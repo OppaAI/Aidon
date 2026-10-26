@@ -9,9 +9,11 @@ This is a filled example, not a template. The customers, invoice numbers, and am
 
 SPECIAL REMINDER: Send only one customer's monthly statement PDF file to that customer's own email. Do not send other customers' statements to the wrong email. Never send a customer's statement to another customer, never CC or BCC other customers on a statement email, and never attach more than one customer's PDF to one email. Before sending, check that three things match: the customer name, the PDF filename, and the recipient email address. If any one of them does not match, stop, do not send, and report the mismatch to the owner.
 
+SCHEDULING AND REVIEW: Accounting emails are drafts first, not sent immediately. Draft each statement email, schedule it to send at 3:00pm on the first Wednesday of the month, and let the AR department review the drafts before they send. For October 2026 statements, the send time is 3:00pm on Wednesday, November 4, 2026. AR review happens before that send time, AR can edit or cancel any draft before 3:00pm, and a draft AR rejects or flags is held and not sent at 3:00pm.
+
 ## Goal
 
-Generate standard-format monthly statements for October 2026 from customer invoice accounts, calculate the total due for each customer with a full breakdown, and email each statement to the customer.
+Generate standard-format monthly statements for October 2026 from customer invoice accounts, calculate the total due for each customer with a full breakdown, draft each statement email, schedule it to send at 3:00pm on the first Wednesday of the month, and let the AR department review the drafts before they send.
 
 ## Deliverables
 
@@ -19,11 +21,13 @@ Generate standard-format monthly statements for October 2026 from customer invoi
 - statement-2026-10-acme-consulting.pdf
 - statement-2026-10-cedar-landscaping.pdf
 - monthly-statements-2026-10-summary.csv
-- One email per customer, each with only that customer's statement PDF attached, to that customer's own email only
+- One draft email per customer, each with only that customer's statement PDF attached, to that customer's own email only, scheduled to send at 3:00pm on the first Wednesday of the month
+- AR review list for the AR department, with each draft, customer, PDF filename, recipient email, total due, and scheduled send time
 
 ## Constraints
 
 - SPECIAL REMINDER: Only send the monthly statement PDF file of one customer to its own email, do not send other customers to the wrong email, never CC or BCC another customer, never attach another customer's PDF, and check customer name, PDF filename, and recipient email match before every send, if they do not match, do not send
+- Accounting emails are drafts first, never sent immediately, scheduled to send at 3:00pm on the first Wednesday of the month, AR department reviews the drafts before they send, AR can edit or cancel a draft before 3:00pm, a draft AR rejects or flags is held and not sent
 - Statement period is October 1 to October 31, 2026 only, invoices outside this period are excluded
 - One statement per customer, in the standard format: customer info, opening balance, invoices, payments, credits, closing balance, and pay by date
 - All amounts are in Canadian dollars, tax is already included in the invoice amounts, do not add tax again
@@ -37,13 +41,14 @@ None
 
 ## Deadline
 
-Statements emailed by November 5, 2026
+Drafts ready for AR review by November 2, 2026, scheduled to send at 3:00pm on Wednesday, November 4, 2026, the first Wednesday of November 2026
 
 ## Recipients
 
 - Northside Bakery, billing@northside.example
 - Acme Consulting, billing@acme.example
 - Cedar Landscaping, billing@cedar.example
+- AR department, for review of all statement drafts before they send
 
 ## Files
 
@@ -56,6 +61,7 @@ Statements emailed by November 5, 2026
 
 ## Notifications
 
+- Notify the AR department when all statement drafts are ready for review, with each draft, customer, PDF filename, recipient email, total due, and scheduled send time of 3:00pm on the first Wednesday of the month
 - Email the owner a confirmation list after all statements are sent, with each customer, PDF filename, recipient email, total due, and pay by date, so a wrong-email send can be spotted
 - Report any failed email send immediately, do not mark that statement as sent
 - Report any customer name, PDF filename, and recipient email mismatch immediately, do not send that statement until the owner confirms the correct email

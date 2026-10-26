@@ -90,13 +90,14 @@ class RunReport:
     files: list[str] = field(default_factory=list)
     error: str = ""
     attempts: int = 1
+    backend: str = "bubblewrap"
 
 
 class GoalRunner:
     def __init__(self, client: ModelClient, sandbox: Sandbox,
                  gate: ApprovalGate, home: Path, memory=None,
                  promotion_ask=None, project_id: str = "default",
-                 plugins=None):
+                 plugins=None, execution_backend=None):
         self.client = client
         self.sandbox = sandbox
         self.gate = gate
@@ -106,9 +107,32 @@ class GoalRunner:
         self.project_id = project_id
         self.tools = ToolRegistry(sandbox.workdir, sandbox=sandbox)
         self.plugins = plugins
+        self.execution_backend = execution_backend
+
+    def _backend_name(self) -> str:
+        if self.execution_backend is not None:
+            return self.execution_backend.name
+        return "bubblewrap"
 
     def _call_tool(self, name: str, args: dict) -> str:
-        """Sandbox tools first, then adopted plugin tools, else unknown."""
+        """Sandbox tools first, then adopted plugin tools, else unknown.
+
+        Shell steps, when an execution backend is set, run
+        through that backend, not through the sandbox
+        directly, so a Docker run is recorded as Docker,
+        and a Docker failure is a step failure, not a
+        silent fallback to a host shell.
+        """
+        if name == "shell" and self.execution_backend is not None:
+            command = args["command"]
+            if not isinstance(command, list) or not command:
+                raise ValueError("shell command must be a non-empty list")
+            result = self.execution_backend.run(
+                [str(c) for c in command], self.sandbox.workdir,
+                timeout_seconds=self.sandbox.timeout_seconds)
+            if not result.ok:
+                raise ValueError(f"shell failed: {result.stderr[:200]}")
+            return result.stdout
         try:
             return self.tools.call(name, args)
         except ValueError as exc:
@@ -257,7 +281,10 @@ class GoalRunner:
         learn_dir = self.home / "learned"
         learn_dir.mkdir(parents=True, exist_ok=True)
         record = {"goal": goal, "deliverables": files,
-                  "criteria": current_plan.criteria}
+                  "criteria": current_plan.criteria,
+                  "backend": self._backend_name(),
+                  "image": getattr(self.execution_backend, "image", "")
+                  if self.execution_backend is not None else ""}
         (learn_dir / "last_run.json").write_text(
             json.dumps(record, indent=2), encoding="utf-8")
         if self.memory is not None:
@@ -287,4 +314,5 @@ class GoalRunner:
             except Exception:
                 pass
         return RunReport("done", goal, current_plan, True, True,
-                         files=files, attempts=attempt)
+                         files=files, attempts=attempt,
+                         backend=self._backend_name())

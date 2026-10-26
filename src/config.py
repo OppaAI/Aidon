@@ -69,6 +69,9 @@ class Config:
     sandbox_timeout_seconds: int = 120
     max_steps: int = 50
     approval_timeout_seconds: int = 180
+    execution_backend: str = "bubblewrap"
+    docker_image: str = "python:3.12-slim"
+    docker_network: bool = False
 
     @classmethod
     def load(cls, home: Path | None = None) -> "Config":
@@ -86,6 +89,12 @@ class Config:
             max_steps=int(os.environ.get("AIDON_MAX_STEPS", "50")),
             approval_timeout_seconds=int(
                 os.environ.get("AIDON_APPROVAL_TIMEOUT", "180")),
+            execution_backend=os.environ.get("AIDON_EXECUTION_BACKEND",
+                                             "bubblewrap"),
+            docker_image=os.environ.get("AIDON_DOCKER_IMAGE",
+                                        "python:3.12-slim"),
+            docker_network=os.environ.get("AIDON_DOCKER_NETWORK",
+                                          "0") == "1",
         )
 
     @property

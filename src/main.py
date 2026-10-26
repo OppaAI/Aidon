@@ -100,6 +100,14 @@ def main(argv: list[str] | None = None) -> int:
         client = FakeClient("")
     sandbox = Sandbox(config.workdir, config.sandbox_timeout_seconds)
     memory = _make_memory(config)
+    from .execution import make_backend
+    try:
+        execution_backend = make_backend(
+            config.execution_backend, sandbox,
+            image=config.docker_image, allow_network=config.docker_network)
+    except Exception as exc:
+        print(f"execution backend error: {exc}")
+        return 2
     if args.command == "plugin":
         from pathlib import Path
         from .plugins import PluginRegistry, scan_plugin
@@ -156,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         plugins.load_all()
         goal_runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
                                  memory=memory, promotion_ask=_promotion_ask,
-                                 project_id=args.project, plugins=plugins)
+                                 project_id=args.project, plugins=plugins, execution_backend=execution_backend)
         report = goal_runner.run(args.text, spec=result.spec)
         print(f"status: {report.status}")
         print(f"verified: {report.verified}")
@@ -172,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
     plugins.load_all()
     runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
                         memory=memory, promotion_ask=_promotion_ask,
-                        project_id=args.project, plugins=plugins)
+                        project_id=args.project, plugins=plugins, execution_backend=execution_backend)
     spec = None
     if getattr(args, "spec", None):
         from pathlib import Path

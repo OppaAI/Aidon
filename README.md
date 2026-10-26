@@ -250,7 +250,17 @@ never in the repo.
 3. **Sandbox** — the plan is tested in an isolated workdir.
    Bubblewrap, when installed, is the isolated backend. A
    subprocess fallback is labeled as not isolated, never as
-   isolated.
+   isolated. Docker is a second backend, for build, install,
+   and test work: disposable container, only the workdir
+   mounted, non-root, all capabilities dropped, network
+   off by default, resource limits, pinned image, no
+   docker.sock, no host credentials, and no silent
+   fallback to a host shell if Docker is missing. The
+   backend is chosen by the owner in config, never by the
+   model. A full VM is post-hackathon, future only, not
+   built here. Set `AIDON_EXECUTION_BACKEND=docker` to
+   use Docker, `AIDON_DOCKER_IMAGE` for the pinned image,
+   `AIDON_DOCKER_NETWORK=1` only when a task needs network.
 4. **Verify** — a result is verified by evidence, not by
    assertion. Deliverables must exist and be non-empty,
    criteria are checked by code, and a ledger total is
