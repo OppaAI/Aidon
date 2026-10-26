@@ -20,6 +20,12 @@ was written.
 The demo runs on Meta models through the Meta Model API. That
 is a real part of what Aidon runs, not just a build-time choice.
 
+## Docs
+
+- [ARCHITECTURE.md](ARCHITECTURE.md): run order, components, storage, and security boundaries.
+- [ROADMAP.md](ROADMAP.md): what is built, what is not built yet, and what is post-hackathon, NOT built, NOT demoed.
+- [examples/SPEC-SHEET-TEMPLATE.md](examples/SPEC-SHEET-TEMPLATE.md) and [examples/SPEC-SHEET-EXAMPLE.md](examples/SPEC-SHEET-EXAMPLE.md): spec sheet template and filled example.
+
 ## Run it
 
 ```sh
@@ -339,6 +345,32 @@ app, store run, and job search plus publish, are still
 Aidon climbing work, through plugins, not arena code.
 What is built here is the research, live, and
 verification arena they will run in.
+
+## Budgets, trace, v1 API, token auth, and MCP
+
+- Budgets: 200,000 tokens estimated, 50 steps, 3,600
+  seconds per run, by default, in config. A budget
+  exceeded fails a run, it does not continue it.
+  Token counts are estimates, about one token per
+  four characters, unless a model client returns a
+  real usage count.
+- Trace: events in run order, interpret, research,
+  recall, plan, sandbox, verify, approval, live, and
+  learn, with no secrets and no file content values,
+  written to `~/.aidon/trace/<run_id>.jsonl`.
+- v1 API: `python -m src.main v1 serve --port 8001`,
+  localhost only, at `/api/v1/`, with Bearer token
+  auth, except health. Owner scope is full, agent
+  scope is submit, read, steer, and cancel only for
+  its own goals, never approve, never key management.
+- Token auth: `python -m src.main v1 keygen --name owner --scope owner`,
+  key shown once, only its SHA256 hash stored, in a
+  0600 file, never shown again, only a hash prefix
+  in key lists.
+- MCP: `python -m src.main v1 mcp`, stdio JSON-RPC,
+  token from `AIDON_MCP_TOKEN`, tools filtered by
+  scope, wrapping the same v1 store as the v1 API.
+  Streamable HTTP MCP is future, not built here.
 3. **Sandbox** — the plan is tested in an isolated workdir.
    Bubblewrap, when installed, is the isolated backend. A
    subprocess fallback is labeled as not isolated, never as

@@ -97,7 +97,8 @@ class GoalRunner:
     def __init__(self, client: ModelClient, sandbox: Sandbox,
                  gate: ApprovalGate, home: Path, memory=None,
                  promotion_ask=None, project_id: str = "default",
-                 plugins=None, execution_backend=None):
+                 plugins=None, execution_backend=None,
+                 budget=None, trace=None):
         self.client = client
         self.sandbox = sandbox
         self.gate = gate
@@ -108,6 +109,12 @@ class GoalRunner:
         self.tools = ToolRegistry(sandbox.workdir, sandbox=sandbox)
         self.plugins = plugins
         self.execution_backend = execution_backend
+        self.budget = budget
+        self.trace = trace
+
+    def _trace(self, kind: str, status: str, detail: str = "") -> None:
+        if self.trace is not None:
+            self.trace.record(kind, status, detail)
 
     def _backend_name(self) -> str:
         if self.execution_backend is not None:
@@ -164,8 +171,14 @@ class GoalRunner:
         if failure_context:
             user = user + (f"\n\nPrevious attempt failed, repair only the "
                            f"failed parts, do not rewrite passed files:\n{failure_context}")
+        self._trace("plan", "started", goal[:100])
+        if self.budget is not None:
+            self.budget.add_tokens(user)
         reply = self.client.chat([Message("system", system),
                                   Message("user", user)])
+        if self.budget is not None:
+            self.budget.add_tokens(reply)
+        self._trace("plan", "done", "plan proposed")
         try:
             data = json.loads(reply)
             steps = data.get("steps", [])
@@ -223,6 +236,11 @@ class GoalRunner:
         return self._execute_plan(goal, plan)
 
     def _execute_plan(self, goal: str, plan: Plan) -> RunReport:
+        if self.budget is not None:
+            self.budget.start()
+        self._trace("interpret", "done", goal[:100])
+        if self.memory is not None:
+            self._trace("recall", "done", "experience recall attempted")
         if not plan.deliverables:
             return RunReport("failed", goal, plan, False, False,
                              error="plan has no deliverables")
@@ -236,19 +254,26 @@ class GoalRunner:
                 if step.deliverable and step.deliverable in passed:
                     continue
                 try:
+                    if self.budget is not None:
+                        self.budget.add_step()
+                    self._trace("sandbox", "started", step.tool)
                     if step.tool == "write" and not step.args:
                         step.args = {"file": step.deliverable,
                                      "text": f"Goal: {goal}\n"}
                     self._call_tool(step.tool, step.args)
+                    self._trace("sandbox", "done", step.tool)
                 except Exception as exc:
                     failures.append(f"step {step.tool} failed: {exc}")
+                    self._trace("sandbox", "failed", str(exc)[:100])
             # Verify: deliverables + plan criteria + step criteria.
             criteria = list(current_plan.criteria)
             for step in current_plan.normalized_steps():
                 if step.criteria and step.criteria not in criteria:
                     criteria.append(step.criteria)
+            self._trace("verify", "started", "verifying deliverables")
             ok, verify_failures, verified = verify_plan(
                 self.sandbox.workdir, current_plan.deliverables, criteria)
+            self._trace("verify", "done" if ok else "failed", f"verified={len(verified)}")
             failures.extend(verify_failures)
             # Passed means existence AND no failure mentions
             # it. A ledger file that exists but totals wrong
@@ -268,9 +293,18 @@ class GoalRunner:
             context = ("Passed deliverables (do not rewrite): "
                        + ", ".join(sorted(passed))
                        + "\nFailures:\n" + "\n".join(failures))
-            current_plan = self._plan(
-                goal, failure_context=context,
-                spec=getattr(self, "_current_spec", None))
+            try:
+                current_plan = self._plan(
+                    goal, failure_context=context,
+                    spec=getattr(self, "_current_spec", None))
+            except Exception as exc:
+                # Budget exceeded, or a plan failure, is a
+                # failed run, not a crash out of the loop.
+                return RunReport("failed", goal, current_plan, False, False,
+                                 files=sorted(passed),
+                                 error=str(exc)[:500],
+                                 attempts=attempt,
+                                 backend=self._backend_name())
             if not current_plan.deliverables:
                 return RunReport("failed", goal, current_plan, False, False,
                                  files=sorted(passed),
@@ -279,9 +313,11 @@ class GoalRunner:
         else:
             attempt = MAX_ATTEMPTS
         files = sorted(passed) if passed else list(current_plan.deliverables)
+        self._trace("approval", "started", "live approval requested")
         decision: Decision = self.gate.ask(
             "live", "Approve live execution?",
             f"Goal: {goal}\nDeliverables: {', '.join(files)}")
+        self._trace("approval", decision.verdict, "live approval")
         approved = decision.verdict == "approved"
         if not approved:
             return RunReport("rejected", goal, current_plan, True, False,
@@ -290,6 +326,7 @@ class GoalRunner:
         # Live execution, only after sandbox verification
         # and owner approval, with live verification and
         # rollback on failure. No live actions, no live step.
+        self._trace("live", "started", "live execution")
         live_record = None
         if getattr(self, "_live_actions", None):
             from .live import LiveExecutor
@@ -354,6 +391,7 @@ class GoalRunner:
                     self.memory.promote_to_ltm(episodic, kind="semantic")
             except Exception:
                 pass
+        self._trace("learn", "done", "experience recorded")
         return RunReport("done", goal, current_plan, True, True,
                          files=files, attempts=attempt,
                          backend=self._backend_name())

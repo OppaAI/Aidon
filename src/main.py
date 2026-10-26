@@ -98,6 +98,15 @@ def main(argv: list[str] | None = None) -> int:
                                 help="Goal for a webhook trigger")
     trigger_parser.add_argument("--project", default="default",
                                 help="Project id for episodic memory")
+    v1_parser = sub.add_parser("v1", help="v1 API, token auth, MCP")
+    v1_parser.add_argument("action", choices=["serve", "keygen", "mcp"],
+                           help="Serve the v1 HTTP API, generate a key once, or run the MCP stdio server")
+    v1_parser.add_argument("--port", type=int, default=8001,
+                           help="Port for v1 serve, default 8001, localhost only")
+    v1_parser.add_argument("--name", default="owner",
+                           help="Key name for keygen")
+    v1_parser.add_argument("--scope", default="owner", choices=["owner", "agent"],
+                           help="Key scope for keygen")
     args = parser.parse_args(argv)
 
     config = Config.load()
@@ -109,6 +118,53 @@ def main(argv: list[str] | None = None) -> int:
         client = FakeClient("")
     sandbox = Sandbox(config.workdir, config.sandbox_timeout_seconds)
     memory = _make_memory(config)
+    if args.command == "v1":
+        from .v1 import AuthStore, GoalStore, handle
+        auth = AuthStore(config.home)
+        goals = GoalStore(config.home)
+        if args.action == "keygen":
+            key, record = auth.create_key(args.name, args.scope)
+            print("Save this key now, it is shown once, only its hash is stored:")
+            print(key)
+            print(f"Name: {record.name}, scope: {record.scope}, hash prefix: {record.key_hash[:12]}")
+            return 0
+        if args.action == "mcp":
+            from .mcp_server import MCPServer
+            MCPServer(auth, goals).run_stdio()
+            return 0
+        # serve: localhost only, stdlib HTTP, v1 handler only.
+        import json as _json
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        class _Handler(BaseHTTPRequestHandler):
+            def _do(self, method):
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                raw = self.rfile.read(length) if length else b""
+                try:
+                    body = _json.loads(raw) if raw else {}
+                except Exception:
+                    body = {}
+                status, payload = handle(auth, goals, method, self.path,
+                                         dict(self.headers), body)
+                data = _json.dumps(payload).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_GET(self):
+                self._do("GET")
+
+            def do_POST(self):
+                self._do("POST")
+
+            def log_message(self, *args):
+                pass
+
+        print(f"v1 API on http://127.0.0.1:{args.port}/api/v1/, localhost only, Bearer token required except health")
+        HTTPServer(("127.0.0.1", args.port), _Handler).serve_forever()
+        return 0
     if args.command == "trigger":
         from datetime import datetime
         from .triggers import (ALLOWED_SOURCES, IngestWatcher, Scheduler,
@@ -218,9 +274,15 @@ def main(argv: list[str] | None = None) -> int:
     from .plugins import PluginRegistry
     plugins = PluginRegistry(config.home)
     plugins.load_all()
+    from .budgets import Budget
+    from .trace import TraceRecorder
+    budget = Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps,
+                    max_seconds=config.budget_seconds)
+    trace = TraceRecorder(config.home, project_id=args.project)
     runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
                         memory=memory, promotion_ask=_promotion_ask,
-                        project_id=args.project, plugins=plugins, execution_backend=execution_backend)
+                        project_id=args.project, plugins=plugins, execution_backend=execution_backend,
+                        budget=budget, trace=trace)
     spec = None
     if getattr(args, "spec", None):
         from pathlib import Path

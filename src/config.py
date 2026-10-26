@@ -73,6 +73,8 @@ class Config:
     docker_image: str = "python:3.12-slim"
     docker_network: bool = False
     ingest_dir: Path | None = None
+    budget_tokens: int = 200000
+    budget_seconds: int = 3600
 
     @classmethod
     def load(cls, home: Path | None = None) -> "Config":
@@ -98,6 +100,8 @@ class Config:
                                           "0") == "1",
             ingest_dir=(Path(os.environ["AIDON_INGEST_DIR"]).expanduser()
                         if os.environ.get("AIDON_INGEST_DIR") else None),
+            budget_tokens=int(os.environ.get("AIDON_BUDGET_TOKENS", "200000")),
+            budget_seconds=int(os.environ.get("AIDON_BUDGET_SECONDS", "3600")),
         )
 
     @property
