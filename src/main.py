@@ -89,6 +89,15 @@ def main(argv: list[str] | None = None) -> int:
                                help="Plugin directory, for scan and adopt")
     plugin_parser.add_argument("--project", default="default",
                                help="Project id for episodic memory")
+    trigger_parser = sub.add_parser("trigger", help="Trigger a DAG run")
+    trigger_parser.add_argument("action", choices=["list", "ingest", "schedule", "webhook"],
+                                help="List sources, scan ingest folder, check due jobs, or fire a webhook trigger")
+    trigger_parser.add_argument("name", nargs="?", default=None,
+                                help="Webhook trigger name, for webhook action")
+    trigger_parser.add_argument("--goal", default="",
+                                help="Goal for a webhook trigger")
+    trigger_parser.add_argument("--project", default="default",
+                                help="Project id for episodic memory")
     args = parser.parse_args(argv)
 
     config = Config.load()
@@ -100,6 +109,37 @@ def main(argv: list[str] | None = None) -> int:
         client = FakeClient("")
     sandbox = Sandbox(config.workdir, config.sandbox_timeout_seconds)
     memory = _make_memory(config)
+    if args.command == "trigger":
+        from datetime import datetime
+        from .triggers import (ALLOWED_SOURCES, IngestWatcher, Scheduler,
+                               TriggerDispatcher, handle_webhook)
+        if args.action == "list":
+            print("Trigger sources, all start a DAG run, none bypass approval:")
+            for source in ALLOWED_SOURCES:
+                print(f"  {source}")
+            print("  No Telegram source, by owner decision.")
+            return 0
+        if args.action == "ingest":
+            watcher = IngestWatcher(config.ingest_path, config.home)
+            for event in watcher.events(project_id=args.project):
+                print(f"ingest trigger: {event.payload['path']}")
+            return 0
+        if args.action == "schedule":
+            scheduler = Scheduler(config.home)
+            for job in scheduler.check_due(datetime.now()):
+                print(f"scheduled trigger: {job.name}: {job.goal}")
+            return 0
+        if args.action == "webhook":
+            if not args.name:
+                print("trigger webhook needs a name")
+                return 2
+            event = handle_webhook(args.name, {"goal": args.goal},
+                                   project_id=args.project)
+            dispatcher = TriggerDispatcher()
+            dispatcher.register("webhook", lambda e: print(f"webhook trigger: {e.kind}: {e.goal}"))
+            dispatcher.dispatch(event)
+            return 0
+        return 2
     from .execution import make_backend
     try:
         execution_backend = make_backend(

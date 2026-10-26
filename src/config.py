@@ -72,6 +72,7 @@ class Config:
     execution_backend: str = "bubblewrap"
     docker_image: str = "python:3.12-slim"
     docker_network: bool = False
+    ingest_dir: Path | None = None
 
     @classmethod
     def load(cls, home: Path | None = None) -> "Config":
@@ -95,6 +96,8 @@ class Config:
                                         "python:3.12-slim"),
             docker_network=os.environ.get("AIDON_DOCKER_NETWORK",
                                           "0") == "1",
+            ingest_dir=(Path(os.environ["AIDON_INGEST_DIR"]).expanduser()
+                        if os.environ.get("AIDON_INGEST_DIR") else None),
         )
 
     @property
@@ -104,6 +107,10 @@ class Config:
     @property
     def library_dir(self) -> Path:
         return self.home / "library" / "files"
+
+    @property
+    def ingest_path(self) -> Path:
+        return self.ingest_dir or (self.home / "ingest")
 
     def ensure_home(self) -> Path:
         self.home.mkdir(parents=True, exist_ok=True)

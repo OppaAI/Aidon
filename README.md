@@ -247,6 +247,41 @@ never in the repo.
 - Standalone skills, Markdown only, live in
   `~/.aidon/skills/<name>.md` and are passed to the
   planner as context, never executed as code.
+
+## Triggers: what starts a DAG run
+
+Scheduler, message, WebUI, and the ingest folder are
+all triggers, and they are all the same shape. A
+trigger produces a TriggerEvent, the dispatcher hands
+it to a run handler, the handler builds a spec and a
+plan, and the approval gate still applies before any
+live action. A trigger starts work, it never bypasses
+approval, spec, or verification.
+
+- Scheduler: a time arrives, for example 3:00pm on the
+  first Wednesday of the month. Schedules supported:
+  daily, weekly, monthly first weekday, monthly day,
+  and simple cron. Jobs live in `~/.aidon/scheduler.json`.
+- WhatsApp and Slack, both two-way: an incoming message
+  starts a run, and the reply goes back on the same
+  transport. No Telegram, by owner decision.
+- WebUI: a message, a button, or an upload in the WebUI.
+  WebUI itself is not built yet, its trigger interface
+  is built here, so it can call the same dispatcher.
+- Ingest folder: a new or changed file in the user's
+  own ingest path, `~/.aidon/ingest` by default, or
+  `AIDON_INGEST_DIR` if set. The watcher reports new
+  files only, it does not move or delete user files.
+- Webhook and manual: n8n-style triggers. Webhook is an
+  HTTP POST, manual is a WebUI button or a CLI run.
+  CLI: `python -m src.main trigger list`,
+  `trigger ingest`, `trigger schedule`, and
+  `trigger webhook <name> --goal "..."`.
+- n8n mapping: Schedule to scheduler, Webhook to
+  webhook, Manual to manual, File watcher to ingest,
+  Message to WhatsApp or Slack. Email, RSS, and database
+  triggers are not core triggers, they are plugins later,
+  if a task needs them.
 3. **Sandbox** — the plan is tested in an isolated workdir.
    Bubblewrap, when installed, is the isolated backend. A
    subprocess fallback is labeled as not isolated, never as
