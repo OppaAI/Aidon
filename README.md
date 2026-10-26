@@ -92,7 +92,7 @@ ingest path.
 
 Configuration is just an endpoint, a key, and a model name:
 
-- `AIDON_API_BASE` — endpoint URL for the model API
+- `AIDON_API_ENDPOINT` — endpoint URL for the model API
 - `AIDON_API_KEY` — API key for that endpoint
 - `AIDON_MODEL` — model name at that endpoint
 - `AIDON_HOME` — where Aidon keeps its state (default `~/.aidon`)

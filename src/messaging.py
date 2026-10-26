@@ -124,13 +124,11 @@ class MessagingConfig:
             return ""
 
         return cls(
-            # Old names first, canonical. WHATSAPP_VERIFY_TOKEN
-            # is kept only as a fallback, from the first WebUI
-            # build, which used the wrong, non-old name.
+            # Old names only. A duplicate new name for the
+            # same setting was removed, not kept as an alias.
             whatsapp_token=get("AIDON_WHATSAPP_TOKEN"),
             whatsapp_phone_id=get("AIDON_WHATSAPP_PHONE_ID"),
-            whatsapp_verify_token=get("AIDON_WHATSAPP_VERIFY_TOKEN",
-                                      "WHATSAPP_VERIFY_TOKEN"),
+            whatsapp_verify_token=get("AIDON_WHATSAPP_VERIFY_TOKEN"),
             whatsapp_app_secret=get("AIDON_WHATSAPP_APP_SECRET"),
             whatsapp_owner=get("AIDON_WHATSAPP_OWNER"),
             slack_bot_token=get("SLACK_BOT_TOKEN"),

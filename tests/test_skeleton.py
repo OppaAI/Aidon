@@ -66,7 +66,7 @@ def test_goal_loop_records_after_approval(tmp_path):
 
 def test_config_loads_endpoint_key_model(monkeypatch, tmp_path):
     monkeypatch.setenv("AIDON_HOME", str(tmp_path))
-    monkeypatch.setenv("AIDON_API_BASE", "https://example.invalid/v1")
+    monkeypatch.setenv("AIDON_API_ENDPOINT", "https://example.invalid/v1")
     monkeypatch.setenv("AIDON_API_KEY", "test-key")
     monkeypatch.setenv("AIDON_MODEL", "muse-spark")
     config = Config.load()

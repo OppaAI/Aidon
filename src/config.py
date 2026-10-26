@@ -59,15 +59,6 @@ def load_dotenv(path: Path | None = None) -> None:
         return
 
 
-def _env_first(*names: str, default: str = "") -> str:
-    """First non-empty env var, in order. Old names first, then new."""
-    for name in names:
-        value = os.environ.get(name, "")
-        if value:
-            return value
-    return default
-
-
 @dataclass
 class Config:
     home: Path
@@ -107,19 +98,18 @@ class Config:
         return cls(
             home=Path(home),
             model=os.environ.get("AIDON_MODEL", "muse-spark"),
-            # AIDON_API_ENDPOINT is the old name for the same
-            # endpoint, AIDON_API_BASE is the new name.
-            api_base=_env_first("AIDON_API_BASE", "AIDON_API_ENDPOINT"),
+            # Old key names only. A duplicate new key for the
+            # same setting was removed, not kept as an alias,
+            # so there is exactly one name per setting.
+            api_base=os.environ.get("AIDON_API_ENDPOINT", ""),
             api_key=os.environ.get("AIDON_API_KEY", ""),
             embed_model=os.environ.get("AIDON_EMBED_MODEL",
                                        "google/embeddinggemma-2"),
-            sandbox_timeout_seconds=int(_env_first(
-                "AIDON_SANDBOX_TIMEOUT", "AIDON_MAX_SANDBOX_SECONDS",
-                default="120")),
+            sandbox_timeout_seconds=int(os.environ.get(
+                "AIDON_MAX_SANDBOX_SECONDS", "120") or 120),
             max_steps=int(os.environ.get("AIDON_MAX_STEPS", "50")),
-            approval_timeout_seconds=int(_env_first(
-                "AIDON_APPROVAL_TIMEOUT", "AIDON_APPROVAL_TIMEOUT_S",
-                default="180")),
+            approval_timeout_seconds=int(os.environ.get(
+                "AIDON_APPROVAL_TIMEOUT_S", "180") or 180),
             execution_backend=os.environ.get("AIDON_EXECUTION_BACKEND",
                                              "bubblewrap"),
             docker_image=os.environ.get("AIDON_DOCKER_IMAGE",
@@ -128,13 +118,10 @@ class Config:
                                           "0") == "1",
             ingest_dir=(Path(os.environ["AIDON_INGEST_DIR"]).expanduser()
                         if os.environ.get("AIDON_INGEST_DIR") else None),
-            budget_tokens=int(_env_first(
-                "AIDON_BUDGET_TOKENS", "AIDON_MAX_TOKENS_PER_RUN",
-                default="200000")),
-            budget_seconds=(int(os.environ["AIDON_BUDGET_SECONDS"])
-                              if os.environ.get("AIDON_BUDGET_SECONDS")
-                              else int(float(os.environ.get(
-                                  "AIDON_MAX_WALLCLOCK_MIN", "60") or 60)) * 60),
+            budget_tokens=int(os.environ.get(
+                "AIDON_MAX_TOKENS_PER_RUN", "200000") or 200000),
+            budget_seconds=int(float(os.environ.get(
+                "AIDON_MAX_WALLCLOCK_MIN", "60") or 60)) * 60,
             model_timeout_seconds=float(os.environ.get(
                 "AIDON_MODEL_TIMEOUT_S", "120") or 120),
             timezone=os.environ.get("AIDON_TIMEZONE", "UTC"),
@@ -146,8 +133,8 @@ class Config:
                 "AIDON_FORGET_GRACE_DAYS", "35") or 35),
             whatsapp_token=os.environ.get("AIDON_WHATSAPP_TOKEN", ""),
             whatsapp_phone_id=os.environ.get("AIDON_WHATSAPP_PHONE_ID", ""),
-            whatsapp_verify_token=_env_first(
-                "AIDON_WHATSAPP_VERIFY_TOKEN", "WHATSAPP_VERIFY_TOKEN"),
+            whatsapp_verify_token=os.environ.get(
+                "AIDON_WHATSAPP_VERIFY_TOKEN", ""),
             whatsapp_app_secret=os.environ.get("AIDON_WHATSAPP_APP_SECRET", ""),
             whatsapp_owner=os.environ.get("AIDON_WHATSAPP_OWNER", ""),
             slack_bot_token=os.environ.get("SLACK_BOT_TOKEN", ""),

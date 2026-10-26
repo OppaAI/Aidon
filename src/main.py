@@ -9,7 +9,7 @@ file in the current directory or in the Aidon home, loaded
 without overriding real environment variables:
   AIDON_HOME      where Aidon keeps its state (default ~/.aidon)
   AIDON_MODEL     model name at the endpoint (default muse-spark)
-  AIDON_API_BASE  endpoint URL for the model API
+  AIDON_API_ENDPOINT  endpoint URL for the model API
   AIDON_API_KEY   API key for that endpoint
   AIDON_EMBED_MODEL  embedding model, default google/embeddinggemma-2
   AIDON_EMBEDDER=hash  forces the test embedder

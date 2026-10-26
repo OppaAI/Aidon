@@ -20,7 +20,7 @@ WebUI, built now, after triggers, after v1 and MCP:
 Messaging, WhatsApp and Slack, both two-way, no Telegram:
 - WhatsApp webhook, at /webhook/whatsapp. GET verifies
   with hub.mode, hub.verify_token, and hub.challenge,
-  against WHATSAPP_VERIFY_TOKEN from the environment.
+  against AIDON_WHATSAPP_VERIFY_TOKEN from the environment.
   POST parses WhatsApp Cloud API messages, creates a
   TriggerEvent source whatsapp, dispatches it, and
   sends the reply back on the same transport, via a
