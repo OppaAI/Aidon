@@ -29,18 +29,32 @@ is a real part of what Aidon runs, not just a build-time choice.
   prefixes only, never real keys, and approval cards
   in the UI, fail-closed on timeout. With arguments,
   `./launch.sh goal "..."` still runs the CLI.
-- WhatsApp and Slack, both two-way, no Telegram:
-  WhatsApp webhook at `/webhook/whatsapp`, with
-  hub verification, and Slack webhook at
+- WhatsApp and Slack, both two-way, no Telegram,
+  with the old Aidon key names:
+  `AIDON_WHATSAPP_TOKEN`, `AIDON_WHATSAPP_PHONE_ID`,
+  `AIDON_WHATSAPP_VERIFY_TOKEN`,
+  `AIDON_WHATSAPP_APP_SECRET`, `AIDON_WHATSAPP_OWNER`,
+  and `SLACK_BOT_TOKEN`, plus `SLACK_SIGNING_SECRET`,
+  which is new, because old Slack was polling, not a
+  webhook. WhatsApp is owner only, empty owner means
+  inbound disabled, never open to everyone. Slack
+  replies go to the same channel, in thread. A message
+  `approve <id>` or `reject <id>` on either channel
+  resolves a pending approval card, it does not become
+  a goal. WhatsApp webhook at `/webhook/whatsapp`,
+  with hub verification and, when an app secret is set,
+  X-Hub-Signature-256 verification. Slack webhook at
   `/webhook/slack`, with HMAC signature verification
   before any event is parsed. An incoming message
   starts a DAG run through the same trigger
   dispatcher as scheduler, WebUI, ingest, webhook,
   and manual, and the reply goes back on the same
-  transport. Real WhatsApp and Slack sending needs
-  your own WhatsApp Cloud API token and Slack bot
-  token, set in the environment, never in chat, and
-  is not tested here without those accounts.
+  transport, with the WhatsApp Cloud API and Slack
+  chat.postMessage. Public reachability still needs a
+  tunnel, localhost alone is not reachable by Meta
+  or Slack, and the full WebUI must not be tunneled
+  unauthenticated, use a webhook-only listener in
+  front, as old Aidon did.
 
 ## Docs
 

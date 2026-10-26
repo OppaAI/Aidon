@@ -68,6 +68,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .approval import ApprovalGate, Decision
+from .messaging import (MessagingConfig, normalize_number, parse_decision,
+                        verify_whatsapp_signature)
 from .triggers import TriggerDispatcher, TriggerEvent
 
 CHAT_HTML = """<!doctype html>
@@ -131,16 +133,40 @@ class WebUIServer:
     def __init__(self, home: Path, dispatcher: TriggerDispatcher | None = None,
                  auth_store=None, memory=None, whatsapp_reply=None,
                  slack_reply=None, whatsapp_verify_token: str = "",
-                 slack_signing_secret: str = ""):
+                 slack_signing_secret: str = "", messaging_config=None,
+                 whatsapp_sender=None, slack_sender=None):
         self.home = Path(home)
         self.dispatcher = dispatcher or TriggerDispatcher()
         self.auth_store = auth_store
         self.memory = memory
-        self.whatsapp_reply = whatsapp_reply
-        self.slack_reply = slack_reply
-        self.whatsapp_verify_token = whatsapp_verify_token
-        self.slack_signing_secret = slack_signing_secret
+        # whatsapp_sender(to, text) and slack_sender(channel, text, thread_ts)
+        # are the two-way senders. whatsapp_reply / slack_reply are
+        # kept only as a single-argument fallback, for tests.
+        self.whatsapp_sender = whatsapp_sender
+        if self.whatsapp_sender is None and whatsapp_reply is not None:
+            self.whatsapp_sender = lambda to, text: whatsapp_reply(text)
+        self.slack_sender = slack_sender
+        if self.slack_sender is None and slack_reply is not None:
+            self.slack_sender = lambda channel, text, thread_ts=None: slack_reply(text)
+        self.messaging_config = messaging_config or MessagingConfig()
+        # Old key names win. A value passed explicitly here
+        # overrides the config, which is how tests inject it.
+        self.whatsapp_verify_token = (
+            whatsapp_verify_token or self.messaging_config.whatsapp_verify_token)
+        self.slack_signing_secret = (
+            slack_signing_secret or self.messaging_config.slack_signing_secret)
         self.webui_gate = WebUIGate()
+
+    def _resolve_decision(self, text: str) -> str | None:
+        decision = parse_decision(text)
+        if not decision:
+            return None
+        verb, card_id = decision
+        verdict = "approved" if verb == "approve" else "rejected"
+        ok = self.webui_gate.approve(card_id, verdict)
+        if ok:
+            return f"{verdict.capitalize()} {card_id}"
+        return f"No such approval {card_id}"
         # Default chat handler: echo, for the server core.
         # A real goal handler is registered by the caller,
         # with GoalRunner, interview, or a trigger handler.
@@ -186,7 +212,17 @@ class WebUIServer:
             return 200, challenge
         return 403, "forbidden"
 
-    def handle_whatsapp_post(self, body: dict) -> dict:
+    def handle_whatsapp_post(self, body: dict, raw: bytes = b"",
+                             headers: dict | None = None) -> tuple[int, dict]:
+        # Signature first, when an app secret is configured.
+        headers = headers or {}
+        if not verify_whatsapp_signature(
+                raw, self.messaging_config.whatsapp_app_secret,
+                headers.get("x-hub-signature-256", "")):
+            return 401, {"error": "bad signature"}
+        # Owner gate, fail closed: only the owner number
+        # becomes a goal, empty owner means inbound disabled.
+        owner = normalize_number(self.messaging_config.whatsapp_owner)
         replies: list[str] = []
         try:
             for entry in body.get("entry", []):
@@ -194,16 +230,26 @@ class WebUIServer:
                     for message in change.get("value", {}).get("messages", []):
                         text = message.get("text", {}).get("body", "")
                         sender = message.get("from", "")
+                        if not owner or normalize_number(sender) != owner:
+                            continue
+                        decision_reply = self._resolve_decision(text)
+                        if decision_reply is not None:
+                            replies.append(decision_reply)
+                            if self.whatsapp_sender is not None:
+                                self.whatsapp_sender(sender, decision_reply)
+                            continue
+                        local_replies: list[str] = []
                         event = TriggerEvent(source="whatsapp", kind="message",
                                              goal=text, payload={"from": sender},
-                                             reply=replies.append)
+                                             reply=local_replies.append)
                         self.dispatcher.dispatch(event)
+                        for reply in local_replies:
+                            replies.append(reply)
+                            if self.whatsapp_sender is not None:
+                                self.whatsapp_sender(sender, reply)
         except Exception as exc:
-            return {"error": str(exc)}
-        if self.whatsapp_reply is not None:
-            for reply in replies:
-                self.whatsapp_reply(reply)
-        return {"replies": replies}
+            return 200, {"error": str(exc)}
+        return 200, {"replies": replies}
 
     def handle_slack_post(self, raw: bytes, headers: dict, body: dict) -> tuple[int, dict]:
         # Verify signature before parsing any event as a goal.
@@ -223,8 +269,17 @@ class WebUIServer:
         if body.get("type") == "url_verification":
             return 200, {"challenge": body.get("challenge", "")}
         event_body = body.get("event", {})
-        if event_body.get("type") == "message" and not event_body.get("bot_id"):
+        if (event_body.get("type") == "message"
+                and not event_body.get("bot_id")
+                and event_body.get("subtype") != "bot_message"):
             text = str(event_body.get("text", ""))
+            channel = str(event_body.get("channel", ""))
+            thread_ts = event_body.get("thread_ts") or event_body.get("ts")
+            decision_reply = self._resolve_decision(text)
+            if decision_reply is not None:
+                if self.slack_sender is not None:
+                    self.slack_sender(channel, decision_reply, thread_ts)
+                return 200, {"replies": [decision_reply]}
             replies: list[str] = []
             event = TriggerEvent(source="slack", kind="message", goal=text,
                                  reply=replies.append)
@@ -232,9 +287,9 @@ class WebUIServer:
                 self.dispatcher.dispatch(event)
             except Exception as exc:
                 return 200, {"error": str(exc)}
-            if self.slack_reply is not None:
+            if self.slack_sender is not None:
                 for reply in replies:
-                    self.slack_reply(reply)
+                    self.slack_sender(channel, reply, thread_ts)
             return 200, {"replies": replies}
         return 200, {"ok": True}
 
@@ -309,7 +364,9 @@ class WebUIServer:
                     ok = server.webui_gate.approve(card_id, verdict)
                     self._send_json(200 if ok else 404, {"ok": ok})
                 elif parsed.path == "/webhook/whatsapp":
-                    self._send_json(200, server.handle_whatsapp_post(body))
+                    headers = {k.lower(): v for k, v in self.headers.items()}
+                    status, payload = server.handle_whatsapp_post(body, raw, headers)
+                    self._send_json(status, payload)
                 elif parsed.path == "/webhook/slack":
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     status, payload = server.handle_slack_post(raw, headers, body)

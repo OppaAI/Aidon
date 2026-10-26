@@ -59,6 +59,15 @@ def load_dotenv(path: Path | None = None) -> None:
         return
 
 
+def _env_first(*names: str, default: str = "") -> str:
+    """First non-empty env var, in order. Old names first, then new."""
+    for name in names:
+        value = os.environ.get(name, "")
+        if value:
+            return value
+    return default
+
+
 @dataclass
 class Config:
     home: Path
@@ -75,6 +84,21 @@ class Config:
     ingest_dir: Path | None = None
     budget_tokens: int = 200000
     budget_seconds: int = 3600
+    # Old Aidon knobs, carried over because they have a live
+    # consumer in the new code, not as dead settings.
+    model_timeout_seconds: float = 120.0
+    timezone: str = "UTC"
+    forget_half_life_days: float = 21.0
+    forget_cleanup_threshold: float = 0.02
+    forget_grace_days: int = 35
+    # Messaging, old key names, see src/messaging.py.
+    whatsapp_token: str = ""
+    whatsapp_phone_id: str = ""
+    whatsapp_verify_token: str = ""
+    whatsapp_app_secret: str = ""
+    whatsapp_owner: str = ""
+    slack_bot_token: str = ""
+    slack_signing_secret: str = ""
 
     @classmethod
     def load(cls, home: Path | None = None) -> "Config":
@@ -83,15 +107,19 @@ class Config:
         return cls(
             home=Path(home),
             model=os.environ.get("AIDON_MODEL", "muse-spark"),
-            api_base=os.environ.get("AIDON_API_BASE", ""),
+            # AIDON_API_ENDPOINT is the old name for the same
+            # endpoint, AIDON_API_BASE is the new name.
+            api_base=_env_first("AIDON_API_BASE", "AIDON_API_ENDPOINT"),
             api_key=os.environ.get("AIDON_API_KEY", ""),
             embed_model=os.environ.get("AIDON_EMBED_MODEL",
                                        "google/embeddinggemma-2"),
-            sandbox_timeout_seconds=int(
-                os.environ.get("AIDON_SANDBOX_TIMEOUT", "120")),
+            sandbox_timeout_seconds=int(_env_first(
+                "AIDON_SANDBOX_TIMEOUT", "AIDON_MAX_SANDBOX_SECONDS",
+                default="120")),
             max_steps=int(os.environ.get("AIDON_MAX_STEPS", "50")),
-            approval_timeout_seconds=int(
-                os.environ.get("AIDON_APPROVAL_TIMEOUT", "180")),
+            approval_timeout_seconds=int(_env_first(
+                "AIDON_APPROVAL_TIMEOUT", "AIDON_APPROVAL_TIMEOUT_S",
+                default="180")),
             execution_backend=os.environ.get("AIDON_EXECUTION_BACKEND",
                                              "bubblewrap"),
             docker_image=os.environ.get("AIDON_DOCKER_IMAGE",
@@ -100,8 +128,30 @@ class Config:
                                           "0") == "1",
             ingest_dir=(Path(os.environ["AIDON_INGEST_DIR"]).expanduser()
                         if os.environ.get("AIDON_INGEST_DIR") else None),
-            budget_tokens=int(os.environ.get("AIDON_BUDGET_TOKENS", "200000")),
-            budget_seconds=int(os.environ.get("AIDON_BUDGET_SECONDS", "3600")),
+            budget_tokens=int(_env_first(
+                "AIDON_BUDGET_TOKENS", "AIDON_MAX_TOKENS_PER_RUN",
+                default="200000")),
+            budget_seconds=(int(os.environ["AIDON_BUDGET_SECONDS"])
+                              if os.environ.get("AIDON_BUDGET_SECONDS")
+                              else int(float(os.environ.get(
+                                  "AIDON_MAX_WALLCLOCK_MIN", "60") or 60)) * 60),
+            model_timeout_seconds=float(os.environ.get(
+                "AIDON_MODEL_TIMEOUT_S", "120") or 120),
+            timezone=os.environ.get("AIDON_TIMEZONE", "UTC"),
+            forget_half_life_days=float(os.environ.get(
+                "AIDON_FORGET_HALF_LIFE_DAYS", "21") or 21),
+            forget_cleanup_threshold=float(os.environ.get(
+                "AIDON_FORGET_CLEANUP_THRESHOLD", "0.02") or 0.02),
+            forget_grace_days=int(os.environ.get(
+                "AIDON_FORGET_GRACE_DAYS", "35") or 35),
+            whatsapp_token=os.environ.get("AIDON_WHATSAPP_TOKEN", ""),
+            whatsapp_phone_id=os.environ.get("AIDON_WHATSAPP_PHONE_ID", ""),
+            whatsapp_verify_token=_env_first(
+                "AIDON_WHATSAPP_VERIFY_TOKEN", "WHATSAPP_VERIFY_TOKEN"),
+            whatsapp_app_secret=os.environ.get("AIDON_WHATSAPP_APP_SECRET", ""),
+            whatsapp_owner=os.environ.get("AIDON_WHATSAPP_OWNER", ""),
+            slack_bot_token=os.environ.get("SLACK_BOT_TOKEN", ""),
+            slack_signing_secret=os.environ.get("SLACK_SIGNING_SECRET", ""),
         )
 
     @property

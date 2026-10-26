@@ -42,13 +42,17 @@ post-hackathon, NOT built, NOT demoed, at the end.
   prefixes only, Library tab, localhost only, with
   launch.sh starting the WebUI by default.
 - WhatsApp and Slack transports, both two-way, no
-  Telegram: WhatsApp webhook with hub verification,
+  Telegram: WhatsApp webhook with hub verification
+  and app-secret signature verification, owner only,
   Slack webhook with HMAC signature verification
   before parsing, both dispatching through the same
   trigger dispatcher, replies back on the same
-  transport. Real sending needs your own WhatsApp
-  Cloud API token and Slack bot token, not included
-  here, and not tested without those accounts.
+  transport, with real WhatsApp Cloud API and Slack
+  chat.postMessage senders, using the old Aidon key
+  names, and approve / reject by message. Real
+  sending needs your own tokens, not included here,
+  and not tested without those accounts, and public
+  reachability still needs a tunnel.
 
 ## Not built yet, in the repo, for the hackathon
 

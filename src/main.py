@@ -123,10 +123,19 @@ def main(argv: list[str] | None = None) -> int:
     sandbox = Sandbox(config.workdir, config.sandbox_timeout_seconds)
     memory = _make_memory(config)
     if args.command == "webui":
-        import os
+        from .messaging import MessagingConfig, send_slack, send_whatsapp
         from .triggers import TriggerDispatcher
         from .v1 import AuthStore
         from .webui import WebUIServer
+        msg = MessagingConfig.from_env()
+        # Override from Config, which already read the old names.
+        msg.whatsapp_token = config.whatsapp_token or msg.whatsapp_token
+        msg.whatsapp_phone_id = config.whatsapp_phone_id or msg.whatsapp_phone_id
+        msg.whatsapp_verify_token = config.whatsapp_verify_token or msg.whatsapp_verify_token
+        msg.whatsapp_app_secret = config.whatsapp_app_secret or msg.whatsapp_app_secret
+        msg.whatsapp_owner = config.whatsapp_owner or msg.whatsapp_owner
+        msg.slack_bot_token = config.slack_bot_token or msg.slack_bot_token
+        msg.slack_signing_secret = config.slack_signing_secret or msg.slack_signing_secret
         dispatcher = TriggerDispatcher()
         # WebUI chat handler, for the server core: echo the
         # goal back, a real goal handler is registered by
@@ -134,11 +143,35 @@ def main(argv: list[str] | None = None) -> int:
         dispatcher.register("webui", lambda e: e.send_reply(f"Received: {e.goal}"))
         dispatcher.register("whatsapp", lambda e: e.send_reply(f"Received: {e.goal}"))
         dispatcher.register("slack", lambda e: e.send_reply(f"Received: {e.goal}"))
+
+        def whatsapp_sender(to: str, text: str):
+            result = send_whatsapp(msg, to, text)
+            if not result["ok"]:
+                print(f"WhatsApp send failed: {result['error']}")
+
+        def slack_sender(channel: str, text: str, thread_ts=None):
+            result = send_slack(msg, channel, text, thread_ts=thread_ts)
+            if not result["ok"]:
+                print(f"Slack send failed: {result['error']}")
+
         server = WebUIServer(config.home, dispatcher=dispatcher,
                              auth_store=AuthStore(config.home), memory=memory,
-                             whatsapp_verify_token=os.environ.get("WHATSAPP_VERIFY_TOKEN", ""),
-                             slack_signing_secret=os.environ.get("SLACK_SIGNING_SECRET", ""))
+                             messaging_config=msg,
+                             whatsapp_sender=whatsapp_sender,
+                             slack_sender=slack_sender)
+        missing = msg.whatsapp_missing()
+        if missing:
+            print(f"WhatsApp not fully configured, missing: {', '.join(missing)}")
+        if not msg.whatsapp_owner:
+            print("WhatsApp inbound disabled: AIDON_WHATSAPP_OWNER not set, owner only, fail closed.")
+        if not msg.whatsapp_app_secret:
+            print("Warning: AIDON_WHATSAPP_APP_SECRET not set, webhook signature check is off.")
+        if not msg.slack_bot_token:
+            print("Slack send not configured: SLACK_BOT_TOKEN not set.")
+        if not msg.slack_signing_secret:
+            print("Warning: SLACK_SIGNING_SECRET not set, Slack signature check is off.")
         print(f"WebUI on http://127.0.0.1:{args.port}/, localhost only, WhatsApp and Slack webhooks at /webhook/whatsapp and /webhook/slack")
+        print("Public reachability still needs a tunnel, localhost alone is not reachable by Meta or Slack.")
         server.serve(port=args.port)
         return 0
     if args.command == "v1":
