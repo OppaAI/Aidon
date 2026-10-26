@@ -98,7 +98,8 @@ class GoalRunner:
                  gate: ApprovalGate, home: Path, memory=None,
                  promotion_ask=None, project_id: str = "default",
                  plugins=None, execution_backend=None,
-                 budget=None, trace=None):
+                 budget=None, trace=None, model_verifier=None,
+                 kernel_mode: bool = False, semantic_router=None):
         self.client = client
         self.sandbox = sandbox
         self.gate = gate
@@ -111,6 +112,10 @@ class GoalRunner:
         self.execution_backend = execution_backend
         self.budget = budget
         self.trace = trace
+        self.model_verifier = model_verifier
+        self.kernel_mode = kernel_mode
+        self.semantic_router = semantic_router
+        self.last_route = None
 
     def _trace(self, kind: str, status: str, detail: str = "") -> None:
         if self.trace is not None:
@@ -130,6 +135,10 @@ class GoalRunner:
         and a Docker failure is a step failure, not a
         silent fallback to a host shell.
         """
+        if self.kernel_mode:
+            from .kernel import kernel_allowed
+            if not kernel_allowed(name, True):
+                raise ValueError(f"kernel mode: tool {name} is not a seed tool")
         if name == "shell" and self.execution_backend is not None:
             command = args["command"]
             if not isinstance(command, list) or not command:
@@ -149,12 +158,20 @@ class GoalRunner:
 
     def _plan(self, goal: str, failure_context: str = "",
               spec=None) -> Plan:
-        system = ("Propose a short plan as JSON with keys steps, "
-                  "deliverables, criteria. Each step is an object "
-                  "with tool, args, deliverable. Tools: write, read, "
-                  "list, shell, calculate. Keep every file inside "
-                  "the workdir.")
-        if self.plugins is not None:
+        if self.kernel_mode:
+            system = ("Propose a short plan as JSON with keys steps, "
+                      "deliverables, criteria. Each step is an object "
+                      "with tool, args, deliverable. Tools: write, read, "
+                      "list, shell only, kernel mode, no calculate, "
+                      "no plugin tools. Keep every file inside "
+                      "the workdir.")
+        else:
+            system = ("Propose a short plan as JSON with keys steps, "
+                      "deliverables, criteria. Each step is an object "
+                      "with tool, args, deliverable. Tools: write, read, "
+                      "list, shell, calculate. Keep every file inside "
+                      "the workdir.")
+        if self.plugins is not None and not self.kernel_mode:
             plugin_tools = self.plugins.tool_names()
             if plugin_tools:
                 system += f" Adopted plugin tools: {', '.join(plugin_tools)}."
@@ -211,6 +228,12 @@ class GoalRunner:
         self._current_spec = spec
         self._research_report = research_report
         self._live_actions = live_actions or []
+        if self.semantic_router is not None:
+            try:
+                self.last_route = self.semantic_router.classify(goal)
+                self._trace("interpret", "done", f"semantic route {self.last_route[0]} {self.last_route[1]:.2f}")
+            except Exception:
+                self.last_route = None
         if spec is not None:
             spec_deliverables = spec.deliverables if hasattr(spec, "deliverables") else spec.get("deliverables", [])
             plan = self._plan(goal, spec=spec)
@@ -275,6 +298,19 @@ class GoalRunner:
                 self.sandbox.workdir, current_plan.deliverables, criteria)
             self._trace("verify", "done" if ok else "failed", f"verified={len(verified)}")
             failures.extend(verify_failures)
+            # Model verifier, second opinion only, after code
+            # verification passes. A "no" triggers repair,
+            # an "unknown" reply does not override code.
+            model_failed = False
+            if ok and self.model_verifier is not None:
+                try:
+                    mv = self.model_verifier.verify(goal, current_plan.deliverables, self.sandbox.workdir)
+                    self._trace("verify", mv["verdict"], f"model verifier {mv['reason'][:100]}")
+                    if mv["verdict"] == "no":
+                        model_failed = True
+                        failures.append(f"model verifier: {mv['reason']}")
+                except Exception as exc:
+                    self._trace("verify", "failed", str(exc)[:100])
             # Passed means existence AND no failure mentions
             # it. A ledger file that exists but totals wrong
             # is not passed, so repair can rewrite it, while
@@ -282,7 +318,11 @@ class GoalRunner:
             for name in verified:
                 if not any(name in msg for msg in failures):
                     passed.add(name)
-            if ok:
+            if model_failed:
+                # Model verifier said no, so passed files are
+                # not trusted for repair, repair re-runs them.
+                passed.clear()
+            if ok and not model_failed:
                 break
             if attempt == MAX_ATTEMPTS:
                 return RunReport("failed", goal, current_plan, False, False,

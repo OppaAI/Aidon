@@ -21,7 +21,54 @@ from dataclasses import dataclass
 @dataclass
 class Message:
     role: str
-    content: str
+    # Text, or a multimodal content list, for vision:
+    # [{"type": "text", "text": "..."},
+    #  {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}]
+    # Muse Spark 1.3 is multimodal, text and image input,
+    # so an image part is sent as-is, never as a filename
+    # alone, which the model cannot see.
+    content: str | list = ""
+
+
+def image_message(text: str, images: list[tuple[bytes, str]]) -> Message:
+    """Build a user message with text plus image parts.
+
+    images is a list of (bytes, mime_type), for example
+    (png_bytes, "image/png"). Each image becomes a data
+    URL, base64, in the OpenAI-compatible image_url part.
+    A missing or empty image list is a text message, not
+    a broken multimodal message.
+    """
+    import base64
+
+    if not images:
+        return Message("user", text)
+    parts: list[dict] = [{"type": "text", "text": text}]
+    for data, mime in images:
+        if not data:
+            continue
+        encoded = base64.b64encode(data).decode()
+        parts.append({"type": "image_url",
+                      "image_url": {"url": f"data:{mime};base64,{encoded}"}})
+    return Message("user", parts)
+
+
+def image_file_message(text: str, paths: list) -> Message:
+    """Build a user message from image files on disk.
+
+    Mime type is guessed from the suffix, png, jpeg, gif,
+    webp, otherwise image/png. A missing file is an error,
+    never a silent text-only message.
+    """
+    import mimetypes
+    from pathlib import Path
+
+    images = []
+    for path in paths:
+        data = Path(path).read_bytes()
+        mime, _ = mimetypes.guess_type(str(path))
+        images.append((data, mime or "image/png"))
+    return image_message(text, images)
 
 
 class ModelClient:
@@ -64,6 +111,9 @@ class HttpModelClient(ModelClient):
             "messages": [{"role": m.role, "content": m.content}
                          for m in messages],
         }
+        # A list content is sent as-is, so image parts reach
+        # the model, not just the text part. A string content
+        # is unchanged, so old text-only calls keep working.
         req = urllib.request.Request(
             f"{self.api_base}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),

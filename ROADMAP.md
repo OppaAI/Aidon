@@ -71,12 +71,13 @@ post-hackathon, NOT built, NOT demoed, at the end.
 - Demo capability tools end to end: dinner menu PDF
   plus grocery app, store run, and job search plus
   publish, through plugins Aidon climbs to.
-- Live model routing, swarm, kernel mode, and
-  semantic routing: single generic model client only
-  in the new loop, no fast / verifier tier, no
-  parallel research workers, no seed-only toolset,
-  no phase router. These are design decisions, not
-  missing keys, see the answers in the current turn.
+- Vision, Spark verifier, swarm, kernel, and routers,
+  built now: image input path in the model client,
+  Muse Spark 1.3 multimodal, model verifier second
+  opinion with code verifier primary, swarm decided
+  by the model with parallel workers and merge,
+  kernel mode seed-only, semantic router by embedding
+  with no LLM call, and phase router fast vs strong.
 - Live verification on a real model and a real
   Qdrant and EmbeddingGemma 2 run: all runs so far
   in the new repo are FakeClient tests, plus a local

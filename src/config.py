@@ -111,6 +111,10 @@ class Config:
     autonomy_decay_days: float = 14.0
     owner_email: str = ""
     corrected_subject: bool = True
+    # Old routing / kernel keys, only, no new duplicates.
+    fast_model: str = ""
+    router_fast_phases: str = "interpret,learn,respond"
+    kernel_mode: bool = False
 
     @classmethod
     def load(cls, home: Path | None = None) -> "Config":
@@ -180,6 +184,9 @@ class Config:
             autonomy_decay_days=float(os.environ.get("AIDON_AUTONOMY_DECAY_DAYS", "14") or 14),
             owner_email=os.environ.get("AIDON_OWNER_EMAIL", ""),
             corrected_subject=os.environ.get("AIDON_CORRECTED_SUBJECT", "1") not in ("0", "false", "no"),
+            fast_model=os.environ.get("AIDON_FAST_MODEL", ""),
+            router_fast_phases=os.environ.get("AIDON_ROUTER_FAST_PHASES", "interpret,learn,respond"),
+            kernel_mode=os.environ.get("AIDON_KERNEL", "0") not in ("0", "false", "no"),
         )
 
     @property

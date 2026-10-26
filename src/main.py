@@ -335,10 +335,13 @@ def main(argv: list[str] | None = None) -> int:
     budget = Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps,
                     max_seconds=config.budget_seconds)
     trace = TraceRecorder(config.home, project_id=args.project)
+    from .verifier_model import ModelVerifier
+    model_verifier = ModelVerifier(client)
     runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
                         memory=memory, promotion_ask=_promotion_ask,
                         project_id=args.project, plugins=plugins, execution_backend=execution_backend,
-                        budget=budget, trace=trace)
+                        budget=budget, trace=trace, model_verifier=model_verifier,
+                        kernel_mode=config.kernel_mode)
     spec = None
     if getattr(args, "spec", None):
         from pathlib import Path
