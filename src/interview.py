@@ -136,6 +136,242 @@ class Spec:
         return (not failures, failures)
 
 
+def spec_sheet(spec: Spec) -> str:
+    """Readable spec sheet for the approval card, not raw JSON.
+
+    The card body is this sheet: goal, deliverables,
+    constraints, budget in dollars, deadline, recipients,
+    files, notifications, assumptions, and open questions.
+    A human approves a sheet they can read, not a JSON dump.
+    """
+    def lines(title: str, values: list[str]) -> list[str]:
+        if not values:
+            return [f"{title}: -"]
+        out = [f"{title}:"]
+        out.extend(f"  - {value}" for value in values)
+        return out
+    budget = "-"
+    if spec.budget_cents is not None:
+        budget = f"${spec.budget_cents / 100:.2f} ({spec.budget_cents} cents)"
+    sheet = [f"Goal: {spec.goal}", f"Budget: {budget}",
+             f"Deadline: {spec.deadline or '-'}"]
+    sheet.extend(lines("Deliverables", spec.deliverables))
+    sheet.extend(lines("Constraints", spec.constraints))
+    sheet.extend(lines("Recipients", spec.recipients))
+    sheet.extend(lines("Files", spec.files))
+    sheet.extend(lines("Notifications", spec.notifications))
+    sheet.extend(lines("Assumptions", spec.assumptions))
+    sheet.extend(lines("Open questions", spec.open_questions))
+    return "\n".join(sheet)
+
+
+def spec_sheet_md(spec: Spec) -> str:
+    """Standard format spec sheet, Markdown, human readable.
+
+    This is THE spec sheet format: Markdown headings and
+    bullet lists, meant to be read by a human in an editor
+    or in the chat box, not a JSON dump. It is the file
+    users write themselves, copy, edit, and attach in
+    chat, and it is the body of the spec sheet approval
+    card. JSON is only the machine copy stored alongside
+    it in specs/. The header points to the template and
+    to the docs, so a user who finds a sheet in specs/
+    knows they can write their own.
+    """
+    def bullets(values: list[str]) -> str:
+        return "\n".join(f"- {v}" for v in values) if values else "None"
+    budget = "None"
+    if spec.budget_cents is not None:
+        budget = f"${spec.budget_cents / 100:.2f} ({spec.budget_cents} cents)"
+    return "\n".join([
+        "# Spec Sheet",
+        "",
+        "How to use this sheet: fill it in, save it, and attach it in the chat box. "
+        "Aidon reads it, verifies it, and skips the interview. "
+        "Template: specs/template.md in your Aidon home, and spec-sheet-template.md in the repo. "
+        "Docs: README, Spec sheet section.",
+        "",
+        f"## Goal",
+        "",
+        spec.goal or "None",
+        "",
+        "## Deliverables",
+        "",
+        bullets(spec.deliverables),
+        "",
+        "## Constraints",
+        "",
+        bullets(spec.constraints),
+        "",
+        f"## Budget",
+        "",
+        budget,
+        "",
+        f"## Deadline",
+        "",
+        spec.deadline or "No deadline",
+        "",
+        "## Recipients",
+        "",
+        bullets(spec.recipients),
+        "",
+        "## Files",
+        "",
+        bullets(spec.files),
+        "",
+        "## Notifications",
+        "",
+        bullets(spec.notifications),
+        "",
+        "## Assumptions",
+        "",
+        bullets(spec.assumptions),
+        "",
+        "## Open questions",
+        "",
+        bullets(spec.open_questions),
+        "",
+    ])
+
+
+SPEC_SHEET_TEMPLATE = """# Spec Sheet
+
+How to use this sheet: fill it in, save it, and attach it in the chat box.
+Aidon reads it, verifies it, and skips the interview.
+Template: specs/template.md in your Aidon home, and spec-sheet-template.md in the repo.
+Docs: README, Spec sheet section.
+
+## Goal
+
+[Your goal in plain language]
+
+## Deliverables
+
+- [First deliverable, a file or a concrete outcome]
+- [Second deliverable]
+
+## Constraints
+
+- [A constraint, for example: no milk, no eggs]
+- [Another constraint]
+
+## Budget
+
+$100.00 (10000 cents)
+
+## Deadline
+
+-
+
+## Recipients
+
+- [Who this is for, if anyone]
+
+## Files
+
+- [A file Aidon should make or use, if any]
+
+## Notifications
+
+- [How you want to be told, if any]
+
+## Assumptions
+
+- [Anything Aidon may assume]
+
+## Open questions
+
+-
+"""
+
+
+def _parse_budget(text: str) -> int | None:
+    import re
+    text = text.strip()
+    if not text or text == "-":
+        return None
+    match = re.search(r"(\d+)\s*cents", text, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    match = re.search(r"\$?\s*(\d+(?:\.\d{1,2})?)", text)
+    if match:
+        return int(round(float(match.group(1)) * 100))
+    return None
+
+
+def parse_spec_sheet(text: str) -> Spec:
+    """Parse a user-written spec sheet back into a Spec.
+
+    Accepts JSON, the plain spec_sheet() format, and the
+    Markdown standard format, so a user can write a sheet
+    in an editor, in chat, or by copying the template,
+    and Aidon can read it without an interview. Unknown
+    lines are ignored, never invented into fields.
+    """
+    stripped = text.strip()
+    if stripped.startswith("{"):
+        try:
+            return Spec.from_dict(json.loads(stripped))
+        except (json.JSONDecodeError, TypeError):
+            pass
+    spec = Spec()
+    section = ""
+    sections = {
+        "goal": "goal", "deliverables": "deliverables",
+        "constraints": "constraints", "budget": "budget",
+        "deadline": "deadline", "recipients": "recipients",
+        "files": "files", "notifications": "notifications",
+        "assumptions": "assumptions", "open questions": "open_questions",
+    }
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.lower() in ("none", "no deadline", "-"):
+            continue
+        if line.startswith("#"):
+            heading = line.lstrip("#").strip().lower()
+            if heading in sections and heading != "spec sheet":
+                section = sections[heading]
+            continue
+        if ":" in line and not line.startswith(("-", "*")):
+            key, value = line.split(":", 1)
+            key = key.strip().lower()
+            if key in sections:
+                section = sections[key]
+                value = value.strip()
+                if not value or value == "-":
+                    continue
+                if section == "goal":
+                    spec.goal = value
+                elif section == "budget":
+                    spec.budget_cents = _parse_budget(value)
+                elif section == "deadline":
+                    spec.deadline = value
+                else:
+                    getattr(spec, section).append(value)
+                continue
+        if line.startswith(("-", "*")):
+            item = line.lstrip("-*").strip()
+            if not item or item == "-" or item.lower() == "none":
+                continue
+            if section == "goal":
+                spec.goal = item
+            elif section in ("deliverables", "constraints", "recipients",
+                             "files", "notifications", "assumptions",
+                             "open_questions"):
+                getattr(spec, section).append(item)
+            continue
+        # A bare line under Goal, Budget, or Deadline is that field.
+        if section == "goal" and not spec.goal and line != "-":
+            spec.goal = line
+        elif section == "budget" and spec.budget_cents is None:
+            spec.budget_cents = _parse_budget(line)
+        elif section == "deadline" and not spec.deadline and line != "-":
+            spec.deadline = line
+    return spec
+
+
 @dataclass
 class InterviewResult:
     spec: Spec
@@ -169,6 +405,51 @@ class InterviewRunner:
         """
         spec = Spec(goal=message.strip())
         exchanges: list[dict] = []
+        # Build from memory and previous runs first, before
+        # asking anything new. This is what keeps the
+        # interview from re-asking what is already known:
+        # - previous conversation in this project,
+        # - previous episodic specs for a similar goal,
+        # - previous successful Experiences for a similar goal.
+        # A prefilled field is a proposal, not a fact: the
+        # user can correct it in chat, and the spec sheet
+        # card at the end is where they approve or reject it.
+        memory_context: dict = {}
+        initial_spec = Spec(goal=message.strip())
+        if self.memory is not None:
+            try:
+                context = self.memory.conversation_context(self.project_id)
+                memory_context["previous_exchanges"] = [
+                    {"role": p.payload.get("role", ""), "text": p.text}
+                    for p in context["exchanges"][-5:]]
+                if context["summary"]:
+                    memory_context["previous_summary"] = context["summary"]
+                # Previous specs: episodic points carrying a spec.
+                for point in self.memory.list_points("episodic", limit=100):
+                    saved = point.payload.get("spec")
+                    if isinstance(saved, dict) and saved.get("goal"):
+                        previous = Spec.from_dict(saved)
+                        spec = self._prefill(spec, previous)
+                        memory_context["previous_spec"] = previous.to_dict()
+                        break
+                # Previous runs: Experience deliverables and lesson.
+                try:
+                    from .experience import recall_experiences
+                    experiences = recall_experiences(self.memory, message, limit=1)
+                    if experiences:
+                        exp = experiences[0]
+                        if not spec.deliverables:
+                            spec.deliverables = [str(n.get("deliverable", ""))
+                                                 for n in exp.dag_nodes
+                                                 if n.get("deliverable")]
+                        if exp.lesson and exp.lesson not in spec.assumptions:
+                            spec.assumptions.append(exp.lesson)
+                        memory_context["previous_experience"] = exp.to_text()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        initial_spec = Spec.from_dict(spec.to_dict())
         # Record the opening message as STM + episodic, so
         # the interview is in chat history from the start.
         self._record_exchange("user", message, exchanges)
@@ -182,7 +463,8 @@ class InterviewRunner:
                         "in chat, never assume an answer."),
                 Message("user", json.dumps({
                     "goal": message, "spec": spec.to_dict(),
-                    "exchanges": exchanges[-10:]})),
+                    "exchanges": exchanges[-10:],
+                    "from_memory": memory_context})),
             ])
             try:
                 data = json.loads(reply)
@@ -192,6 +474,10 @@ class InterviewRunner:
                 spec = Spec.from_dict(data["spec"])
                 if not spec.goal.strip():
                     spec.goal = message.strip()
+                # Spec built from questions + memory: if the
+                # model omitted a field that memory already
+                # knew, keep the memory value, do not lose it.
+                spec = self._prefill(spec, initial_spec)
             question = data.get("question") if isinstance(data, dict) else None
             complete = bool(data.get("complete")) if isinstance(data, dict) else False
             if not question or complete:
@@ -202,12 +488,7 @@ class InterviewRunner:
             if answer.strip().lower() in ("done", "go ahead", "that's all", "no more"):
                 break
         verified, failures = spec.verify()
-        # Save the spec, even if unverified, so the user can
-        # see what is missing, and the run can resume it.
-        spec_dir = self.home / "specs"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        (spec_dir / f"{self.project_id}.json").write_text(
-            json.dumps(spec.to_dict(), indent=2), encoding="utf-8")
+        self._save_spec(spec)
         if self.memory is not None:
             try:
                 self.memory.record_episodic(
@@ -222,13 +503,114 @@ class InterviewRunner:
             if approve is not None:
                 approved = bool(approve(spec))
             elif self.gate is not None:
+                # Spec sheet card, not a JSON dump: the user
+                # approves a sheet they can read, before any
+                # planning or live step proceeds.
                 decision = self.gate.ask(
-                    "spec", "Approve this spec?",
-                    json.dumps(spec.to_dict(), indent=2))
+                    "spec", "Approve this spec sheet?",
+                    spec_sheet_md(spec))
                 approved = decision.verdict == "approved"
         return InterviewResult(spec=spec, approved=approved,
                                verified=verified, failures=failures,
                                exchanges=exchanges)
+
+    def ensure_template(self) -> Path:
+        """Template spec sheet in the specs/ path, if not already there.
+
+        Users find it at <home>/specs/template.md, copy it,
+        fill it in, and attach it in chat. It is not
+        overwritten if the user already edited it.
+        """
+        spec_dir = self.home / "specs"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        target = spec_dir / "template.md"
+        if not target.exists():
+            target.write_text(SPEC_SHEET_TEMPLATE, encoding="utf-8")
+        return target
+
+    def _save_spec(self, spec: Spec) -> tuple[Path, Path]:
+        """Save a spec as JSON and as a standard Markdown sheet.
+
+        Both live in <home>/specs/: <project>.json for code,
+        <project>.md for humans. The template is ensured
+        alongside them, so a user who finds a sheet knows
+        they can write their own. Even an unverified spec
+        is saved, so the user can see what is missing and
+        resume it.
+        """
+        spec_dir = self.home / "specs"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        self.ensure_template()
+        json_path = spec_dir / f"{self.project_id}.json"
+        md_path = spec_dir / f"{self.project_id}.md"
+        json_path.write_text(json.dumps(spec.to_dict(), indent=2),
+                             encoding="utf-8")
+        md_path.write_text(spec_sheet_md(spec), encoding="utf-8")
+        return json_path, md_path
+
+    def load_attached_spec(self, sheet_text: str, approve=None) -> InterviewResult:
+        """Attach a spec sheet in chat, skip the interview.
+
+        The user writes their own sheet, from the template
+        or by hand, and attaches it in the chat box. Aidon
+        parses it, verifies it by code, saves it as JSON
+        and Markdown in specs/, records it as episodic,
+        and confirms it with a spec sheet card. No
+        questions are asked, the interview step is skipped.
+        If the sheet is unverified, it is not approved,
+        and the run does not proceed.
+        """
+        spec = parse_spec_sheet(sheet_text)
+        verified, failures = spec.verify()
+        self._save_spec(spec)
+        if self.memory is not None:
+            try:
+                self.memory.record_episodic(
+                    self.project_id,
+                    f"Attached spec: {spec.goal}",
+                    {"spec": spec.to_dict(), "deliverables": spec.deliverables,
+                     "verified": verified, "attached": True})
+            except Exception:
+                pass
+        approved = False
+        if verified:
+            if approve is not None:
+                approved = bool(approve(spec))
+            elif self.gate is not None:
+                decision = self.gate.ask(
+                    "spec", "Approve this spec sheet?",
+                    spec_sheet_md(spec))
+                approved = decision.verdict == "approved"
+        return InterviewResult(spec=spec, approved=approved,
+                               verified=verified, failures=failures,
+                               exchanges=[])
+
+    @staticmethod
+    def _prefill(spec: Spec, previous: Spec) -> Spec:
+        """Fill empty spec fields from a previous spec, goal kept.
+
+        Only empty fields are filled, never overwritten:
+        a previous budget, constraint, or deliverable is a
+        starting proposal, the current interview can change
+        it, and the spec sheet card is the final check.
+        """
+        if not spec.deliverables:
+            spec.deliverables = list(previous.deliverables)
+        if not spec.constraints:
+            spec.constraints = list(previous.constraints)
+        if spec.budget_cents is None:
+            spec.budget_cents = previous.budget_cents
+        if not spec.deadline:
+            spec.deadline = previous.deadline
+        if not spec.recipients:
+            spec.recipients = list(previous.recipients)
+        if not spec.files:
+            spec.files = list(previous.files)
+        if not spec.notifications:
+            spec.notifications = list(previous.notifications)
+        if not spec.assumptions:
+            spec.assumptions = list(previous.assumptions)
+        return spec
 
     def _record_exchange(self, role: str, text: str, exchanges: list[dict]) -> None:
         exchanges.append({"role": role, "text": text})

@@ -170,11 +170,42 @@ collection.
    interview triggers from the chat message itself, and
    ends in a frozen spec: goal, deliverables, constraints,
    budget, deadline, recipients, files, notifications,
-   assumptions, with no open questions. The spec is
-   verified by code and approved as a decision card,
-   then it binds the planner. Run it with
+   assumptions, with no open questions. The spec is built
+   from the questions, from memory, and from previous runs,
+   then confirmed with a spec sheet card for user approval
+   before any planning proceeds. The spec is verified by
+   code and approved as a decision card, then it binds the
+   planner. Run it with
    `python -m src.main interview "Plan a dinner"`, with
    `--run` to run the goal after the spec is approved.
+
+## Spec sheet
+
+You do not have to do the interview. Write your own spec
+sheet, attach it in the chat box, and Aidon skips the
+interview.
+
+- Template: [spec-sheet-template.md](spec-sheet-template.md)
+  in this repo, and `specs/template.md` in your Aidon home
+  (`~/.aidon/specs/template.md` by default). Copy it, fill
+  it in, save it, and attach it.
+- Standard format: Markdown, human readable. Goal,
+  Deliverables, Constraints, Budget, Deadline, Recipients,
+  Files, Notifications, Assumptions, Open questions, in
+  Markdown headings with bullet lists. Plain `Goal: ...`
+  lines and JSON are also accepted on attach, but the
+  sheet itself, the template, the stored file, and the
+  approval card are all the same Markdown sheet, not a
+  JSON dump. Budget is written as `$100.00 (10000 cents)`,
+  or as cents. Empty sections read `None`, not `-`.
+- Attached sheets are parsed, verified by code, and saved
+  as `specs/<project>.json` and `specs/<project>.md`.
+  An unverified sheet is not approved, and the run does
+  not proceed. A verified sheet is confirmed with a spec
+  sheet card, then it binds the planner, same as an
+  interviewed spec.
+- CLI: `python -m src.main interview "Plan a dinner" --attach my-spec.md --run`,
+  or `python -m src.main goal --spec my-spec.md "Plan a dinner"`.
 2. **Plan** — a plan with steps, deliverables, and criteria.
    Steps are tool calls, not strings: write, read, list,
    shell in the sandbox, and calculate, all confined to the

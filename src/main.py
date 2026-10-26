@@ -72,12 +72,16 @@ def main(argv: list[str] | None = None) -> int:
     goal_parser.add_argument("text", help="Goal in plain language")
     goal_parser.add_argument("--project", default="default",
                              help="Project id for episodic memory")
+    goal_parser.add_argument("--spec", default=None,
+                             help="Attached spec sheet file, skips interview")
     interview_parser = sub.add_parser("interview", help="Interview to a spec")
     interview_parser.add_argument("text", help="Goal in plain language, chat message")
     interview_parser.add_argument("--project", default="default",
                                   help="Project id for episodic memory")
     interview_parser.add_argument("--run", action="store_true",
                                   help="Run the goal after the spec is approved")
+    interview_parser.add_argument("--attach", default=None,
+                                  help="Attached spec sheet file, skips interview questions")
     args = parser.parse_args(argv)
 
     config = Config.load()
@@ -93,14 +97,24 @@ def main(argv: list[str] | None = None) -> int:
         from .interview import InterviewRunner
         runner = InterviewRunner(client, config.home, memory=memory,
                                  gate=_cli_gate(), project_id=args.project)
-        # Questions are chat, no clock, no card: input() in CLI.
-        result = runner.start_from_message(
-            args.text, ask=lambda q: input(f"\nAidon: {q}\nYou: "))
+        print(f"Spec template: {runner.ensure_template()}  "
+              f"(copy it, fill it in, attach it to skip the interview; "
+              f"docs: README, Spec sheet section)")
+        if args.attach:
+            # Attached spec sheet: skip the interview questions.
+            from pathlib import Path
+            result = runner.load_attached_spec(
+                Path(args.attach).read_text(encoding="utf-8"))
+        else:
+            # Questions are chat, no clock, no card: input() in CLI.
+            result = runner.start_from_message(
+                args.text, ask=lambda q: input(f"\nAidon: {q}\nYou: "))
         print(f"\nSpec verified: {result.verified}")
         if result.failures:
             print(f"Spec failures: {'; '.join(result.failures)}")
         print(f"Spec approved: {result.approved}")
         print(f"Spec file: {config.home}/specs/{args.project}.json")
+        print(f"Spec sheet: {config.home}/specs/{args.project}.md")
         if not result.approved:
             return 2
         if not args.run:
@@ -121,7 +135,16 @@ def main(argv: list[str] | None = None) -> int:
     runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
                         memory=memory, promotion_ask=_promotion_ask,
                         project_id=args.project)
-    report = runner.run(args.text)
+    spec = None
+    if getattr(args, "spec", None):
+        from pathlib import Path
+        from .interview import InterviewRunner, parse_spec_sheet
+        spec = parse_spec_sheet(Path(args.spec).read_text(encoding="utf-8"))
+        verified, failures = spec.verify()
+        if not verified:
+            print(f"Attached spec is not verified: {'; '.join(failures)}")
+            return 2
+    report = runner.run(args.text, spec=spec)
     print(f"status: {report.status}")
     print(f"verified: {report.verified}")
     print(f"approved: {report.approved}")

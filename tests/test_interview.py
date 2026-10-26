@@ -9,7 +9,8 @@ import json
 
 from src.approval import ApprovalGate, Decision
 from src.embedder import HashEmbedder
-from src.interview import InterviewRunner, Spec
+from src.interview import (InterviewRunner, Spec, parse_spec_sheet,
+                           spec_sheet, spec_sheet_md, SPEC_SHEET_TEMPLATE)
 from src.loop import GoalRunner
 from src.memory import InMemoryStore, Memory
 from src.model_client import FakeClient
@@ -79,6 +80,77 @@ def test_interview_unverified_spec_is_not_approved(tmp_path):
     assert result.verified is False
     assert result.approved is False
     assert result.failures
+
+
+def test_spec_sheet_markdown_round_trip(tmp_path):
+    spec = Spec(goal="Plan a dinner", deliverables=["menu.pdf"],
+                constraints=["no milk", "no eggs"], budget_cents=10000)
+    sheet = spec_sheet_md(spec)
+    assert sheet.startswith("# Spec Sheet")
+    assert "## Deliverables" in sheet
+    assert "$100.00" in sheet
+    assert "menu.pdf" in sheet
+    parsed = parse_spec_sheet(sheet)
+    assert parsed.goal == "Plan a dinner"
+    assert parsed.deliverables == ["menu.pdf"]
+    assert parsed.constraints == ["no milk", "no eggs"]
+    assert parsed.budget_cents == 10000
+
+
+def test_user_written_markdown_sheet_parses(tmp_path):
+    text = ("# Spec Sheet\n\n## Goal\n\nPlan a dinner\n\n"
+            "## Deliverables\n\n- menu.pdf\n\n"
+            "## Constraints\n\n- no milk\n\n## Budget\n\n$100.00\n")
+    parsed = parse_spec_sheet(text)
+    assert parsed.goal == "Plan a dinner"
+    assert parsed.deliverables == ["menu.pdf"]
+    assert parsed.constraints == ["no milk"]
+    assert parsed.budget_cents == 10000
+
+
+def test_attach_skips_interview_and_saves_markdown(tmp_path):
+    memory = _memory(tmp_path)
+    seen = {}
+    def decide(kind, title, body):
+        seen["body"] = body
+        return Decision("approved")
+    gate = ApprovalGate(decide)
+    runner = InterviewRunner(FakeClient("should not be called"),
+                             tmp_path / "home", memory=memory, gate=gate,
+                             project_id="dinner")
+    sheet = spec_sheet_md(Spec(goal="Plan a dinner",
+                               deliverables=["menu.pdf"],
+                               constraints=["no milk"]))
+    result = runner.load_attached_spec(sheet)
+    assert result.verified is True
+    assert result.approved is True
+    assert result.exchanges == []
+    assert seen["body"].startswith("# Spec Sheet")
+    assert (tmp_path / "home" / "specs" / "dinner.md").exists()
+    assert (tmp_path / "home" / "specs" / "dinner.json").exists()
+    template = runner.ensure_template()
+    assert template.exists()
+    assert template.read_text().startswith("# Spec Sheet")
+    assert "attach it" in template.read_text()
+
+
+def test_interview_prefills_from_previous_spec(tmp_path):
+    memory = _memory(tmp_path)
+    memory.record_episodic("dinner", "Interview spec: Plan a dinner",
+                           {"spec": {"goal": "Plan a dinner",
+                                     "deliverables": ["menu.pdf"],
+                                     "constraints": ["no milk"]}})
+    class EmptySpecClient(FakeClient):
+        def chat(self, messages):
+            return json.dumps({"question": None, "complete": True,
+                               "spec": {"goal": "Plan a dinner",
+                                        "deliverables": []}})
+    gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
+    runner = InterviewRunner(EmptySpecClient(), tmp_path / "home",
+                             memory=memory, gate=gate, project_id="dinner")
+    result = runner.start_from_message("Plan a dinner", ask=lambda q: "x")
+    assert result.spec.deliverables == ["menu.pdf"]
+    assert result.spec.constraints == ["no milk"]
 
 
 def test_loop_with_spec_binds_deliverables(tmp_path):
