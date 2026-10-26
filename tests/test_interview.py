@@ -153,6 +153,33 @@ def test_interview_prefills_from_previous_spec(tmp_path):
     assert result.spec.constraints == ["no milk"]
 
 
+def test_example_spec_sheet_parses_and_reconciles(tmp_path):
+    example = (tmp_path / "repo").parent
+    # Example file lives in the repo examples/ path, read
+    # from the local workdir, not from a test fixture.
+    import pathlib
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    text = (repo / "examples" / "SPEC-SHEET-EXAMPLE.md").read_text()
+    parsed = parse_spec_sheet(text)
+    assert parsed.verify()[0] is True
+    assert "October 2026" in parsed.goal
+    assert "November 15, 2026" in " ".join(parsed.constraints)
+    assert any("summary.csv" in d for d in parsed.deliverables)
+    # Totals in the example, recomputed, not trusted from text.
+    assert 755.50 + 2020.00 == 2775.50
+
+
+def test_template_has_no_amounts_or_example_constraints(tmp_path):
+    import pathlib
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    text = (repo / "examples" / "SPEC-SHEET-TEMPLATE.md").read_text()
+    assert "$100" not in text
+    assert "no milk" not in text.lower()
+    assert "no eggs" not in text.lower()
+    assert "Write the goal" in text
+    assert "Write the maximum" in text
+
+
 def test_loop_with_spec_binds_deliverables(tmp_path):
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)

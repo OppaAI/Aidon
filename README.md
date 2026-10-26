@@ -23,7 +23,7 @@ is a real part of what Aidon runs, not just a build-time choice.
 ## Run it
 
 ```sh
-cp .env.example .env
+cp examples/.env.example .env
 # Fill in your own endpoint, key, and model name in .env
 python -m src.main goal "Plan a dinner for two"
 ```
@@ -185,10 +185,17 @@ You do not have to do the interview. Write your own spec
 sheet, attach it in the chat box, and Aidon skips the
 interview.
 
-- Template: [spec-sheet-template.md](spec-sheet-template.md)
+- Template: [examples/SPEC-SHEET-TEMPLATE.md](examples/SPEC-SHEET-TEMPLATE.md)
   in this repo, and `specs/template.md` in your Aidon home
   (`~/.aidon/specs/template.md` by default). Copy it, fill
-  it in, save it, and attach it.
+  it in, save it, and attach it. The template contains no
+  amounts, values, or example constraints, only one or a
+  few sentences per section telling you what to write.
+- Example: [examples/SPEC-SHEET-EXAMPLE.md](examples/SPEC-SHEET-EXAMPLE.md),
+  a filled spec sheet for generating October 2026 monthly
+  statements from invoice accounts, with customer totals,
+  a pay by date, and email to customers. The example is
+  fictional, for illustration only.
 - Standard format: Markdown, human readable. Goal,
   Deliverables, Constraints, Budget, Deadline, Recipients,
   Files, Notifications, Assumptions, Open questions, in
@@ -196,8 +203,8 @@ interview.
   lines and JSON are also accepted on attach, but the
   sheet itself, the template, the stored file, and the
   approval card are all the same Markdown sheet, not a
-  JSON dump. Budget is written as `$100.00 (10000 cents)`,
-  or as cents. Empty sections read `None`, not `-`.
+  JSON dump. Budget is written in dollars and cents, or
+  as cents. Empty sections read `None`, not `-`.
 - Attached sheets are parsed, verified by code, and saved
   as `specs/<project>.json` and `specs/<project>.md`.
   An unverified sheet is not approved, and the run does

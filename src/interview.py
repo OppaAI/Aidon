@@ -188,7 +188,7 @@ def spec_sheet_md(spec: Spec) -> str:
         "",
         "How to use this sheet: fill it in, save it, and attach it in the chat box. "
         "Aidon reads it, verifies it, and skips the interview. "
-        "Template: specs/template.md in your Aidon home, and spec-sheet-template.md in the repo. "
+        "Template: specs/template.md in your Aidon home, and examples/SPEC-SHEET-TEMPLATE.md in the repo. "
         "Docs: README, Spec sheet section.",
         "",
         f"## Goal",
@@ -238,50 +238,49 @@ SPEC_SHEET_TEMPLATE = """# Spec Sheet
 
 How to use this sheet: fill it in, save it, and attach it in the chat box.
 Aidon reads it, verifies it, and skips the interview.
-Template: specs/template.md in your Aidon home, and spec-sheet-template.md in the repo.
+Template: specs/template.md in your Aidon home, and examples/SPEC-SHEET-TEMPLATE.md in the repo.
+Example: examples/SPEC-SHEET-EXAMPLE.md in the repo.
 Docs: README, Spec sheet section.
 
 ## Goal
 
-[Your goal in plain language]
+Write the goal in plain language, in one sentence, saying what you want Aidon to do and for whom, not how it will do it.
 
 ## Deliverables
 
-- [First deliverable, a file or a concrete outcome]
-- [Second deliverable]
+List each file or concrete outcome Aidon must produce, one per bullet, with the file name if it is a file.
 
 ## Constraints
 
-- [A constraint, for example: no milk, no eggs]
-- [Another constraint]
+List every hard limit Aidon must not break, one per bullet, such as a date range, a format, or a source file. Write None if there are no hard limits.
 
 ## Budget
 
-$100.00 (10000 cents)
+Write the maximum total amount Aidon may spend, in dollars and cents, or write None if there is no budget cap. Do not write a budget here unless it is a real limit.
 
 ## Deadline
 
--
+Write the date and time the work must be finished by, or write No deadline if there is none.
 
 ## Recipients
 
-- [Who this is for, if anyone]
+List who the work is for or who should receive the output, with their contact details if Aidon must send it to them, or write None if there is no recipient.
 
 ## Files
 
-- [A file Aidon should make or use, if any]
+List every input file Aidon should read and every output file it should create, one per bullet, with the file name and path.
 
 ## Notifications
 
-- [How you want to be told, if any]
+Write how you want to be told when the work is done or if it fails, or write None if no notification is needed.
 
 ## Assumptions
 
-- [Anything Aidon may assume]
+List anything Aidon may assume without asking, one per bullet, or write None if there are no assumptions.
 
 ## Open questions
 
--
+List any questions that are still open, one per bullet, or write None if the spec is complete. A spec with open questions is not verified.
 """
 
 
