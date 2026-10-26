@@ -90,6 +90,27 @@ class Config:
     whatsapp_owner: str = ""
     slack_bot_token: str = ""
     slack_signing_secret: str = ""
+    # Old capability keys, only, no new duplicates.
+    search_backend: str = "tavily"
+    searxng_url: str = "http://localhost:8888"
+    tavily_api_key: str = ""
+    youtube_api_key: str = ""
+    fish_api_key: str = ""
+    tts_voice_id: str = ""
+    transcribe_api_key: str = ""
+    threads_access_token: str = ""
+    threads_account_id: str = ""
+    ig_user_id: str = ""
+    ig_access_token: str = ""
+    github_token: str = ""
+    daily_report_time: str = ""
+    approval_nudge_minutes: int = 15
+    approval_nudge_channel: str = ""
+    autonomy_enabled: bool = True
+    autonomy_threshold: int = 5
+    autonomy_decay_days: float = 14.0
+    owner_email: str = ""
+    corrected_subject: bool = True
 
     @classmethod
     def load(cls, home: Path | None = None) -> "Config":
@@ -139,6 +160,26 @@ class Config:
             whatsapp_owner=os.environ.get("AIDON_WHATSAPP_OWNER", ""),
             slack_bot_token=os.environ.get("SLACK_BOT_TOKEN", ""),
             slack_signing_secret=os.environ.get("SLACK_SIGNING_SECRET", ""),
+            search_backend=os.environ.get("AIDON_SEARCH_BACKEND", "tavily"),
+            searxng_url=os.environ.get("AIDON_SEARXNG_URL", "http://localhost:8888"),
+            tavily_api_key=os.environ.get("TAVILY_API_KEY", ""),
+            youtube_api_key=os.environ.get("AIDON_YOUTUBE_API_KEY", ""),
+            fish_api_key=os.environ.get("AIDON_FISH_API_KEY", ""),
+            tts_voice_id=os.environ.get("AIDON_TTS_VOICE_ID", ""),
+            transcribe_api_key=os.environ.get("AIDON_TRANSCRIBE_API_KEY", ""),
+            threads_access_token=os.environ.get("AIDON_THREADS_ACCESS_TOKEN", ""),
+            threads_account_id=os.environ.get("AIDON_THREADS_ACCOUNT_ID", ""),
+            ig_user_id=os.environ.get("AIDON_IG_USER_ID", ""),
+            ig_access_token=os.environ.get("AIDON_IG_ACCESS_TOKEN", ""),
+            github_token=os.environ.get("GITHUB_TOKEN", ""),
+            daily_report_time=os.environ.get("AIDON_DAILY_REPORT_TIME", ""),
+            approval_nudge_minutes=int(os.environ.get("AIDON_APPROVAL_NUDGE_MIN", "15") or 15),
+            approval_nudge_channel=os.environ.get("AIDON_APPROVAL_NUDGE_CHANNEL", ""),
+            autonomy_enabled=os.environ.get("AIDON_AUTONOMY_ENABLED", "1") not in ("0", "false", "no"),
+            autonomy_threshold=int(os.environ.get("AIDON_AUTONOMY_THRESHOLD", "5") or 5),
+            autonomy_decay_days=float(os.environ.get("AIDON_AUTONOMY_DECAY_DAYS", "14") or 14),
+            owner_email=os.environ.get("AIDON_OWNER_EMAIL", ""),
+            corrected_subject=os.environ.get("AIDON_CORRECTED_SUBJECT", "1") not in ("0", "false", "no"),
         )
 
     @property

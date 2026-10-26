@@ -54,11 +54,29 @@ post-hackathon, NOT built, NOT demoed, at the end.
   and not tested without those accounts, and public
   reachability still needs a tunnel.
 
+- Old capability tools, rebuilt as arena modules,
+  with fake-API tests, live keys not included:
+  search (Tavily / SearXNG), YouTube search +
+  metadata, Fish Audio TTS + Muse Voice Transcribe,
+  Threads and Instagram publishing, approval-gated,
+  GitHub search + fetch, scheduler loop, daily
+  report, approval nudges, autonomy graduation,
+  and email drafts with the old corrected-subject
+  policy. Not built here: YouTube transcript path,
+  Gmail MCP transport, live model routing, swarm,
+  kernel mode, and semantic routing, see below.
+
 ## Not built yet, in the repo, for the hackathon
 
 - Demo capability tools end to end: dinner menu PDF
   plus grocery app, store run, and job search plus
   publish, through plugins Aidon climbs to.
+- Live model routing, swarm, kernel mode, and
+  semantic routing: single generic model client only
+  in the new loop, no fast / verifier tier, no
+  parallel research workers, no seed-only toolset,
+  no phase router. These are design decisions, not
+  missing keys, see the answers in the current turn.
 - Live verification on a real model and a real
   Qdrant and EmbeddingGemma 2 run: all runs so far
   in the new repo are FakeClient tests, plus a local
@@ -79,5 +97,6 @@ post-hackathon, NOT built, NOT demoed, at the end.
 - Streamable HTTP MCP, beyond stdio MCP built now.
 - Email, RSS, and database triggers, as plugins,
   beyond the core triggers built now.
-- Voice transcription and image generation tools,
-  beyond the model selection already decided.
+- Image generation tools, beyond the Fish TTS and
+  transcribe interface built now, and beyond the
+  model selection already decided.
