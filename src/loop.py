@@ -105,14 +105,22 @@ class GoalRunner:
         self.project_id = project_id
         self.tools = ToolRegistry(sandbox.workdir, sandbox=sandbox)
 
-    def _plan(self, goal: str, failure_context: str = "") -> Plan:
+    def _plan(self, goal: str, failure_context: str = "",
+              spec=None) -> Plan:
         system = ("Propose a short plan as JSON with keys steps, "
                   "deliverables, criteria. Each step is an object "
                   "with tool, args, deliverable. Tools: write, read, "
                   "list, shell, calculate. Keep every file inside "
                   "the workdir.")
-        user = goal if not failure_context else \
-            f"{goal}\n\nPrevious attempt failed, repair only the failed parts, do not rewrite passed files:\n{failure_context}"
+        user = goal
+        if spec is not None:
+            spec_dict = spec.to_dict() if hasattr(spec, "to_dict") else spec
+            user = (f"Goal: {goal}\n\nFrozen spec, binding for this plan, "
+                    f"do not invent deliverables or constraints outside it:\n"
+                    f"{json.dumps(spec_dict, indent=2)}")
+        if failure_context:
+            user = user + (f"\n\nPrevious attempt failed, repair only the "
+                           f"failed parts, do not rewrite passed files:\n{failure_context}")
         reply = self.client.chat([Message("system", system),
                                   Message("user", user)])
         try:
@@ -133,7 +141,18 @@ class GoalRunner:
                 deliverables=["deliverable.md"],
                 criteria=["deliverable.md exists"])
 
-    def run(self, goal: str) -> RunReport:
+    def run(self, goal: str, spec=None) -> RunReport:
+        # A frozen spec binds the planner: if one is given,
+        # plan from it, do not plan fresh from the goal alone.
+        # Experience reuse still applies, but only if its
+        # deliverables match the spec's deliverables.
+        self._current_spec = spec
+        if spec is not None:
+            spec_deliverables = spec.deliverables if hasattr(spec, "deliverables") else spec.get("deliverables", [])
+            plan = self._plan(goal, spec=spec)
+            if not plan.deliverables and spec_deliverables:
+                plan.deliverables = list(spec_deliverables)
+            return self._execute_plan(goal, plan)
         if self.memory is not None:
             try:
                 from .experience import recall_experiences
@@ -198,7 +217,9 @@ class GoalRunner:
             context = ("Passed deliverables (do not rewrite): "
                        + ", ".join(sorted(passed))
                        + "\nFailures:\n" + "\n".join(failures))
-            current_plan = self._plan(goal, failure_context=context)
+            current_plan = self._plan(
+                goal, failure_context=context,
+                spec=getattr(self, "_current_spec", None))
             if not current_plan.deliverables:
                 return RunReport("failed", goal, current_plan, False, False,
                                  files=sorted(passed),

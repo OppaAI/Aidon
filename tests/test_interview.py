@@ -1,0 +1,95 @@
+"""#1 interview tests: chat questions, frozen spec, approval card.
+
+Questions are chat turns, no gate, no clock. The spec
+approval is a decision, through the gate. FakeClient
+returns question JSON, then a completed spec JSON.
+"""
+
+import json
+
+from src.approval import ApprovalGate, Decision
+from src.embedder import HashEmbedder
+from src.interview import InterviewRunner, Spec
+from src.loop import GoalRunner
+from src.memory import InMemoryStore, Memory
+from src.model_client import FakeClient
+from src.sandbox import Sandbox
+
+
+def _memory(tmp_path):
+    return Memory(tmp_path / "home", embedder=HashEmbedder(),
+                  store=InMemoryStore())
+
+
+def test_spec_verify():
+    good = Spec(goal="Plan a dinner", deliverables=["menu.pdf"],
+                constraints=["no milk", "no eggs"], budget_cents=10000)
+    assert good.verify()[0] is True
+    bad = Spec(goal="Plan a dinner", deliverables=[],
+               open_questions=["what is the budget?"])
+    ok, failures = bad.verify()
+    assert not ok and failures
+    bad2 = Spec(goal="x", deliverables=["TBD"], budget_cents=-1)
+    assert not bad2.verify()[0]
+
+
+class _InterviewClient(FakeClient):
+    def __init__(self):
+        self.calls = 0
+    def chat(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return json.dumps({"question": "What is the main dish?",
+                               "spec": {"goal": "Plan a dinner", "deliverables": []}})
+        return json.dumps({"question": None, "complete": True,
+                           "spec": {"goal": "Plan a dinner",
+                                    "deliverables": ["menu.pdf"],
+                                    "constraints": ["no milk", "no eggs"],
+                                    "budget_cents": 10000}})
+
+
+def test_interview_chat_then_spec_approval(tmp_path):
+    memory = _memory(tmp_path)
+    gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
+    runner = InterviewRunner(_InterviewClient(), tmp_path / "home",
+                             memory=memory, gate=gate, project_id="dinner")
+    answers = iter(["roast beef"])
+    result = runner.start_from_message(
+        "Plan a dinner", ask=lambda q: next(answers))
+    assert result.verified is True
+    assert result.approved is True
+    assert result.spec.deliverables == ["menu.pdf"]
+    assert result.spec.budget_cents == 10000
+    # Spec saved, Q&A in STM and episodic.
+    assert (tmp_path / "home" / "specs" / "dinner.json").exists()
+    assert memory.list_points("episodic")
+    assert len(memory.stm) >= 2
+
+
+def test_interview_unverified_spec_is_not_approved(tmp_path):
+    class BadClient(FakeClient):
+        def chat(self, messages):
+            return json.dumps({"question": None, "complete": True,
+                               "spec": {"goal": "Plan a dinner",
+                                        "deliverables": []}})
+    gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
+    runner = InterviewRunner(BadClient(), tmp_path / "home",
+                             memory=None, gate=gate, project_id="dinner")
+    result = runner.start_from_message("Plan a dinner", ask=lambda q: "x")
+    assert result.verified is False
+    assert result.approved is False
+    assert result.failures
+
+
+def test_loop_with_spec_binds_deliverables(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    spec = Spec(goal="Write a note", deliverables=["spec-note.md"])
+    plan = {"steps": [{"tool": "write", "args": {"file": "spec-note.md", "text": "from spec"}, "deliverable": "spec-note.md"}],
+            "deliverables": ["spec-note.md"], "criteria": []}
+    gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
+    runner = GoalRunner(FakeClient(json.dumps(plan)), Sandbox(home / "work"),
+                        gate, home, memory=None)
+    report = runner.run("Write a note", spec=spec)
+    assert report.status == "done"
+    assert report.files == ["spec-note.md"]

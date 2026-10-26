@@ -166,9 +166,15 @@ collection.
 ## Core, in order
 
 1. **Interpret** — the goal, in chat. Interview questions are
-   chat turns, not cards, and they have no clock. Interview
-   to a verified spec is the next part after plan execution,
-   it is not built yet.
+   chat turns, not cards, and they have no clock. The
+   interview triggers from the chat message itself, and
+   ends in a frozen spec: goal, deliverables, constraints,
+   budget, deadline, recipients, files, notifications,
+   assumptions, with no open questions. The spec is
+   verified by code and approved as a decision card,
+   then it binds the planner. Run it with
+   `python -m src.main interview "Plan a dinner"`, with
+   `--run` to run the goal after the spec is approved.
 2. **Plan** — a plan with steps, deliverables, and criteria.
    Steps are tool calls, not strings: write, read, list,
    shell in the sandbox, and calculate, all confined to the

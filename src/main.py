@@ -72,6 +72,12 @@ def main(argv: list[str] | None = None) -> int:
     goal_parser.add_argument("text", help="Goal in plain language")
     goal_parser.add_argument("--project", default="default",
                              help="Project id for episodic memory")
+    interview_parser = sub.add_parser("interview", help="Interview to a spec")
+    interview_parser.add_argument("text", help="Goal in plain language, chat message")
+    interview_parser.add_argument("--project", default="default",
+                                  help="Project id for episodic memory")
+    interview_parser.add_argument("--run", action="store_true",
+                                  help="Run the goal after the spec is approved")
     args = parser.parse_args(argv)
 
     config = Config.load()
@@ -83,6 +89,35 @@ def main(argv: list[str] | None = None) -> int:
         client = FakeClient("")
     sandbox = Sandbox(config.workdir, config.sandbox_timeout_seconds)
     memory = _make_memory(config)
+    if args.command == "interview":
+        from .interview import InterviewRunner
+        runner = InterviewRunner(client, config.home, memory=memory,
+                                 gate=_cli_gate(), project_id=args.project)
+        # Questions are chat, no clock, no card: input() in CLI.
+        result = runner.start_from_message(
+            args.text, ask=lambda q: input(f"\nAidon: {q}\nYou: "))
+        print(f"\nSpec verified: {result.verified}")
+        if result.failures:
+            print(f"Spec failures: {'; '.join(result.failures)}")
+        print(f"Spec approved: {result.approved}")
+        print(f"Spec file: {config.home}/specs/{args.project}.json")
+        if not result.approved:
+            return 2
+        if not args.run:
+            return 0
+        goal_runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
+                                 memory=memory, promotion_ask=_promotion_ask,
+                                 project_id=args.project)
+        report = goal_runner.run(args.text, spec=result.spec)
+        print(f"status: {report.status}")
+        print(f"verified: {report.verified}")
+        print(f"approved: {report.approved}")
+        print(f"files: {', '.join(report.files)}")
+        print(f"attempts: {report.attempts}")
+        if report.error:
+            print(f"error: {report.error}")
+            return 1
+        return 0 if report.status == "done" else 2
     runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
                         memory=memory, promotion_ask=_promotion_ask,
                         project_id=args.project)
