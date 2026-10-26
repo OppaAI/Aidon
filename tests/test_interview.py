@@ -165,6 +165,10 @@ def test_example_spec_sheet_parses_and_reconciles(tmp_path):
     assert "October 2026" in parsed.goal
     assert "November 15, 2026" in " ".join(parsed.constraints)
     assert any("summary.csv" in d for d in parsed.deliverables)
+    # Special reminder: one customer's PDF only to its own email.
+    assert "SPECIAL REMINDER" in " ".join(parsed.constraints)
+    assert "wrong email" in " ".join(parsed.constraints)
+    assert any("only that customer's statement PDF" in d for d in parsed.deliverables)
     # Totals in the example, recomputed, not trusted from text.
     assert 755.50 + 2020.00 == 2775.50
 
