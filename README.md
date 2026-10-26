@@ -64,6 +64,51 @@ There is no central Aidon cloud, and your data is not sent to
 one. Your memory, workdirs, and keys stay on your machine,
 under your Aidon home, outside this repository.
 
+## Memory and KB, Qdrant for all
+
+One database, Qdrant, no second database. One instance, local
+mode under the Aidon home by default, or a server URL if
+`AIDON_QDRANT_URL` is set, with separate collections:
+
+- **Working memory (STM):** chat history, last 20 exchanges,
+  `working` collection. Never promoted on its own.
+- **Episodic memory:** project-specific, from interview
+  questions and task data, scoped by project, `episodic`
+  collection.
+- **Semantic memory (LTM, global):** facts, `semantic`
+  collection.
+- **Procedural memory (LTM, global):** Experiences, see below,
+  `experience` collection.
+- **Knowledge (KB, RAG):** ingested files, `knowledge`
+  collection.
+
+**Promotion, episodic to LTM:** at the end of a completed run,
+Aidon may ask whether to put that run's episodic memories into
+LTM. If `AIDON_AUTO_PROMOTE_TO_LTM=1`, promotion happens
+automatically, otherwise it asks, and a "no" leaves episodic
+memories project-scoped only.
+
+**KB:** dump files into `knowledge/` under the Aidon home, or
+import them in the WebUI, which duplicates them into
+`knowledge/` first, then auto-ingests them: chunk, embed, and
+upsert to the knowledge collection for RAG. Scanning
+`knowledge/` ingests new or changed files and prunes chunks
+for deleted files, without deleting your files.
+
+**Experience:** a successful run's workflow, with its DAG
+nodes, tools, and skills, stored in the experience collection.
+Aidon builds an Experience after the first successful run,
+and after every successful run after that. A failed or
+rejected run does not become an Experience. On a new goal,
+Aidon recalls Experiences first, and if one matches, its DAG
+is the starting plan, verified in the sandbox like any other
+plan. This is procedural memory, unified, not a second store.
+It is what the earlier design called Knowledge.
+
+Forget, recall, list, prune, and one-hop knowledge-graph
+expansion (payload `links`) follow the same shape in every
+collection.
+
 ## Core, in order
 
 1. **Interpret** — the goal, in chat. Interview questions are

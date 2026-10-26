@@ -45,11 +45,17 @@ class RunReport:
 
 class GoalRunner:
     def __init__(self, client: ModelClient, sandbox: Sandbox,
-                 gate: ApprovalGate, home: Path):
+                 gate: ApprovalGate, home: Path, memory=None):
         self.client = client
         self.sandbox = sandbox
         self.gate = gate
         self.home = Path(home)
+        # Optional memory framework (see memory.py, experience.py).
+        # When present, the loop recalls Experiences before
+        # planning fresh, builds an Experience after a successful
+        # run, and records episodic memory. When absent, the
+        # skeleton loop runs unchanged, as in the earlier tests.
+        self.memory = memory
 
     def _plan(self, goal: str) -> Plan:
         """Ask the model for a plan, fall back to a safe default.
@@ -77,7 +83,32 @@ class GoalRunner:
             )
 
     def run(self, goal: str) -> RunReport:
+        # Experience reuse: if a previous successful run left an
+        # Experience with DAG nodes for a similar goal, start
+        # from those nodes, adapted, instead of planning fresh.
+        # The sandbox and verifier still check the result.
+        if self.memory is not None:
+            try:
+                from .experience import recall_experiences
+
+                experiences = recall_experiences(self.memory, goal,
+                                                 limit=1)
+                if experiences and experiences[0].dag_nodes:
+                    nodes = experiences[0].dag_nodes
+                    plan = Plan(
+                        steps=[str(n.get("tool", "")) for n in nodes],
+                        deliverables=[str(n["deliverable"])
+                                      for n in nodes
+                                      if n.get("deliverable")],
+                        criteria=[])
+                    if plan.deliverables:
+                        return self._execute_plan(goal, plan)
+            except Exception:
+                pass
         plan = self._plan(goal)
+        return self._execute_plan(goal, plan)
+
+    def _execute_plan(self, goal: str, plan: Plan) -> RunReport:
         if not plan.deliverables:
             return RunReport("failed", goal, plan, False, False,
                              error="plan has no deliverables")
@@ -113,12 +144,36 @@ class GoalRunner:
             return RunReport("rejected", goal, plan, True, False,
                              files=files)
         # Learn: record the run, in plain JSON, under the home.
-        # Later versions will turn this into reusable skills and
-        # workflows; the skeleton records the shape.
         learn_dir = self.home / "learned"
         learn_dir.mkdir(parents=True, exist_ok=True)
         record = {"goal": goal, "deliverables": files,
                   "criteria": plan.criteria}
         (learn_dir / "last_run.json").write_text(
             json.dumps(record, indent=2), encoding="utf-8")
+        if self.memory is not None:
+            # Episodic memory, project-scoped, from this run.
+            episodic = self.memory.record_episodic(
+                "default", goal, {"deliverables": files})
+            # Experience, procedural LTM, built after a successful
+            # run only, so the next run can reuse this workflow.
+            try:
+                from .experience import build_experience, store_experience
+
+                nodes = [{"tool": "write", "args": {"file": f},
+                          "deliverable": f} for f in files]
+                experience = build_experience(
+                    goal, goal, nodes, ["write"], [], "done",
+                    "Reused workflow from a successful run.")
+                store_experience(self.memory, experience)
+            except Exception:
+                pass
+            # Promotion to LTM: only if the env flag says auto.
+            # Otherwise the caller asks the user after the run,
+            # via memory.promote_to_ltm(), and a "no" leaves the
+            # episodic memory project-scoped only.
+            if self.memory.auto_promote_enabled():
+                try:
+                    self.memory.promote_to_ltm(episodic, kind="semantic")
+                except Exception:
+                    pass
         return RunReport("done", goal, plan, True, True, files=files)
