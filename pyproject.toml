@@ -11,6 +11,8 @@ dependencies = ["qdrant-client>=1.10"]
 
 [project.optional-dependencies]
 embed = ["sentence-transformers>=6.1", "transformers", "Pillow"]
+sparse = ["fastembed"]
+kb = ["pypdf", "python-docx", "beautifulsoup4"]
 
 [tool.setuptools]
 packages = ["src"]

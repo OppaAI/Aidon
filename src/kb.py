@@ -34,11 +34,52 @@ import json
 import shutil
 from pathlib import Path
 
+import re
+
 from .library import is_image
 from .memory import Memory
 
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 100
+
+
+def extract_text(path: Path) -> str:
+    """Extract readable text from a file, by suffix.
+
+    Parsers are arena plumbing, not capability tools, so
+    they may be used here: pypdf for PDF, python-docx for
+    docx, BeautifulSoup for HTML, plain UTF-8 for text and
+    markdown. If a parser is not installed, fall back to
+    UTF-8 with errors ignored, never crash an ingest, and
+    never invent text. A PDF without pypdf will therefore
+    ingest as little or no text, which is honest, and the
+    file itself is still in knowledge/ for later re-ingest
+    once the parser is installed.
+    """
+    suffix = Path(path).suffix.lower()
+    if suffix == ".pdf":
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(str(path))
+            return "\n\n".join((page.extract_text() or "")
+                                for page in reader.pages)
+        except Exception:
+            return Path(path).read_text(encoding="utf-8", errors="ignore")
+    if suffix == ".docx":
+        try:
+            import docx
+            document = docx.Document(str(path))
+            return "\n\n".join(p.text for p in document.paragraphs)
+        except Exception:
+            return Path(path).read_text(encoding="utf-8", errors="ignore")
+    if suffix in (".html", ".htm"):
+        raw = Path(path).read_text(encoding="utf-8", errors="ignore")
+        try:
+            from bs4 import BeautifulSoup
+            return BeautifulSoup(raw, "html.parser").get_text("\n")
+        except Exception:
+            return re.sub(r"<[^>]+>", " ", raw)
+    return Path(path).read_text(encoding="utf-8", errors="ignore")
 
 
 def chunk_text(text: str, size: int = CHUNK_SIZE,
@@ -118,7 +159,7 @@ class KnowledgeBase:
             self._save_manifest(manifest)
             return 1
         try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
+            text = extract_text(path)
         except OSError:
             return 0
         # Remove old chunks for this file first, so a re-ingest

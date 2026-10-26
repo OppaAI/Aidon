@@ -97,6 +97,27 @@ it is not semantic. Vector size must match the embedder: a
 collection created at 128-dim cannot hold 768-dim vectors, so
 changing embedders means a fresh home or a recreated
 collection, never a silent resize.
+**Recall, hybrid:** dense plus sparse, fused with RRF,
+over-fetching 2x, in Qdrant with named vectors `dense` and
+`sparse`, and the same RRF shape in the in-memory fallback.
+Sparse is SPLADE when `AIDON_SPARSE_MODEL` is set, otherwise
+keyword sparse, no extra download. `recall_both` embeds once
+and recalls episodic plus knowledge. A recall is an access:
+access count, last accessed, and distinct access days are
+updated, and a deterministic forgetting curve, 21-day
+half-life, 35-day grace, 0.02 prune threshold, finds
+cleanup candidates. Prune is explicit only, never automatic.
+**Projects and conversations:** project and conversation ids
+are payload fields on working and episodic points, read back
+from Qdrant by filtered scroll, oldest first, so a
+conversation survives a restart without a second database.
+**KB parsing:** text and markdown as UTF-8, HTML stripped,
+docx via python-docx, PDF via pypdf, with a UTF-8 fallback
+that never crashes an ingest and never invents text.
+**Experience:** goal shape is sorted unique key tokens,
+recall re-ranks by shape overlap plus vector score, and
+store merges on save when shape overlap is at least 0.5
+and a tool is shared, unioning DAG nodes by deliverable.
 
 **Library, images and outputs:** image inputs, generated
 images, charts, and other outputs are copied into the Aidon

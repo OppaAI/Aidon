@@ -45,11 +45,18 @@ class RunReport:
 
 class GoalRunner:
     def __init__(self, client: ModelClient, sandbox: Sandbox,
-                 gate: ApprovalGate, home: Path, memory=None):
+                 gate: ApprovalGate, home: Path, memory=None,
+                 promotion_ask=None):
         self.client = client
         self.sandbox = sandbox
         self.gate = gate
         self.home = Path(home)
+        # promotion_ask: a chat question callback, point -> bool.
+        # If set, and auto-promote is off, it is asked at the
+        # end of a successful run, for that run's episodic
+        # point. If unset, promotion is left to the caller,
+        # via memory.promote_with_ask() or promote_to_ltm().
+        self.promotion_ask = promotion_ask
         # Optional memory framework (see memory.py, experience.py).
         # When present, the loop recalls Experiences before
         # planning fresh, builds an Experience after a successful
@@ -167,13 +174,16 @@ class GoalRunner:
                 store_experience(self.memory, experience)
             except Exception:
                 pass
-            # Promotion to LTM: only if the env flag says auto.
-            # Otherwise the caller asks the user after the run,
-            # via memory.promote_to_ltm(), and a "no" leaves the
+            # Promotion to LTM: auto if the env flag says so,
+            # otherwise ask via promotion_ask if one was given,
+            # otherwise leave it to the caller. A "no" leaves
             # episodic memory project-scoped only.
-            if self.memory.auto_promote_enabled():
-                try:
+            try:
+                if self.promotion_ask is not None:
+                    self.memory.promote_with_ask(
+                        episodic, self.promotion_ask, kind="semantic")
+                elif self.memory.auto_promote_enabled():
                     self.memory.promote_to_ltm(episodic, kind="semantic")
-                except Exception:
-                    pass
+            except Exception:
+                pass
         return RunReport("done", goal, plan, True, True, files=files)

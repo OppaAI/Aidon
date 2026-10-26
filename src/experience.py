@@ -42,7 +42,29 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
+from .embedder import tokens
 from .memory import Memory, Point
+
+
+def goal_shape_for(goal: str) -> str:
+    """Deterministic goal shape: sorted unique key tokens.
+
+    Shape matching is not exact-text matching. Two goals
+    with the same constraints, in different words or order,
+    share a shape, so a workflow for one can start the
+    other. Stopwords are dropped, order is normalized.
+    """
+    stop = {"a", "an", "the", "for", "to", "and", "or", "of", "in", "on",
+            "with", "i", "want", "please", "me", "my"}
+    shape_tokens = sorted({t for t in tokens(goal) if t not in stop})
+    return " ".join(shape_tokens)
+
+
+def _shape_overlap(a: str, b: str) -> float:
+    set_a, set_b = set(a.split()), set(b.split())
+    if not set_a or not set_b:
+        return 0.0
+    return len(set_a & set_b) / len(set_a | set_b)
 
 
 @dataclass
@@ -92,13 +114,61 @@ class Experience:
 def build_experience(goal: str, goal_shape: str, dag_nodes: list[dict],
                      tools_used: list[str], skills_used: list[str],
                      outcome: str, lesson: str = "") -> Experience:
-    return Experience(goal=goal, goal_shape=goal_shape,
+    # An empty shape means "derive it from the goal", so
+    # callers that pass the goal twice, as the loop does,
+    # still get a real shape for matching.
+    shape = goal_shape if goal_shape and goal_shape != goal else \
+        goal_shape_for(goal)
+    return Experience(goal=goal, goal_shape=shape,
                       dag_nodes=dag_nodes, tools_used=tools_used,
                       skills_used=skills_used, outcome=outcome,
                       lesson=lesson)
 
 
 def store_experience(memory: Memory, experience: Experience) -> Point:
+    """Store, merging on save when a close Experience already exists.
+
+    Merge rule, same shape as the earlier design, better
+    documented: if an existing Experience shares at least
+    half its shape tokens (Jaccard >= 0.5) and at least one
+    tool, the new DAG nodes are unioned into the existing
+    point (dedupe by deliverable), tools and skills are
+    unioned, and the lesson is appended, instead of creating
+    a duplicate. Otherwise a new point is created. The
+    library of workflows heals itself instead of duplicating.
+    """
+    if not experience.goal_shape:
+        experience.goal_shape = goal_shape_for(experience.goal)
+    candidates = recall_experiences(memory, experience.goal, limit=5)
+    for candidate in candidates:
+        if _shape_overlap(candidate.goal_shape, experience.goal_shape) < 0.5:
+            continue
+        if not (set(candidate.tools_used) & set(experience.tools_used)):
+            continue
+        # Merge into the existing point, by re-recording it.
+        merged_nodes = list(candidate.dag_nodes)
+        seen = {n.get("deliverable") for n in merged_nodes}
+        for node in experience.dag_nodes:
+            if node.get("deliverable") not in seen:
+                merged_nodes.append(node)
+                seen.add(node.get("deliverable"))
+        merged = Experience(
+            goal=candidate.goal, goal_shape=candidate.goal_shape,
+            dag_nodes=merged_nodes,
+            tools_used=sorted(set(candidate.tools_used) | set(experience.tools_used)),
+            skills_used=sorted(set(candidate.skills_used) | set(experience.skills_used)),
+            outcome=experience.outcome or candidate.outcome,
+            lesson=(candidate.lesson + "\n" + experience.lesson).strip()
+            if experience.lesson else candidate.lesson)
+        # Delete the old point by matching its text, then
+        # record the merged one. Points are found by recall,
+        # so we locate the exact point id first.
+        for point in memory.list_points("experience", limit=1000):
+            if point.payload.get("goal") == candidate.goal and \
+                    point.payload.get("goal_shape") == candidate.goal_shape:
+                memory.forget("experience", point.id)
+                break
+        return memory.record("experience", merged.to_text(), merged.to_payload())
     return memory.record("experience", experience.to_text(),
                          experience.to_payload())
 
@@ -106,4 +176,13 @@ def store_experience(memory: Memory, experience: Experience) -> Point:
 def recall_experiences(memory: Memory, goal: str,
                        limit: int = 3) -> list[Experience]:
     hits = memory.recall("experience", goal, limit=limit, graph=False)
-    return [Experience.from_point(hit.point) for hit in hits]
+    shape = goal_shape_for(goal)
+    scored = []
+    for hit in hits:
+        exp = Experience.from_point(hit.point)
+        # Re-rank: vector score plus shape overlap, so a
+        # workflow with the same constraints beats a workflow
+        # with similar words but a different shape.
+        scored.append((hit.score + _shape_overlap(exp.goal_shape, shape), exp))
+    scored.sort(key=lambda kv: kv[0], reverse=True)
+    return [exp for _, exp in scored[:limit]]
