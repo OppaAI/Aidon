@@ -9,11 +9,11 @@ These tests prove the core shape, not the full agent:
   fake client standing in for the real endpoint in tests
 """
 
-from aidon.approval import ApprovalGate, Decision
-from aidon.config import Config
-from aidon.loop import GoalRunner
-from aidon.model_client import FakeClient
-from aidon.sandbox import Sandbox
+from src.approval import ApprovalGate, Decision
+from src.config import Config
+from src.loop import GoalRunner
+from src.model_client import FakeClient
+from src.sandbox import Sandbox
 
 
 def test_sandbox_runs_in_workdir(tmp_path):

@@ -25,7 +25,7 @@ is a real part of what Aidon runs, not just a build-time choice.
 ```sh
 cp .env.example .env
 # Fill in your own endpoint, key, and model name in .env
-python -m aidon.main goal "Plan a dinner for two"
+python -m src.main goal "Plan a dinner for two"
 ```
 
 Configuration is just an endpoint, a key, and a model name:
@@ -54,9 +54,9 @@ Configuration is just an endpoint, a key, and a model name:
   No image tool is used by default, and no core workflow
   requires an image to succeed.
 
-Layout: the package lives under `src/aidon/`, standard src
-layout, so `pip install -e .` installs it and
-`python -m aidon.main goal "..."` runs it.
+Layout: the code lives in `src/` only, no sub-directory, so
+`pip install -e .` installs it and
+`python -m src.main goal "..."` runs it.
 
 Aidon is self-hosted by design: clone it to your own computer
 or server, run it there, and use the WebUI or call the API.
