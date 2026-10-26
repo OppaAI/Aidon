@@ -1,20 +1,38 @@
-"""Embedder interface: text in, vector out.
+"""Embedder interface: text and images in, vectors out.
 
 Qdrant stores vectors, it does not create them. The memory and
 KB framework therefore takes an embedder as a parameter, and
 never hard-codes one model.
 
+Production embedder, by user decision:
+- ``EmbeddingGemma2Embedder``: ``google/embeddinggemma-2`` via
+  sentence-transformers (>= 6.1.0). Loaded with
+  ``config_kwargs={"audio_config": None}``, which is the 440M
+  configuration: 270M text backbone + 170M vision encoder,
+  audio omitted. Output is 768-dim, in one shared space for
+  text and images, so a text query can recall an image and
+  vice versa. Text-only is 270M (both vision and audio None),
+  full multimodal is 740M, but this repo keeps 440M because
+  image input and output are part of memory, audio is not.
+  Precision: bfloat16 or float32, never float16, which
+  EmbeddingGemma 2 activations do not tolerate.
+  Task prompts, per the model guide: documents use
+  ``Document``, queries use ``SearchQuery``.
+  The model is Apache 2.0, ungated, and it runs locally, so
+  embeddings are computed on the user's own machine, not sent
+  to a central service. ``HF_HUB_OFFLINE=1`` is respected by
+  the underlying hub loader for a cached model.
+
+Test / offline embedder:
 - ``HashEmbedder`` is the offline, testable default. It hashes
   words into a fixed 128-dim vector and normalizes it. It is
   deterministic, it needs no download, and it proves the
-  framework end to end. It is NOT semantic: two different words
-  with the same hash collide, and related words are not close.
-  Use it for tests and for framework proof only.
-- A real embedder for production RAG plugs in here behind the
-  same interface: a local embedding model, or a hosted
-  embedding endpoint, if one is available. That swap changes
-  the embedder, not the memory code, the collections, or the
-  recall code.
+  framework end to end. It is NOT semantic: two different
+  words with the same hash collide, and related words are not
+  close. Use it for tests and for framework proof only.
+  Its ``embed_image`` falls back to embedding the image
+  description text, because a hash embedder has no vision
+  encoder. A real image vector requires the 440M embedder.
 
 Sparse recall, keyword tokens with weights, is separate from
 dense vectors and is computed in memory.py from the text itself,
@@ -25,9 +43,12 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import re
 
-DIM = 128
+DIM = 768
+HASH_DIM = 128
+EMBEDDINGGEMMA2_MODEL = "google/embeddinggemma-2"
 _WORD = re.compile(r"[a-z0-9]+")
 
 
@@ -43,18 +64,39 @@ def sparse_weights(text: str) -> dict[str, float]:
     return weights
 
 
+def _normalize(vec: list[float]) -> list[float]:
+    norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+    return [v / norm for v in vec]
+
+
 class Embedder:
+    dim: int = HASH_DIM
+
     def embed(self, text: str) -> list[float]:
         raise NotImplementedError
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         return [self.embed(t) for t in texts]
 
+    def embed_query(self, text: str) -> list[float]:
+        """Query-side embedding. Default: same as a document."""
+        return self.embed(text)
+
+    def embed_image(self, path, description: str = "") -> list[float]:
+        """Image-side embedding. Default: embed the description.
+
+        A real vision embedder overrides this with an image
+        vector. The fallback keeps the framework working offline:
+        an image is still retrievable by its description text,
+        but it is not a vision match.
+        """
+        return self.embed(description or str(path))
+
 
 class HashEmbedder(Embedder):
     """Deterministic offline embedder, for tests and framework proof."""
 
-    def __init__(self, dim: int = DIM):
+    def __init__(self, dim: int = HASH_DIM):
         self.dim = dim
 
     def embed(self, text: str) -> list[float]:
@@ -62,28 +104,93 @@ class HashEmbedder(Embedder):
         for token in tokens(text):
             h = int(hashlib.sha256(token.encode()).hexdigest()[:8], 16)
             vec[h % self.dim] += 1.0
-        norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-        return [v / norm for v in vec]
+        return _normalize(vec)
 
 
-class FastEmbedEmbedder(Embedder):
-    """Optional real embedder, only if fastembed is installed.
+class EmbeddingGemma2Embedder(Embedder):
+    """EmbeddingGemma 2, 440M text + vision, audio omitted.
 
-    Imported lazily, so the framework works without it. If it
-    is not installed, construction raises a clear error telling
-    the user to install it or to use HashEmbedder for tests.
+    ``model`` is injected for tests: a stub with an ``encode``
+    method can stand in for SentenceTransformer, so the image
+    and prompt paths are testable without downloading 440M.
+    In production, ``model`` is None and SentenceTransformer
+    is loaded lazily, so importing this module never downloads
+    anything.
     """
 
-    def __init__(self, model: str = "BAAI/bge-small-en-v1.5"):
+    dim = DIM
+
+    def __init__(self, model_name: str = EMBEDDINGGEMMA2_MODEL,
+                 model=None):
+        self.model_name = model_name
+        if model is not None:
+            self._model = model
+            return
         try:
-            from fastembed import TextEmbedding
+            from sentence_transformers import SentenceTransformer
         except ImportError as exc:
             raise RuntimeError(
-                "fastembed is not installed; install it for a real "
-                "embedder, or use HashEmbedder for tests") from exc
-        self._model = TextEmbedding(model)
+                "sentence-transformers is not installed; install it "
+                "for the real embedder (pip install -U "
+                "'sentence-transformers[image]>=6.1' transformers "
+                "Pillow), or use HashEmbedder for tests") from exc
+        # 440M: text + vision, audio omitted. Text-only would
+        # also set vision_config=None, full would set neither.
+        self._model = SentenceTransformer(
+            model_name, config_kwargs={"audio_config": None})
+
+    def _encode(self, inputs, prompt_name: str | None = None):
+        try:
+            if prompt_name is not None:
+                raw = self._model.encode(
+                    inputs, prompt_name=prompt_name,
+                    normalize_embeddings=True)
+            else:
+                raw = self._model.encode(
+                    inputs, normalize_embeddings=True)
+        except TypeError:
+            # Stub models and older wrappers without prompt_name.
+            raw = self._model.encode(inputs, normalize_embeddings=True)
+        # encode() returns a batch: numpy (1, 768) or [[...]].
+        # A single-item wrapper may return a flat vector instead.
+        if hasattr(raw, "tolist"):
+            raw = raw.tolist()
+        if isinstance(raw, (list, tuple)) and raw and \
+                isinstance(raw[0], (list, tuple)):
+            vec = list(raw[0])
+        else:
+            vec = list(raw)
+        return _normalize([float(v) for v in vec])
 
     def embed(self, text: str) -> list[float]:
-        vec = list(next(iter(self._model.embed([text]))))
-        norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-        return [v / norm for v in vec]
+        return self._encode([text], prompt_name="Document")
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._encode([text], prompt_name="SearchQuery")
+
+    def embed_image(self, path, description: str = "") -> list[float]:
+        try:
+            from PIL import Image
+        except ImportError as exc:
+            raise RuntimeError(
+                "Pillow is not installed; install it for image "
+                "embedding, or use a text description") from exc
+        with Image.open(path) as image:
+            image = image.convert("RGB")
+            return self._encode([image])
+
+
+def make_embedder(name: str | None = None) -> Embedder:
+    """Factory from env / name.
+
+    ``hash`` -> HashEmbedder (tests, offline).
+    Anything else, or empty -> EmbeddingGemma 2 440M, with
+    AIDON_EMBED_MODEL overriding the model id.
+    """
+    name = (name or os.environ.get("AIDON_EMBEDDER", "")).strip()
+    if name == "hash":
+        return HashEmbedder()
+    model_name = os.environ.get("AIDON_EMBED_MODEL",
+                                EMBEDDINGGEMMA2_MODEL).strip()
+    return EmbeddingGemma2Embedder(model_name=model_name or
+                                   EMBEDDINGGEMMA2_MODEL)

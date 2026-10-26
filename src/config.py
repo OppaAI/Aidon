@@ -30,6 +30,7 @@ class Config:
     model: str = "muse-spark"
     api_base: str = ""
     api_key: str = ""
+    embed_model: str = "google/embeddinggemma-2"
     sandbox_timeout_seconds: int = 120
     max_steps: int = 50
     approval_timeout_seconds: int = 180
@@ -42,6 +43,8 @@ class Config:
             model=os.environ.get("AIDON_MODEL", "muse-spark"),
             api_base=os.environ.get("AIDON_API_BASE", ""),
             api_key=os.environ.get("AIDON_API_KEY", ""),
+            embed_model=os.environ.get("AIDON_EMBED_MODEL",
+                                       "google/embeddinggemma-2"),
             sandbox_timeout_seconds=int(
                 os.environ.get("AIDON_SANDBOX_TIMEOUT", "120")),
             max_steps=int(os.environ.get("AIDON_MAX_STEPS", "50")),
@@ -52,6 +55,10 @@ class Config:
     @property
     def workdir(self) -> Path:
         return self.home / "workspace"
+
+    @property
+    def library_dir(self) -> Path:
+        return self.home / "library" / "files"
 
     def ensure_home(self) -> Path:
         self.home.mkdir(parents=True, exist_ok=True)

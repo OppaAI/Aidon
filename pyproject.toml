@@ -9,5 +9,8 @@ description = "An autonomous agent that works from a plain-language goal."
 requires-python = ">=3.11"
 dependencies = ["qdrant-client>=1.10"]
 
+[project.optional-dependencies]
+embed = ["sentence-transformers>=6.1", "transformers", "Pillow"]
+
 [tool.setuptools]
 packages = ["src"]

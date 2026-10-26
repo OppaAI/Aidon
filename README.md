@@ -88,12 +88,42 @@ LTM. If `AIDON_AUTO_PROMOTE_TO_LTM=1`, promotion happens
 automatically, otherwise it asks, and a "no" leaves episodic
 memories project-scoped only.
 
+**Embedder, production:** EmbeddingGemma 2, `google/embeddinggemma-2`,
+440M: text plus vision, audio omitted, 768-dim, local via
+sentence-transformers >= 6.1, bfloat16 or float32, never
+float16. Documents use the `Document` prompt, queries use
+`SearchQuery`. HashEmbedder is tests and framework proof only,
+it is not semantic. Vector size must match the embedder: a
+collection created at 128-dim cannot hold 768-dim vectors, so
+changing embedders means a fresh home or a recreated
+collection, never a silent resize.
+
+**Library, images and outputs:** image inputs, generated
+images, charts, and other outputs are copied into the Aidon
+home, at `~/.aidon/library/files/<id>/<name>` by default, or
+`AIDON_HOME/library/files/<id>/<name>`. They are never stored
+in the repository and never sent to a central service. The
+memory point for that exchange, episodic run, or promoted LTM
+fact carries the link in its payload: library_id,
+library_path, library_url (`/api/library/<id>/file`), and
+kind. Recalling the text therefore returns the image link,
+so the caller can show or open the image alongside the text.
+Charts carry their data file in the same library item, because
+a vector cannot recover exact numbers from a picture.
+The WebUI Library tab, when the WebUI is built, follows the
+earlier design: left sidebar, Library view, thumbnails for
+images, a memory_linked flag, click to open, delete to remove,
+and file serving confined to `home/library`, never an
+arbitrary path.
+
 **KB:** dump files into `knowledge/` under the Aidon home, or
 import them in the WebUI, which duplicates them into
 `knowledge/` first, then auto-ingests them: chunk, embed, and
-upsert to the knowledge collection for RAG. Scanning
-`knowledge/` ingests new or changed files and prunes chunks
-for deleted files, without deleting your files.
+upsert to the knowledge collection for RAG. Images are one
+knowledge point, not text chunks: image vector plus file name
+plus knowledge path, so text recall can refer to them.
+Scanning `knowledge/` ingests new or changed files and prunes
+chunks for deleted files, without deleting your files.
 
 **Experience:** a successful run's workflow, with its DAG
 nodes, tools, and skills, stored in the experience collection.

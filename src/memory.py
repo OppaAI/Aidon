@@ -53,6 +53,10 @@ If qdrant_client is not installed, the store falls back to
 an in-memory store with the same collection / point / search
 shape, so tests run offline. When qdrant_client is installed,
 the real Qdrant store is used, local mode by default.
+
+Images: see library.py. A memory point never holds image
+bytes; it holds the image vector and the library link, so
+recall returns the file reference alongside the text.
 """
 
 from __future__ import annotations
@@ -145,7 +149,7 @@ class QdrantStore:
     dense + keyword + graph expansion as the in-memory store.
     """
 
-    def __init__(self, home: Path, url: str = ""):
+    def __init__(self, home: Path, url: str = "", dim: int = 768):
         from qdrant_client import QdrantClient, models
 
         self._models = models
@@ -153,7 +157,12 @@ class QdrantStore:
             self._client = QdrantClient(url=url)
         else:
             self._client = QdrantClient(path=str(Path(home) / "qdrant"))
-        self._embedder_dim = 128
+        # Vector size must match the embedder: 768 for
+        # EmbeddingGemma 2, 128 for HashEmbedder (tests). A
+        # collection created with a different size cannot hold
+        # the new vectors; a fresh home, or a recreated
+        # collection, is the migration, never a silent resize.
+        self._embedder_dim = dim
         for name in COLLECTIONS:
             if not self._client.collection_exists(name):
                 self._client.create_collection(
@@ -218,14 +227,14 @@ class QdrantStore:
                 for p in raw]
 
 
-def make_store(home: Path):
+def make_store(home: Path, dim: int = 768):
     """Real Qdrant if qdrant_client is installed, else in-memory."""
     try:
         import qdrant_client  # noqa: F401
     except ImportError:
         return InMemoryStore()
     url = os.environ.get("AIDON_QDRANT_URL", "").strip()
-    return QdrantStore(home, url=url)
+    return QdrantStore(home, url=url, dim=dim)
 
 
 class Memory:
@@ -235,7 +244,9 @@ class Memory:
                  store=None):
         self.home = Path(home)
         self.embedder = embedder or HashEmbedder()
-        self.store = store if store is not None else make_store(home)
+        dim = getattr(self.embedder, "dim", 128)
+        self.store = store if store is not None else make_store(home,
+                                                                 dim=dim)
         self.stm: deque = deque(maxlen=20)
 
     def _point_id(self, text: str) -> str:
@@ -250,22 +261,57 @@ class Memory:
         self.store.upsert(collection, point)
         return point
 
-    def record_stm(self, role: str, text: str) -> None:
-        """Working memory: chat history, last 20 exchanges."""
-        self.stm.append({"role": role, "text": text})
-        self.record("working", text,
-                    {"role": role, "kind": "stm"})
+    def record_image(self, collection: str, image_path,
+                     description: str, payload: dict | None = None) -> Point:
+        """Record an image point, with its file link in the payload.
+
+        The image file itself stays on disk, under the Aidon
+        home (library/ or knowledge/). The point holds the
+        image vector (440M vision encoder, or a description
+        vector with the hash fallback), the description text,
+        and the link fields the caller sets: library_id,
+        library_path (relative to home), library_url
+        (the future WebUI route, /api/library/<id>/file), and
+        kind=image. Recalling the text therefore returns the
+        link, so the caller can show or open the image.
+        The file bytes are never stored in Qdrant.
+        """
+        data = {"kind": "image", "media": "image"}
+        data.update(payload or {})
+        vector = self.embedder.embed_image(image_path, description)
+        point = Point(id=self._point_id(description + str(image_path)),
+                      text=description, vector=vector, payload=data)
+        self.store.upsert(collection, point)
+        return point
+
+    def record_stm(self, role: str, text: str,
+                   attachments: list | None = None) -> None:
+        """Working memory: chat history, last 20 exchanges.
+
+        ``attachments`` is a list of library item ids (or
+        library link dicts) attached to this exchange, so a
+        recalled chat exchange can refer to its images.
+        """
+        self.stm.append({"role": role, "text": text,
+                         "attachments": list(attachments or [])})
+        payload = {"role": role, "kind": "stm"}
+        if attachments:
+            payload["attachments"] = list(attachments)
+        self.record("working", text, payload)
 
     def record_episodic(self, project_id: str, text: str,
-                        payload: dict | None = None) -> Point:
+                        payload: dict | None = None,
+                        attachments: list | None = None) -> Point:
         data = {"project_id": project_id, "kind": "episodic",
                 "promoted": False}
         data.update(payload or {})
+        if attachments:
+            data["attachments"] = list(attachments)
         return self.record("episodic", text, data)
 
     def recall(self, collection: str, query: str,
                limit: int = 5, graph: bool = True) -> list[Hit]:
-        vector = self.embedder.embed(query)
+        vector = self.embedder.embed_query(query)
         hits = self.store.search(collection, vector, query, limit)
         if not graph:
             return hits

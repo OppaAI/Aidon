@@ -12,6 +12,8 @@ Ingestion, in order:
 2. Chunk it: text and markdown by paragraphs, max 1000 chars
    per chunk, 100 chars overlap, so a chunk is a readable unit
    for retrieval, not a whole file and not a single line.
+   Images are one point, not chunks: image vector + file
+   name + knowledge path, so text recall can refer to them.
 3. Embed each chunk and upsert it to the knowledge collection,
    with payload: file name, chunk index, file hash, and text.
 4. Track file hashes in a manifest, so a later auto-ingest
@@ -32,6 +34,7 @@ import json
 import shutil
 from pathlib import Path
 
+from .library import is_image
 from .memory import Memory
 
 CHUNK_SIZE = 1000
@@ -92,8 +95,28 @@ class KnowledgeBase:
         return target
 
     def ingest_file(self, path: Path) -> int:
-        """Chunk and ingest one file. Returns chunk count."""
+        """Chunk and ingest one file. Returns chunk count.
+
+        Images are not chunked as text: one knowledge point,
+        with the image vector (440M vision encoder, or a
+        description vector with the hash fallback), the file
+        name as description, and the knowledge path in the
+        payload, so a text recall can refer to the image file
+        under knowledge/. The file itself stays on disk.
+        """
         path = Path(path)
+        if is_image(path):
+            self._delete_chunks_for_file(path.name)
+            digest = file_hash(path)
+            self.memory.record_image(
+                "knowledge", path, f"Image file {path.name}",
+                payload={"file": path.name, "file_hash": digest,
+                         "kind": "kb", "media": "image",
+                         "knowledge_path": f"knowledge/{path.name}"})
+            manifest = self._manifest()
+            manifest[path.name] = digest
+            self._save_manifest(manifest)
+            return 1
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
