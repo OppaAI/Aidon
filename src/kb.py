@@ -42,6 +42,35 @@ from .memory import Memory
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 100
 
+# Parser needs, for future auto-install, not preinstalled.
+# When Aidon detects a file it cannot read, it records the
+# need here, in the KB point and the manifest, instead of
+# crashing or inventing text. In the future, Aidon climbs
+# to that parser itself: research, draft, sandbox-test, and
+# adopt it with the owner's approval, like any capability
+# tool. CAD, LaTeX, and 3D formats are examples, not a
+# closed list. Blank memory, see README: no import from
+# previous projects, collections start empty.
+PARSER_NEEDED = {
+    ".dwg": "cad-parser", ".dxf": "cad-parser", ".step": "cad-parser",
+    ".stp": "cad-parser", ".stl": "3d-parser", ".obj": "3d-parser",
+    ".tex": "latex-parser", ".bib": "latex-parser",
+    ".psd": "image-parser", ".ai": "vector-parser",
+    ".xls": "spreadsheet-parser", ".xlsx": "spreadsheet-parser",
+    ".ppt": "presentation-parser", ".pptx": "presentation-parser",
+}
+
+
+def parser_needed_for(path: Path) -> str | None:
+    """Parser name needed to read this file, or None if readable now."""
+    suffix = Path(path).suffix.lower()
+    if suffix in (".txt", ".md", ".markdown", ".html", ".htm",
+                  ".pdf", ".docx", ".json", ".csv"):
+        return None
+    if is_image(Path(path)):
+        return None
+    return PARSER_NEEDED.get(suffix, "unknown-parser")
+
 
 def extract_text(path: Path) -> str:
     """Extract readable text from a file, by suffix.
@@ -146,6 +175,21 @@ class KnowledgeBase:
         under knowledge/. The file itself stays on disk.
         """
         path = Path(path)
+        needed = parser_needed_for(path)
+        if needed is not None:
+            # Future auto-install, recorded now: file stays
+            # in knowledge/, a point says what parser is
+            # needed, no text is invented, no crash.
+            digest = file_hash(path)
+            self.memory.record(
+                "knowledge", f"File {path.name} needs parser {needed} to read",
+                payload={"file": path.name, "file_hash": digest,
+                         "kind": "kb", "parser_needed": needed,
+                         "status": "needs_parser"})
+            manifest = self._manifest()
+            manifest[path.name] = digest
+            self._save_manifest(manifest)
+            return 1
         if is_image(path):
             self._delete_chunks_for_file(path.name)
             digest = file_hash(path)

@@ -68,7 +68,10 @@ under your Aidon home, outside this repository.
 
 One database, Qdrant, no second database. One instance, local
 mode under the Aidon home by default, or a server URL if
-`AIDON_QDRANT_URL` is set, with separate collections:
+`AIDON_QDRANT_URL` is set, with separate collections.
+Memory starts blank: no import from previous projects,
+collections start empty, the first runs build memory from
+scratch.
 
 - **Working memory (STM):** chat history, last 20 exchanges,
   `working` collection. Never promoted on its own.
@@ -163,22 +166,43 @@ collection.
 ## Core, in order
 
 1. **Interpret** — the goal, in chat. Interview questions are
-   chat turns, not cards, and they have no clock.
+   chat turns, not cards, and they have no clock. Interview
+   to a verified spec is the next part after plan execution,
+   it is not built yet.
 2. **Plan** — a plan with steps, deliverables, and criteria.
+   Steps are tool calls, not strings: write, read, list,
+   shell in the sandbox, and calculate, all confined to the
+   workdir, with calculation by AST, never eval.
 3. **Sandbox** — the plan is tested in an isolated workdir.
    Bubblewrap, when installed, is the isolated backend. A
    subprocess fallback is labeled as not isolated, never as
    isolated.
 4. **Verify** — a result is verified by evidence, not by
-   assertion. A deliverable must exist and be non-empty before
-   any approval is asked.
-5. **Approve** — decisions are cards, and they fail closed on
+   assertion. Deliverables must exist and be non-empty,
+   criteria are checked by code, and a ledger total is
+   recomputed from its lines in cents. A vague criterion
+   is reported unverified, never passed.
+5. **Repair** — if a step or a check fails, the loop asks
+   for a repaired plan, with passed deliverables listed
+   as do-not-rewrite. Passed files are untouched, only
+   failed steps are fixed, at most 3 attempts in total.
+6. **Approve** — decisions are cards, and they fail closed on
    timeout. No answer means rejected, never approved by default.
    An external agent can submit and read, but it cannot approve
    on the owner's behalf.
-6. **Execute** — only what was approved, and only after it.
-7. **Learn** — what worked is recorded, so the next goal can
-   reuse it.
+7. **Execute** — only what was approved, and only after it.
+8. **Learn** — what worked is recorded, so the next goal can
+   reuse it. Memory starts blank, by design: new collections,
+   no import from previous projects.
+
+**KB parsers, future auto-install:** when Aidon detects a
+file it cannot read, for example CAD or LaTeX, it records
+the parser needed in the KB point and manifest, and keeps
+the file in knowledge/, without inventing text. In the
+future, Aidon climbs to that parser itself, research,
+draft, sandbox-test, and adopt with owner approval, like
+any capability tool. Parsers for CAD, LaTeX, and other
+formats are not preinstalled.
 
 ## Future — post-hackathon (NOT built, NOT demoed)
 

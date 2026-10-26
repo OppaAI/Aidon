@@ -24,6 +24,41 @@ def default_home() -> Path:
     return Path.home() / ".aidon"
 
 
+def load_dotenv(path: Path | None = None) -> None:
+    """Load KEY=VALUE from a .env file, without overriding real env.
+
+    Looks in the current directory, then in the Aidon home.
+    No secrets are read into code beyond os.environ, and a
+    missing .env is not an error. Quotes, comments, and an
+    ``export `` prefix are handled, nothing else is parsed.
+    """
+    candidates = []
+    if path is not None:
+        candidates.append(Path(path))
+    candidates.append(Path.cwd() / ".env")
+    candidates.append(default_home() / ".env")
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            lines = candidate.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].strip()
+            key, value = line.split("=", 1)
+            key, value = key.strip(), value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            if key and key not in os.environ:
+                os.environ[key] = value
+        return
+
+
 @dataclass
 class Config:
     home: Path
@@ -37,6 +72,7 @@ class Config:
 
     @classmethod
     def load(cls, home: Path | None = None) -> "Config":
+        load_dotenv()
         home = home or default_home()
         return cls(
             home=Path(home),
