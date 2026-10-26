@@ -20,6 +20,28 @@ was written.
 The demo runs on Meta models through the Meta Model API. That
 is a real part of what Aidon runs, not just a build-time choice.
 
+## WebUI and messaging
+
+- WebUI: `./launch.sh` starts the WebUI server on
+  `http://127.0.0.1:8002/`, localhost only, with a chat
+  thread, a left sidebar for projects and library, a
+  Library tab, a settings and keys page showing hash
+  prefixes only, never real keys, and approval cards
+  in the UI, fail-closed on timeout. With arguments,
+  `./launch.sh goal "..."` still runs the CLI.
+- WhatsApp and Slack, both two-way, no Telegram:
+  WhatsApp webhook at `/webhook/whatsapp`, with
+  hub verification, and Slack webhook at
+  `/webhook/slack`, with HMAC signature verification
+  before any event is parsed. An incoming message
+  starts a DAG run through the same trigger
+  dispatcher as scheduler, WebUI, ingest, webhook,
+  and manual, and the reply goes back on the same
+  transport. Real WhatsApp and Slack sending needs
+  your own WhatsApp Cloud API token and Slack bot
+  token, set in the environment, never in chat, and
+  is not tested here without those accounts.
+
 ## Docs
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): run order, components, storage, and security boundaries.

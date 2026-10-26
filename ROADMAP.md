@@ -37,17 +37,21 @@ post-hackathon, NOT built, NOT demoed, at the end.
   scopes, key generation with hash only stored, MCP
   stdio server wrapping the same v1 store, tools
   filtered by scope.
+- WebUI server: chat thread, left sidebar, approval
+  cards in UI, settings and keys page with hash
+  prefixes only, Library tab, localhost only, with
+  launch.sh starting the WebUI by default.
+- WhatsApp and Slack transports, both two-way, no
+  Telegram: WhatsApp webhook with hub verification,
+  Slack webhook with HMAC signature verification
+  before parsing, both dispatching through the same
+  trigger dispatcher, replies back on the same
+  transport. Real sending needs your own WhatsApp
+  Cloud API token and Slack bot token, not included
+  here, and not tested without those accounts.
 
 ## Not built yet, in the repo, for the hackathon
 
-- WebUI server itself: chat thread, left sidebar,
-  approval cards in UI, settings and keys page,
-  Library tab UI. Trigger interface is built, server
-  is not.
-- WhatsApp and Slack transports themselves: account
-  setup, webhook endpoints, and two-way message
-  handling. Trigger interface is built, transports
-  are not.
 - Demo capability tools end to end: dinner menu PDF
   plus grocery app, store run, and job search plus
   publish, through plugins Aidon climbs to.

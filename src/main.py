@@ -107,6 +107,10 @@ def main(argv: list[str] | None = None) -> int:
                            help="Key name for keygen")
     v1_parser.add_argument("--scope", default="owner", choices=["owner", "agent"],
                            help="Key scope for keygen")
+    webui_parser = sub.add_parser("webui", help="WebUI server and messaging webhooks")
+    webui_parser.add_argument("action", choices=["serve"], help="Serve the WebUI, localhost only")
+    webui_parser.add_argument("--port", type=int, default=8002,
+                              help="Port for WebUI serve, default 8002, localhost only")
     args = parser.parse_args(argv)
 
     config = Config.load()
@@ -118,6 +122,25 @@ def main(argv: list[str] | None = None) -> int:
         client = FakeClient("")
     sandbox = Sandbox(config.workdir, config.sandbox_timeout_seconds)
     memory = _make_memory(config)
+    if args.command == "webui":
+        import os
+        from .triggers import TriggerDispatcher
+        from .v1 import AuthStore
+        from .webui import WebUIServer
+        dispatcher = TriggerDispatcher()
+        # WebUI chat handler, for the server core: echo the
+        # goal back, a real goal handler is registered by
+        # the caller with GoalRunner, interview, or triggers.
+        dispatcher.register("webui", lambda e: e.send_reply(f"Received: {e.goal}"))
+        dispatcher.register("whatsapp", lambda e: e.send_reply(f"Received: {e.goal}"))
+        dispatcher.register("slack", lambda e: e.send_reply(f"Received: {e.goal}"))
+        server = WebUIServer(config.home, dispatcher=dispatcher,
+                             auth_store=AuthStore(config.home), memory=memory,
+                             whatsapp_verify_token=os.environ.get("WHATSAPP_VERIFY_TOKEN", ""),
+                             slack_signing_secret=os.environ.get("SLACK_SIGNING_SECRET", ""))
+        print(f"WebUI on http://127.0.0.1:{args.port}/, localhost only, WhatsApp and Slack webhooks at /webhook/whatsapp and /webhook/slack")
+        server.serve(port=args.port)
+        return 0
     if args.command == "v1":
         from .v1 import AuthStore, GoalStore, handle
         auth = AuthStore(config.home)
