@@ -216,7 +216,37 @@ interview.
 2. **Plan** — a plan with steps, deliverables, and criteria.
    Steps are tool calls, not strings: write, read, list,
    shell in the sandbox, and calculate, all confined to the
-   workdir, with calculation by AST, never eval.
+   workdir, with calculation by AST, never eval, plus any
+   adopted plugin tools, and any skills as planner context.
+
+## Tool, skill, and plugin system
+
+Aidon builds his own capability tools by climbing, this
+module is the arena around that climb, not the tools
+themselves. A tool is code, a skill is Markdown
+instructions, a plugin is a bundle of both, with a
+plugin.json manifest, living in `~/.aidon/plugins/<name>/`,
+never in the repo.
+
+- Adopt: `python -m src.main plugin scan <dir>`,
+  then `python -m src.main plugin adopt <dir>`, then
+  `python -m src.main plugin list`. Adoption is scan,
+  then a decision card, then copy, in that order.
+- Scan: path, line, and type only, never values, never
+  an invented CVE. Blocking findings reject adoption
+  even if the owner would approve: eval, exec, subprocess
+  or shell, socket or network calls, and a secret
+  assigned to a string value. Warnings, shown on the
+  adoption card, are file writes in plugin code and
+  dependencies that are `*`, `latest`, or unpinned.
+- A plugin tool is pure: it takes args and returns text.
+  It does not get the sandbox, the home, or a network
+  client. File and network work stays with the sandbox
+  tools and with later, explicitly approved capability
+  plugins.
+- Standalone skills, Markdown only, live in
+  `~/.aidon/skills/<name>.md` and are passed to the
+  planner as context, never executed as code.
 3. **Sandbox** — the plan is tested in an isolated workdir.
    Bubblewrap, when installed, is the isolated backend. A
    subprocess fallback is labeled as not isolated, never as

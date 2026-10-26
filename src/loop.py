@@ -95,7 +95,8 @@ class RunReport:
 class GoalRunner:
     def __init__(self, client: ModelClient, sandbox: Sandbox,
                  gate: ApprovalGate, home: Path, memory=None,
-                 promotion_ask=None, project_id: str = "default"):
+                 promotion_ask=None, project_id: str = "default",
+                 plugins=None):
         self.client = client
         self.sandbox = sandbox
         self.gate = gate
@@ -104,6 +105,16 @@ class GoalRunner:
         self.promotion_ask = promotion_ask
         self.project_id = project_id
         self.tools = ToolRegistry(sandbox.workdir, sandbox=sandbox)
+        self.plugins = plugins
+
+    def _call_tool(self, name: str, args: dict) -> str:
+        """Sandbox tools first, then adopted plugin tools, else unknown."""
+        try:
+            return self.tools.call(name, args)
+        except ValueError as exc:
+            if str(exc).startswith("unknown tool:") and self.plugins is not None:
+                return self.plugins.call(name, args)
+            raise
 
     def _plan(self, goal: str, failure_context: str = "",
               spec=None) -> Plan:
@@ -112,6 +123,14 @@ class GoalRunner:
                   "with tool, args, deliverable. Tools: write, read, "
                   "list, shell, calculate. Keep every file inside "
                   "the workdir.")
+        if self.plugins is not None:
+            plugin_tools = self.plugins.tool_names()
+            if plugin_tools:
+                system += f" Adopted plugin tools: {', '.join(plugin_tools)}."
+            skill_texts = self.plugins.skill_texts()
+            if skill_texts:
+                system += " Skills, follow them when relevant: " + " ".join(
+                    f"{name}: {text[:200]}" for name, text in skill_texts.items())
         user = goal
         if spec is not None:
             spec_dict = spec.to_dict() if hasattr(spec, "to_dict") else spec
@@ -188,7 +207,7 @@ class GoalRunner:
                     if step.tool == "write" and not step.args:
                         step.args = {"file": step.deliverable,
                                      "text": f"Goal: {goal}\n"}
-                    self.tools.call(step.tool, step.args)
+                    self._call_tool(step.tool, step.args)
                 except Exception as exc:
                     failures.append(f"step {step.tool} failed: {exc}")
             # Verify: deliverables + plan criteria + step criteria.

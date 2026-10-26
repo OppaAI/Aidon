@@ -82,6 +82,13 @@ def main(argv: list[str] | None = None) -> int:
                                   help="Run the goal after the spec is approved")
     interview_parser.add_argument("--attach", default=None,
                                   help="Attached spec sheet file, skips interview questions")
+    plugin_parser = sub.add_parser("plugin", help="Plugin tools and skills")
+    plugin_parser.add_argument("action", choices=["list", "scan", "adopt"],
+                               help="List adopted plugins, scan a plugin dir, or adopt it")
+    plugin_parser.add_argument("path", nargs="?", default=None,
+                               help="Plugin directory, for scan and adopt")
+    plugin_parser.add_argument("--project", default="default",
+                               help="Project id for episodic memory")
     args = parser.parse_args(argv)
 
     config = Config.load()
@@ -93,6 +100,31 @@ def main(argv: list[str] | None = None) -> int:
         client = FakeClient("")
     sandbox = Sandbox(config.workdir, config.sandbox_timeout_seconds)
     memory = _make_memory(config)
+    if args.command == "plugin":
+        from pathlib import Path
+        from .plugins import PluginRegistry, scan_plugin
+        registry = PluginRegistry(config.home)
+        if args.action == "list":
+            plugins = registry.load_all()
+            for plugin in plugins:
+                print(f"{plugin.name} {plugin.version}: {', '.join(plugin.tool_names()) or 'no tools'}")
+            return 0
+        if args.path is None:
+            print("plugin scan and adopt need a directory path")
+            return 2
+        if args.action == "scan":
+            findings = scan_plugin(Path(args.path))
+            for finding in findings:
+                print(f"{finding.path}:{finding.line} {finding.type}")
+            print(f"findings: {len(findings)}")
+            return 0
+        ok, findings, message = registry.adopt(
+            Path(args.path), gate=_cli_gate(), memory=memory,
+            project_id=args.project)
+        print(message)
+        for finding in findings:
+            print(f"{finding.path}:{finding.line} {finding.type}")
+        return 0 if ok else 2
     if args.command == "interview":
         from .interview import InterviewRunner
         runner = InterviewRunner(client, config.home, memory=memory,
@@ -119,9 +151,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         if not args.run:
             return 0
+        from .plugins import PluginRegistry
+        plugins = PluginRegistry(config.home)
+        plugins.load_all()
         goal_runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
                                  memory=memory, promotion_ask=_promotion_ask,
-                                 project_id=args.project)
+                                 project_id=args.project, plugins=plugins)
         report = goal_runner.run(args.text, spec=result.spec)
         print(f"status: {report.status}")
         print(f"verified: {report.verified}")
@@ -132,9 +167,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {report.error}")
             return 1
         return 0 if report.status == "done" else 2
+    from .plugins import PluginRegistry
+    plugins = PluginRegistry(config.home)
+    plugins.load_all()
     runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
                         memory=memory, promotion_ask=_promotion_ask,
-                        project_id=args.project)
+                        project_id=args.project, plugins=plugins)
     spec = None
     if getattr(args, "spec", None):
         from pathlib import Path
