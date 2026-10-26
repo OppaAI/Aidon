@@ -302,6 +302,43 @@ approval, spec, or verification.
   Message to WhatsApp or Slack. Email, RSS, and database
   triggers are not core triggers, they are plugins later,
   if a task needs them.
+
+## Real research, live execution, and incremental improving
+
+Yes, Aidon can improve incrementally, and it does so
+by recording what actually happened, not by re-planning
+from scratch each time.
+
+- Real research: a fact is verified only if a source
+  URL, fetched with stdlib urllib, contains it, with
+  the source and excerpt recorded. A model claim with
+  no source excerpt stays unverified. Research runs
+  outside the sandbox, which has network off by default.
+- Live execution: after sandbox verification and owner
+  approval, only a closed list of live actions runs:
+  copy a verified file to a spec-named output path,
+  with a snapshot backup first, and record a
+  notification. No live shell, no live network, no
+  live delete, no overwrite without a snapshot.
+- Live verification: every live output must exist and
+  be non-empty, and a ledger total must match the
+  sandbox total. If live verification fails, rollback
+  restores every snapshot, and the run is failed, not done.
+- Incremental improving: each successful run records
+  its research report and its live record in learned
+  and in its Experience lesson, so the next run for a
+  similar goal starts with the previous sources,
+  verified facts, unverified claims, live outputs, and
+  live failures, and only re-researches and re-tests
+  what is missing or stale. Repair, experience reuse,
+  and this lesson record together are the improvement
+  loop, not a separate feature.
+
+Demo capability tools themselves, dinner PDF, grocery
+app, store run, and job search plus publish, are still
+Aidon climbing work, through plugins, not arena code.
+What is built here is the research, live, and
+verification arena they will run in.
 3. **Sandbox** — the plan is tested in an isolated workdir.
    Bubblewrap, when installed, is the isolated backend. A
    subprocess fallback is labeled as not isolated, never as

@@ -184,12 +184,20 @@ class GoalRunner:
                 deliverables=["deliverable.md"],
                 criteria=["deliverable.md exists"])
 
-    def run(self, goal: str, spec=None) -> RunReport:
+    def run(self, goal: str, spec=None, research_report=None,
+            live_actions=None) -> RunReport:
         # A frozen spec binds the planner: if one is given,
         # plan from it, do not plan fresh from the goal alone.
         # Experience reuse still applies, but only if its
         # deliverables match the spec's deliverables.
+        # Research and live actions, when given, are part of
+        # the run, not a separate run: research sources are
+        # recorded with the run, live actions run only after
+        # sandbox verification and owner approval, in
+        # _execute_plan, below.
         self._current_spec = spec
+        self._research_report = research_report
+        self._live_actions = live_actions or []
         if spec is not None:
             spec_deliverables = spec.deliverables if hasattr(spec, "deliverables") else spec.get("deliverables", [])
             plan = self._plan(goal, spec=spec)
@@ -277,14 +285,32 @@ class GoalRunner:
         approved = decision.verdict == "approved"
         if not approved:
             return RunReport("rejected", goal, current_plan, True, False,
-                             files=files, attempts=attempt)
+                             files=files, attempts=attempt,
+                             backend=self._backend_name())
+        # Live execution, only after sandbox verification
+        # and owner approval, with live verification and
+        # rollback on failure. No live actions, no live step.
+        live_record = None
+        if getattr(self, "_live_actions", None):
+            from .live import LiveExecutor
+            executor = LiveExecutor(self.sandbox.workdir, self.home)
+            live_record = executor.execute(self._live_actions)
+            if not executor.verify_live(live_record):
+                executor.rollback(live_record)
+                return RunReport("failed", goal, current_plan, True, False,
+                                 files=files, attempts=attempt,
+                                 error=f"live verification failed: {live_record.error}",
+                                 backend=self._backend_name())
         learn_dir = self.home / "learned"
         learn_dir.mkdir(parents=True, exist_ok=True)
         record = {"goal": goal, "deliverables": files,
                   "criteria": current_plan.criteria,
                   "backend": self._backend_name(),
                   "image": getattr(self.execution_backend, "image", "")
-                  if self.execution_backend is not None else ""}
+                  if self.execution_backend is not None else "",
+                  "research": (self._research_report.to_dict()
+                               if getattr(self, "_research_report", None) is not None else None),
+                  "live": (live_record.to_dict() if live_record is not None else None)}
         (learn_dir / "last_run.json").write_text(
             json.dumps(record, indent=2), encoding="utf-8")
         if self.memory is not None:
@@ -299,9 +325,24 @@ class GoalRunner:
                                   "deliverable": step.deliverable})
                     if step.tool not in tools_used:
                         tools_used.append(step.tool)
+                # Incremental improving: the lesson for the
+                # next run includes research sources and live
+                # verification, not just the workflow shape,
+                # so the next run starts from what actually
+                # worked, what was verified, and what went
+                # live, instead of starting from scratch.
+                lesson_parts = ["Reused workflow from a successful run."]
+                if getattr(self, "_research_report", None) is not None:
+                    lesson_parts.append(
+                        f"Research: {len(self._research_report.verified_facts)} verified facts, "
+                        f"{len(self._research_report.unverified_claims)} unverified claims, "
+                        f"sources: {', '.join(s.url for s in self._research_report.sources)}")
+                if live_record is not None:
+                    lesson_parts.append(
+                        f"Live: verified={live_record.verified}, outputs={', '.join(live_record.outputs)}")
                 experience = build_experience(
                     goal, "", nodes, tools_used, [], "done",
-                    "Reused workflow from a successful run.")
+                    " ".join(lesson_parts))
                 store_experience(self.memory, experience)
             except Exception:
                 pass
