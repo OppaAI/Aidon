@@ -784,6 +784,7 @@ class WebUIServer:
         self.webui_token = webui_token
         self.transcribe_key = transcribe_key
         self.tts_key = tts_key
+        self.tts_voice_id = str(getattr(config, "tts_voice_id", "") or "")
         # Default chat handler: echo, for the server core. A real
         # goal handler is registered by the caller, with GoalRunner,
         # interview, or a trigger handler. This used to sit after an
@@ -1892,8 +1893,8 @@ class WebUIServer:
         text = text[:2000]
         text = re.sub(r"[#>*`_\[\]()|]", " ", text)
         text = re.sub(r"\s+", " ", text).strip()
-        result = _tts(text, tts_key,
-                      str(body.get("voice_id", "")))
+        voice_id = str(body.get("voice_id", "") or self.tts_voice_id)
+        result = _tts(text, tts_key, voice_id)
         if not result.get("ok"):
             return 500, {"error": result.get("error", "TTS failed")}
         return 200, {"ok": True,
