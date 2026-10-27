@@ -48,7 +48,7 @@ def delivery_summary(report: dict) -> str:
         lines.append("")
     tokens = report.get("model_tokens_estimated", report.get("tokens_used"))
     if tokens is not None:
-        lines.append(f"**Tokens:** {int(tokens):,} (estimated)")
+        lines.append(f"**Total workflow tokens:** {int(tokens):,} (estimated)")
         lines.append("")
     repairs = report.get("repairs")
     if repairs is not None:

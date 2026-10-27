@@ -126,7 +126,7 @@ def format_run_stats(report: RunReport) -> str:
     else:
         elapsed_text = f"{elapsed:.1f}s"
     tokens = int(getattr(report, "model_tokens_estimated", 0) or 0)
-    return f"⏱️ {elapsed_text} · {tokens:,} tokens (estimated)"
+    return f"⏱️ {elapsed_text} · {tokens:,} total workflow tokens (estimated)"
 
 
 class GoalRunner:

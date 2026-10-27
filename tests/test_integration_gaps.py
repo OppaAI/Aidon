@@ -50,7 +50,7 @@ def test_delivery_summary_render(tmp_path):
     (tmp_path / "a.md").write_text("x")
     text = delivery_summary({"goal": "g", "deliverables": {"a.md": True}, "files": ["a.md"], "elapsed": 5, "model_tokens_estimated": 1234, "repairs": 0})
     assert "a.md" in text and "g" in text
-    assert "**Tokens:** 1,234 (estimated)" in text
+    assert "**Total workflow tokens:** 1,234 (estimated)" in text
     assert "a.md" in inventory_markdown(tmp_path)
 
 
@@ -58,4 +58,4 @@ def test_finished_run_stats_put_tokens_next_to_elapsed():
     report = RunReport("done", "g", Plan(), True, True,
                        elapsed_seconds=12.34,
                        model_tokens_estimated=5678)
-    assert format_run_stats(report) == "⏱️ 12.3s · 5,678 tokens (estimated)"
+    assert format_run_stats(report) == "⏱️ 12.3s · 5,678 total workflow tokens (estimated)"

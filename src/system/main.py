@@ -905,6 +905,7 @@ def main(argv: list[str] | None = None) -> int:
     config = Config.load()
     config.ensure_home()
     from .model_client import client_for_config
+    from ..agentic.counting import CountingClient
     try:
         client = client_for_config(config)
     except ValueError as exc:
@@ -914,6 +915,9 @@ def main(argv: list[str] | None = None) -> int:
         print("warning: no model backend configured, using FakeClient; "
               "set AIDON_BACKEND and AIDON_API_ENDPOINT / AIDON_API_KEY "
               "in .env for a real run", file=sys.stderr)
+    # Count every model call in the workflow, including planning, research,
+    # verification, repairs, learning, and the final response.
+    client = CountingClient(client)
     # Fast model, same backend, different model name. This is how a
     # local small model works too: set the endpoint to a local
     # Ollama, AIDON_MODEL to the strong model, and AIDON_FAST_MODEL
@@ -927,7 +931,7 @@ def main(argv: list[str] | None = None) -> int:
         fast_config = replace(
             config, model=config.fast_model,
             ollama_num_ctx=config.fast_num_ctx or config.ollama_num_ctx)
-        fast_client = client_for_config(fast_config)
+        fast_client = CountingClient(client_for_config(fast_config))
         fast_phases = {s.strip() for s in config.router_fast_phases.split(",") if s.strip()}
         client = RoutedClient(fast_client, client, fast_phases=fast_phases)
         # ALSO build the phase router: fast phases go to the fast

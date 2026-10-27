@@ -66,3 +66,14 @@ class RoutedClient(ModelClient):
 
     def stats(self) -> dict:
         return {"fast_calls": self.fast_calls, "strong_calls": self.strong_calls}
+
+    @property
+    def calls(self) -> int:
+        """Total calls across both model tiers for the whole workflow."""
+        return int(getattr(self.fast_client, "calls", 0)) + int(getattr(self.strong_client, "calls", 0))
+
+    @property
+    def tokens_estimated(self) -> int:
+        """Total estimated tokens across both model tiers."""
+        return (int(getattr(self.fast_client, "tokens_estimated", 0)) +
+                int(getattr(self.strong_client, "tokens_estimated", 0)))
