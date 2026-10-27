@@ -187,3 +187,67 @@ def send_slack(config: MessagingConfig, channel: str, text: str,
     if not result.get("ok"):
         return {"ok": False, "error": str(result.get("error", "unknown error"))}
     return {"ok": True, "ts": result.get("ts", "")}
+
+
+def poll_slack_once(config, channel: str, last_ts: str = "", fetch=None) -> tuple[list[dict], str]:
+    """Polling mode, old Slack, for when no public webhook URL exists.
+
+    fetch is an injected Slack API caller, taking (url, token, params)
+    and returning the JSON response. In production it calls
+    conversations.history with the bot token. It returns
+    (new user messages, newest ts), where a message is a dict
+    with text, channel, and ts. Bot messages are skipped, and
+    messages at or before last_ts are skipped, so a poll never
+    re-dispatches the same message twice.
+    """
+    if fetch is None:
+        import urllib.request, json as _json
+        def fetch(url, token, params):
+            req = urllib.request.Request(
+                f"{url}?channel={params['channel']}&oldest={params.get('oldest', '')}",
+                headers={"Authorization": f"Bearer {token}"})
+            with urllib.request.urlopen(req, timeout=15) as response:
+                return _json.loads(response.read().decode())
+    result = fetch(f"{SLACK_API_BASE}/conversations.history", config.slack_bot_token,
+                   {"channel": channel, "oldest": last_ts})
+    messages = []
+    newest = last_ts
+    for message in result.get("messages", []):
+        if message.get("bot_id") or message.get("subtype") == "bot_message":
+            continue
+        ts = str(message.get("ts", ""))
+        if ts <= last_ts:
+            continue
+        messages.append({"text": str(message.get("text", "")), "channel": channel, "ts": ts})
+        if ts > newest:
+            newest = ts
+    messages.reverse()
+    return messages, newest
+
+
+def download_whatsapp_media(config, media_id: str, get=None) -> bytes:
+    """Download WhatsApp media bytes, via the Graph API, two steps.
+
+    Step 1: GET /<media_id> with the WhatsApp token, returns a
+    download URL. Step 2: GET that URL with the same token,
+    returns the bytes. get is injectable for tests, taking
+    (url, token) and returning bytes or a dict with a url.
+    """
+    if get is None:
+        import urllib.request, json as _json
+        def get(url, token):
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+            with urllib.request.urlopen(req, timeout=15) as response:
+                raw = response.read()
+            try:
+                return _json.loads(raw.decode())
+            except Exception:
+                return raw
+    info = get(f"https://graph.facebook.com/v21.0/{media_id}", config.whatsapp_token)
+    url = info.get("url", "") if isinstance(info, dict) else ""
+    if not url:
+        raise ValueError("WhatsApp media lookup did not return a download URL")
+    data = get(url, config.whatsapp_token)
+    if isinstance(data, dict):
+        raise ValueError("WhatsApp media download did not return bytes")
+    return data

@@ -91,6 +91,12 @@ class RunReport:
     error: str = ""
     attempts: int = 1
     backend: str = "bubblewrap"
+    model_calls: int = 0
+    model_tokens_estimated: int = 0
+    adapted: bool = False
+    adapted_from: str = ""
+    chat_reply: str = ""
+    dag_summary: dict = field(default_factory=dict)
 
 
 class GoalRunner:
@@ -99,7 +105,9 @@ class GoalRunner:
                  promotion_ask=None, project_id: str = "default",
                  plugins=None, execution_backend=None,
                  budget=None, trace=None, model_verifier=None,
-                 kernel_mode: bool = False, semantic_router=None):
+                 kernel_mode: bool = False, semantic_router=None,
+                 use_semantic_router_skip: bool = False,
+                 run_id: str | None = None, run_control=None):
         self.client = client
         self.sandbox = sandbox
         self.gate = gate
@@ -115,6 +123,12 @@ class GoalRunner:
         self.model_verifier = model_verifier
         self.kernel_mode = kernel_mode
         self.semantic_router = semantic_router
+        self.use_semantic_router_skip = use_semantic_router_skip
+        self._adapted = False
+        self._adapted_from = ""
+        self.run_id = run_id
+        self.run_control = run_control
+        self._dag_summary: dict = {}
         self.last_route = None
 
     def _trace(self, kind: str, status: str, detail: str = "") -> None:
@@ -191,8 +205,10 @@ class GoalRunner:
         self._trace("plan", "started", goal[:100])
         if self.budget is not None:
             self.budget.add_tokens(user)
-        reply = self.client.chat([Message("system", system),
-                                  Message("user", user)])
+        if hasattr(self.client, "chat_phase"):
+            reply = self.client.chat_phase("plan", [Message("system", system), Message("user", user)])
+        else:
+            reply = self.client.chat([Message("system", system), Message("user", user)])
         if self.budget is not None:
             self.budget.add_tokens(reply)
         self._trace("plan", "done", "plan proposed")
@@ -234,29 +250,68 @@ class GoalRunner:
                 self._trace("interpret", "done", f"semantic route {self.last_route[0]} {self.last_route[1]:.2f}")
             except Exception:
                 self.last_route = None
+        if self.use_semantic_router_skip and self.last_route and self.last_route[0] == "chat" and spec is None:
+            reply = self.client.chat([Message("user", goal)])
+            report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                               False, False, chat_reply=reply)
+            return self._finalize(report)
         if spec is not None:
             spec_deliverables = spec.deliverables if hasattr(spec, "deliverables") else spec.get("deliverables", [])
             plan = self._plan(goal, spec=spec)
             if not plan.deliverables and spec_deliverables:
                 plan.deliverables = list(spec_deliverables)
-            return self._execute_plan(goal, plan)
+            return self._finalize(self._execute_plan(goal, plan))
         if self.memory is not None:
             try:
                 from .experience import recall_experiences
                 experiences = recall_experiences(self.memory, goal, limit=1)
                 if experiences and experiences[0].dag_nodes:
-                    nodes = experiences[0].dag_nodes
-                    plan = Plan(
-                        steps=nodes,
-                        deliverables=[str(n["deliverable"])
-                                      for n in nodes if n.get("deliverable")],
-                        criteria=[])
-                    if plan.deliverables:
-                        return self._execute_plan(goal, plan)
+                    # Adaptive DAG first: add, remove, modify, reorder,
+                    # validated, with rollback to the saved graph on failure.
+                    # A sequential adapt is the fallback, never a broken graph.
+                    from .dag import adapt_dag
+                    dag_result = adapt_dag(experiences[0], goal, client=self.client)
+                    if dag_result is not None:
+                        dag, summary, _model_calls = dag_result
+                        steps = dag.to_plan_steps()
+                        plan = Plan(
+                            steps=steps,
+                            deliverables=[str(s["deliverable"]) for s in steps if s.get("deliverable")],
+                            criteria=[])
+                        if plan.deliverables:
+                            self._adapted = True
+                            self._adapted_from = experiences[0].goal
+                            self._dag_summary = summary
+                            return self._finalize(self._execute_plan(goal, plan))
+                    from .adapt import adapt_experience
+                    adapted = adapt_experience(experiences[0], goal, client=self.client)
+                    if adapted is not None:
+                        nodes, _changed, _model_calls = adapted
+                        plan = Plan(
+                            steps=nodes,
+                            deliverables=[str(n["deliverable"])
+                                          for n in nodes if n.get("deliverable")],
+                            criteria=[])
+                        if plan.deliverables:
+                            self._adapted = True
+                            self._adapted_from = experiences[0].goal
+                            return self._finalize(self._execute_plan(goal, plan))
             except Exception:
                 pass
         plan = self._plan(goal)
-        return self._execute_plan(goal, plan)
+        return self._finalize(self._execute_plan(goal, plan))
+
+
+    def _finalize(self, report: RunReport) -> RunReport:
+        """Fill model-usage and adaptation fields, from the counting client if present."""
+        client = self.client
+        if hasattr(client, "calls") and hasattr(client, "tokens_estimated"):
+            report.model_calls = int(client.calls)
+            report.model_tokens_estimated = int(client.tokens_estimated)
+        report.adapted = bool(self._adapted)
+        report.adapted_from = str(self._adapted_from)
+        report.dag_summary = dict(self._dag_summary)
+        return report
 
     def _execute_plan(self, goal: str, plan: Plan) -> RunReport:
         if self.budget is not None:
@@ -264,6 +319,17 @@ class GoalRunner:
         self._trace("interpret", "done", goal[:100])
         if self.memory is not None:
             self._trace("recall", "done", "experience recall attempted")
+        from .validator import validate_plan, ALLOWED_TOOLS
+        _allowed = set(ALLOWED_TOOLS)
+        if self.plugins is not None:
+            try:
+                _allowed.update(self.plugins.tool_names())
+            except Exception:
+                pass
+        plan_failures = validate_plan(plan, allowed_tools=_allowed)
+        if plan_failures:
+            return RunReport("failed", goal, plan, False, False,
+                             error="; ".join(plan_failures)[:500])
         if not plan.deliverables:
             return RunReport("failed", goal, plan, False, False,
                              error="plan has no deliverables")
@@ -271,9 +337,19 @@ class GoalRunner:
         current_plan = plan
         for attempt in range(1, MAX_ATTEMPTS + 1):
             failures: list[str] = []
+            # Cancellation, checked before every attempt, and steer,
+            # applied to the next repair attempt, not to passed work.
+            if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
+                return RunReport("cancelled", goal, current_plan, False, False,
+                                 files=sorted(passed), attempts=attempt,
+                                 backend=self._backend_name())
             # Execute steps, skipping steps whose deliverable
             # already passed in an earlier attempt (repair rule).
             for step in current_plan.normalized_steps():
+                if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
+                    return RunReport("cancelled", goal, current_plan, False, False,
+                                     files=sorted(passed), attempts=attempt,
+                                     backend=self._backend_name())
                 if step.deliverable and step.deliverable in passed:
                     continue
                 try:
@@ -330,9 +406,12 @@ class GoalRunner:
                                  error="; ".join(failures)[:500],
                                  attempts=attempt)
             # Repair: ask for a repaired plan, passed files untouched.
+            steer_notes = self.run_control.steer_notes(self.run_id) if self.run_control is not None else []
             context = ("Passed deliverables (do not rewrite): "
                        + ", ".join(sorted(passed))
                        + "\nFailures:\n" + "\n".join(failures))
+            if steer_notes:
+                context += "\nSteer notes from the owner, apply to the repair:\n" + "\n".join(steer_notes)
             try:
                 current_plan = self._plan(
                     goal, failure_context=context,
@@ -417,10 +496,18 @@ class GoalRunner:
                 if live_record is not None:
                     lesson_parts.append(
                         f"Live: verified={live_record.verified}, outputs={', '.join(live_record.outputs)}")
+                from .adapt import generalize_nodes as _generalize_nodes
+                _gen_nodes = _generalize_nodes(nodes, goal)
                 experience = build_experience(
                     goal, "", nodes, tools_used, [], "done",
                     " ".join(lesson_parts))
+                experience.generalized_nodes = _gen_nodes
                 store_experience(self.memory, experience)
+                try:
+                    from .memory_extras import rolling_summary as _rolling_summary
+                    _rolling_summary(self.home, self.project_id, goal, files, "done")
+                except Exception:
+                    pass
             except Exception:
                 pass
             try:

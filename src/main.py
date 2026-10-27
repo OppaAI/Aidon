@@ -99,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     trigger_parser.add_argument("--project", default="default",
                                 help="Project id for episodic memory")
     v1_parser = sub.add_parser("v1", help="v1 API, token auth, MCP")
-    v1_parser.add_argument("action", choices=["serve", "keygen", "mcp"],
+    v1_parser.add_argument("action", choices=["serve", "keygen", "mcp", "mcp-http"],
                            help="Serve the v1 HTTP API, generate a key once, or run the MCP stdio server")
     v1_parser.add_argument("--port", type=int, default=8001,
                            help="Port for v1 serve, default 8001, localhost only")
@@ -111,6 +111,26 @@ def main(argv: list[str] | None = None) -> int:
     webui_parser.add_argument("action", choices=["serve"], help="Serve the WebUI, localhost only")
     webui_parser.add_argument("--port", type=int, default=8002,
                               help="Port for WebUI serve, default 8002, localhost only")
+    webui_parser.add_argument("--webhook-only", action="store_true",
+                              help="Serve only /webhook/whatsapp and /webhook/slack, no chat, settings, or library, for a tunnel front")
+    scheduler_parser = sub.add_parser("scheduler", help="Scheduler daemon and pre-approval")
+    scheduler_parser.add_argument("action", choices=["serve", "preapprove", "morning"],
+                                  help="Serve due jobs, grant a pre-approval, or list the morning report")
+    scheduler_parser.add_argument("--spec", default="default", help="Spec id for pre-approval")
+    scheduler_parser.add_argument("--kind", default="sandbox", help="Action kind for pre-approval, reversible only")
+    scheduler_parser.add_argument("--hours", type=float, default=8.0, help="Pre-approval duration, hours")
+    benchmark_parser = sub.add_parser("benchmark", help="Self-learning benchmark, canned, not live")
+    benchmark_parser.add_argument("action", choices=["learn"], help="Snake to Worm, fresh vs adapted")
+    control_parser = sub.add_parser("control", help="Steer and cancel a running run")
+    control_parser.add_argument("action", choices=["list", "cancel", "steer"], help="List runs, cancel a run, or steer a run")
+    control_parser.add_argument("run_id", nargs="?", default=None, help="Run id, from the goal reply")
+    control_parser.add_argument("note", nargs="?", default=None, help="Steer note, for steer")
+    email_parser = sub.add_parser("email", help="Email drafts and Gmail send")
+    email_parser.add_argument("action", choices=["drafts", "send"], help="List drafts, or send a draft via Gmail OAuth")
+    email_parser.add_argument("--draft", default=None, help="Draft id for send")
+    email_parser.add_argument("--to", default=None, help="Recipient for send")
+    email_parser.add_argument("--subject", default="", help="Subject for send")
+    email_parser.add_argument("--body", default="", help="Body for send")
     args = parser.parse_args(argv)
 
     config = Config.load()
@@ -137,12 +157,11 @@ def main(argv: list[str] | None = None) -> int:
         msg.slack_bot_token = config.slack_bot_token or msg.slack_bot_token
         msg.slack_signing_secret = config.slack_signing_secret or msg.slack_signing_secret
         dispatcher = TriggerDispatcher()
-        # WebUI chat handler, for the server core: echo the
-        # goal back, a real goal handler is registered by
-        # the caller with GoalRunner, interview, or triggers.
-        dispatcher.register("webui", lambda e: e.send_reply(f"Received: {e.goal}"))
-        dispatcher.register("whatsapp", lambda e: e.send_reply(f"Received: {e.goal}"))
-        dispatcher.register("slack", lambda e: e.send_reply(f"Received: {e.goal}"))
+        # Goal handler, wired here, not echo: WebUI chat,
+        # WhatsApp, and Slack all run the same GoalRunner,
+        # with the WebUI approval gate, so a card in the
+        # browser, or approve <id> on a message, resolves
+        # a run that started on any surface.
 
         def whatsapp_sender(to: str, text: str):
             result = send_whatsapp(msg, to, text)
@@ -154,11 +173,43 @@ def main(argv: list[str] | None = None) -> int:
             if not result["ok"]:
                 print(f"Slack send failed: {result['error']}")
 
+        from .messaging import download_whatsapp_media
+        from .run_control import RunControl
+        run_control = RunControl(config.home)
         server = WebUIServer(config.home, dispatcher=dispatcher,
                              auth_store=AuthStore(config.home), memory=memory,
                              messaging_config=msg,
                              whatsapp_sender=whatsapp_sender,
-                             slack_sender=slack_sender)
+                             slack_sender=slack_sender,
+                             webhook_only=args.webhook_only,
+                             media_downloader=lambda media_id: download_whatsapp_media(msg, media_id),
+                             run_control=run_control)
+
+        def _goal_handler(event):
+            from .loop import GoalRunner
+            from .run_control import new_run_id
+            run_id = new_run_id()
+            run_control.register(run_id, event.goal, event.project_id)
+            runner = GoalRunner(client, sandbox, server.webui_gate.gate,
+                                config.home, memory=memory,
+                                project_id=event.project_id,
+                                kernel_mode=config.kernel_mode,
+                                run_id=run_id, run_control=run_control)
+            report = runner.run(event.goal)
+            if report.status == "chat":
+                event.send_reply(f"[{run_id}] {report.chat_reply or 'Received.'}")
+            elif report.status == "done":
+                event.send_reply(f"[{run_id}] Done: {', '.join(report.files)}")
+            elif report.status == "rejected":
+                event.send_reply(f"[{run_id}] Rejected, no live action taken.")
+            elif report.status == "cancelled":
+                event.send_reply(f"[{run_id}] Cancelled, no further steps run.")
+            else:
+                event.send_reply(f"[{run_id}] Failed: {report.error}")
+
+        dispatcher.register("webui", _goal_handler)
+        dispatcher.register("whatsapp", _goal_handler)
+        dispatcher.register("slack", _goal_handler)
         missing = msg.whatsapp_missing()
         if missing:
             print(f"WhatsApp not fully configured, missing: {', '.join(missing)}")
@@ -187,6 +238,40 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "mcp":
             from .mcp_server import MCPServer
             MCPServer(auth, goals).run_stdio()
+            return 0
+        if args.action == "mcp-http":
+            # Streamable HTTP MCP: JSON-RPC over HTTP at /mcp,
+            # Bearer token, same store and scopes as stdio MCP.
+            from .mcp_server import MCPServer
+            import json as _json2
+            from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+            mcp_server = MCPServer(auth, goals)
+
+            class _McpHandler(BaseHTTPRequestHandler):
+                def do_POST(self):
+                    if self.path != "/mcp":
+                        self.send_response(404); self.end_headers(); return
+                    length = int(self.headers.get("Content-Length", 0) or 0)
+                    raw = self.rfile.read(length) if length else b""
+                    try:
+                        body = _json2.loads(raw) if raw else {}
+                    except Exception:
+                        body = {}
+                    auth_header = self.headers.get("Authorization", "")
+                    token = auth_header[7:] if auth_header.startswith("Bearer ") else None
+                    payload = mcp_server.handle(body, token)
+                    data = _json2.dumps(payload).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+
+                def log_message(self, *args):
+                    pass
+
+            print(f"Streamable HTTP MCP on http://127.0.0.1:{args.port}/mcp, localhost only, Bearer <redacted> required except initialize and ping")
+            ThreadingHTTPServer(("127.0.0.1", args.port), _McpHandler).serve_forever()
             return 0
         # serve: localhost only, stdlib HTTP, v1 handler only.
         import json as _json
@@ -252,6 +337,107 @@ def main(argv: list[str] | None = None) -> int:
             dispatcher.dispatch(event)
             return 0
         return 2
+    if args.command == "control":
+        from .run_control import RunControl
+        control = RunControl(config.home)
+        if args.action == "list":
+            for run in control.list_runs():
+                print(f"{run['run_id']} {run['status']} {run['goal']} steer_notes={len(run.get('steer_notes', []))}")
+            return 0
+        if args.action == "cancel":
+            ok = control.cancel(args.run_id) if args.run_id else False
+            print(f"Cancelled {args.run_id}" if ok else f"No such run {args.run_id}")
+            return 0 if ok else 2
+        if args.action == "steer":
+            ok = control.steer(args.run_id, args.note or "") if args.run_id else False
+            print(f"Steered {args.run_id}: {args.note}" if ok else f"No such run {args.run_id}")
+            return 0 if ok else 2
+    if args.command == "scheduler":
+        from .preapproval import PreapprovalStore
+        import time as _time
+        store = PreapprovalStore(config.home)
+        if args.action == "preapprove":
+            ok = store.grant(args.spec, args.kind, _time.time() + args.hours * 3600, reversible=True)
+            print(f"Pre-approval {'granted' if ok else 'refused, irreversible or external email'}: {args.spec} {args.kind}")
+            return 0 if ok else 2
+        if args.action == "morning":
+            for item in store.morning_report():
+                print(f"{item['spec_id']} {item['action_kind']}: undo: {item['undo']}")
+            return 0
+        # serve: poll due jobs every 60 seconds, run each via GoalRunner.
+        from datetime import datetime
+        from .triggers import Scheduler
+        print("Scheduler daemon, polling every 60 seconds, Ctrl-C to stop.")
+        while True:
+            scheduler = Scheduler(config.home)
+            for job in scheduler.check_due(datetime.now()):
+                print(f"Due job: {job.name}: {job.goal}")
+                runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
+                                    memory=memory, project_id="default")
+                report = runner.run(job.goal)
+                print(f"Job {job.name}: {report.status}, files: {', '.join(report.files)}")
+            import time as _sleep
+            _sleep.sleep(60)
+    if args.command == "benchmark":
+        # Canned Snake to Worm benchmark, for the self-learning claim.
+        # Fresh: a long plan JSON, adapted: a short changed-node JSON.
+        # Tokens are estimated at one per four characters, as in budgets.
+        from .benchmark import benchmark_learn
+        from .counting import CountingClient
+        from .loop import RunReport, Plan
+
+        class _PlanClient:
+            def __init__(self, reply):
+                self.reply = reply
+                self.calls = 0
+            def chat(self, messages, phase="chat"):
+                self.calls += 1
+                return self.reply
+            def chat_phase(self, phase, messages):
+                return self.chat(messages, phase=phase)
+
+        long_plan = '{"steps": [{"tool": "write", "args": {"file": "worm.py", "text": "Worm game loop, input handling, rendering, scoring, tests, and a long description of every step in detail."}, "deliverable": "worm.py"}, {"tool": "write", "args": {"file": "worm_test.py", "text": "Tests for the Worm game loop, input, rendering, and scoring, in detail."}, "deliverable": "worm_test.py"}], "deliverables": ["worm.py", "worm_test.py"], "criteria": ["worm.py exists", "worm.py contains Worm"]}'
+        short_adapt = '{"adapted": [{"index": 0, "args": {"file": "worm.py", "text": "Worm"}, "deliverable": "worm.py"}]}'
+        fresh_client = CountingClient(_PlanClient(long_plan))
+        adapted_client = CountingClient(_PlanClient(short_adapt))
+        # Fresh and adapted reports, from the counting clients directly,
+        # so the benchmark measures model calls, not sandbox execution.
+        fresh_client.chat([], phase="plan")
+        adapted_client.chat([], phase="adapt")
+        fresh_report = RunReport("done", "Write a Worm game", Plan([], ["worm.py"], []), True, True,
+                                 files=["worm.py"], model_calls=fresh_client.calls,
+                                 model_tokens_estimated=fresh_client.tokens_estimated)
+        adapted_report = RunReport("done", "Write a Worm game", Plan([], ["worm.py"], []), True, True,
+                                   files=["worm.py"], model_calls=adapted_client.calls,
+                                   model_tokens_estimated=adapted_client.tokens_estimated)
+        result = benchmark_learn(lambda: (fresh_report, {"worm.py": "Worm game"}),
+                                 lambda: (adapted_report, {"worm.py": "Worm game"}),
+                                 "Worm", "Snake")
+        print(f"Fresh: {result['fresh']['model_calls']} calls, {result['fresh']['model_tokens_estimated']} estimated tokens, quality_ok={result['fresh']['quality_ok']}")
+        print(f"Adapted: {result['adapted']['model_calls']} calls, {result['adapted']['model_tokens_estimated']} estimated tokens, quality_ok={result['adapted']['quality_ok']}")
+        print(f"Tokens saved, estimated: {result['tokens_saved_estimated']}, saving_counts={result['saving_counts']}")
+        print("Canned benchmark, not a live model run. Live benchmark is demo and testing, after work.")
+        return 0
+    if args.command == "email":
+        import os as _os
+        if args.action == "drafts":
+            drafts_dir = config.home / "email" / "drafts"
+            if drafts_dir.exists():
+                for draft in sorted(drafts_dir.glob("*.md")):
+                    print(draft.name)
+            return 0
+        # send: Gmail OAuth, only if the keys are present, else drafts only.
+        client_id = _os.environ.get("GMAIL_CLIENT_ID", "")
+        client_secret = _os.environ.get("GMAIL_CLIENT_SECRET", "")
+        refresh_token = _os.environ.get("GMAIL_REFRESH_TOKEN", "")
+        if not (client_id and client_secret and refresh_token):
+            print("Gmail OAuth keys are missing, email stays as drafts. Fill GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN in .env, then run again.")
+            return 2
+        from .gmail import gmail_sender
+        sender = gmail_sender(client_id, client_secret, refresh_token)
+        result = sender(args.to or "", args.subject, args.body)
+        print(f"Gmail send result: {result.get('id', 'sent')}")
+        return 0
     from .execution import make_backend
     try:
         execution_backend = make_backend(

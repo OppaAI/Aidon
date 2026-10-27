@@ -63,7 +63,7 @@ import hmac
 import json
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -121,6 +121,13 @@ class WebUIGate:
         verdict = card["verdict"] or "rejected"
         return Decision(verdict)
 
+    def cancel_all(self) -> None:
+        """Resolve every pending card as rejected, for a cancelled run."""
+        for card_id, event in list(self._events.items()):
+            if not event.is_set():
+                self.cards[card_id]["verdict"] = "rejected"
+                event.set()
+
     def approve(self, card_id: str, verdict: str) -> bool:
         if card_id not in self.cards:
             return False
@@ -134,7 +141,8 @@ class WebUIServer:
                  auth_store=None, memory=None, whatsapp_reply=None,
                  slack_reply=None, whatsapp_verify_token: str = "",
                  slack_signing_secret: str = "", messaging_config=None,
-                 whatsapp_sender=None, slack_sender=None):
+                 whatsapp_sender=None, slack_sender=None, webhook_only: bool = False,
+                 media_downloader=None, run_control=None):
         self.home = Path(home)
         self.dispatcher = dispatcher or TriggerDispatcher()
         self.auth_store = auth_store
@@ -156,6 +164,9 @@ class WebUIServer:
         self.slack_signing_secret = (
             slack_signing_secret or self.messaging_config.slack_signing_secret)
         self.webui_gate = WebUIGate()
+        self.webhook_only = webhook_only
+        self.media_downloader = media_downloader
+        self.run_control = run_control
 
     def _resolve_decision(self, text: str) -> str | None:
         decision = parse_decision(text)
@@ -172,6 +183,25 @@ class WebUIServer:
         # with GoalRunner, interview, or a trigger handler.
         if "webui" not in self.dispatcher.handlers:
             self.dispatcher.register("webui", lambda e: e.send_reply(f"Received: {e.goal}"))
+
+    def _resolve_control(self, text: str) -> str | None:
+        """Steer and cancel, from chat or a message, while a run is running.
+
+        Commands, all surfaces, same run id:
+        - cancel <run_id> or stop <run_id>: stop the run, no further steps.
+        - steer <run_id> <note>: add a note for the next repair attempt.
+        Returns a reply, or None when the text is not a control command.
+        """
+        if self.run_control is None:
+            return None
+        parts = text.strip().split(None, 2)
+        if len(parts) >= 2 and parts[0].lower() in ("cancel", "stop"):
+            ok = self.run_control.cancel(parts[1], gate=self.webui_gate)
+            return f"Cancelled {parts[1]}" if ok else f"No such run {parts[1]}"
+        if len(parts) >= 3 and parts[0].lower() == "steer":
+            ok = self.run_control.steer(parts[1], parts[2])
+            return f"Steered {parts[1]}: {parts[2]}" if ok else f"No such run {parts[1]}"
+        return None
 
     def _library_files(self) -> list[dict]:
         library_dir = self.home / "library" / "files"
@@ -194,6 +224,9 @@ class WebUIServer:
 
     def handle_chat(self, body: dict) -> dict:
         message = str(body.get("message", ""))
+        control_reply = self._resolve_control(message)
+        if control_reply is not None:
+            return {"reply": control_reply}
         project_id = str(body.get("project_id", "default"))
         replies: list[str] = []
         event = TriggerEvent(source="webui", kind="chat", goal=message,
@@ -229,10 +262,28 @@ class WebUIServer:
                 for change in entry.get("changes", []):
                     for message in change.get("value", {}).get("messages", []):
                         text = message.get("text", {}).get("body", "")
+                        if not text and message.get("type") == "image":
+                            caption = message.get("image", {}).get("caption", "")
+                            media_id = message.get("image", {}).get("id", "")
+                            text = caption
+                            if self.media_downloader is not None and media_id:
+                                try:
+                                    data = self.media_downloader(media_id)
+                                    from .library import Library
+                                    tmp = self.home / "library" / "whatsapp-image.png"
+                                    tmp.parent.mkdir(parents=True, exist_ok=True)
+                                    tmp.write_bytes(data)
+                                    library = Library(self.home)
+                                    saved = library.add_file(tmp, kind="image", description="WhatsApp image")
+                                    text = f"{caption} [image library_id={saved['id']}]".strip()
+                                except Exception as exc:
+                                    text = caption or f"image received, could not save: {exc}"
                         sender = message.get("from", "")
                         if not owner or normalize_number(sender) != owner:
                             continue
                         decision_reply = self._resolve_decision(text)
+                        if decision_reply is None:
+                            decision_reply = self._resolve_control(text)
                         if decision_reply is not None:
                             replies.append(decision_reply)
                             if self.whatsapp_sender is not None:
@@ -276,6 +327,8 @@ class WebUIServer:
             channel = str(event_body.get("channel", ""))
             thread_ts = event_body.get("thread_ts") or event_body.get("ts")
             decision_reply = self._resolve_decision(text)
+            if decision_reply is None:
+                decision_reply = self._resolve_control(text)
             if decision_reply is not None:
                 if self.slack_sender is not None:
                     self.slack_sender(channel, decision_reply, thread_ts)
@@ -292,6 +345,23 @@ class WebUIServer:
                     self.slack_sender(channel, reply, thread_ts)
             return 200, {"replies": replies}
         return 200, {"ok": True}
+
+
+    def factory_stages(self) -> list[dict]:
+        """Read trace files and map kinds to factory stages, for /factory."""
+        stages = []
+        trace_dir = self.home / "trace"
+        if not trace_dir.exists():
+            return stages
+        for path in sorted(trace_dir.glob("*.jsonl")):
+            for line in path.read_text(errors="ignore").splitlines():
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                stages.append({"run": path.stem, "kind": event.get("kind", ""),
+                               "status": event.get("status", "")})
+        return stages
 
     def make_handler(self):
         server = self
@@ -319,7 +389,9 @@ class WebUIServer:
 
             def do_GET(self):
                 parsed = urlparse(self.path)
-                if parsed.path == "/":
+                if server.webhook_only and parsed.path != "/webhook/whatsapp":
+                    self._send_json(404, {"error": "webhook only"})
+                elif parsed.path == "/":
                     self._send_html(200, CHAT_HTML)
                 elif parsed.path == "/settings":
                     keys = server.auth_store.list_keys() if server.auth_store else []
@@ -338,6 +410,14 @@ class WebUIServer:
                     self._send_json(200, {"files": server._library_files()})
                 elif parsed.path == "/api/projects":
                     self._send_json(200, {"projects": server._projects()})
+                elif parsed.path == "/factory":
+                    stages = server.factory_stages()
+                    html = "<h1>Factory</h1><p>Trace stages, live from trace files, not a replay.</p>"
+                    for stage in stages:
+                        html += f"<p>{stage['run']} {stage['kind']} {stage['status']}</p>"
+                    self._send_html(200, html)
+                elif parsed.path == "/api/factory":
+                    self._send_json(200, {"stages": server.factory_stages()})
                 elif parsed.path == "/webhook/whatsapp":
                     query = parse_qs(parsed.query)
                     status, text = server.handle_whatsapp_get(query)
@@ -351,6 +431,9 @@ class WebUIServer:
 
             def do_POST(self):
                 parsed = urlparse(self.path)
+                if server.webhook_only and parsed.path not in ("/webhook/whatsapp", "/webhook/slack"):
+                    self._send_json(404, {"error": "webhook only"})
+                    return
                 raw = self._read_body()
                 try:
                     body = json.loads(raw) if raw else {}
@@ -358,6 +441,18 @@ class WebUIServer:
                     body = {}
                 if parsed.path == "/api/chat":
                     self._send_json(200, server.handle_chat(body))
+                elif parsed.path == "/api/runs":
+                    runs = server.run_control.list_runs() if server.run_control else []
+                    self._send_json(200, {"runs": runs})
+                elif parsed.path == "/api/steer":
+                    run_id = str(body.get("run_id", ""))
+                    note = str(body.get("note", ""))
+                    ok = server.run_control.steer(run_id, note) if server.run_control else False
+                    self._send_json(200 if ok else 404, {"ok": ok})
+                elif parsed.path == "/api/cancel":
+                    run_id = str(body.get("run_id", ""))
+                    ok = server.run_control.cancel(run_id, gate=server.webui_gate) if server.run_control else False
+                    self._send_json(200 if ok else 404, {"ok": ok})
                 elif parsed.path == "/api/approve":
                     card_id = str(body.get("id", ""))
                     verdict = str(body.get("verdict", "rejected"))
@@ -380,4 +475,6 @@ class WebUIServer:
         return Handler
 
     def serve(self, port: int = 8002) -> None:
-        HTTPServer(("127.0.0.1", port), self.make_handler()).serve_forever()
+        # Threading, so a goal run waiting on an approval card
+        # does not block the /api/approve request that resolves it.
+        ThreadingHTTPServer(("127.0.0.1", port), self.make_handler()).serve_forever()

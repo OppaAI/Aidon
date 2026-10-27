@@ -30,7 +30,7 @@ REPO_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 AIDON_HOME=${AIDON_HOME:-$HOME/.aidon}
 
 echo "Aidon home: $AIDON_HOME"
-mkdir -p "$AIDON_HOME/workspace" "$AIDON_HOME/ingest" "$AIDON_HOME/plugins" "$AIDON_HOME/skills" "$AIDON_HOME/specs" "$AIDON_HOME/library/files"
+mkdir -p "$AIDON_HOME/workspace" "$AIDON_HOME/ingest" "$AIDON_HOME/plugins" "$AIDON_HOME/skills" "$AIDON_HOME/specs" "$AIDON_HOME/library/files" "$AIDON_HOME/runs" "$AIDON_HOME/summaries" "$AIDON_HOME/learned" "$AIDON_HOME/email/drafts" "$AIDON_HOME/trace" "$AIDON_HOME/v1" "$AIDON_HOME/live"
 
 if ! command -v python3 >/dev/null 2>&1; then
   echo "ERROR: python3 is not installed. Install Python 3.11 or later, then run ./setup.sh again." >&2
@@ -80,4 +80,19 @@ if [ "${1:-}" = "--with-optional" ]; then
   python3 -m pip install qdrant-client sentence-transformers fastembed
 fi
 
-echo "Setup done. Next: ./launch.sh --help, or fill in $AIDON_HOME/.env, then ./launch.sh goal \"Plan a dinner for two\""
+echo "Setup done. Next: fill in $AIDON_HOME/.env, then ./launch.sh"
+echo ""
+echo "Keys and setup, by you, after this script, names only, no values here:"
+echo "  Meta Model API: AIDON_API_ENDPOINT, AIDON_API_KEY, AIDON_MODEL"
+echo "  WhatsApp: AIDON_WHATSAPP_TOKEN, AIDON_WHATSAPP_PHONE_ID, AIDON_WHATSAPP_VERIFY_TOKEN, AIDON_WHATSAPP_APP_SECRET, AIDON_WHATSAPP_OWNER"
+echo "  Slack: SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, or polling with SLACK_BOT_TOKEN and a channel"
+echo "  Gmail: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN"
+echo "  Search/YouTube/voice/social/GitHub/Tavily: TAVILY_API_KEY, AIDON_YOUTUBE_API_KEY, AIDON_FISH_API_KEY, AIDON_THREADS_ACCESS_TOKEN, AIDON_IG_ACCESS_TOKEN, GITHUB_TOKEN"
+echo "  Tunnel: put a webhook-only listener in front, never tunnel the full WebUI unauthenticated:"
+echo "    ./launch.sh webui serve --webhook-only"
+echo "  Steer and cancel, while a run is running, any surface, same run id:"
+echo "    WebUI: POST /api/cancel {run_id}, POST /api/steer {run_id, note}, GET /api/runs"
+echo "    WhatsApp/Slack: cancel <run_id>, steer <run_id> <note>"
+echo "    CLI: ./launch.sh control cancel <run_id>, ./launch.sh control steer <run_id> <note>"
+echo "  Adaptive DAG benchmark, canned, not live: ./launch.sh benchmark learn"
+echo "  Demo, live testing, and Meta API key claim are after work, not in setup.sh."

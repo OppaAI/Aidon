@@ -76,6 +76,7 @@ class Experience:
     skills_used: list[str] = field(default_factory=list)
     outcome: str = ""
     lesson: str = ""
+    generalized_nodes: list[dict] = field(default_factory=list)
 
     def to_text(self) -> str:
         """Text for embedding and recall: goal + shape + lesson."""
@@ -90,6 +91,7 @@ class Experience:
             "skills_used": self.skills_used,
             "outcome": self.outcome,
             "lesson": self.lesson,
+            "generalized_nodes": json.dumps(self.generalized_nodes),
             "kind": "experience",
         }
 
@@ -100,6 +102,10 @@ class Experience:
             nodes = json.loads(payload.get("dag_nodes", "[]"))
         except (json.JSONDecodeError, TypeError):
             nodes = []
+        try:
+            gen = json.loads(payload.get("generalized_nodes", "[]"))
+        except (json.JSONDecodeError, TypeError):
+            gen = []
         return cls(
             goal=payload.get("goal", point.text),
             goal_shape=payload.get("goal_shape", ""),
@@ -108,12 +114,13 @@ class Experience:
             skills_used=payload.get("skills_used", []),
             outcome=payload.get("outcome", ""),
             lesson=payload.get("lesson", ""),
+            generalized_nodes=gen if isinstance(gen, list) else [],
         )
 
 
 def build_experience(goal: str, goal_shape: str, dag_nodes: list[dict],
                      tools_used: list[str], skills_used: list[str],
-                     outcome: str, lesson: str = "") -> Experience:
+                     outcome: str, lesson: str = "", generalized_nodes: list[dict] | None = None) -> Experience:
     # An empty shape means "derive it from the goal", so
     # callers that pass the goal twice, as the loop does,
     # still get a real shape for matching.
@@ -122,7 +129,7 @@ def build_experience(goal: str, goal_shape: str, dag_nodes: list[dict],
     return Experience(goal=goal, goal_shape=shape,
                       dag_nodes=dag_nodes, tools_used=tools_used,
                       skills_used=skills_used, outcome=outcome,
-                      lesson=lesson)
+                      lesson=lesson, generalized_nodes=generalized_nodes or [])
 
 
 def store_experience(memory: Memory, experience: Experience) -> Point:
@@ -157,6 +164,7 @@ def store_experience(memory: Memory, experience: Experience) -> Point:
             dag_nodes=merged_nodes,
             tools_used=sorted(set(candidate.tools_used) | set(experience.tools_used)),
             skills_used=sorted(set(candidate.skills_used) | set(experience.skills_used)),
+            generalized_nodes=experience.generalized_nodes or candidate.generalized_nodes,
             outcome=experience.outcome or candidate.outcome,
             lesson=(candidate.lesson + "\n" + experience.lesson).strip()
             if experience.lesson else candidate.lesson)
