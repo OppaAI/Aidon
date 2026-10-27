@@ -843,6 +843,16 @@ class WebUIServer:
         except Exception:
             return []
 
+    def _avatar_path(self) -> Path | None:
+        import os
+        candidates = []
+        configured = os.environ.get("AIDON_VRM_PATH", "").strip()
+        if configured:
+            candidates.append(Path(configured).expanduser())
+        candidates.extend((self.home / "avatar.vrm",
+                           self.home / "profile" / "avatar.vrm"))
+        return next((path for path in candidates if path.is_file()), None)
+
     def handle_chat(self, body: dict) -> dict:
         message = str(body.get("message", ""))
         control_reply = self._resolve_control(message)
@@ -2384,8 +2394,8 @@ loadSettings();
                 elif parsed.path == "/api/settings":
                     self._send_json(200, server.settings_get())
                 elif parsed.path == "/api/avatar.vrm":
-                    vrm_path = server.home / "avatar.vrm"
-                    if not vrm_path.exists():
+                    vrm_path = server._avatar_path()
+                    if vrm_path is None:
                         self._send_json(404, {"error": "no VRM file"})
                     else:
                         data = vrm_path.read_bytes()
@@ -2438,6 +2448,13 @@ loadSettings();
                     self._send_bytes(status, content_type, data)
                 elif parsed.path == "/api/voice":
                     self._send_json(200, server.handle_voice())
+                elif parsed.path == "/api/health":
+                    runs = server.run_control.list_runs() if server.run_control else []
+                    self._send_json(200, {"ok": True, "runs": len(runs)})
+                elif parsed.path == "/api/avatar/status":
+                    vrm_path = server._avatar_path()
+                    self._send_json(200, {"present": vrm_path is not None,
+                                          "source": str(vrm_path) if vrm_path else None})
                 elif parsed.path == "/api/reports":
                     self._send_json(200, server.handle_reports_list())
                 elif parsed.path.startswith("/api/reports/"):
@@ -2577,6 +2594,13 @@ loadSettings();
                     run_id = parsed.path[len("/api/runs/"):-len("/cancel")].strip("/")
                     ok = server.run_control.cancel(run_id, gate=server.webui_gate) if server.run_control else False
                     self._send_json(200 if ok else 404, {"ok": ok})
+                elif parsed.path.startswith("/api/runs/") and parsed.path.endswith("/cancel-queued"):
+                    run_id = parsed.path[len("/api/runs/"):-len("/cancel-queued")].strip("/")
+                    record = server.run_control.get(run_id) if server.run_control else None
+                    if record is None:
+                        self._send_json(404, {"error": "run not found"})
+                    else:
+                        self._send_json(409, {"error": "run is not queued"})
                 elif parsed.path == "/api/chat":
                     self._send_json(200, server.handle_chat(body))
                 elif parsed.path == "/api/dags":
