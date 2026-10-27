@@ -170,6 +170,16 @@ post-hackathon, NOT built, NOT demoed, at the end.
   and tick run need a configured model, like any
   goal run.
 
+- Qdrant, bwrap, and PIL fixes from PC test run, 182 passed
+  10 failed: sparse vectors moved to sparse_vectors_config,
+  point ids changed from 12-char hex to full UUIDs, both
+  required by newer qdrant-client local mode, bwrap now
+  binds /lib64, which holds the dynamic linker on Ubuntu,
+  so echo and sh no longer fail with execvp No such file,
+  and video pipeline tests skip if PIL is missing, same
+  pattern as the ffmpeg skip, instead of failing on a
+  missing optional package.
+
 ## Post-hackathon, NOT built, NOT demoed
 
 - Full VM backend: disposable VM running Docker

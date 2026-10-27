@@ -55,7 +55,30 @@ class Sandbox:
         if not command:
             raise ValueError("command must not be empty")
         if self.bwrap:
-            full = self._bwrap_argv(command)
+            full = [
+                self.bwrap,
+                "--unshare-net", "--unshare-pid",
+                "--ro-bind", "/usr", "/usr",
+                "--ro-bind", "/lib", "/lib",
+                "--ro-bind", "/etc", "/etc",
+                "--dev", "/dev",
+                "--bind", str(self.workdir), str(self.workdir),
+                "--chdir", str(self.workdir),
+                "--clearenv",
+                "--setenv", "PATH", "/usr/bin:/bin",
+                "--",
+                *command,
+            ]
+            # On Ubuntu, /lib64 is a symlink to usr/lib64, and it holds
+            # the dynamic linker /lib64/ld-linux-x86-64.so.2. Without
+            # binding it, bwrap fails with "execvp echo: No such file
+            # or directory", even though /usr/bin/echo exists, because
+            # the linker itself is missing inside the sandbox. Bind it
+            # only if it exists, so non-Ubuntu systems do not fail on
+            # a missing source path. Insert before the "--" separator.
+            if Path("/lib64").exists() or Path("/lib64").is_symlink():
+                sep = full.index("--")
+                full[sep:sep] = ["--ro-bind", "/lib64", "/lib64"]
             isolated = True
         else:
             full = list(command)
