@@ -315,18 +315,6 @@ class GoalRunner:
             self._mission_lifecycle = None
             self._trace("mission", "failed", f"mission start failed: {exc}")
 
-    def _checkpoint_store(self):
-      if not self.run_id:
-          return None
-      try:
-          from ..capabilities.registry_db import Registry
-          from .checkpoint import CheckpointStore
-          if getattr(self, "_checkpoint_registry", None) is None:
-              self._checkpoint_registry = Registry(self.home)
-          return CheckpointStore(self._checkpoint_registry)
-      except Exception:
-          return None
-
     def _save_checkpoint(self, phase: str, goal: str, plan, passed, verified=None,
                          attempt: int = 1) -> None:
         store = self._checkpoint_store()
@@ -429,6 +417,18 @@ class GoalRunner:
                 registry.close()
             self._mission_registry = None
 
+    def _checkpoint_store(self):
+      if not self.run_id:
+          return None
+      try:
+          from ..capabilities.registry_db import Registry
+          from .checkpoint import CheckpointStore
+          if getattr(self, "_checkpoint_registry", None) is None:
+              self._checkpoint_registry = Registry(self.home)
+          return CheckpointStore(self._checkpoint_registry)
+      except Exception:
+          return None
+  
     def _ask_for_approval(self, kind: str, title: str, body: str, **kwargs) -> Decision:
         """Ask the owner while excluding human wait from active elapsed time."""
         timer = getattr(self, "_elapsed_timer", None)
@@ -985,6 +985,16 @@ class GoalRunner:
                 })
         except Exception:
             pass
+
+        if report.status in ("done", "failed", "rejected", "chat", "cancelled"):
+            self._clear_checkpoint()
+        reg = getattr(self, "_checkpoint_registry", None)
+        if reg is not None:
+            try:
+                reg.close()
+            except Exception:
+                pass
+            self._checkpoint_registry = None
         return report
 
     def _execute_plan(self, goal: str, plan: Plan) -> RunReport:
@@ -1033,6 +1043,13 @@ class GoalRunner:
             return RunReport("failed", goal, plan, False, False,
                              error="plan has no deliverables")
         passed: set[str] = set()
+        verified: list[str] = []
+        resume = self._load_checkpoint(self.sandbox.workdir)
+        if resume is not None and resume.phase in ("sandbox", "verified", "approved"):
+            passed = set(resume.passed)
+            verified = list(resume.verified)
+            self._trace("checkpoint", "resumed",
+                        f"phase={resume.phase} passed={len(passed)}")
         current_plan = plan
         for attempt in range(1, MAX_ATTEMPTS + 1):
             failures: list[str] = []
@@ -1077,7 +1094,12 @@ class GoalRunner:
                     from .step_lines import record_attempt
                     record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "done")
                     self._trace("sandbox", "done", step.tool)
-                except Exception as exc:
+                    if step.deliverable:
+                        passed.add(step.deliverable)
+                    self._save_checkpoint(
+                        "sandbox", goal, current_plan, passed,
+                        verified=verified, attempt=attempt)
+                except Exception as exp:
                     failures.append(f"step {step.tool} failed: {exc}")
                     try:
                         from .step_lines import record_attempt
@@ -1116,10 +1138,11 @@ class GoalRunner:
                 if not any(name in msg for msg in failures):
                     passed.add(name)
             if model_failed:
-                # Model verifier said no, so passed files are
-                # not trusted for repair, repair re-runs them.
                 passed.clear()
             if ok and not model_failed:
+                self._save_checkpoint(
+                    "verified", goal, current_plan, passed,
+                    verified=verified, attempt=attempt)
                 break
             if attempt == MAX_ATTEMPTS:
                 return RunReport("failed", goal, current_plan, False, False,
@@ -1160,15 +1183,16 @@ class GoalRunner:
             self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"),
             force_ask=True,
         )
-        approved = decision.verdict in ("approved", "edited")
+                approved = decision.verdict in ("approved", "edited")
         self._mission_approval(approved)
         if not approved:
             return RunReport("rejected", goal, current_plan, True, False,
                              files=files, attempts=attempt,
                              backend=self._backend_name())
-        # Live execution, only after sandbox verification
-        # and owner approval, with live verification and
-        # rollback on failure. No live actions, no live step.
+        self._save_checkpoint(
+            "approved", goal, current_plan, passed,
+            verified=verified, attempt=attempt)
+        # Live execution...
         self._trace("live", "started", "live execution")
         live_record = None
         if getattr(self, "_live_actions", None):
