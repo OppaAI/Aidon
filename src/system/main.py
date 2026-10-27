@@ -1660,7 +1660,6 @@ def main(argv: list[str] | None = None) -> int:
                 threshold=config.autonomy_threshold,
                 decay_days=config.autonomy_decay_days,
             )
-            # Optional: disable AutonomyTracker so it cannot double-count
             server.webui_gate.autonomy_tracker = None
             server.webui_gate.slack_sender = slack_sender
             plugins = PluginRegistry(config.home)
