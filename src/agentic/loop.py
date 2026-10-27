@@ -240,9 +240,17 @@ class GoalRunner:
                 has_image = True
         if has_image and str(phase) in ("interpret", "learn", "respond"):
             try:
-                return self.client.chat(messages, sampling=sampling)
-            except TypeError:
-                return self.client.chat(messages)
+                from .image_guard import image_allowed
+                if not image_allowed("fast", True):
+                    try:
+                        return self.client.chat(messages, sampling=sampling)
+                    except TypeError:
+                        return self.client.chat(messages)
+            except Exception:
+                try:
+                    return self.client.chat(messages, sampling=sampling)
+                except TypeError:
+                    return self.client.chat(messages)
         if self.router is not None and str(phase) in ("interpret", "learn", "respond"):
             chat_phase = getattr(self.router, "chat_phase", None)
             if callable(chat_phase):

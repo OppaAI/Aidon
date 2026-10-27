@@ -1258,6 +1258,7 @@ class WebUIServer:
             {"key": "AIDON_SAM_API_KEY", "label": "SAM API key", "type": "string", "default": "", "desc": "SAM key; empty uses the main API key.", "secret": True},
             {"key": "AIDON_VERIFIER_MODEL", "label": "Verifier model", "type": "string", "default": "", "desc": "Independent model for verification; empty uses the main model.", "secret": False},
             {"key": "AIDON_VERIFY_SEED", "label": "Verifier seed", "type": "string", "default": "42", "desc": "Deterministic verify seed; leave empty to disable.", "secret": False},
+            {"key": "AIDON_VISION_TIERS", "label": "Vision tiers", "type": "string", "default": "strong", "desc": "Comma-separated model tiers allowed to receive images.", "secret": False},
             {"key": "AIDON_MAX_TOKENS_PER_RUN", "label": "Max tokens per run", "type": "int", "default": "200000", "desc": "Hard token budget for one goal run.", "secret": False},
             {"key": "AIDON_MAX_STEPS", "label": "Max steps", "type": "int", "default": "50", "desc": "Hard step budget for one goal run.", "secret": False},
             {"key": "AIDON_MAX_WALLCLOCK_MIN", "label": "Max wallclock minutes", "type": "int", "default": "60", "desc": "Hard wallclock budget for one goal run, in minutes.", "secret": False},

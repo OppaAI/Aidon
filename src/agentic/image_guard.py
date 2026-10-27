@@ -9,10 +9,14 @@ rejected call reports why.
 
 from __future__ import annotations
 
+import os
+
 
 def allowed_tiers() -> set[str]:
     """Tiers that may receive images."""
-    return {"strong"}
+    raw = os.environ.get("AIDON_VISION_TIERS", "strong")
+    values = {part.strip().lower() for part in raw.split(",") if part.strip()}
+    return values or {"strong"}
 
 
 def image_allowed(tier: str, has_image: bool) -> bool:
