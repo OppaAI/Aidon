@@ -5,17 +5,17 @@
 [![Repo](https://img.shields.io/badge/Repo-OppaAI%2FAidon-D9578C)](https://github.com/OppaAI/Aidon)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/Status-experimental-orange.svg)
-![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
-![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu&logoColor=white)
-![NVIDIA](https://img.shields.io/badge/NVIDIA-accelerated-76B900?logo=nvidia&logoColor=white)<br>
-![Sandbox](https://img.shields.io/badge/Sandbox-bubblewrap%20%7C%20Docker-2496ED?logo=docker&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-supported-2496ED?logo=docker&logoColor=white)
-![Meta Models](https://img.shields.io/badge/Meta%20Models-Muse%20Spark%201.3-0467DF?logo=meta&logoColor=white)
-![Memory](https://img.shields.io/badge/Memory-Qdrant-8E75B2)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu&logoColor=white)](https://ubuntu.com/)
+[![NVIDIA](https://img.shields.io/badge/NVIDIA-accelerated-76B900?logo=nvidia&logoColor=white)](https://www.nvidia.com/)<br>
+[![Sandbox](https://img.shields.io/badge/Sandbox-bubblewrap%20%7C%20Docker-2496ED?logo=docker&logoColor=white)](https://github.com/containers/bubblewrap)
+[![Docker](https://img.shields.io/badge/Docker-supported-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Meta Models](https://img.shields.io/badge/Meta%20Models-Muse%20Spark%201.3-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
+[![Memory](https://img.shields.io/badge/Memory-Qdrant-8E75B2)](https://qdrant.tech/)
 
 ---
 
-[![Author](https://img.shields.io/badge/Author-OppaAI-D9578C)](https://github.com/OppaAI)
+![Author](https://img.shields.io/badge/Author-OppaAI-D9578C)
 ![Contributors](https://img.shields.io/badge/Contributors-1-3776AB)
 ![Commits](https://img.shields.io/badge/Commits-131-76B900)
 ![Start date](https://img.shields.io/badge/Start%20date-October%2026%2C%202026-E95420)
