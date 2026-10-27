@@ -108,8 +108,13 @@ class GoalRunner:
                  kernel_mode: bool = False, semantic_router=None,
                  use_semantic_router_skip: bool = False,
                  run_id: str | None = None, run_control=None,
-                 researcher=None, extra_tools=None):
+                 researcher=None, extra_tools=None, router=None):
         self.client = client
+        # Optional phase router (duck-typed RouterClient): fast
+        # phases interpret/learn/respond go through it, every
+        # other phase uses the default client exactly as before.
+        # None means no change to any model call.
+        self.router = router
         self.sandbox = sandbox
         self.gate = gate
         self.home = Path(home)
@@ -137,6 +142,32 @@ class GoalRunner:
     def _trace(self, kind: str, status: str, detail: str = "") -> None:
         if self.trace is not None:
             self.trace.record(kind, status, detail)
+
+    def _chat(self, phase: str, messages) -> str:
+        """One model call, router-aware.
+
+        Fast phases (interpret, learn, respond) go through the
+        router when one is supplied; all other phases, and every
+        call when no router is supplied, use the default client
+        exactly as before (chat_phase when it has one, else chat).
+        The router is duck-typed: chat_phase(phase, messages)
+        preferred, chat(phase, messages) accepted, never
+        hard-required, so a plain client passed as router
+        still works.
+        """
+        if self.router is not None and str(phase) in ("interpret", "learn", "respond"):
+            chat_phase = getattr(self.router, "chat_phase", None)
+            if callable(chat_phase):
+                return chat_phase(phase, messages)
+            chat = getattr(self.router, "chat", None)
+            if callable(chat):
+                try:
+                    return chat(phase, messages)
+                except TypeError:
+                    return chat(messages)
+        if hasattr(self.client, "chat_phase"):
+            return self.client.chat_phase(phase, messages)
+        return self.client.chat(messages)
 
     def _backend_name(self) -> str:
         if self.execution_backend is not None:
@@ -250,10 +281,7 @@ class GoalRunner:
         if self.budget is not None:
             self.budget.add_tokens(user)
         _phase = "repair" if failure_context else "plan"
-        if hasattr(self.client, "chat_phase"):
-            reply = self.client.chat_phase(_phase, [Message("system", system), Message("user", user)])
-        else:
-            reply = self.client.chat([Message("system", system), Message("user", user)])
+        reply = self._chat(_phase, [Message("system", system), Message("user", user)])
         if self.budget is not None:
             self.budget.add_tokens(reply)
         self._trace("plan", "done", "plan proposed")
@@ -301,7 +329,7 @@ class GoalRunner:
         # router said chat, because that would silently miss the task.
         _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
         if self.use_semantic_router_skip and self.last_route and self.last_route[0] == "chat" and spec is None and not _write_intent:
-            reply = self.client.chat([Message("user", goal)])
+            reply = self._chat("respond", [Message("user", goal)])
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
@@ -367,6 +395,24 @@ class GoalRunner:
         report.adapted = bool(self._adapted)
         report.adapted_from = str(self._adapted_from)
         report.dag_summary = dict(self._dag_summary)
+        # Save the run state so `resume` can list and show it:
+        # goal, steps, completed files, status. Best effort only;
+        # a failed save must never fail the run itself.
+        try:
+            from .resume import save_run_state
+            home = getattr(self, "home", None)
+            if home is not None and getattr(self, "run_id", ""):
+                save_run_state(home, str(self.run_id), {
+                    "goal": report.goal,
+                    "steps": [s if isinstance(s, dict) else
+                              {"tool": getattr(s, "tool", ""),
+                               "deliverable": getattr(s, "deliverable", "")}
+                              for s in report.plan.steps],
+                    "completed": list(report.files),
+                    "status": report.status,
+                })
+        except Exception:
+            pass
         return report
 
     def _execute_plan(self, goal: str, plan: Plan) -> RunReport:

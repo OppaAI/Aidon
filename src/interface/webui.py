@@ -884,6 +884,172 @@ class WebUIServer:
         path.write_text(json.dumps(data, indent=2))
         return True
 
+    # -- WebUI depth: settings into .env, studio edits, plugin adoption.
+    #    These are new methods only; the existing /api/settings
+    #    behaviour above (settings.json, 8 keys) is unchanged. ------
+    _ENV_SETTING_MAP = {
+        "timezone": "AIDON_TIMEZONE",
+        "budget_tokens": "AIDON_MAX_TOKENS_PER_RUN",
+        "max_steps": "AIDON_MAX_STEPS",
+        "autonomy_enabled": "AIDON_AUTONOMY_ENABLED",
+        "approval_nudge_minutes": "AIDON_APPROVAL_NUDGE_MIN",
+        "research_max_rounds": "AIDON_RESEARCH_MAX_ROUNDS",
+        "max_stuck_iterations": "AIDON_MAX_STUCK_ITERATIONS",
+        "parallel_tools": "AIDON_PARALLEL_TOOLS",
+        "daily_report_time": "AIDON_DAILY_REPORT_TIME",
+        "execution_backend": "AIDON_EXECUTION_BACKEND",
+        "search_backend": "AIDON_SEARCH_BACKEND",
+        "searxng_url": "AIDON_SEARXNG_URL",
+        "qdrant_url": "AIDON_QDRANT_URL",
+        "image_model": "AIDON_IMAGE_MODEL",
+        "sam_model": "AIDON_SAM_MODEL",
+        "owner_email": "AIDON_OWNER_EMAIL",
+    }
+    _ENV_SECRET_MARKERS = ("TOKEN", "KEY", "SECRET", "PASSWORD", "CLIENT")
+
+    def settings_set_env(self, key: str, value) -> dict:
+        """Write one safe setting to <home>/.env, never a secret.
+
+        Accepts the friendly settings name (e.g. "timezone") or the
+        env var name itself (e.g. "AIDON_TIMEZONE"). Any key whose
+        name contains a secret marker is refused, as is any unknown
+        key and any value containing a newline (which would let a
+        value smuggle a second .env line in). The value is never
+        printed or returned: the result carries only the key name.
+        The .env file is created if missing and kept owner-only.
+        """
+        raw_key = str(key or "").strip()
+        env_key = self._ENV_SETTING_MAP.get(raw_key) or raw_key
+        if env_key not in self._ENV_SETTING_MAP.values():
+            return {"ok": False, "error": f"setting not writable to .env: {raw_key}"}
+        if any(marker in env_key for marker in self._ENV_SECRET_MARKERS):
+            return {"ok": False, "error": f"secret keys are never writable via settings: {raw_key}"}
+        text = str(value)
+        if "\n" in text or "\r" in text:
+            return {"ok": False, "error": "value must not contain a newline"}
+        path = self.home / ".env"
+        lines: list[str] = []
+        if path.is_file():
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                lines = []
+        out: list[str] = []
+        found = False
+        for line in lines:
+            stripped = line.strip()
+            candidate = stripped[7:].strip() if stripped.startswith("export ") else stripped
+            if "=" in candidate and candidate.split("=", 1)[0].strip() == env_key and not found:
+                out.append(f"{env_key}={text}")
+                found = True
+            else:
+                out.append(line)
+        if not found:
+            out.append(f"{env_key}={text}")
+        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+        return {"ok": True, "key": env_key}
+
+    def handle_memory_edit(self, collection: str, point_id: str, text: str) -> dict:
+        """Edit a memory point's text, or record the edit if the
+        point is not in the live store. Never silently dropped:
+        when the live store has no such point, the edit is written
+        to <home>/memory_edits/<point_id>.json and the result says
+        so, so it can be applied later instead of vanishing."""
+        collection = str(collection or "episodic")
+        point_id = str(point_id or "")
+        text = str(text or "")
+        if not point_id or not text:
+            return {"ok": False, "error": "memory edit needs point_id and text"}
+        if self.memory is not None:
+            try:
+                store = getattr(self.memory, "store", None)
+                point = None
+                if store is not None and hasattr(store, "get"):
+                    point = store.get(collection, point_id)
+                if point is not None:
+                    point.text = text
+                    if isinstance(getattr(point, "payload", None), dict):
+                        point.payload["text"] = text
+                    if hasattr(store, "set_payload"):
+                        store.set_payload(collection, point_id, {"text": text})
+                    if hasattr(store, "upsert"):
+                        store.upsert(collection, point)
+                    return {"ok": True, "point_id": point_id, "collection": collection, "via": "store"}
+            except Exception as exc:
+                return self._record_memory_edit(collection, point_id, text, error=f"{type(exc).__name__}: {exc}")
+        return self._record_memory_edit(collection, point_id, text)
+
+    def _record_memory_edit(self, collection: str, point_id: str, text: str, error: str = "") -> dict:
+        record = {"collection": collection, "point_id": point_id, "text": text, "action": "edit"}
+        if error:
+            record["store_error"] = error
+        self._write_json_file(
+            self._json_dir("memory_edits") / f"{self._safe_name(point_id)}.json", record)
+        return {"ok": True, "point_id": point_id, "collection": collection, "via": "recorded", "recorded": True}
+
+    def handle_skill_edit(self, name: str, description: str) -> dict:
+        """Edit a skill's description in the SkillLibrary, or record
+        the edit if the skill is not in the library. Never silently
+        dropped: a missing skill gets a <home>/skill_edits/<name>.json
+        record instead of a vanishing edit."""
+        name = str(name or "")
+        description = str(description or "")
+        if not name or not description:
+            return {"ok": False, "error": "skill edit needs name and description"}
+        try:
+            from ..capabilities.skill_library import SkillLibrary
+            library = SkillLibrary(self.home)
+            skill = library.get(name)
+            if skill is not None:
+                skill.description = description
+                library._update(skill)
+                return {"ok": True, "name": name, "via": "library"}
+        except Exception as exc:
+            record = {"name": name, "description": description, "action": "edit", "library_error": f"{type(exc).__name__}: {exc}"}
+            self._write_json_file(
+                self._json_dir("skill_edits") / f"{self._safe_name(name)}.json", record)
+            return {"ok": True, "name": name, "via": "recorded", "recorded": True}
+        record = {"name": name, "description": description, "action": "edit"}
+        self._write_json_file(
+            self._json_dir("skill_edits") / f"{self._safe_name(name)}.json", record)
+        return {"ok": True, "name": name, "via": "recorded", "recorded": True}
+
+    def handle_plugin_adopt(self, path: str, approve=None) -> dict:
+        """Adopt a plugin directory through the approval gate.
+
+        When approve is supplied (tests, or a caller that already
+        holds approval) it is passed straight to adopt. Otherwise
+        adoption goes through the server's approval gate, which
+        creates a card the owner approves or rejects; with no gate
+        available adoption is refused rather than auto-adopted.
+        Findings are returned as plain dicts, never raw objects.
+        """
+        path = str(path or "")
+        if not path:
+            return {"ok": False, "error": "plugin adopt needs a path"}
+        source = Path(path)
+        if not source.is_dir():
+            return {"ok": False, "error": f"plugin directory not found: {path}"}
+        from ..capabilities.plugins import PluginRegistry
+        registry = PluginRegistry(self.home)
+        registry.load_all()
+        gate = None if approve is not None else getattr(self.webui_gate, "gate", None)
+        if approve is None and gate is None:
+            return {"ok": False, "error": "adoption needs approval"}
+        ok, findings, message = registry.adopt(source, gate=gate, approve=approve)
+        finding_dicts = []
+        for finding in findings:
+            if hasattr(finding, "to_dict"):
+                finding_dicts.append(finding.to_dict())
+            else:
+                finding_dicts.append({"type": getattr(finding, "type", ""), "path": str(getattr(finding, "path", "")),
+                                      "line": getattr(finding, "line", 0), "message": str(getattr(finding, "message", finding))})
+        return {"ok": ok, "findings": finding_dicts, "message": message}
+
     def handle_entities(self, entity: str) -> dict:
         graph = getattr(self.memory, "entity_graph", None) if self.memory is not None else None
         if graph is None:
@@ -1123,8 +1289,8 @@ class WebUIServer:
                     html = "<h1>Capabilities</h1><p>What Aidon can do, what it has learned, and the evidence.</p>"
                     html += f"<p>Sandbox tools: write, read, list, shell, calculate</p><p>Plugin tools: {', '.join(_reg.tool_names())}</p>"
                     html += "<p>Computer use: screenshot and click, type, scroll, key, approval-gated, no driver configured by default, no GUI action without a driver.</p>"
-                    html += "<h2>Capabilities studio</h2><p>Record a skill success or failure, or probe a plugin dir, via POST /api/studio/capabilities with JSON {action: success|failure|probe, name, path}.</p>"
-                    html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/capabilities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('cap_action').value,name:document.getElementById('cap_name').value,path:document.getElementById('cap_path').value})}).then(r=>r.json()).then(d=>document.getElementById('cap_result').textContent=JSON.stringify(d));\"><select id=\"cap_action\"><option>success</option><option>failure</option><option>probe</option></select> <input id=\"cap_name\" placeholder=\"skill name\"> <input id=\"cap_path\" placeholder=\"plugin dir for probe\"> <button>Run</button></form><pre id=\"cap_result\"></pre>"
+                    html += "<h2>Capabilities studio</h2><p>Record a skill success or failure, or probe a plugin dir, or edit a skill's description, via POST /api/studio/capabilities with JSON {action: success|failure|probe|edit, name, path, description}.</p>"
+                    html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/capabilities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('cap_action').value,name:document.getElementById('cap_name').value,path:document.getElementById('cap_path').value,description:document.getElementById('cap_desc').value})}).then(r=>r.json()).then(d=>document.getElementById('cap_result').textContent=JSON.stringify(d));\"><select id=\"cap_action\"><option>success</option><option>failure</option><option>probe</option></select> <input id=\"cap_name\" placeholder=\"skill name\"> <input id=\"cap_path\" placeholder=\"plugin dir for probe\"> <button>Run</button></form><pre id=\"cap_result\"></pre>"
                     self._send_html(200, html)
                 elif parsed.path == "/memory":
                     html = "<h1>Memory</h1><p>Episodes Aidon remembers from past work, by collection, no secret values.</p>"
@@ -1137,8 +1303,8 @@ class WebUIServer:
                                     html += f"<p>{point.id} {point.payload.get('text', '')[:120]}</p>"
                             except Exception:
                                 continue
-                    html += "<h2>Memory studio</h2><p>Forget a point, prune a collection, or promote an episodic point, via POST /api/studio/memory with JSON {action: forget|prune|promote, collection, point_id}.</p>"
-                    html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/memory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('mem_action').value,collection:document.getElementById('mem_coll').value,point_id:document.getElementById('mem_id').value})}).then(r=>r.json()).then(d=>document.getElementById('mem_result').textContent=JSON.stringify(d));\"><select id=\"mem_action\"><option>forget</option><option>prune</option><option>promote</option></select> <input id=\"mem_coll\" value=\"episodic\"> <input id=\"mem_id\" placeholder=\"point id\"> <button>Run</button></form><pre id=\"mem_result\"></pre>"
+                    html += "<h2>Memory studio</h2><p>Forget a point, prune a collection, or promote an episodic point, or edit a point's text, via POST /api/studio/memory with JSON {action: forget|prune|promote|edit, collection, point_id, text}.</p>"
+                    html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/memory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('mem_action').value,collection:document.getElementById('mem_coll').value,point_id:document.getElementById('mem_id').value,text:document.getElementById('mem_text').value})}).then(r=>r.json()).then(d=>document.getElementById('mem_result').textContent=JSON.stringify(d));\"><select id=\"mem_action\"><option>forget</option><option>prune</option><option>promote</option></select> <input id=\"mem_coll\" value=\"episodic\"> <input id=\"mem_id\" placeholder=\"point id\"> <button>Run</button></form><pre id=\"mem_result\"></pre>"
                     self._send_html(200, html)
                 elif parsed.path == "/knowledge":
                     html = "<h1>Knowledge</h1><p>Documents and facts Aidon has ingested, from the knowledge collection and library.</p>"
@@ -1258,6 +1424,9 @@ class WebUIServer:
                 elif parsed.path == "/api/settings":
                     ok = server.settings_set(str(body.get("key", "")), body.get("value"))
                     self._send_json(200 if ok else 400, {"ok": ok})
+                elif parsed.path == "/api/settings/env":
+                    result = server.settings_set_env(str(body.get("key", "")), body.get("value", ""))
+                    self._send_json(200 if result.get("ok") else 400, result)
                 elif parsed.path == "/api/transcribe":
                     if not server.transcribe_key:
                         self._send_json(501, {"error": "transcribe key not configured"})
@@ -1293,7 +1462,16 @@ class WebUIServer:
                     ok = server.webui_gate.approve(card_id, verdict)
                     self._send_json(200 if ok else 404, {"ok": ok})
                 elif parsed.path == "/api/studio/memory":
-                    if server.memory is None:
+                    if str(body.get("action", "")) == "edit":
+                        # Edit works with or without a live memory
+                        # store: without one it is recorded, never
+                        # dropped, under <home>/memory_edits/.
+                        result = server.handle_memory_edit(
+                            str(body.get("collection", "episodic")),
+                            str(body.get("point_id", "")),
+                            str(body.get("text", "")))
+                        self._send_json(200 if result.get("ok") else 400, result)
+                    elif server.memory is None:
                         self._send_json(500, {"error": "no memory"})
                     else:
                         action = str(body.get("action", ""))
@@ -1325,7 +1503,11 @@ class WebUIServer:
                             self._send_json(400, {"error": "unknown knowledge studio action"})
                 elif parsed.path == "/api/studio/capabilities":
                     action = str(body.get("action", ""))
-                    if action in ("success", "failure"):
+                    if action == "edit":
+                        result = server.handle_skill_edit(
+                            str(body.get("name", "")), str(body.get("description", "")))
+                        self._send_json(200 if result.get("ok") else 400, result)
+                    elif action in ("success", "failure"):
                         from ..capabilities.skill_lifecycle import LifecycleStore
                         lifecycle = LifecycleStore(server.home)
                         name = str(body.get("name", ""))
@@ -1363,6 +1545,9 @@ class WebUIServer:
                     self._send_json(status, payload)
                 elif parsed.path == "/api/goals/with-images":
                     self._send_json(200, server.handle_goal_with_images(body))
+                elif parsed.path == "/api/plugins/adopt":
+                    result = server.handle_plugin_adopt(str(body.get("path", "")))
+                    self._send_json(200 if result.get("ok") else 400, result)
                 elif parsed.path == "/webhook/whatsapp":
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     status, payload = server.handle_whatsapp_post(body, raw, headers)

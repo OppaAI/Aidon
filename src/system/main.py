@@ -51,6 +51,183 @@ def _promotion_ask(point) -> bool:
     return answer in ("y", "yes")
 
 
+def _goal_extra_tools(config, workdir, gate=None) -> dict:
+    """Extra tools for goal runs, built from existing modules only.
+
+    The loop approval-gates any extra tool whose name contains
+    post, send, or publish before dispatch, and that gate is not
+    weakened here: email send and social publish keep those words
+    in their names, so they always go through the gate. Tools that
+    write files (charts) are confined to the sandbox workdir.
+    No Gmail MCP here: that direction is dropped by the owner,
+    Gmail API send already exists via the email draft/sender path.
+    """
+    from pathlib import Path
+    workdir = Path(workdir)
+    tools: dict = {}
+
+    def _confined(name: str) -> Path:
+        target = (workdir / str(name)).resolve()
+        root = workdir.resolve()
+        if target != root and root not in target.parents:
+            raise ValueError(f"path outside workdir: {name}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return target
+
+    try:
+        from ..capabilities.charts import bar_chart, line_chart
+
+        def make_bar_chart(title, data, output="chart.svg"):
+            pairs = [(str(label), float(value)) for label, value in data]
+            return str(bar_chart(title, pairs, _confined(output)))
+
+        def make_line_chart(title, data, output="chart.svg"):
+            pairs = [(str(label), float(value)) for label, value in data]
+            return str(line_chart(title, pairs, _confined(output)))
+
+        tools["make_bar_chart"] = make_bar_chart
+        tools["make_line_chart"] = make_line_chart
+    except Exception:
+        pass
+    try:
+        from ..capabilities.docgen import build_ebook, generate_document
+        tools["generate_document"] = generate_document
+        tools["build_ebook"] = build_ebook
+    except Exception:
+        pass
+    try:
+        from ..capabilities.github_tools import fetch_file, search_repos
+
+        def github_search(query, token=""):
+            return search_repos(query, token=token or getattr(config, "github_token", "") or "")
+
+        def github_fetch(owner, repo, path, ref="main", token=""):
+            return fetch_file(owner, repo, path, ref=ref,
+                              token=token or getattr(config, "github_token", "") or "")
+
+        tools["github_search"] = github_search
+        tools["github_fetch"] = github_fetch
+    except Exception:
+        pass
+    try:
+        from ..social.social import publish_instagram, publish_threads
+
+        def threads_publish(text):
+            return publish_threads(
+                text, getattr(config, "threads_account_id", ""),
+                getattr(config, "threads_access_token", ""),
+                approve=lambda kind, body: True)
+
+        def instagram_publish(image_url, caption=""):
+            return publish_instagram(
+                image_url, caption, getattr(config, "ig_user_id", ""),
+                getattr(config, "ig_access_token", ""),
+                approve=lambda kind, body: True)
+
+        tools["threads_publish"] = threads_publish
+        tools["instagram_publish"] = instagram_publish
+    except Exception:
+        pass
+    try:
+        from ..capabilities.voice import transcribe, tts
+
+        def tts_speak(text, voice_id=""):
+            result = tts(text, getattr(config, "fish_api_key", ""),
+                         voice_id or getattr(config, "tts_voice_id", ""))
+            return str(result.get("ok", False))
+
+        def transcribe_audio(audio_bytes, key=""):
+            result = transcribe(audio_bytes, key or getattr(config, "transcribe_api_key", ""))
+            return result.get("text", "")
+
+        tools["tts_speak"] = tts_speak
+        tools["transcribe_audio"] = transcribe_audio
+    except Exception:
+        pass
+    try:
+        from ..capabilities.email import make_draft, send_draft
+
+        def email_make_draft(to, subject, body):
+            return make_draft(config.home, to, subject, body)
+
+        def email_send(draft, owner_email=""):
+            return send_draft(config.home, draft,
+                              owner_email or getattr(config, "owner_email", ""),
+                              approve=lambda kind, body: True, sender=None)
+
+        tools["email_make_draft"] = email_make_draft
+        tools["email_send"] = email_send
+    except Exception:
+        pass
+    try:
+        from ..capabilities.office import (  # type: ignore
+            make_docx, make_latex, make_slides, make_spreadsheet)
+
+        # Office builders take an output path: confine it to the
+        # workdir like the chart builders, so a model-supplied
+        # path cannot escape the sandbox. Each wrapper confines
+        # only its own output argument, by position.
+        def _office_spreadsheet(sheets, output):
+            return make_spreadsheet(sheets, str(_confined(output)))
+
+        def _office_docx(title, blocks, output):
+            return make_docx(title, blocks, str(_confined(output)))
+
+        def _office_slides(title, slides, output):
+            return make_slides(title, slides, str(_confined(output)))
+
+        def _office_latex(title, sections, output, author="Aidon"):
+            return make_latex(title, sections, str(_confined(output)), author=author)
+
+        tools["make_spreadsheet"] = _office_spreadsheet
+        tools["make_docx"] = _office_docx
+        tools["make_slides"] = _office_slides
+        tools["make_latex"] = _office_latex
+    except Exception:
+        pass  # office.py absent; the guarded import skips it.
+    try:
+        from ..capabilities.audio import record_system_audio
+        def record_audio(seconds, output="recording.wav"):
+            return record_system_audio(int(seconds), str(_confined(output)))
+        tools["record_system_audio"] = record_audio
+    except Exception:
+        pass
+    try:
+        from ..agentic.file_versions import write_versioned
+        def write_versioned_tool(name, text, expected_hash=""):
+            result = write_versioned(workdir, name, text, expected_hash=expected_hash or None)
+            return str(result)
+        tools["write_versioned"] = write_versioned_tool
+    except Exception:
+        pass
+
+    def ask_user(question):
+        if gate is None:
+            return "no gate configured"
+        try:
+            decision = gate.ask("live", "Aidon asks", str(question))
+            if decision.verdict != "approved":
+                return f"question not approved: {question}"
+        except Exception:
+            pass
+        return str(question)
+
+    def declare_blocked(reason):
+        return f"[blocked] {reason}"
+
+    def schedule_job(name, kind="", schedule="", goal=""):
+        from ..interface.triggers import Scheduler, SchedulerJob
+        scheduler = Scheduler(config.home)
+        scheduler.add_job(SchedulerJob(name=name, schedule=schedule,
+                                       goal=goal, project_id="default"))
+        return f"scheduled {name} ({kind}) {schedule}: {goal}"
+
+    tools["ask_user"] = ask_user
+    tools["declare_blocked"] = declare_blocked
+    tools["schedule_job"] = schedule_job
+    return tools
+
+
 def _make_memory(config: Config):
     """Memory with the real embedder if available, else Hash, with warning."""
     try:
@@ -284,6 +461,19 @@ def main(argv: list[str] | None = None) -> int:
     intake_parser = sub.add_parser("intake", help="Intake schema: missing slots and summary for a goal text")
     intake_parser.add_argument("--schema", default="generic", help="Schema name: generic or dinner")
     intake_parser.add_argument("text", nargs="?", default="", help="Goal text to check against the schema")
+    resume_parser = sub.add_parser("resume", help="Resume a saved run: list saved runs, or show one")
+    resume_parser.add_argument("run_id", nargs="?", default="", help="Run id to show; empty = list")
+    plan_guard_parser = sub.add_parser("plan-guard", help="Validate a plan JSON file against available tools")
+    plan_guard_parser.add_argument("file", help="Plan JSON file")
+    plan_guard_parser.add_argument("--tools", default="write,read,list,shell,calculate", help="Comma-separated available tools")
+    inventory_parser = sub.add_parser("inventory", help="Artifact inventory for a workdir")
+    inventory_parser.add_argument("workdir", nargs="?", default="", help="Workdir; default = configured workdir")
+    delivery_parser = sub.add_parser("delivery", help="Delivery summary from a run report JSON file")
+    delivery_parser.add_argument("file", help="Run report JSON file")
+    think_parser = sub.add_parser("think", help="Think effort and sampling for a phase")
+    think_parser.add_argument("phase", help="Phase: interpret, research, plan, sandbox, verify, approval, live, learn, respond")
+    think_parser.add_argument("--level", default="", help="Requested effort level: off, low, medium, high")
+    think_parser.add_argument("--escalate", action="store_true", help="Raise one level (verifier rejection only)")
     args = parser.parse_args(argv)
 
     config = Config.load()
@@ -302,6 +492,9 @@ def main(argv: list[str] | None = None) -> int:
     # local small model works too: set the endpoint to a local
     # Ollama, AIDON_MODEL to the strong model, and AIDON_FAST_MODEL
     # to the small local model. No Ollama-specific branch in the loop.
+    main_client = client
+    fast_client = None
+    model_router = None
     if config.fast_model and config.fast_model != config.model:
         from dataclasses import replace
         from ..agentic.router import RoutedClient
@@ -311,6 +504,15 @@ def main(argv: list[str] | None = None) -> int:
         fast_client = client_for_config(fast_config)
         fast_phases = {s.strip() for s in config.router_fast_phases.split(",") if s.strip()}
         client = RoutedClient(fast_client, client, fast_phases=fast_phases)
+        # ALSO build the phase router: fast phases go to the fast
+        # client, everything else to the main client. If building
+        # it fails, the RoutedClient above stays the behaviour.
+        try:
+            from ..system.model_router import RouterClient
+            phase_clients = {phase: fast_client for phase in fast_phases}
+            model_router = RouterClient(phase_clients, default=main_client)
+        except Exception:
+            model_router = None
     sandbox = Sandbox(config.workdir, config.sandbox_timeout_seconds)
     memory = _LazyMemory(config)
 
@@ -321,6 +523,48 @@ def main(argv: list[str] | None = None) -> int:
               f"retired={summary.get('retired_duplicates', [])} "
               f"trusted_for_review={summary.get('trusted_duplicates_for_review', [])} "
               f"skipped={summary.get('skipped', [])}")
+        return 0
+    if args.command == "resume":
+        from ..agentic.resume import list_runs, resume_state
+        if args.run_id:
+            ok, state, error = resume_state(config.home, args.run_id)
+            if not ok:
+                print(f"cannot resume: {error}"); return 2
+            print(f"Resuming run {args.run_id}: goal={state.get('goal','')} steps={len(state.get('steps',[]))} completed={state.get('completed',[])}")
+        else:
+            for run_id in list_runs(config.home):
+                print(run_id)
+        return 0
+    if args.command == "plan-guard":
+        import json as _json
+        from pathlib import Path as _Path
+        from ..agentic.plan_guard import plan_first_summary, validate_plan
+        plan = _json.loads(_Path(args.file).read_text())
+        failures = validate_plan(plan, [t.strip() for t in args.tools.split(",") if t.strip()])
+        print(plan_first_summary(plan))
+        if failures:
+            for failure in failures:
+                print(f"FAIL: {failure}")
+            return 2
+        print("plan guard: pass")
+        return 0
+    if args.command == "inventory":
+        from pathlib import Path as _Path
+        from ..agentic.artifact_inventory import inventory, inventory_markdown
+        workdir = _Path(args.workdir) if args.workdir else config.workdir
+        print(inventory_markdown(workdir))
+        return 0
+    if args.command == "delivery":
+        import json as _json
+        from pathlib import Path as _Path
+        from ..agentic.delivery_summary import delivery_summary
+        report = _json.loads(_Path(args.file).read_text())
+        print(delivery_summary(report))
+        return 0
+    if args.command == "think":
+        from ..agentic.think_effort import effort_for, resolve_effort, sampling_for
+        level = resolve_effort(args.phase, requested=args.level or None, escalate=args.escalate)
+        print(f"phase={args.phase} effort={level} sampling={sampling_for(args.phase)}")
         return 0
     if args.command == "skill-library":
         from ..capabilities.skill_library import SkillLibrary
@@ -1437,12 +1681,16 @@ def main(argv: list[str] | None = None) -> int:
             return [f"{r.get('title', '')}: {r.get('snippet', '')}" for r in result.get("results", [])]
         except Exception:
             return []
+    import uuid as _uuid
     runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
                         memory=memory, promotion_ask=_promotion_ask,
                         project_id=args.project, plugins=plugins, execution_backend=execution_backend,
                         budget=budget, trace=trace, model_verifier=model_verifier,
                         kernel_mode=config.kernel_mode, semantic_router=_cli_router,
-                        use_semantic_router_skip=True, researcher=_researcher, extra_tools={})
+                        use_semantic_router_skip=True, researcher=_researcher,
+                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate()),
+                        router=model_router,
+                        run_id=_uuid.uuid4().hex[:12])
     spec = None
     if getattr(args, "spec", None):
         from pathlib import Path

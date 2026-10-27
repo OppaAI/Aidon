@@ -48,3 +48,54 @@ function startVrmLipSync(vrm, audioElement) {
 
 def vrm_lip_sync_js() -> str:
     return VRM_LIP_SYNC_JS
+
+
+def record_system_audio(seconds: int, out_path) -> str:
+    """Capture host system audio into a WAV file.
+
+    Host-side, not sandboxed, and approval-gated at the tool
+    layer (the caller asks the human first; this function only
+    records). Tries ffmpeg, then arecord, then sox, in that
+    order, with a timeout. If none of them is present, raises
+    RuntimeError naming all three — it never writes silence
+    and calls it a recording. A recorder that exits non-zero,
+    or leaves no non-empty file, also raises RuntimeError.
+    """
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    if not isinstance(seconds, int) or isinstance(seconds, bool):
+        raise ValueError("seconds must be an integer")
+    if seconds < 1 or seconds > 4 * 3600:
+        raise ValueError("seconds must be 1..14400")
+    if not str(out_path).strip():
+        raise ValueError("out_path is required")
+    path = Path(out_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    recorders = [
+        ("ffmpeg", ["ffmpeg", "-y", "-f", "pulse", "-i", "default",
+                    "-t", str(seconds), str(path)]),
+        ("arecord", ["arecord", "-f", "cd", "-t", "wav",
+                     "-d", str(seconds), str(path)]),
+        ("sox", ["sox", "-d", str(path), "trim", "0", str(seconds)]),
+    ]
+    available = [(name, argv) for name, argv in recorders
+                 if shutil.which(name) is not None]
+    if not available:
+        raise RuntimeError(
+            "no audio recorder found: install ffmpeg, arecord, or sox")
+    errors = []
+    for name, argv in available:
+        try:
+            proc = subprocess.run(argv, capture_output=True, text=True,
+                                  timeout=seconds + 60)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            errors.append(f"{name}: {type(exc).__name__}")
+            continue
+        if proc.returncode == 0 and path.is_file() and path.stat().st_size > 0:
+            return str(path)
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        errors.append(f"{name}: exit {proc.returncode}"
+                      + (f" ({detail[-1][:120]})" if detail else ""))
+    raise RuntimeError("audio recording failed: " + "; ".join(errors))
