@@ -153,6 +153,47 @@ function mouthForChar(ch) {
   if (ch === ' ') return 0.4;
   return 0.9;
 }
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function renderInline(s) {
+  // s is already escaped: bold, code, and links are inserted as
+  // markup AFTER escaping, so model text can never inject HTML.
+  let out = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+  out = out.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
+  out = out.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^)\\s]+)\\)/g, '<a href="$2">$1</a>');
+  return out;
+}
+function render_markdown(text) {
+  // Hand-rolled, table-aware: consecutive lines starting with |
+  // whose second line is a separator row of | - : and spaces
+  // become a real <table>; other lines get inline rendering.
+  // Non-table lines are joined with <br> so line breaks survive.
+  const lines = text.split('\\n');
+  let html = '';
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const next = lines[i + 1] || '';
+    const isTable = line.trim().startsWith('|') && /^[\\s|:\\-]+$/.test(next) && next.includes('-');
+    if (isTable) {
+      const rows = [line];
+      i += 2;
+      while (i < lines.length && lines[i].trim().startsWith('|')) { rows.push(lines[i]); i++; }
+      const cells = (row) => row.trim().replace(/^\\|/, '').replace(/\\|$/, '').split('|').map((c) => renderInline(escapeHtml(c.trim())));
+      html += '<table><tr>' + cells(rows[0]).map((c) => '<th>' + c + '</th>').join('') + '</tr>';
+      for (const row of rows.slice(1)) {
+        html += '<tr>' + cells(row).map((c) => '<td>' + c + '</td>').join('') + '</tr>';
+      }
+      html += '</table>';
+    } else {
+      html += renderInline(escapeHtml(line));
+      if (i < lines.length - 1) { html += '<br>'; }
+      i++;
+    }
+  }
+  return html;
+}
 async function typewriterKaraoke(element, text) {
   const words = text.split(/([ \t\n]+)/);
   let done = '';
@@ -171,7 +212,10 @@ async function typewriterKaraoke(element, text) {
       await new Promise((r) => setTimeout(r, 18));
     }
   }
-  element.innerHTML = '<span class="karaoke-done">' + text + '</span>';
+  // Completion hook: typing shows plain characters progressively,
+  // but once typing finishes the message is re-rendered as
+  // markdown, so tables, bold, code, and links display properly.
+  element.innerHTML = render_markdown(text);
   setSpeaking(false);
   setAvatarStatus('Idle');
 }
@@ -1398,6 +1442,39 @@ class WebUIServer:
         return {"sandbox_tools": ["write", "read", "list", "shell", "calculate"],
                 "plugin_tools": registry.tool_names()}
 
+    _FILE_CONTENT_TYPES = {
+        ".md": "text/markdown", ".txt": "text/plain",
+        ".html": "text/html", ".json": "application/json",
+        ".pdf": "application/pdf", ".png": "image/png",
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    }
+
+    def handle_file(self, path: str) -> tuple[int, str, bytes]:
+        """Serve one file from under the server's home directory.
+
+        Returns (status, content_type, body). The requested path is
+        resolved (symlinks followed) BEFORE the confinement check,
+        so a symlink inside home pointing outside home is refused
+        with 403, exactly like a literal traversal. A missing file
+        is 404, a directory is 400. Nothing outside home is ever
+        served, so this endpoint cannot become a way to read /etc.
+        """
+        home = Path(self.home).resolve()
+        candidate = Path(path) if Path(path).is_absolute() else home / path
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            return 404, "application/json", b'{"error": "not found"}'
+        if not resolved.is_relative_to(home):
+            return 403, "application/json", b'{"error": "outside home"}'
+        if resolved.is_dir():
+            return 400, "application/json", b'{"error": "is a directory"}'
+        if not resolved.is_file():
+            return 404, "application/json", b'{"error": "not found"}'
+        content_type = self._FILE_CONTENT_TYPES.get(
+            resolved.suffix.lower(), "application/octet-stream")
+        return 200, content_type, resolved.read_bytes()
+
     def _conversations_db(self):
         from ..memory.conversations_db import ConversationStoreDB
         return ConversationStoreDB(self.home)
@@ -1619,6 +1696,13 @@ class WebUIServer:
                 self.end_headers()
                 self.wfile.write(data)
 
+            def _send_bytes(self, status: int, content_type: str, data: bytes):
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
             def _read_body(self) -> bytes:
                 length = int(self.headers.get("Content-Length", 0) or 0)
                 return self.rfile.read(length) if length else b""
@@ -1762,6 +1846,14 @@ class WebUIServer:
                     self._send_json(200 if data is not None else 404, data or {"error": "not found"})
                 elif parsed.path == "/api/ideas":
                     self._send_json(200, server.handle_ideas_list())
+                elif parsed.path == "/api/files":
+                    # Same-origin file serving: the auth check at the
+                    # top of do_GET already ran (is_authorized), so
+                    # this branch only confines the path to home.
+                    query = parse_qs(parsed.query)
+                    requested = query.get("path", [""])[0]
+                    status, content_type, data = server.handle_file(requested)
+                    self._send_bytes(status, content_type, data)
                 elif parsed.path == "/webhook/whatsapp":
                     query = parse_qs(parsed.query)
                     status, text = server.handle_whatsapp_get(query)

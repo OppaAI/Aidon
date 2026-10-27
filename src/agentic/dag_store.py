@@ -21,9 +21,38 @@ only, never a path, so a crafted id cannot escape dags/.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from .dag import DAG, DAGNode
+
+# Words that carry no goal shape: articles, prepositions,
+# pronouns, and politeness fillers. Everything else in a
+# goal counts toward its shape, so two goals that differ
+# only in filler still match, while goals about different
+# things do not.
+_STOPWORDS = frozenset({
+    "a", "an", "the", "and", "or", "to", "of", "for", "in", "on",
+    "with", "my", "me", "i", "is", "it", "be", "by", "at", "from",
+    "please", "then", "that", "this", "as", "into", "about",
+})
+
+_LEARN_SIMILARITY = 0.3
+
+
+def _goal_words(goal: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", str(goal).lower())
+            if w not in _STOPWORDS}
+
+
+def _goal_slug(goal: str) -> str:
+    words = [w for w in re.findall(r"[a-z0-9]+", str(goal).lower())
+             if w not in _STOPWORDS][:4]
+    slug = "-".join(words) or "goal"
+    try:
+        return _safe_id(slug)
+    except ValueError:
+        return "goal"
 
 
 def _safe_id(dag_id: str) -> str:
@@ -99,6 +128,64 @@ class DagStore:
             except Exception:
                 pass
         return True, []
+
+    def learn(self, goal: str, nodes: list) -> tuple[str, str]:
+        """Learn a proven run's DAG into the library.
+
+        One DAG per goal shape: the new goal's content words
+        are compared (Jaccard similarity) against every saved
+        DAG's goal. At 0.3 or above, the best match is
+        REPLACED under its existing id — no near-duplicate
+        is added. Below that, the DAG is saved under a new
+        slug id derived from the goal, so distinct shapes
+        coexist. Returns ("replaced", id), ("added", id),
+        or ("invalid", "") when the nodes cannot form a
+        valid DAG. This is the learn path only; the editor
+        path (save) is untouched.
+        """
+        norm = []
+        for index, node in enumerate(nodes or []):
+            if isinstance(node, dict):
+                item = {"id": f"step-{index + 1}",
+                        "tool": str(node.get("tool", "write")),
+                        "args": dict(node.get("args", {})) if isinstance(node.get("args", {}), dict) else {},
+                        "deliverable": str(node.get("deliverable", "")),
+                        "depends_on": list(node.get("depends_on", [])) if isinstance(node.get("depends_on", []), list) else []}
+            else:
+                item = {"id": f"step-{index + 1}",
+                        "tool": str(getattr(node, "tool", "write")),
+                        "args": dict(getattr(node, "args", {}) or {}),
+                        "deliverable": str(getattr(node, "deliverable", "")),
+                        "depends_on": []}
+            norm.append(item)
+        if not norm:
+            return ("invalid", "")
+        words = _goal_words(goal)
+        best_id, best_score = "", 0.0
+        for entry in self.list_dags():
+            saved = self.get(entry["id"])
+            if saved is None:
+                continue
+            other = _goal_words(saved.get("goal", ""))
+            if not words and not other:
+                score = 1.0
+            elif not words or not other:
+                score = 0.0
+            else:
+                score = len(words & other) / len(words | other)
+            if score > best_score:
+                best_id, best_score = entry["id"], score
+        if best_id and best_score >= _LEARN_SIMILARITY:
+            ok, _failures = self.save(best_id, goal, norm)
+            return ("replaced", best_id) if ok else ("invalid", "")
+        slug = _goal_slug(goal)
+        candidate = slug
+        suffix = 2
+        while self.get(candidate) is not None:
+            candidate = f"{slug}-{suffix}"
+            suffix += 1
+        ok, _failures = self.save(candidate, goal, norm)
+        return ("added", candidate) if ok else ("invalid", "")
 
     def delete(self, dag_id: str) -> bool:
         path = self._path(dag_id)

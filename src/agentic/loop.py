@@ -62,6 +62,7 @@ class Plan:
     steps: list = field(default_factory=list)
     deliverables: list[str] = field(default_factory=list)
     criteria: list[str] = field(default_factory=list)
+    needs_research: list[str] = field(default_factory=list)
 
     def normalized_steps(self) -> list[Step]:
         out = []
@@ -97,6 +98,8 @@ class RunReport:
     model_tokens_estimated: int = 0
     adapted: bool = False
     adapted_from: str = ""
+    replan_note: str = ""
+    learned_dag: str = ""
     chat_reply: str = ""
     dag_summary: dict = field(default_factory=dict)
     step_lines: list[str] = field(default_factory=list)
@@ -141,6 +144,7 @@ class GoalRunner:
         self._adapted_from = ""
         self.run_id = run_id
         self.run_control = run_control
+        self._replan_note = ""
         self._dag_summary: dict = {}
         self.last_route = None
         self.researcher = researcher
@@ -283,7 +287,7 @@ class GoalRunner:
             raise
 
     def _plan(self, goal: str, failure_context: str = "",
-              spec=None) -> Plan:
+              spec=None, research_context: str = "") -> Plan:
         if self.kernel_mode:
             system = ("Propose a short plan as JSON with keys steps, "
                       "deliverables, criteria. Each step is an object "
@@ -314,6 +318,11 @@ class GoalRunner:
         if failure_context:
             user = user + (f"\n\nPrevious attempt failed, repair only the "
                            f"failed parts, do not rewrite passed files:\n{failure_context}")
+        if research_context:
+            user = user + ("\n\nTargeted research findings for the plan's "
+                           "open questions, use them to fill those gaps, "
+                           "do not change unrelated steps:\n"
+                           f"{research_context}")
         self._trace("plan", "started", goal[:100])
         if self.budget is not None:
             self.budget.add_tokens(user)
@@ -331,7 +340,8 @@ class GoalRunner:
                                 for s in steps if isinstance(s, dict)
                                 and s.get("deliverable")]
             return Plan(steps=steps, deliverables=deliverables,
-                        criteria=[str(c) for c in data.get("criteria", [])])
+                        criteria=[str(c) for c in data.get("criteria", [])],
+                        needs_research=[str(x) for x in data.get("needs_research", []) or []])
         except (json.JSONDecodeError, AttributeError):
             return Plan(
                 steps=[Step(tool="write", args={"file": "deliverable.md",
@@ -339,6 +349,53 @@ class GoalRunner:
                             deliverable="deliverable.md")],
                 deliverables=["deliverable.md"],
                 criteria=["deliverable.md exists"])
+
+    def _research_and_replan(self, plan: Plan, goal: str,
+                             spec=None) -> Plan:
+        """One plan-first research + replan pass, before execution.
+
+        When the plan names open questions (needs_research), each
+        one is researched through the loop's researcher callable,
+        then the planner is called exactly once more with those
+        notes as context, and the replanned plan replaces the
+        original. Exactly one pass, never a loop: a replanned
+        plan's own needs_research is not researched again.
+        No researcher means no research: the original plan is
+        kept. A failed or invalid replan keeps the original
+        plan and records the failure in _replan_note (copied
+        onto the report by _finalize); it never fails the run.
+        """
+        items = [str(x) for x in (getattr(plan, "needs_research", None) or [])]
+        if not items or self.researcher is None:
+            return plan
+        notes = []
+        for item in items:
+            try:
+                result = self.researcher(item)
+            except Exception as exc:
+                notes.append(f"{item}: research failed ({exc})")
+                continue
+            if isinstance(result, (list, tuple)):
+                notes.append(f"{item}: " + "; ".join(str(r) for r in result))
+            elif isinstance(result, str):
+                notes.append(f"{item}: {result}")
+            else:
+                notes.append(f"{item}: {result!r}")
+        try:
+            replanned = self._plan(
+                goal, spec=spec,
+                research_context="\n".join(notes))
+        except Exception as exc:
+            self._replan_note = (f"replan after research failed ({exc}), "
+                                 "keeping the original plan")
+            return plan
+        if not isinstance(replanned, Plan) or (not replanned.steps
+                                               and not replanned.deliverables):
+            self._replan_note = ("replan after research returned an invalid "
+                                 "plan (no steps or deliverables), keeping "
+                                 "the original plan")
+            return plan
+        return replanned
 
     def run(self, goal: str, spec=None, research_report=None,
             live_actions=None) -> RunReport:
@@ -381,6 +438,7 @@ class GoalRunner:
             plan = self._plan(goal, spec=spec)
             if not plan.deliverables and spec_deliverables:
                 plan.deliverables = list(spec_deliverables)
+            plan = self._research_and_replan(plan, goal, spec=spec)
             return self._finalize(self._execute_plan(goal, plan))
         if self.memory is not None:
             try:
@@ -424,6 +482,7 @@ class GoalRunner:
             except Exception:
                 pass
         plan = self._plan(goal)
+        plan = self._research_and_replan(plan, goal)
         return self._finalize(self._execute_plan(goal, plan))
 
 
@@ -436,6 +495,22 @@ class GoalRunner:
         report.adapted = bool(self._adapted)
         report.adapted_from = str(self._adapted_from)
         report.dag_summary = dict(self._dag_summary)
+        report.replan_note = str(getattr(self, "_replan_note", "") or "")
+        # Proven-run DAG learn, successful runs only, best
+        # effort: a learn failure must never fail the run.
+        if report.status == "done":
+            try:
+                from .dag_store import DagStore
+                nodes = [{"tool": s.tool, "args": dict(s.args),
+                          "deliverable": s.deliverable}
+                         for s in report.plan.normalized_steps()]
+                if nodes:
+                    action, dag_id = DagStore(self.home).learn(
+                        report.goal, nodes)
+                    if dag_id:
+                        report.learned_dag = f"{action}:{dag_id}"
+            except Exception:
+                pass
         try:
             from .autonomy_metrics import AutonomyMetrics
             AutonomyMetrics(self.home).record(

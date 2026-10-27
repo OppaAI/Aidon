@@ -30,18 +30,54 @@ def _kind(path: Path) -> str:
     return _KIND_BY_SUFFIX.get(path.suffix.lower(), "file")
 
 
-def inventory(workdir) -> list[dict]:
-    """All non-hidden files in a workdir, sorted by path."""
+def inventory(workdir, extra=None) -> list[dict]:
+    """All non-hidden files in a workdir, sorted by path.
+
+    extra is an optional list of additional file paths (absolute or
+    relative to workdir). An existing absolute path in extra is
+    included even when it lives outside workdir, marked with
+    "absolute": True; workdir files carry "absolute": False.
+    Non-existent extra paths are skipped silently, and an extra
+    that duplicates a workdir file is listed only once.
+    """
     workdir = Path(workdir)
     rows = []
-    if not workdir.is_dir():
-        return rows
-    for path in sorted(p for p in workdir.rglob("*") if p.is_file()):
-        rel = path.relative_to(workdir)
-        if any(part.startswith(".") for part in rel.parts):
+    seen: set[Path] = set()
+    if workdir.is_dir():
+        for path in sorted(p for p in workdir.rglob("*") if p.is_file()):
+            rel = path.relative_to(workdir)
+            if any(part.startswith(".") for part in rel.parts):
+                continue
+            rows.append({"path": str(rel), "size": path.stat().st_size,
+                         "kind": _kind(path), "absolute": False})
+            try:
+                seen.add(path.resolve())
+            except OSError:
+                pass
+    try:
+        workdir_resolved = workdir.resolve()
+    except OSError:
+        workdir_resolved = workdir
+    for item in extra or []:
+        candidate = Path(item)
+        if not candidate.is_absolute():
+            candidate = workdir / candidate
+        try:
+            resolved = candidate.resolve()
+        except OSError:
             continue
-        rows.append({"path": str(rel), "size": path.stat().st_size,
-                     "kind": _kind(path)})
+        if not resolved.is_file() or resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            rel = resolved.relative_to(workdir_resolved)
+        except ValueError:
+            rel = None
+        rows.append({"path": str(rel) if rel is not None else str(resolved),
+                     "size": resolved.stat().st_size,
+                     "kind": _kind(resolved),
+                     "absolute": rel is None})
+    rows.sort(key=lambda row: row["path"])
     return rows
 
 
@@ -68,9 +104,14 @@ def goal_files(workdir, goal: str) -> list[dict]:
     return rows
 
 
-def inventory_markdown(workdir) -> str:
-    """The inventory as a Markdown table, with a total row."""
-    rows = inventory(workdir)
+def inventory_markdown(workdir, extra=None) -> str:
+    """The inventory as a Markdown table, with a total row.
+
+    extra passes through to inventory(), so an absolute-path
+    deliverable shows up here instead of the listing coming
+    back with only the header and total rows.
+    """
+    rows = inventory(workdir, extra=extra)
     lines = ["| path | size | kind |", "| --- | ---: | --- |"]
     total = 0
     for row in rows:
