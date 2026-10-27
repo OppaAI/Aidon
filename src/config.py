@@ -115,6 +115,7 @@ class Config:
     fast_model: str = ""
     webui_token: str = ""
     image_model: str = "muse-image-1.0"
+    sam_model: str = "meta-sam"
     router_fast_phases: str = "interpret,learn,respond"
     kernel_mode: bool = False
 
@@ -189,6 +190,7 @@ class Config:
             fast_model=os.environ.get("AIDON_FAST_MODEL", ""),
             webui_token=os.environ.get("AIDON_WEBUI_TOKEN", ""),
             image_model=os.environ.get("AIDON_IMAGE_MODEL", "muse-image-1.0"),
+            sam_model=os.environ.get("AIDON_SAM_MODEL", "meta-sam"),
             router_fast_phases=os.environ.get("AIDON_ROUTER_FAST_PHASES", "interpret,learn,respond"),
             kernel_mode=os.environ.get("AIDON_KERNEL", "0") not in ("0", "false", "no"),
         )

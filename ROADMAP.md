@@ -115,6 +115,13 @@ post-hackathon, NOT built, NOT demoed, at the end.
 - Streamable HTTP MCP, cross-file validator, and
   image generation, all built now, no longer
   post-hackathon.
+- SAM 3.1 segmentation, built now for demo video
+  editing: segment and track objects in images
+  and video frames, boxes, confidences, and mask
+  metadata, via the Meta Model API Responses API.
+  SAM is the segment and track step only, frame
+  extraction and video re-encoding need ffmpeg,
+  not built here.
 
 ## Post-hackathon, NOT built, NOT demoed
 
@@ -134,10 +141,18 @@ post-hackathon, NOT built, NOT demoed, at the end.
   for local models, beyond the generic endpoint plus
   model name client built now, which already works
   with a local endpoint.
-- SAM 3.1 segmentation: pixel-precise masks, boxes,
-  and video tracks, for cutouts, counting, and
-  tracking. Not needed for the dinner, store, or
-  job demo, which need no mask, so it is optional,
-  not core.
 - Email, RSS, and database triggers, as plugins,
   beyond the core triggers built now.
+
+- Fly-brain biological layer, semi-joke, last entry,
+  not a product direction, not demoed as sentience:
+  Aiko's fly circuits as a modulatory layer for
+  Aidon, giving Aidon fly-like reactions, approach
+  and avoid, curiosity, urgency, and so on. This
+  is NOT sentience, and it is NOT RLHF, RLHF is
+  human feedback, fly circuits are small insect
+  reactive networks, and they do not make an agent
+  conscious. It is a curiosity for later, if anyone
+  wants a toy reactive layer, and it would never
+  be presented as Aidon becoming sentient, or as
+  Aidon turning into a bug.

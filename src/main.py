@@ -127,6 +127,10 @@ def main(argv: list[str] | None = None) -> int:
     control_parser.add_argument("action", choices=["list", "cancel", "steer"], help="List runs, cancel a run, or steer a run")
     control_parser.add_argument("run_id", nargs="?", default=None, help="Run id, from the goal reply")
     control_parser.add_argument("note", nargs="?", default=None, help="Steer note, for steer")
+    sam_parser = sub.add_parser("sam", help="SAM 3.1 segmentation for video editing, segment and track objects in images or frames")
+    sam_parser.add_argument("prompt", help="Noun phrase, for example red toolbox")
+    sam_parser.add_argument("images", nargs="+", help="Image or video frame file paths")
+    sam_parser.add_argument("--propagation", default="both", choices=["both", "forward", "backward"])
     image_parser = sub.add_parser("image", help="Muse Image generation and editing, same .env key and endpoint as Spark")
     image_parser.add_argument("action", choices=["generate", "edit"], help="generate = prompt only, edit = prompt plus 1-10 reference images")
     image_parser.add_argument("prompt", help="Prompt, for edit refer to refs as @Image1, @Image2 in input order")
@@ -464,6 +468,20 @@ def main(argv: list[str] | None = None) -> int:
             data = edit_image(args.prompt, config.api_key, config.api_base, reference_images=args.refs or [], size=args.size, model=config.image_model)
         path = save_image(data, out)
         print(f"Image saved: {path}, model {config.image_model}")
+        return 0
+    if args.command == "sam":
+        if not config.api_key or not config.api_base:
+            print("SAM needs AIDON_API_KEY and AIDON_API_ENDPOINT in .env, same key and endpoint as Spark.")
+            return 2
+        from .sam import SAMClient, build_object_prompt
+        client_sam = SAMClient(config.api_base, config.api_key, config.sam_model)
+        result = client_sam.segment(args.images, build_object_prompt(args.prompt), propagation=args.propagation)
+        if "error" in result:
+            print(f"SAM error: {result['error']}")
+            return 1
+        for seg in result["segments"]:
+            print(f"frame {seg['frame']} id {seg['object_id']} box {seg['box']} confidence {seg['confidence']}")
+        print("SAM is the segment and track step only. Frame extraction and video re-encoding need ffmpeg, not built here.")
         return 0
     if args.command == "control":
         from .run_control import RunControl
