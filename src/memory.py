@@ -439,8 +439,9 @@ class Memory:
     """STM + episodic + semantic + experience + knowledge, Qdrant for all."""
 
     def __init__(self, home: Path, embedder: Embedder | None = None,
-                 store=None):
+                 store=None, entity_graph=None):
         self.home = Path(home)
+        self.entity_graph = entity_graph
         self.embedder = embedder or HashEmbedder()
         dim = getattr(self.embedder, "dim", 128)
         self.store = store if store is not None else make_store(home, dim=dim)
@@ -472,9 +473,15 @@ class Memory:
 
     def record(self, collection: str, text: str,
                payload: dict | None = None) -> Point:
-        return self._record_with_vector(
+        point = self._record_with_vector(
             collection, text, self.embedder.embed(text),
             self.embedder.embed_sparse(text), payload or {})
+        if self.entity_graph is not None:
+            try:
+                self.entity_graph.index_point(collection, point.id, text, point.payload)
+            except Exception:
+                pass
+        return point
 
     def record_image(self, collection: str, image_path,
                      description: str, payload: dict | None = None) -> Point:
@@ -557,6 +564,15 @@ class Memory:
                 if linked is not None:
                     seen.add(link_id)
                     expanded.append(Hit(linked, hit.score * 0.5, True))
+        if self.entity_graph is not None:
+            for hit in list(hits):
+                for related in self.entity_graph.related(collection, hit.point.id, limit=5):
+                    if related["point_id"] in seen:
+                        continue
+                    linked = self.store.get(related["collection"], related["point_id"])
+                    if linked is not None:
+                        seen.add(related["point_id"])
+                        expanded.append(Hit(linked, hit.score * 0.5, True))
         return hits + expanded
 
     def recall_both(self, query: str, episode_limit: int = 5,

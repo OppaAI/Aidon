@@ -76,25 +76,180 @@ CHAT_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Aidon</title></head>
 <body>
 <h1>Aidon</h1>
+<div id="avatar" aria-label="Aidon avatar">
+<svg id="avatar-face" width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="Aidon">
+<circle cx="60" cy="60" r="50" fill="#ddeeff" stroke="#336699" stroke-width="3"/>
+<circle id="eye-left" cx="42" cy="52" r="6" fill="#223344"/>
+<circle id="eye-right" cx="78" cy="52" r="6" fill="#223344"/>
+<path id="mouth" d="M 42 78 Q 60 90 78 78" fill="none" stroke="#223344" stroke-width="3" stroke-linecap="round"/>
+</svg>
+<p id="avatar-status">Idle</p>
+<p><button id="mic" type="button">🎤 Mic</button> <label><input id="announce" type="checkbox"> Voice announce</label></p>
+<p id="mic-status"></p>
+</div>
 <div id="sidebar">
 <h2>Projects</h2><div id="projects"></div>
 <h2>Library</h2><a href="/library">Library tab</a>
 <h2>Settings</h2><a href="/settings">Settings and keys</a>
+<h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a>
 </div>
 <div id="chat">
 <div id="messages"></div>
-<form id="form"><input id="msg" name="message" placeholder="Type a goal, in plain language">
+<form id="form"><input id="msg" name="message" placeholder="Type a goal, in plain language, or use the mic">
 <button type="submit">Send</button></form>
 <div id="approval"></div>
 </div>
 <script>
+function setAvatar(status, mouth) {
+  document.getElementById('avatar-status').textContent = status;
+  document.getElementById('mouth').setAttribute('d', mouth);
+}
+function speak(text) {
+  if (document.getElementById('announce').checked && 'speechSynthesis' in window) {
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+  }
+}
+async function sendMessage(message) {
+  setAvatar('Working', 'M 42 78 Q 60 84 78 78');
+  const r = await fetch('/api/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message})});
+  const data = await r.json();
+  const reply = data.reply || '';
+  document.getElementById('messages').innerHTML += '<p>' + reply + '</p>';
+  if (reply.includes('Done:')) { setAvatar('Done', 'M 42 76 Q 60 94 78 76'); }
+  else if (reply.includes('Failed:')) { setAvatar('Failed', 'M 42 86 Q 60 74 78 86'); }
+  else if (reply.includes('Cancelled')) { setAvatar('Cancelled', 'M 42 80 L 78 80'); }
+  else if (reply.includes('Rejected')) { setAvatar('Waiting', 'M 42 80 L 78 80'); }
+  else { setAvatar('Idle', 'M 42 78 Q 60 90 78 78'); }
+  speak(reply);
+}
 document.getElementById('form').onsubmit = async (e) => {
   e.preventDefault();
   const message = document.getElementById('msg').value;
-  const r = await fetch('/api/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message})});
-  const data = await r.json();
-  document.getElementById('messages').innerHTML += '<p>' + (data.reply || '') + '</p>';
+  document.getElementById('msg').value = '';
+  await sendMessage(message);
 };
+document.getElementById('mic').onclick = () => {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    document.getElementById('mic-status').textContent = 'Mic is not supported in this browser. Use Chrome on localhost, or type instead.';
+    return;
+  }
+  const recognition = new SpeechRecognition();
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  document.getElementById('mic-status').textContent = 'Listening...';
+  recognition.onresult = async (event) => {
+    const text = event.results[0][0].transcript;
+    document.getElementById('mic-status').textContent = 'Heard: ' + text;
+    await sendMessage(text);
+  };
+  recognition.onerror = (event) => {
+    document.getElementById('mic-status').textContent = 'Mic error: ' + event.error;
+  };
+  recognition.start();
+};
+</script>
+</body></html>
+"""
+
+DAG_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Aidon DAG editor</title></head>
+<body>
+<h1>DAG editor</h1>
+<p>Edit a saved workflow: add, remove, modify, and reorder nodes. A DAG that fails validation is not saved, the failures are shown, so a broken graph is never executed.</p>
+<div id="list"></div>
+<h2>Editor</h2>
+<p><label>DAG id <input id="dag-id"></label> <label>Goal <input id="dag-goal" size="60"></label></p>
+<div id="nodes"></div>
+<p>
+<button id="add-node" type="button">Add node</button>
+<button id="save" type="button">Validate and save</button>
+<button id="delete" type="button">Delete</button>
+</p>
+<p id="result"></p>
+<script>
+let nodes = [];
+function render() {
+  const div = document.getElementById('nodes');
+  div.innerHTML = '';
+  nodes.forEach((node, index) => {
+    const row = document.createElement('div');
+    row.innerHTML = '<h3>Node ' + (index + 1) + '</h3>' +
+      '<label>Id <input data-field="id" data-index="' + index + '" value="' + (node.id || '') + '"></label> ' +
+      '<label>Tool <input data-field="tool" data-index="' + index + '" value="' + (node.tool || 'write') + '"></label> ' +
+      '<label>Deliverable <input data-field="deliverable" data-index="' + index + '" value="' + (node.deliverable || '') + '"></label> ' +
+      '<label>Depends on, comma list <input data-field="depends_on" data-index="' + index + '" value="' + (node.depends_on || []).join(',') + '"></label> ' +
+      '<label>Expected <input data-field="expected" data-index="' + index + '" value="' + (node.expected || '') + '"></label> ' +
+      '<label>Assumptions, comma list <input data-field="assumptions" data-index="' + index + '" value="' + (node.assumptions || []).join(',') + '"></label><br>' +
+      '<label>Args, JSON <input data-field="args" data-index="' + index + '" size="80" value=\'' + JSON.stringify(node.args || {}).replace(/'/g, '') + '\'></label> ' +
+      '<button data-action="up" data-index="' + index + '">Move up</button> ' +
+      '<button data-action="down" data-index="' + index + '">Move down</button> ' +
+      '<button data-action="remove" data-index="' + index + '">Remove</button>';
+    div.appendChild(row);
+  });
+  div.querySelectorAll('input').forEach((input) => {
+    input.onchange = () => {
+      const index = parseInt(input.dataset.index, 10);
+      const field = input.dataset.field;
+      if (field === 'depends_on' || field === 'assumptions') {
+        nodes[index][field] = input.value.split(',').map((s) => s.trim()).filter(Boolean);
+      } else if (field === 'args') {
+        try { nodes[index][field] = JSON.parse(input.value); } catch (e) { nodes[index][field] = {}; }
+      } else {
+        nodes[index][field] = input.value;
+      }
+    };
+  });
+  div.querySelectorAll('button').forEach((button) => {
+    button.onclick = () => {
+      const index = parseInt(button.dataset.index, 10);
+      const action = button.dataset.action;
+      if (action === 'remove') { nodes.splice(index, 1); }
+      if (action === 'up' && index > 0) { const item = nodes.splice(index, 1)[0]; nodes.splice(index - 1, 0, item); }
+      if (action === 'down' && index < nodes.length - 1) { const item = nodes.splice(index, 1)[0]; nodes.splice(index + 1, 0, item); }
+      render();
+    };
+  });
+}
+async function loadList() {
+  const r = await fetch('/api/dags');
+  const data = await r.json();
+  const list = document.getElementById('list');
+  list.innerHTML = '<h2>Saved DAGs</h2>';
+  (data.dags || []).forEach((dag) => {
+    const button = document.createElement('button');
+    button.textContent = dag.id + ' (' + dag.nodes + ' nodes) ' + dag.goal;
+    button.onclick = async () => {
+      const rr = await fetch('/api/dags/' + encodeURIComponent(dag.id));
+      const dd = await rr.json();
+      document.getElementById('dag-id').value = dd.id || dag.id;
+      document.getElementById('dag-goal').value = dd.goal || '';
+      nodes = dd.nodes || [];
+      render();
+    };
+    list.appendChild(button);
+    list.appendChild(document.createElement('br'));
+  });
+}
+document.getElementById('add-node').onclick = () => {
+  nodes.push({id: 'node-' + (nodes.length + 1), tool: 'write', args: {}, deliverable: '', depends_on: [], expected: '', assumptions: []});
+  render();
+};
+document.getElementById('save').onclick = async () => {
+  const id = document.getElementById('dag-id').value;
+  const goal = document.getElementById('dag-goal').value;
+  const r = await fetch('/api/dags', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id, goal, nodes})});
+  const data = await r.json();
+  document.getElementById('result').textContent = data.ok ? 'Saved.' : 'Not saved: ' + (data.failures || []).join('; ');
+  await loadList();
+};
+document.getElementById('delete').onclick = async () => {
+  const id = document.getElementById('dag-id').value;
+  await fetch('/api/dags/' + encodeURIComponent(id), {method: 'DELETE'});
+  await loadList();
+};
+loadList();
+render();
 </script>
 </body></html>
 """
@@ -363,6 +518,32 @@ class WebUIServer:
                                "status": event.get("status", "")})
         return stages
 
+    def dag_store(self):
+        from .dag_store import DagStore
+        return DagStore(self.home)
+
+    def handle_dags_list(self) -> dict:
+        return {"dags": self.dag_store().list_dags()}
+
+    def handle_dag_get(self, dag_id: str) -> dict:
+        data = self.dag_store().get(dag_id)
+        return data if data is not None else {"error": "not found"}
+
+    def handle_dag_save(self, body: dict) -> tuple[int, dict]:
+        ok, failures = self.dag_store().save(
+            str(body.get("id", "")), str(body.get("goal", "")),
+            list(body.get("nodes", [])), memory=self.memory)
+        return (200, {"ok": True}) if ok else (400, {"ok": False, "failures": failures})
+
+    def handle_dag_delete(self, dag_id: str) -> dict:
+        return {"ok": self.dag_store().delete(dag_id)}
+
+    def handle_entities(self, entity: str) -> dict:
+        graph = getattr(self.memory, "entity_graph", None) if self.memory is not None else None
+        if graph is None:
+            return {"entity": entity, "related": []}
+        return {"entity": entity, "related": graph.points_for(entity)}
+
     def make_handler(self):
         server = self
 
@@ -418,6 +599,18 @@ class WebUIServer:
                     self._send_html(200, html)
                 elif parsed.path == "/api/factory":
                     self._send_json(200, {"stages": server.factory_stages()})
+                elif parsed.path == "/dag":
+                    self._send_html(200, DAG_HTML)
+                elif parsed.path == "/api/dags":
+                    self._send_json(200, server.handle_dags_list())
+                elif parsed.path.startswith("/api/dags/"):
+                    dag_id = parsed.path[len("/api/dags/"):]
+                    data = server.handle_dag_get(dag_id)
+                    self._send_json(200 if "error" not in data else 404, data)
+                elif parsed.path == "/api/entities":
+                    query = parse_qs(parsed.query)
+                    entity = query.get("entity", [""])[0]
+                    self._send_json(200, server.handle_entities(entity))
                 elif parsed.path == "/webhook/whatsapp":
                     query = parse_qs(parsed.query)
                     status, text = server.handle_whatsapp_get(query)
@@ -441,6 +634,9 @@ class WebUIServer:
                     body = {}
                 if parsed.path == "/api/chat":
                     self._send_json(200, server.handle_chat(body))
+                elif parsed.path == "/api/dags":
+                    status, payload = server.handle_dag_save(body)
+                    self._send_json(status, payload)
                 elif parsed.path == "/api/runs":
                     runs = server.run_control.list_runs() if server.run_control else []
                     self._send_json(200, {"runs": runs})
@@ -466,6 +662,14 @@ class WebUIServer:
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     status, payload = server.handle_slack_post(raw, headers, body)
                     self._send_json(status, payload)
+                else:
+                    self._send_json(404, {"error": "not found"})
+
+            def do_DELETE(self):
+                parsed = urlparse(self.path)
+                if parsed.path.startswith("/api/dags/"):
+                    dag_id = parsed.path[len("/api/dags/"):]
+                    self._send_json(200, server.handle_dag_delete(dag_id))
                 else:
                     self._send_json(404, {"error": "not found"})
 

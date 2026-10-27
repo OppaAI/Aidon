@@ -54,9 +54,10 @@ def _make_memory(config: Config):
     """Memory with the real embedder if available, else Hash, with warning."""
     try:
         from .embedder import HashEmbedder, make_embedder_cached
+        from .entity_graph import EntityGraph
         from .memory import Memory
         embedder = make_embedder_cached()
-        return Memory(config.home, embedder=embedder)
+        return Memory(config.home, embedder=embedder, entity_graph=EntityGraph(config.home))
     except Exception as exc:
         print(f"warning: real embedder unavailable ({exc}), "
               "using HashEmbedder for this run", file=sys.stderr)

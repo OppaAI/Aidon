@@ -30,7 +30,7 @@ REPO_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 AIDON_HOME=${AIDON_HOME:-$HOME/.aidon}
 
 echo "Aidon home: $AIDON_HOME"
-mkdir -p "$AIDON_HOME/workspace" "$AIDON_HOME/ingest" "$AIDON_HOME/plugins" "$AIDON_HOME/skills" "$AIDON_HOME/specs" "$AIDON_HOME/library/files" "$AIDON_HOME/runs" "$AIDON_HOME/summaries" "$AIDON_HOME/learned" "$AIDON_HOME/email/drafts" "$AIDON_HOME/trace" "$AIDON_HOME/v1" "$AIDON_HOME/live"
+mkdir -p "$AIDON_HOME/workspace" "$AIDON_HOME/ingest" "$AIDON_HOME/plugins" "$AIDON_HOME/skills" "$AIDON_HOME/specs" "$AIDON_HOME/library/files" "$AIDON_HOME/runs" "$AIDON_HOME/summaries" "$AIDON_HOME/learned" "$AIDON_HOME/email/drafts" "$AIDON_HOME/trace" "$AIDON_HOME/v1" "$AIDON_HOME/live" "$AIDON_HOME/dags"
 
 if ! command -v python3 >/dev/null 2>&1; then
   echo "ERROR: python3 is not installed. Install Python 3.11 or later, then run ./setup.sh again." >&2
