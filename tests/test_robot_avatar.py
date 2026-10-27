@@ -1,4 +1,4 @@
-"""Robot SVG avatar as default, VRM as fallback, with blink, idle, speaking mouth, karaoke typewriter."""
+"""Robot SVG avatar as default, with optional explicit VRM viewing."""
 
 import sys
 from pathlib import Path
@@ -10,7 +10,7 @@ from src.interface.webui import CHAT_HTML, VRM_HTML
 
 def test_robot_avatar_default():
     assert 'id="robot-avatar"' in CHAT_HTML
-    assert 'id="avatar" aria-label="Aidon avatar, robot, default, VRM is the fallback"' in CHAT_HTML
+    assert 'id="avatar" aria-label="Aidon robot avatar, default; VRM is available separately"' in CHAT_HTML
     assert "robot-blink" in CHAT_HTML
     assert "robot-bob" in CHAT_HTML
     assert "robot-head-sway" in CHAT_HTML
@@ -31,7 +31,7 @@ def test_mouth_smile_waveform_and_karaoke_sync():
     assert "aeiou" in CHAT_HTML
 
 
-def test_vrm_is_fallback_not_default():
-    assert "VRM avatar, fallback" in CHAT_HTML
-    assert "VRM avatar, fallback" in VRM_HTML
-    assert "robot SVG" in VRM_HTML
+def test_vrm_is_explicit_and_robot_remains_default():
+    assert "Open VRM avatar" in CHAT_HTML
+    assert "VRM avatar (optional)" in VRM_HTML
+    assert "robot avatar is always the default in chat" in VRM_HTML

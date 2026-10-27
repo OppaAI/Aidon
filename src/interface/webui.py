@@ -162,7 +162,7 @@ CHAT_HTML = """<!doctype html>
 <h1>Aidon</h1><button id="theme-toggle" title="Toggle dark / light theme">Theme</button>
 <div id="layout">
 <div id="sidecol">
-<div id="avatar" aria-label="Aidon avatar, robot, default, VRM is the fallback">
+<div id="avatar" aria-label="Aidon robot avatar, default; VRM is available separately">
 <svg id="robot-avatar" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="Aidon robot">
 <g id="robot">
 <g id="robot-head">
@@ -194,7 +194,7 @@ CHAT_HTML = """<!doctype html>
 <h2>Projects</h2><div id="projects"></div>
 <h2>Library</h2><a href="/library">Library tab</a>
 <h2>Settings</h2><a href="/settings">Settings and keys</a>
-<h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a> <a href="/replay">Replay</a> <a href="/avatar-vrm">VRM avatar, fallback</a> <a href="/capabilities">Capabilities</a> <a href="/memory">Memory</a> <a href="/knowledge">Knowledge</a> <a href="/reports">Reports</a>
+<h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a> <a href="/replay">Replay</a> <a href="/avatar-vrm">Open VRM avatar</a> <a href="/capabilities">Capabilities</a> <a href="/memory">Memory</a> <a href="/knowledge">Knowledge</a> <a href="/reports">Reports</a>
 <div id="stage-pills"><p>Stages: recall, interpret, research, plan, sandbox, verify, approval, live, learn</p><div id="pills"></div></div>
 </div>
 </div>
@@ -512,16 +512,16 @@ loadRuns();
 VRM_HTML = """<!doctype html><html><head><meta charset="utf-8"><title>VRM avatar</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
 </head><body>
-<h1>VRM avatar, fallback</h1>
-<p>Three-dimensional VRM avatar, if a VRM file is present at &lt;home&gt;/avatar.vrm, otherwise the robot SVG avatar in the chat is the default, and this page says so, it does not invent a model. Three.js and three-vrm are loaded from CDN, a VRM file is not bundled, because a model file is the owner's asset, not arena code. Mic here uses Meta Transcribe via /api/transcribe when a transcribe key is configured, otherwise browser SpeechRecognition, as in the chat.</p>
+<h1>VRM avatar (optional)</h1>
+<p>The robot avatar is always the default in chat. This separate page is the explicit place to view a VRM file when one is present at &lt;home&gt;/avatar.vrm. Three.js and three-vrm are loaded from CDN, a VRM file is not bundled, because a model file is the owner's asset, not arena code. Mic here uses Meta Transcribe via /api/transcribe when a transcribe key is configured, otherwise browser SpeechRecognition, as in the chat.</p>
 <div id="vrm-view" style="width:600px;height:400px;border:1px solid #ccc"></div>
 <p id="vrm-status"></p>
 <p><button id="vrm-mic">Transcribe mic</button> <span id="vrm-mic-status"></span></p>
 <script>
 async function checkVrm() {
   const r = await fetch('/api/avatar.vrm');
-  if (r.status === 404) { document.getElementById('vrm-status').textContent = 'No VRM file at <home>/avatar.vrm, using robot SVG avatar in chat as default.'; return; }
-  document.getElementById('vrm-status').textContent = 'VRM file found, loading with three-vrm. If the VRM loader fails to load from CDN, the robot SVG remains the default.';
+  if (r.status === 404) { document.getElementById('vrm-status').textContent = 'No VRM file found. The robot avatar remains the chat default.'; return; }
+  document.getElementById('vrm-status').textContent = 'Optional VRM file found. The robot avatar remains the chat default.';
 }
 checkVrm();
 document.getElementById('vrm-mic').onclick = async () => {
@@ -2509,7 +2509,9 @@ loadSettings();
                 elif parsed.path == "/api/avatar/status":
                     vrm_path = server._avatar_path()
                     self._send_json(200, {"present": vrm_path is not None,
-                                          "source": str(vrm_path) if vrm_path else None})
+                                          "source": str(vrm_path) if vrm_path else None,
+                                          "default": "robot",
+                                          "active": "robot"})
                 elif parsed.path == "/api/reports":
                     self._send_json(200, server.handle_reports_list())
                 elif parsed.path.startswith("/api/reports/"):
