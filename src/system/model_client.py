@@ -14,9 +14,11 @@ against files and evidence, never against a model's word alone.
 from __future__ import annotations
 
 import json
+import uuid
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -29,6 +31,60 @@ class Message:
     # so an image part is sent as-is, never as a filename
     # alone, which the model cannot see.
     content: str | list = ""
+
+
+@dataclass
+class ToolCall:
+    """Compatibility representation for native model tool calls."""
+    name: str
+    arguments: dict
+    id: str = field(default_factory=lambda: f"call_{uuid.uuid4().hex[:8]}")
+
+
+@dataclass
+class ChatResponse:
+    """Normalized response shape for integrations that expose tool calls."""
+    text: str = ""
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    usage: dict = field(default_factory=dict)
+    thinking: str = ""
+    raw: Any = None
+
+
+def parse_ollama_tool_calls(message: dict) -> list[ToolCall]:
+    calls = []
+    for item in message.get("tool_calls") or []:
+        function = item.get("function", {}) if isinstance(item, dict) else {}
+        args = function.get("arguments", {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except (json.JSONDecodeError, TypeError):
+                args = {"_raw": args}
+        calls.append(ToolCall(str(function.get("name", "")),
+                              args if isinstance(args, dict) else {"_raw": str(args)}))
+    return calls
+
+
+def parse_openai_tool_calls(message: dict) -> list[ToolCall]:
+    calls = []
+    for item in message.get("tool_calls") or []:
+        if not isinstance(item, dict):
+            continue
+        function = item.get("function", {})
+        raw = function.get("arguments", "{}")
+        try:
+            args = raw if isinstance(raw, dict) else json.loads(raw or "{}")
+        except (json.JSONDecodeError, TypeError):
+            args = {"_raw": str(raw)}
+        calls.append(ToolCall(str(function.get("name", "")),
+                              args if isinstance(args, dict) else {"_raw": str(args)},
+                              str(item.get("id", "")) or f"call_{uuid.uuid4().hex[:8]}"))
+    return calls
+
+
+def estimate_tokens(text: str) -> int:
+    return max(1, len(str(text)) // 4)
 
 
 def image_message(text: str, images: list[tuple[bytes, str]]) -> Message:
@@ -77,6 +133,10 @@ class ModelClient:
 
     def chat(self, messages: list[Message], sampling=None) -> str:
         raise NotImplementedError
+
+    def chat_response(self, messages: list[Message], sampling=None) -> ChatResponse:
+        """Compatibility adapter for callers expecting a normalized response."""
+        return ChatResponse(text=self.chat(messages, sampling=sampling))
 
 
 class FakeClient(ModelClient):

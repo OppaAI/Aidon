@@ -89,6 +89,24 @@ class Registry:
                 id TEXT PRIMARY KEY,
                 goal TEXT NOT NULL DEFAULT '',
                 state TEXT NOT NULL DEFAULT 'draft',
+                run_id TEXT NOT NULL DEFAULT '',
+                workspace TEXT NOT NULL DEFAULT '',
+                snapshot_ref TEXT NOT NULL DEFAULT '',
+                snapshot_json TEXT NOT NULL DEFAULT '',
+                report TEXT NOT NULL DEFAULT '',
+                history_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT '',
+                body TEXT NOT NULL DEFAULT '',
+                channel TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -100,6 +118,19 @@ class Registry:
             );
             """
         )
+        # Migrate databases created by the earlier minimal registry schema.
+        for column, definition in (
+            ("run_id", "TEXT NOT NULL DEFAULT ''"),
+            ("workspace", "TEXT NOT NULL DEFAULT ''"),
+            ("snapshot_ref", "TEXT NOT NULL DEFAULT ''"),
+            ("snapshot_json", "TEXT NOT NULL DEFAULT ''"),
+            ("report", "TEXT NOT NULL DEFAULT ''"),
+            ("history_json", "TEXT NOT NULL DEFAULT '[]'"),
+        ):
+            try:
+                self._db.execute(f"ALTER TABLE missions ADD COLUMN {column} {definition}")
+            except sqlite3.OperationalError:
+                pass
         self._db.commit()
 
     # -- runs ----------------------------------------------------------
@@ -219,22 +250,86 @@ class Registry:
         self._db.commit()
         return self.get_mission(mission_id)
 
+    def save_mission(self, mission: dict) -> dict:
+        now = _now()
+        self._db.execute(
+            "INSERT INTO missions (id, goal, state, run_id, workspace,"
+            " snapshot_ref, snapshot_json, report, history_json, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(id) DO UPDATE SET goal=excluded.goal, state=excluded.state,"
+            " run_id=excluded.run_id, workspace=excluded.workspace,"
+            " snapshot_ref=excluded.snapshot_ref, snapshot_json=excluded.snapshot_json,"
+            " report=excluded.report, history_json=excluded.history_json,"
+            " updated_at=excluded.updated_at",
+            (mission.get("id", ""), mission.get("goal", ""),
+             mission.get("state", "researching"), mission.get("run_id", ""),
+             mission.get("workspace", ""), mission.get("snapshot_ref", ""),
+             mission.get("snapshot_json", ""), mission.get("report", ""),
+             mission.get("history_json", "[]"), mission.get("created_at", now),
+             now))
+        self._db.commit()
+        return self.get_mission(mission.get("id", ""))
+
     def get_mission(self, mission_id: str) -> dict | None:
         row = self._db.execute(
-            "SELECT id, goal, state, created_at, updated_at FROM missions"
+            "SELECT id, goal, state, run_id, workspace, snapshot_ref,"
+            " snapshot_json, report, history_json, created_at, updated_at FROM missions"
             " WHERE id = ?", (mission_id,)).fetchone()
         return dict(row) if row else None
 
-    def list_missions(self, state: str | None = None) -> list[dict]:
+    def list_missions(self, state: str | None = None, limit: int = 20) -> list[dict]:
+        limit = max(1, int(limit))
         if state is None:
             rows = self._db.execute(
-                "SELECT id, goal, state, created_at, updated_at FROM missions"
-                " ORDER BY created_at").fetchall()
+                "SELECT id, goal, state, run_id, workspace, snapshot_ref,"
+                " snapshot_json, report, history_json, created_at, updated_at FROM missions"
+                " ORDER BY created_at LIMIT ?", (limit,)).fetchall()
         else:
             rows = self._db.execute(
-                "SELECT id, goal, state, created_at, updated_at FROM missions"
-                " WHERE state = ? ORDER BY created_at", (state,)).fetchall()
+                "SELECT id, goal, state, run_id, workspace, snapshot_ref,"
+                " snapshot_json, report, history_json, created_at, updated_at FROM missions"
+                " WHERE state = ? ORDER BY created_at LIMIT ?", (state, limit)).fetchall()
         return [dict(row) for row in rows]
+
+    def delete_mission(self, mission_id: str) -> None:
+        self._db.execute("DELETE FROM missions WHERE id = ?", (mission_id,))
+        self._db.commit()
+
+    def outbox_enqueue(self, kind: str, title: str, body: str = "",
+                       channel: str = "") -> int:
+        now = _now()
+        cur = self._db.execute(
+            "INSERT INTO notifications (kind, title, body, channel, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)", (kind, title, body, channel, now, now))
+        self._db.commit()
+        return int(cur.lastrowid)
+
+    def outbox_pending(self) -> list[dict]:
+        rows = self._db.execute(
+            "SELECT id, kind, title, body, channel, status, attempts, last_error,"
+            " created_at, updated_at FROM notifications WHERE status = 'pending'"
+            " ORDER BY id").fetchall()
+        return [dict(row) for row in rows]
+
+    def outbox_list(self) -> list[dict]:
+        rows = self._db.execute(
+            "SELECT id, kind, title, body, channel, status, attempts, last_error,"
+            " created_at, updated_at FROM notifications ORDER BY id").fetchall()
+        return [dict(row) for row in rows]
+
+    def outbox_mark(self, notification_id: int, status: str,
+                    error: str = "") -> None:
+        now = _now()
+        if status == "pending":
+            self._db.execute(
+                "UPDATE notifications SET status=?, attempts=attempts+1,"
+                " last_error=?, updated_at=? WHERE id=?",
+                (status, error, now, notification_id))
+        else:
+            self._db.execute(
+                "UPDATE notifications SET status=?, last_error=?, updated_at=? WHERE id=?",
+                (status, error, now, notification_id))
+        self._db.commit()
 
     def close(self) -> None:
         self._db.close()

@@ -12,6 +12,8 @@ from src.capabilities.mission import (GuardViolation, MissionStore,
                                       grade_criteria, guard_external_action)
 from src.capabilities.repair import apply_patch
 from src.capabilities.skill_lifecycle import LifecycleStore
+from src.capabilities.registry_db import Registry
+from src.agentic.lifecycle import MissionLifecycle, NotificationOutbox
 
 
 # Mission lifecycle -------------------------------------------------------
@@ -97,6 +99,30 @@ def test_mission_external_actions_are_guarded():
     except GuardViolation:
         pass
     guard_external_action("approved", "git_push")
+
+
+def test_registry_mission_lifecycle_and_durable_outbox(tmp_path):
+    registry = Registry(tmp_path)
+    try:
+        lifecycle = MissionLifecycle(registry)
+        mission = lifecycle.start("build it", "run-1", workspace=str(tmp_path / "draft"))
+        lifecycle.transition(mission["id"], "testing")
+        ref = lifecycle.freeze_snapshot(
+            mission["id"], [], {"passed": True}, [],
+            [{"name": "tests", "status": "passed", "evidence": "pytest passed"}],
+        )
+        assert lifecycle.verify_snapshot(mission["id"])
+        assert lifecycle.get(mission["id"])["snapshot_ref"] == ref
+        lifecycle.transition(mission["id"], "approved")
+        assert lifecycle.review_record(mission["id"])["state"] == "approved"
+
+        outbox = NotificationOutbox(registry, max_attempts=2)
+        notification_id = outbox.enqueue("review", "Ready")
+        assert outbox.pending()[0]["id"] == notification_id
+        assert outbox.drain(lambda item: (_ for _ in ()).throw(RuntimeError("down")))["dead"] == []
+        assert outbox.drain(lambda item: (_ for _ in ()).throw(RuntimeError("down")))["dead"] == [notification_id]
+    finally:
+        registry.close()
 
 
 # Skill lifecycle and governor --------------------------------------------
