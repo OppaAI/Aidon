@@ -61,6 +61,19 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 echo "python3: $(python3 --version 2>&1)"
 
+# Install the project itself and its declared base dependencies. The old
+# Aidon setup did this through uv; without this step a fresh machine falls
+# back to system Python and silently misses the installed package/runtime.
+if command -v uv >/dev/null 2>&1; then
+  echo "Installing Aidon and declared dependencies with uv..."
+  (cd "$REPO_DIR" && uv sync) || {
+    echo "WARNING: uv sync failed; optional features may be unavailable." >&2
+  }
+else
+  echo "WARNING: uv not found; Aidon will use the available Python environment." >&2
+  echo "Install uv and rerun setup.sh for the declared project dependencies." >&2
+fi
+
 if [ -f "$AIDON_HOME/.env" ]; then
   echo ".env already exists at $AIDON_HOME/.env, not overwriting it."
 else
