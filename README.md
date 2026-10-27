@@ -16,10 +16,10 @@
 ---
 
 [![Author](https://img.shields.io/badge/Author-OppaAI-D9578C)](https://github.com/OppaAI)
-![Contributors](https://img.shields.io/badge/Contributors-1-3776AB)
-![Commits](https://img.shields.io/badge/Commits-131-76B900)
-![Start date](https://img.shields.io/badge/Start%20date-October%2026%2C%202026-E95420)
-![Credentials](https://img.shields.io/badge/Credentials-none-6C757D)
+<img src="https://img.shields.io/badge/Contributors-1-3776AB" alt="Contributors: 1">
+<img src="https://img.shields.io/badge/Commits-131-76B900" alt="Commits: 131">
+<img src="https://img.shields.io/badge/Start%20date-October%2026%2C%202026-E95420" alt="Start date: October 26, 2026">
+<img src="https://img.shields.io/badge/Credentials-none-6C757D" alt="Credentials: none">
 
 ---
 
