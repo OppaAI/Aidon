@@ -265,8 +265,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if isinstance(client, FakeClient):
         print("warning: no model backend configured, using FakeClient; "
-              "set AIDON_BACKEND and AIDON_API_ENDPOINT (or "
-              "AIDON_META_API_KEY) in .env for a real run", file=sys.stderr)
+              "set AIDON_BACKEND and AIDON_API_ENDPOINT / AIDON_API_KEY "
+              "in .env for a real run", file=sys.stderr)
     # Fast model, same backend, different model name. This is how a
     # local small model works too: set the endpoint to a local
     # Ollama, AIDON_MODEL to the strong model, and AIDON_FAST_MODEL
@@ -708,7 +708,8 @@ def main(argv: list[str] | None = None) -> int:
                 channel=config.approval_nudge_channel)
             server.webui_gate.autonomy_tracker = AutonomyTracker(
                 enabled=config.autonomy_enabled, threshold=config.autonomy_threshold,
-                decay_days=config.autonomy_decay_days)
+                decay_days=config.autonomy_decay_days,
+                path=config.home / "autonomy.json")
             server.webui_gate.slack_sender = slack_sender
             plugins = PluginRegistry(config.home)
             plugins.load_all()

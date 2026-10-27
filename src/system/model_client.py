@@ -219,8 +219,7 @@ class MetaModelAPIClient(HttpModelClient):
                  endpoint: str = "", timeout: float = 120.0):
         if not api_key:
             raise ValueError(
-                "AIDON_META_API_KEY (or AIDON_API_KEY) is required "
-                "for the Meta Model API backend")
+                "AIDON_API_KEY is required for the Meta Model API backend")
         super().__init__(endpoint or self.DEFAULT_ENDPOINT, api_key, model,
                          timeout=timeout)
 
@@ -236,7 +235,10 @@ def client_for_config(config) -> ModelClient:
     backend = (getattr(config, "backend", "") or "").strip().lower()
     api_base = (getattr(config, "api_base", "") or "").strip()
     if not backend:
-        if getattr(config, "meta_api_key", ""):
+        # Old keys only: AIDON_API_KEY + AIDON_API_ENDPOINT.
+        # A Meta endpoint means meta, an Ollama endpoint means
+        # ollama, any other endpoint means http, else fake.
+        if api_base and "api.meta.ai" in api_base:
             backend = "meta"
         elif api_base and "localhost:11434" not in api_base \
                 and "127.0.0.1:11434" not in api_base:
@@ -257,9 +259,8 @@ def client_for_config(config) -> ModelClient:
             num_ctx=int(getattr(config, "ollama_num_ctx", 0) or 0))
     if backend == "meta":
         return MetaModelAPIClient(
-            getattr(config, "meta_api_key", "") or config.api_key,
-            getattr(config, "meta_model", "") or config.model,
-            endpoint=getattr(config, "meta_endpoint", ""),
+            config.api_key, config.model,
+            endpoint=api_base,
             timeout=timeout)
     if backend == "http":
         return HttpModelClient(api_base, config.api_key, config.model,

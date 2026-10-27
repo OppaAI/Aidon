@@ -109,8 +109,18 @@ def _ocr_image(path: Path) -> str:
 
 
 def read_document(path_or_url: str, sandbox=None,
-                  max_chars: int = MAX_CHARS) -> str:
-    """Convert a document (local path or URL) to Markdown."""
+                  max_chars: int = MAX_CHARS, allowlist=None,
+                  grants=None) -> str:
+    """Convert a document (local path or URL) to Markdown.
+
+    allowlist wiring: a URL outside the list (and outside any
+    explicit grant) is READ_BLOCKED, never fetched. Local paths
+    are unaffected — the allowlist is a network rule, not a file rule.
+    """
+    if _is_url(path_or_url) and allowlist:
+        from ..agentic.research_allow import is_fetchable
+        if not is_fetchable(path_or_url, allowlist, grants):
+            return "READ_BLOCKED: URL host not on research allowlist"
     if not _MARKITDOWN_AVAILABLE:
         # Fall back to the KB extractors for common formats.
         from ..memory.kb import extract_text, parser_needed_for

@@ -37,11 +37,24 @@ def _get_json(url: str, get=None):
         return json.loads(response.read())
 
 
+def _filtered(backend: str, results: list, allowlist: list, grants) -> dict:
+    if not allowlist:
+        return {"ok": True, "backend": backend, "results": results}
+    from ..agentic.research_allow import is_fetchable
+    kept = [r for r in results if is_fetchable(r.get("url", ""), allowlist, grants)]
+    return {"ok": True, "backend": backend, "results": kept,
+            "skipped_not_allowlisted": len(results) - len(kept)}
+
+
 def search(query: str, backend: str = "tavily", tavily_key: str = "",
            searxng_url: str = "http://localhost:8888",
-           max_results: int = 5, post=None, get=None) -> dict:
+           max_results: int = 5, post=None, get=None, allowlist=None,
+           grants=None) -> dict:
     if not query.strip():
         return {"ok": False, "error": "empty query", "results": []}
+    # Allowlist wiring: when a list is set, results outside it are
+    # dropped and counted as skipped, never returned as verified.
+    _allowlist = list(allowlist) if allowlist else []
     try:
         if backend == "tavily":
             if not tavily_key:
@@ -53,7 +66,7 @@ def search(query: str, backend: str = "tavily", tavily_key: str = "",
             results = [{"title": r.get("title", ""), "url": r.get("url", ""),
                         "snippet": r.get("content", "")[:300]}
                        for r in result.get("results", [])]
-            return {"ok": True, "backend": "tavily", "results": results}
+            return _filtered("tavily", results, _allowlist, grants)
         if backend == "searxng":
             from urllib.parse import quote
             result = _get_json(
@@ -62,7 +75,7 @@ def search(query: str, backend: str = "tavily", tavily_key: str = "",
             results = [{"title": r.get("title", ""), "url": r.get("url", ""),
                         "snippet": r.get("content", "")[:300]}
                        for r in result.get("results", [])]
-            return {"ok": True, "backend": "searxng", "results": results}
+            return _filtered("searxng", results, _allowlist, grants)
         return {"ok": False, "error": f"unknown backend {backend}", "results": []}
     except Exception as exc:
         return {"ok": False, "error": type(exc).__name__, "results": []}

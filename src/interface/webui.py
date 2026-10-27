@@ -859,7 +859,8 @@ class WebUIServer:
             return {}
 
     def settings_set(self, key: str, value) -> bool:
-        allowed = {"timezone", "budget_tokens", "max_steps", "autonomy_enabled", "approval_nudge_minutes"}
+        allowed = {"timezone", "budget_tokens", "max_steps", "autonomy_enabled", "approval_nudge_minutes",
+                   "research_max_rounds", "max_stuck_iterations", "parallel_tools"}
         if key not in allowed:
             return False
         data = self.settings_get()

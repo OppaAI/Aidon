@@ -84,11 +84,24 @@ class ResearchReport:
 
 
 class Researcher:
-    def __init__(self, timeout_seconds: int = 15):
+    def __init__(self, timeout_seconds: int = 15, allowlist=None,
+                 grants=None, parallel_tools: int = 4):
         self.timeout_seconds = timeout_seconds
+        # Wired, not just defined: when an allowlist is set, a URL
+        # outside it (and outside any explicit grant) is never
+        # fetched. It is recorded as a blocked source, not silently
+        # widened and not fetched anyway.
+        self.allowlist = list(allowlist) if allowlist else []
+        self.grants = grants
+        self.parallel_tools = max(1, int(parallel_tools))
 
     def fetch(self, url: str) -> Source:
         fetched_at = datetime.now().isoformat(timespec="seconds")
+        if self.allowlist:
+            from .research_allow import is_fetchable
+            if not is_fetchable(url, self.allowlist, self.grants):
+                return Source(url=url, fetched_at=fetched_at,
+                              error="blocked: host not on research allowlist")
         try:
             request = urllib.request.Request(
                 url, headers={"User-Agent": "Aidon/1.0 research"})
@@ -106,7 +119,7 @@ class Researcher:
         # the report reads the same as before.
         if len(urls) > 1:
             from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=min(8, len(urls))) as pool:
+            with ThreadPoolExecutor(max_workers=min(self.parallel_tools, len(urls))) as pool:
                 sources = list(pool.map(self.fetch, urls))
         else:
             sources = [self.fetch(url) for url in urls]

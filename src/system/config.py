@@ -152,9 +152,12 @@ class Config:
     ollama_think: bool = False
     ollama_num_ctx: int = 0
     fast_num_ctx: int = 0
-    meta_api_key: str = ""
-    meta_model: str = ""
-    meta_endpoint: str = ""
+    # Research caps, old Aidon names only, no new duplicates.
+    # AIDON_RESEARCH_ALLOWLIST is a comma list, empty = unrestricted.
+    research_max_rounds: int = 10
+    max_stuck_iterations: int = 8
+    parallel_tools: int = 4
+    research_allowlist: str = ""
     webui_token: str = ""
     image_model: str = "muse-image-1.0"
     sam_model: str = "meta-sam"
@@ -237,9 +240,10 @@ class Config:
             ("0", "false", "no", ""),
             ollama_num_ctx=_env_int("AIDON_OLLAMA_NUM_CTX", 0),
             fast_num_ctx=_env_int("AIDON_FAST_NUM_CTX", 0),
-            meta_api_key=os.environ.get("AIDON_META_API_KEY", ""),
-            meta_model=os.environ.get("AIDON_META_MODEL", ""),
-            meta_endpoint=os.environ.get("AIDON_META_ENDPOINT", ""),
+            research_max_rounds=_env_int("AIDON_RESEARCH_MAX_ROUNDS", 10),
+            max_stuck_iterations=_env_int("AIDON_MAX_STUCK_ITERATIONS", 8),
+            parallel_tools=_env_int("AIDON_PARALLEL_TOOLS", 4),
+            research_allowlist=os.environ.get("AIDON_RESEARCH_ALLOWLIST", ""),
             webui_token=os.environ.get("AIDON_WEBUI_TOKEN", ""),
             image_model=os.environ.get("AIDON_IMAGE_MODEL", "muse-image-1.0"),
             sam_model=os.environ.get("AIDON_SAM_MODEL", "meta-sam"),

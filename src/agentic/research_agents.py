@@ -36,8 +36,13 @@ from concurrent.futures import ThreadPoolExecutor
 DEFAULT_ANGLES = ["overview", "details", "counterpoints"]
 
 
-def run_research_agents(query: str, researcher, angles=None) -> dict:
-    """Run one researcher per angle in parallel, merge facts, report failures."""
+def run_research_agents(query: str, researcher, angles=None,
+                        max_workers: int = 3) -> dict:
+    """Run one researcher per angle in parallel, merge facts, report failures.
+
+    max_workers is the parallel-tools cap (AIDON_PARALLEL_TOOLS);
+    the default 3 keeps the old angle fan-out bounded.
+    """
     if not query or not query.strip():
         raise ValueError("research query is required")
     if researcher is None:
@@ -50,7 +55,7 @@ def run_research_agents(query: str, researcher, angles=None) -> dict:
     def _run(angle: str):
         return researcher(query, angle)
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, int(max_workers))) as pool:
         # Submit in angle order; results are collected in angle
         # order below, so merging is deterministic regardless of
         # which thread finishes first.

@@ -97,26 +97,40 @@ class NudgeTracker:
 
 
 class AutonomyTracker:
+    """Per-stake view over the persistent per-action-class policy.
+
+    The WebUI gate calls this with a stake ("medium" for normal cards,
+    "high" for live execution). Underneath, each stake is an action
+    class in src/interface/autonomy.py, so counts survive a restart
+    when path is given, refusal resets the streak, and decay applies.
+    Timing is unchanged: auto-approve only at the threshold, never
+    for high stakes, never when disabled. The policy's notify tier
+    (act_and_notify at 2 approvals) is reported by permission(), not
+    by this gate, which stays silent-auto-approve at the threshold.
+    """
+
     def __init__(self, enabled: bool = True, threshold: int = 5,
-                 decay_days: float = 14.0):
+                 decay_days: float = 14.0, path=None):
+        from .autonomy import AutonomyPolicy
         self.enabled = enabled
         self.threshold = threshold
         self.decay_days = decay_days
-        self._counts: dict[str, int] = {}
-        self._last: dict[str, float] = {}
+        self.policy = AutonomyPolicy(
+            threshold=threshold, decay_seconds=decay_days * 86400,
+            path=Path(path) if path is not None else None)
 
     def record_approval(self, stake: str, now: float):
-        self._counts[stake] = self._counts.get(stake, 0) + 1
-        self._last[stake] = now
+        if not self.enabled:
+            return
+        self.policy.record_approval(stake, stakes=stake)
 
     def record_rejection(self, stake: str):
-        self._counts[stake] = 0
+        self.policy.record_refusal(stake, stakes=stake)
 
     def should_auto_approve(self, stake: str, now: float) -> bool:
         if not self.enabled or stake == "high":
             return False
-        last = self._last.get(stake, 0)
-        if last and (now - last) > self.decay_days * 86400:
-            self._counts[stake] = 0
-            return False
-        return self._counts.get(stake, 0) >= self.threshold
+        return self.policy.approvals(stake) >= self.threshold
+
+    def forget(self, stake: str):
+        self.policy.forget(stake)
