@@ -16,10 +16,11 @@
 
 ## 👤 Project provenance
 
-- **Author and only contributor:** [OppaAI](https://github.com/OppaAI)
-- **First development day:** October 26, 2026
-- **Repository history:** 131 commits
-- **Credentials:** none committed; secrets belong in the local, ignored `.env`
+[![Author](https://img.shields.io/badge/Author-OppaAI-D9578C)](https://github.com/OppaAI)
+![Contributors](https://img.shields.io/badge/Contributors-1-D9578C)
+![Commits](https://img.shields.io/badge/Commits-131-D9578C)
+![First day](https://img.shields.io/badge/First%20day-October%2026%2C%202026-D9578C)
+![Credentials](https://img.shields.io/badge/Credentials-none%20committed-D9578C)
 
 ---
 
