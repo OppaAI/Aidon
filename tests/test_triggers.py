@@ -41,6 +41,16 @@ def test_scheduler_cron_simple(tmp_path):
     assert job.next_due(datetime(2026, 10, 26, 14, 0)) == datetime(2026, 10, 26, 15, 0)
 
 
+def test_scheduler_preserves_job_kind_and_validates_chain(tmp_path):
+    scheduler = Scheduler(tmp_path / "home")
+    scheduler.add_job(SchedulerJob(name="learning", kind="learn",
+                                   schedule="0 9 * * *", goal=""))
+    assert scheduler.jobs[0].kind == "learn"
+    with pytest.raises(ValueError, match="invalid chain"):
+        scheduler.add_job(SchedulerJob(name="bad", kind="chain",
+                                       schedule="0 9 * * *", goal="{}"))
+
+
 def test_ingest_watcher_new_changed_unchanged(tmp_path):
     ingest = tmp_path / "ingest"
     ingest.mkdir()

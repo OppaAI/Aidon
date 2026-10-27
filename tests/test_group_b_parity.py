@@ -141,6 +141,20 @@ def test_gate_text_verdicts():
     assert isinstance(Finding("flag", "builtin", "x"), Finding)
 
 
+def test_gate_text_accepts_old_compatibility_arguments():
+    class Metrics:
+        def __init__(self):
+            self.calls = []
+        def record(self, *args):
+            self.calls.append(args)
+
+    metrics = Metrics()
+    result = gate_text("plugin.py", "eval('x')", metrics=metrics,
+                       is_code=True)
+    assert result.verdict == "fail"
+    assert metrics.calls
+
+
 # ── docstore ──
 
 def test_docstore_hash_and_collection():

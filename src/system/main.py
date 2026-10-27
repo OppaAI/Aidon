@@ -497,8 +497,12 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
     def schedule_job(name, kind="", schedule="", goal=""):
         from ..interface.triggers import Scheduler, SchedulerJob
         scheduler = Scheduler(config.home)
-        scheduler.add_job(SchedulerJob(name=name, schedule=schedule,
-                                       goal=goal, project_id="default"))
+        try:
+            scheduler.add_job(SchedulerJob(name=name, schedule=schedule,
+                                           goal=goal, kind=kind or "goal",
+                                           project_id="default"))
+        except ValueError as exc:
+            return f"schedule failed: {exc}"
         return f"scheduled {name} ({kind}) {schedule}: {goal}"
 
     def web_search(query):
@@ -806,6 +810,9 @@ def main(argv: list[str] | None = None) -> int:
     schedule_parser.add_argument("action", choices=["add", "list", "remove", "show"], help="add = add a job, list = list jobs, remove = remove a job, show = show a job")
     schedule_parser.add_argument("--name", default="", help="Job name")
     schedule_parser.add_argument("--goal", default="", help="Goal for add")
+    schedule_parser.add_argument("--kind", default="goal",
+                                 choices=["goal", "chain", "learn", "report", "brief"],
+                                 help="Job kind; chain uses JSON in --goal")
     schedule_parser.add_argument("--schedule", default="0 9 * * *", help="Cron schedule for add, default daily 9am")
     schedule_parser.add_argument("--project", default="default", help="Project id for add")
     sandbox_parser = sub.add_parser("sandbox", help="Sandbox isolation boundary")
@@ -1352,7 +1359,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "add":
             if not args.name or not args.goal:
                 print("schedule add needs --name and --goal"); return 2
-            scheduler.add_job(SchedulerJob(name=args.name, goal=args.goal, schedule=args.schedule, project_id=args.project))
+            try:
+                scheduler.add_job(SchedulerJob(name=args.name, goal=args.goal,
+                                               schedule=args.schedule,
+                                               kind=args.kind,
+                                               project_id=args.project))
+            except ValueError as exc:
+                print(f"schedule add failed: {exc}"); return 2
             print(f"Added job {args.name}")
             return 0
         if args.action == "remove":
@@ -2108,14 +2121,46 @@ def main(argv: list[str] | None = None) -> int:
                 _serve_control = _ServeControl(config.home)
                 _serve_control.register(_serve_run_id, job.goal, job.project_id)
                 print(f"Job {job.name}: run id {_serve_run_id}")
-                runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home,
-                                    memory=memory, project_id=job.project_id, plugins=_plugins,
-                                    execution_backend=_backend, budget=_Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
-                                    trace=_Trace(config.home, project_id=job.project_id), model_verifier=_MV(client),
-                                    kernel_mode=config.kernel_mode, semantic_router=_router2,
-                                    use_semantic_router_skip=True, network_available=_network_available(_backend, sandbox), run_id=_serve_run_id, run_control=_serve_control)
-                report = runner.run(job.goal)
-                print(f"Job {job.name}: {report.status}, files: {', '.join(report.files)}")
+
+                # Scheduled non-goal jobs retain the old Aidon scheduler
+                # semantics. They do not need a model GoalRunner.
+                _handled = False
+                if job.kind == "learn":
+                    from ..agentic.learn_cycle import run_learn_cycle as _learn
+                    _summary = _learn(config.home, sandbox,
+                                      max_per_day=max(0, config.learn_max_skills_per_day))
+                    print(f"Job {job.name}: learn cycle {_summary}")
+                    _handled = True
+                elif job.kind == "report":
+                    from ..interface.report import daily_report as _daily
+                    print(f"Job {job.name}: report\n{_daily(config.home)}")
+                    _handled = True
+                elif job.kind == "chain":
+                    from ..capabilities.chain import run_chain as _run_chain
+                    from ..capabilities.tools import ToolRegistry as _ChainTools
+                    import json as _chain_json
+                    _chain = _chain_json.loads(job.goal)
+                    _tools = _ChainTools(
+                        sandbox.workdir, sandbox=sandbox,
+                        network_available=_network_available(_backend, sandbox))
+                    _chain_result = _run_chain(_chain, _tools)
+                    print(f"Job {job.name}: chain {_chain_result}")
+                    _handled = True
+                elif job.kind == "brief":
+                    # The new report subsystem does not yet have the old
+                    # model-synthesized WhatsApp brief builder. Fail loudly
+                    # instead of silently treating a brief as a goal.
+                    print(f"Job {job.name}: brief jobs are not implemented in the new report subsystem")
+                    _handled = True
+                if not _handled:
+                    runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home,
+                                        memory=memory, project_id=job.project_id, plugins=_plugins,
+                                        execution_backend=_backend, budget=_Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
+                                        trace=_Trace(config.home, project_id=job.project_id), model_verifier=_MV(client),
+                                        kernel_mode=config.kernel_mode, semantic_router=_router2,
+                                        use_semantic_router_skip=True, network_available=_network_available(_backend, sandbox), run_id=_serve_run_id, run_control=_serve_control)
+                    report = runner.run(job.goal)
+                    print(f"Job {job.name}: {report.status}, files: {', '.join(report.files)}")
             # Tick drain: once per tick, due notifications only,
             # cadence-spaced by the Outbox itself.
             _serve_loop.drain_outbox()

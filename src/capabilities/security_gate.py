@@ -212,16 +212,18 @@ def review_with_model(text: str, client) -> list[Finding]:
     return []
 
 
-def gate_text(source: str, text: str, client=None) -> GateResult:
+def gate_text(source: str, text: str, *, client=None, metrics=None,
+              is_code: bool = False) -> GateResult:
     """Run every layer over `text` and return the verdict.
 
     `source` is recorded for the caller; it does not change
     the scan. Info findings (scanner unavailable) never
     change the verdict on their own.
     """
-    _ = source
+    # ``metrics`` and ``is_code`` were part of the old Aidon API.  Keep them
+    # accepted so migrated callers and plugins do not fail at runtime.
     findings = []
-    findings.extend(_builtin_scan(text, is_code=False))
+    findings.extend(_builtin_scan(text, is_code=is_code))
     findings.extend(injection_heuristics(text))
     findings.extend(_semgrep_scan(text))
     findings.extend(_bandit_scan(text))
@@ -232,7 +234,17 @@ def gate_text(source: str, text: str, client=None) -> GateResult:
         verdict = "review"
     else:
         verdict = "pass"
-    return GateResult(verdict=verdict, text=text, findings=findings)
+    result = GateResult(verdict=verdict, text=text, findings=findings)
+    if metrics is not None and verdict == "fail":
+        try:
+            from ..agentic.autonomy_metrics import QUARANTINE
+            metrics.record(QUARANTINE, source,
+                           f"{sum(f.severity == 'block' for f in findings)} blocking finding(s)")
+        except Exception:
+            # Security gating must not become fail-open because telemetry is
+            # unavailable or uses an older metrics implementation.
+            pass
+    return result
 
 
 # (pattern, reason) — a match always needs a human, even autonomous.

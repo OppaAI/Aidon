@@ -227,6 +227,10 @@ class SchedulerJob:
     goal: str
     project_id: str = "default"
     last_run: str = ""
+    # Kept for compatibility with the old registry scheduler.  A missing
+    # field in an existing scheduler.json is a normal goal job.  This is
+    # placed last so existing positional construction keeps its meaning.
+    kind: str = "goal"
 
     def next_due(self, after: datetime) -> datetime | None:
         schedule = self.schedule.strip()
@@ -288,6 +292,8 @@ class SchedulerJob:
 
 
 class Scheduler:
+    KINDS = ("goal", "chain", "learn", "report", "brief")
+
     def __init__(self, home: Path):
         self.home = Path(home)
         self.state_path = self.home / "scheduler.json"
@@ -310,6 +316,20 @@ class Scheduler:
             encoding="utf-8")
 
     def add_job(self, job: SchedulerJob) -> None:
+        if job.kind not in self.KINDS:
+            raise ValueError(
+                f"job kind must be {'|'.join(self.KINDS)}, got {job.kind!r}")
+        if not job.goal.strip() and job.kind == "goal":
+            raise ValueError("goal jobs need goal text")
+        if job.kind == "chain":
+            try:
+                spec = json.loads(job.goal)
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise ValueError(f"chain jobs need JSON in goal: {exc}") from exc
+            from ..capabilities.chain import validate_chain_spec
+            failures = validate_chain_spec(spec)
+            if failures:
+                raise ValueError("invalid chain: " + "; ".join(failures))
         self.jobs = [j for j in self.jobs if j.name != job.name]
         self.jobs.append(job)
         self.save()
