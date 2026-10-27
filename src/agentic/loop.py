@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..interface.approval import ApprovalGate, Decision
-from ..core.model_client import Message, ModelClient
+from ..system.model_client import Message, ModelClient
 from ..capabilities.sandbox import Sandbox
 from ..capabilities.tools import ToolRegistry
 from .verify import verify_plan

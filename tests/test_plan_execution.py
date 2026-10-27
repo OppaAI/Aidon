@@ -11,7 +11,7 @@ from src.memory.embedder import HashEmbedder
 from src.memory.kb import KnowledgeBase, parser_needed_for
 from src.agentic.loop import GoalRunner, Plan, Step
 from src.memory.memory import InMemoryStore, Memory
-from src.core.model_client import FakeClient
+from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
 from src.capabilities.tools import ToolRegistry
 from src.agentic.verify import check_criterion, verify_plan

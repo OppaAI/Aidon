@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.core.config import Config
+from src.system.config import Config
 from src.memory.embedder import HashEmbedder
 from src.agentic.semantic_router import SemanticRouter
 

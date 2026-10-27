@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pytest
 
 from src.capabilities.extra_tools import build_extra_tools, dispatch_extra_tool
-from src.core.model_client import FakeClient
+from src.system.model_client import FakeClient
 from src.capabilities.webchat import webchat_reply
 from src.interface.webui_auth import is_authorized
 from src.capabilities.whatsapp_vision import prepare_vision_message

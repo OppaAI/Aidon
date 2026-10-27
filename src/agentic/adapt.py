@@ -172,7 +172,7 @@ def adapt_experience(experience, new_goal: str, client=None):
         changed = sum(1 for a, b in zip(heuristic, experience.dag_nodes) if a != b)
         return heuristic, changed, 0
     # One selective model call: only changed nodes, as JSON.
-    from ..core.model_client import Message
+    from ..system.model_client import Message
     prompt = (
         f"Old goal: {old_goal}\nNew goal: {new_goal}\n"
         f"Old workflow nodes, as JSON: {json.dumps(experience.dag_nodes)}\n"

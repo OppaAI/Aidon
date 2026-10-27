@@ -10,7 +10,7 @@ import json
 
 from src.interface.approval import ApprovalGate, Decision
 from src.agentic.loop import GoalRunner
-from src.core.model_client import FakeClient
+from src.system.model_client import FakeClient
 from src.capabilities.plugins import PluginRegistry, load_plugin, scan_plugin
 from src.capabilities.sandbox import Sandbox
 

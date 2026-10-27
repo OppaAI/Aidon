@@ -13,7 +13,7 @@ from src.memory.experience import build_experience, recall_experiences, store_ex
 from src.memory.kb import KnowledgeBase, chunk_text
 from src.agentic.loop import GoalRunner
 from src.memory.memory import InMemoryStore, Memory
-from src.core.model_client import FakeClient
+from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
 
 

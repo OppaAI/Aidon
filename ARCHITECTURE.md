@@ -115,10 +115,11 @@ goal starts from what actually worked.
 
 Code lives in `src/`, grouped by what it does, so a reader can find a system without reading 70 files in one directory. `src/main.py` is the entry point, it imports from the groups, it does not contain the systems itself.
 
-- `src/core/` — config, model client. The model client is endpoint, key, and model name only, OpenAI-compatible, stdlib, FakeClient for tests.
+- `src/system/` — config, model client. The model client is endpoint, key, and model name only, OpenAI-compatible, stdlib, FakeClient for tests.
 - `src/memory/` — Qdrant memory, embedder, entity graph, KB parsing, Experience, redaction, rolling summary, library links.
 - `src/agentic/` — goal loop, DAG and DAG store, adapt, swarm, interview and spec, validation, model verifier, budgets, trace, counting, metrics, benchmark, kernel, routers, research.
 - `src/interface/` — WebUI and robot avatar, messaging, v1 API, MCP server and client, triggers, scheduler loop, run control, approval and pre-approval gates.
-- `src/capabilities/` — sandbox and execution backends, tools and plugins, skill lifecycle, live actions, search, YouTube, voice, social, GitHub, email and Gmail, image generation and editing, charts, Unity assets, Playwright MCP, SAM segmentation, video pipeline.
+- `src/capabilities/` — sandbox and execution backends, tools and plugins, skill lifecycle, live actions, search, voice, GitHub, email and Gmail, image generation and editing, charts, Unity assets, Playwright MCP, SAM segmentation, video pipeline.
+- `src/social/` — one-way social publishing, Threads and Instagram, plus YouTube search, metadata, and transcripts.
 
 Old flat layout, `src/*.py` with no sub-directory, is superseded by this grouped layout. Tests import from the grouped paths, for example `from src.memory.memory import Memory`, not `from src.memory import Memory`.

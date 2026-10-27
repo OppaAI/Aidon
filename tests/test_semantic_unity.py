@@ -9,7 +9,7 @@ from src.interface.approval import ApprovalGate, Decision
 from src.memory.embedder import HashEmbedder
 from src.agentic.loop import GoalRunner
 from src.memory.memory import Memory
-from src.core.model_client import FakeClient
+from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
 from src.agentic.semantic_router import SemanticRouter
 from src.capabilities.unity import UnityAssetBuilder

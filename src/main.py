@@ -28,9 +28,9 @@ import argparse
 import sys
 
 from .interface.approval import ApprovalGate, Decision
-from .core.config import Config
+from .system.config import Config
 from .agentic.loop import GoalRunner
-from .core.model_client import FakeClient, HttpModelClient
+from .system.model_client import FakeClient, HttpModelClient
 from .capabilities.sandbox import Sandbox
 
 
@@ -748,7 +748,7 @@ def main(argv: list[str] | None = None) -> int:
             _router = SemanticRouter(memory.embedder, cache_path=config.home / 'semantic_router_vectors.json')
             _route, _conf = _router.classify(args.text)
             if _route == "chat" and _conf >= 0.15 and not any(w in args.text.lower() for w in ("write", "save", ".md", ".py")):
-                from .core.model_client import Message as _Msg
+                from .system.model_client import Message as _Msg
                 print(client.chat([_Msg("user", args.text)]))
                 return 0
         except Exception:

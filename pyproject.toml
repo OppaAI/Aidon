@@ -15,4 +15,4 @@ sparse = ["fastembed"]
 kb = ["pypdf", "python-docx", "beautifulsoup4"]
 
 [tool.setuptools]
-packages = ["src", "src.core", "src.memory", "src.agentic", "src.interface", "src.capabilities"]
+packages = ["src", "src.system", "src.memory", "src.agentic", "src.interface", "src.capabilities", "src.social"]

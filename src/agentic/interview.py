@@ -57,7 +57,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..core.model_client import Message, ModelClient
+from ..system.model_client import Message, ModelClient
 
 PLACEHOLDERS = ("tbd", "todo", "to be decided", "unknown", "n/a")
 

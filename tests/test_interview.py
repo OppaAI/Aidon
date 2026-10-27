@@ -13,7 +13,7 @@ from src.agentic.interview import (InterviewRunner, Spec, parse_spec_sheet,
                            spec_sheet, spec_sheet_md, SPEC_SHEET_TEMPLATE)
 from src.agentic.loop import GoalRunner
 from src.memory.memory import InMemoryStore, Memory
-from src.core.model_client import FakeClient
+from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
 
 

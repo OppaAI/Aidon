@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
-from ..core.model_client import Message, ModelClient
+from ..system.model_client import Message, ModelClient
 
 
 def decide_subgoals(goal: str, client: ModelClient) -> list[str]:

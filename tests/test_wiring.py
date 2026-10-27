@@ -11,7 +11,7 @@ from src.interface.mcp_client import McpClient
 from src.memory.memory_extras import backup, export_points, redact, rolling_summary
 from src.interface.preapproval import PreapprovalStore
 from src.agentic.research_allow import is_allowed, load_allowlist, research_multiround
-from src.capabilities.youtube_transcript import fetch_transcript
+from src.social.youtube_transcript import fetch_transcript
 from src.interface.messaging import poll_slack_once, MessagingConfig
 from src.interface.webui import WebUIServer
 from src.interface.triggers import TriggerDispatcher

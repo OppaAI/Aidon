@@ -18,7 +18,7 @@ from src.memory.kb import KnowledgeBase, extract_text
 from src.memory.memory import (Memory, decay_score, is_grace_protected,
                         should_prune, InMemoryStore)
 from src.agentic.loop import GoalRunner
-from src.core.model_client import FakeClient
+from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
 from src.interface.approval import ApprovalGate, Decision
 

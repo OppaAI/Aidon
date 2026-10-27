@@ -30,7 +30,7 @@ output: a model call is never proof on its own.
 
 from __future__ import annotations
 
-from ..core.model_client import Message
+from ..system.model_client import Message
 
 
 def _fallback(previous_summary: str, new_events: list[str]) -> str:

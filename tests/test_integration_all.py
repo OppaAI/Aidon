@@ -10,7 +10,7 @@ from src.agentic.dag_store import DagStore
 from src.memory.embedder import HashEmbedder
 from src.agentic.loop import GoalRunner
 from src.memory.memory import Memory
-from src.core.model_client import FakeClient
+from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
 from src.interface.v1 import AuthStore, GoalStore, handle
 from src.interface.mcp_server import MCPServer

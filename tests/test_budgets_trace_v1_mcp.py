@@ -12,7 +12,7 @@ from src.interface.approval import ApprovalGate, Decision
 from src.agentic.budgets import Budget, BudgetExceeded
 from src.agentic.loop import GoalRunner
 from src.interface.mcp_server import MCPServer
-from src.core.model_client import FakeClient
+from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
 from src.agentic.trace import TraceRecorder
 from src.interface.v1 import AuthStore, GoalStore, handle

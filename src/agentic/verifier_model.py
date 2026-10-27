@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..core.model_client import Message, ModelClient
+from ..system.model_client import Message, ModelClient
 
 
 class ModelVerifier:

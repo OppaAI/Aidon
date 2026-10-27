@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.core.model_client import FakeClient, Message
+from src.system.model_client import FakeClient, Message
 from src.agentic.router import RoutedClient
 from src.interface.run_control import RunControl
 from src.interface.v1 import AuthStore, GoalStore, handle

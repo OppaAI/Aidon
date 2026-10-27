@@ -19,7 +19,7 @@ usage count is available from the model API.
 
 from __future__ import annotations
 
-from ..core.model_client import ModelClient
+from ..system.model_client import ModelClient
 
 
 def _text_of(messages) -> str:

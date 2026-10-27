@@ -28,7 +28,7 @@ router actually did.
 
 from __future__ import annotations
 
-from ..core.model_client import Message, ModelClient
+from ..system.model_client import Message, ModelClient
 
 DEFAULT_FAST_PHASES = {"interpret", "learn", "respond"}
 

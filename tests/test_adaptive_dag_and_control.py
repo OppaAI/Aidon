@@ -14,7 +14,7 @@ from src.agentic.loop import GoalRunner, RunReport, Plan
 from src.memory.memory import Memory
 from src.interface.approval import ApprovalGate, Decision
 from src.memory.embedder import HashEmbedder
-from src.core.model_client import FakeClient
+from src.system.model_client import FakeClient
 from src.interface.run_control import RunControl, new_run_id
 from src.capabilities.sandbox import Sandbox
 from src.interface.webui import WebUIServer

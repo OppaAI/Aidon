@@ -25,7 +25,7 @@ from __future__ import annotations
 
 def _make_message(text: str):
     try:
-        from ..core.model_client import Message
+        from ..system.model_client import Message
 
         return Message(role="user", content=text)
     except Exception:

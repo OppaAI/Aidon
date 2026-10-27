@@ -10,9 +10,9 @@ These tests prove the core shape, not the full agent:
 """
 
 from src.interface.approval import ApprovalGate, Decision
-from src.core.config import Config
+from src.system.config import Config
 from src.agentic.loop import GoalRunner
-from src.core.model_client import FakeClient
+from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
 
 

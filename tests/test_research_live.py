@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from src.interface.approval import ApprovalGate, Decision
 from src.capabilities.live import LiveExecutor
 from src.agentic.loop import GoalRunner
-from src.core.model_client import FakeClient
+from src.system.model_client import FakeClient
 from src.agentic.research import Researcher
 from src.capabilities.sandbox import Sandbox
 

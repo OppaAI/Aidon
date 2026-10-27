@@ -14,7 +14,7 @@ by embedding, with no LLM call, low confidence to agentic.
 
 from src.agentic.kernel import kernel_allowed, kernel_filter_tools
 from src.agentic.loop import GoalRunner
-from src.core.model_client import FakeClient, Message, image_message
+from src.system.model_client import FakeClient, Message, image_message
 from src.agentic.router import RoutedClient
 from src.agentic.semantic_router import SemanticRouter
 from src.agentic.swarm import decide_subgoals, run_swarm

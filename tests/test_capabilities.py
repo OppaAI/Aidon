@@ -8,9 +8,9 @@ gated, fail closed.
 """
 
 from src.capabilities import search as search_mod
-from src.capabilities import youtube as youtube_mod
+from src.social import youtube as youtube_mod
 from src.capabilities import voice as voice_mod
-from src.capabilities import social as social_mod
+from src.social import social as social_mod
 from src.capabilities import github_tools as github_mod
 from src.capabilities import email as email_mod
 from src.interface.scheduler_loop import (AutonomyTracker, NudgeTracker,
