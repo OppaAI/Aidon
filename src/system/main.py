@@ -101,16 +101,25 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
     try:
         from ..capabilities.charts import bar_chart, line_chart
 
+        def _chart_data(data):
+            if isinstance(data, dict):
+                data = list(data.items())
+            return [(str(label), float(value)) for label, value in data]
+
         def make_bar_chart(title, data, output="chart.svg"):
-            pairs = [(str(label), float(value)) for label, value in data]
-            return str(bar_chart(title, pairs, _confined(output)))
+            return str(bar_chart(title, _chart_data(data), _confined(output)))
 
         def make_line_chart(title, data, output="chart.svg"):
-            pairs = [(str(label), float(value)) for label, value in data]
-            return str(line_chart(title, pairs, _confined(output)))
+            return str(line_chart(title, _chart_data(data), _confined(output)))
+
+        def make_chart(title, data, output="chart.svg", kind="bar"):
+            if str(kind).lower() in ("line", "line_chart"):
+                return make_line_chart(title, data, output)
+            return make_bar_chart(title, data, output)
 
         tools["make_bar_chart"] = make_bar_chart
         tools["make_line_chart"] = make_line_chart
+        tools["make_chart"] = make_chart
     except Exception:
         pass
     try:

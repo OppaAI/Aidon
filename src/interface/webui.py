@@ -1612,10 +1612,13 @@ class WebUIServer:
 
     def handle_tools(self) -> dict:
         from ..capabilities.plugins import PluginRegistry
+        from ..capabilities.tool_catalog import all_tool_names
         registry = PluginRegistry(self.home)
         registry.load_all()
+        plugin_tools = registry.tool_names()
         return {"sandbox_tools": ["write", "read", "list", "shell", "calculate"],
-                "plugin_tools": registry.tool_names()}
+                "goal_tools": all_tool_names(plugin_tools),
+                "plugin_tools": plugin_tools}
 
     _FILE_CONTENT_TYPES = {
         ".md": "text/markdown", ".txt": "text/plain",
@@ -1954,8 +1957,7 @@ class WebUIServer:
         """
         try:
             tools = self.handle_tools()
-            tool_names = list(tools.get("sandbox_tools", [])) \
-                + list(tools.get("plugin_tools", []))
+            tool_names = list(tools.get("goal_tools", []))
         except Exception:
             tool_names = []
         try:
