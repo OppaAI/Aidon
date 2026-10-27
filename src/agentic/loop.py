@@ -552,7 +552,7 @@ class GoalRunner:
                     self._approval_body(f"Run shell command: {command_text}?"),
                     force_ask=True,
                 )
-                if decision.verdict not in ("approved", "edited"):
+                if decision.verdict not in ("approved", "auto_approved"):
                     raise ValueError(f"shell command rejected by approval gate ({reason})")
         if name == "shell" and self.execution_backend is not None:
             command = args["command"]
