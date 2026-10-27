@@ -130,7 +130,7 @@ CHAT_HTML = """<!doctype html>
 <h2>Projects</h2><div id="projects"></div>
 <h2>Library</h2><a href="/library">Library tab</a>
 <h2>Settings</h2><a href="/settings">Settings and keys</a>
-<h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a> <a href="/replay">Replay</a> <a href="/avatar-vrm">VRM avatar, fallback</a>
+<h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a> <a href="/replay">Replay</a> <a href="/avatar-vrm">VRM avatar, fallback</a> <a href="/capabilities">Capabilities</a> <a href="/memory">Memory</a> <a href="/knowledge">Knowledge</a> <a href="/reports">Reports</a>
 <div id="stage-pills"><p>Stages: recall, interpret, research, plan, sandbox, verify, approval, live, learn</p><div id="pills"></div></div>
 </div>
 <div id="chat">
@@ -936,6 +936,41 @@ class WebUIServer:
                     dag_id = parsed.path[len("/api/dags/"):]
                     data = server.handle_dag_get(dag_id)
                     self._send_json(200 if "error" not in data else 404, data)
+                elif parsed.path == "/capabilities":
+                    from ..capabilities.plugins import PluginRegistry as _PR
+                    _reg = _PR(server.home); _reg.load_all()
+                    html = "<h1>Capabilities</h1><p>What Aidon can do, what it has learned, and the evidence.</p>"
+                    html += f"<p>Sandbox tools: write, read, list, shell, calculate</p><p>Plugin tools: {', '.join(_reg.tool_names())}</p>"
+                    html += "<p>Computer use: screenshot and click, type, scroll, key, approval-gated, no driver configured by default, no GUI action without a driver.</p>"
+                    self._send_html(200, html)
+                elif parsed.path == "/memory":
+                    html = "<h1>Memory</h1><p>Episodes Aidon remembers from past work, by collection, no secret values.</p>"
+                    if server.memory is not None:
+                        for coll in ("working", "episodic", "semantic", "experience", "knowledge"):
+                            try:
+                                points = server.memory.list_points(coll, limit=20)
+                                html += f"<h2>{coll}: {len(points)} points</h2>"
+                                for point in points:
+                                    html += f"<p>{point.id} {point.payload.get('text', '')[:120]}</p>"
+                            except Exception:
+                                continue
+                    self._send_html(200, html)
+                elif parsed.path == "/knowledge":
+                    html = "<h1>Knowledge</h1><p>Documents and facts Aidon has ingested, from the knowledge collection and library.</p>"
+                    if server.memory is not None:
+                        try:
+                            for point in server.memory.list_points("knowledge", limit=50):
+                                html += f"<p>{point.id} {point.payload.get('text', '')[:120]}</p>"
+                        except Exception:
+                            pass
+                    for item in server._library_files():
+                        html += f"<p>Library: {item['path']}</p>"
+                    self._send_html(200, html)
+                elif parsed.path == "/reports":
+                    from ..interface.scheduler_loop import daily_report as _daily
+                    html = "<h1>Reports</h1><p>Daily reports, from learned last run and trace files, never invented.</p>"
+                    html += f"<pre>{_daily(server.home)}</pre>"
+                    self._send_html(200, html)
                 elif parsed.path == "/replay":
                     self._send_html(200, REPLAY_HTML)
                 elif parsed.path == "/avatar-vrm":
@@ -964,10 +999,10 @@ class WebUIServer:
                         self.wfile.write(data)
                 elif parsed.path == "/api/memory-dags":
                     dags = []
-                    if self.memory is not None:
+                    if server.memory is not None:
                         try:
                             from ..memory.experience import recall_experiences
-                            for exp in recall_experiences(self.memory, "", limit=20):
+                            for exp in recall_experiences(server.memory, "", limit=20):
                                 if exp.dag_nodes:
                                     dags.append({"goal": exp.goal, "nodes": exp.dag_nodes})
                         except Exception:

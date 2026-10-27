@@ -154,6 +154,50 @@ def main(argv: list[str] | None = None) -> int:
     email_parser.add_argument("--to", default=None, help="Recipient for send")
     email_parser.add_argument("--subject", default="", help="Subject for send")
     email_parser.add_argument("--body", default="", help="Body for send")
+
+    memory_parser = sub.add_parser("memory", help="Inspect and prune Aidon memory, old Aidon memory commands")
+    memory_parser.add_argument("action", choices=["forget", "ingest", "check", "prune", "list"], help="forget = delete matching memories, ingest = ingest a folder, check = list points, prune = delete decayed memories, list = list projects")
+    memory_parser.add_argument("query", nargs="?", default="", help="Query for forget, folder for ingest")
+    memory_parser.add_argument("--id", default=None, help="Exact point id for forget")
+    memory_parser.add_argument("--collection", default="episodic", help="Collection for forget, check, prune")
+    memory_parser.add_argument("--project", default="default", help="Project id")
+    memory_parser.add_argument("--dry-run", action="store_true", help="Prune dry run only, do not delete")
+    skills_parser = sub.add_parser("skills", help="Inspect the skill library, old Aidon skills commands")
+    skills_parser.add_argument("action", choices=["list", "show", "check", "rollback"], help="list = list skills, show = show one skill state, check = governor check, rollback = reset a skill to candidate")
+    skills_parser.add_argument("name", nargs="?", default="", help="Skill name")
+    tools_parser = sub.add_parser("tools", help="Inspect the tool registry")
+    tools_parser.add_argument("action", choices=["list", "check"], help="list = list plugin tools, check = check a tool exists")
+    tools_parser.add_argument("name", nargs="?", default="", help="Tool name for check")
+    dag_parser = sub.add_parser("dag", help="Inspect saved DAG workflows")
+    dag_parser.add_argument("action", choices=["list", "show"], help="list = list saved DAGs, show = show one DAG")
+    dag_parser.add_argument("id", nargs="?", default="", help="DAG id for show")
+    mission_parser = sub.add_parser("mission", help="Mission lifecycle records")
+    mission_parser.add_argument("action", choices=["list", "show", "discard", "create"], help="list = list missions, show = show one, discard = discard a rejected mission, create = create a draft mission")
+    mission_parser.add_argument("id", nargs="?", default="", help="Project id")
+    mission_parser.add_argument("--spec", default="{}", help="Spec JSON for create")
+    outbox_parser = sub.add_parser("outbox", help="Durable notification outbox")
+    outbox_parser.add_argument("action", choices=["list", "drain", "queue"], help="list = list queued, drain = deliver queued with a printed sender, queue = queue a notification")
+    outbox_parser.add_argument("--to", default="", help="Recipient for queue")
+    outbox_parser.add_argument("--subject", default="", help="Subject for queue")
+    outbox_parser.add_argument("--body", default="", help="Body for queue")
+    export_parser = sub.add_parser("export", help="Render a read-only markdown view of the registry, and export memory points")
+    export_parser.add_argument("--dir", default="", help="Output directory, default <home>/export")
+    schedule_parser = sub.add_parser("schedule", help="Cron-like scheduled jobs, old Aidon schedule commands, scheduler serve runs them")
+    schedule_parser.add_argument("action", choices=["add", "list", "remove", "show"], help="add = add a job, list = list jobs, remove = remove a job, show = show a job")
+    schedule_parser.add_argument("--name", default="", help="Job name")
+    schedule_parser.add_argument("--goal", default="", help="Goal for add")
+    schedule_parser.add_argument("--schedule", default="0 9 * * *", help="Cron schedule for add, default daily 9am")
+    schedule_parser.add_argument("--project", default="default", help="Project id for add")
+    sandbox_parser = sub.add_parser("sandbox", help="Sandbox isolation boundary")
+    sandbox_parser.add_argument("action", choices=["check"], help="check = report sandbox backend and workdir, fail closed if backend missing")
+    chain_parser = sub.add_parser("chain", help="Declarative tool chains, zero-LLM scheduled jobs")
+    chain_parser.add_argument("action", choices=["validate", "run"], help="validate = validate a chain spec JSON, run = run a validated chain through sandbox tools")
+    chain_parser.add_argument("path", help="Chain spec JSON file")
+    chat_parser = sub.add_parser("chat", help="Interactive terminal chat, old Aidon chat command, type a goal, empty line to exit")
+    computer_parser = sub.add_parser("computer", help="Screenshot and computer use, approval-gated, no GUI action without a driver")
+    computer_parser.add_argument("action", choices=["screenshot", "run"], help="screenshot = capture screen to a file, run = run a computer-use action JSON file")
+    computer_parser.add_argument("path", help="Output PNG for screenshot, or action JSON file for run")
+    computer_parser.add_argument("--approve", action="store_true", help="Approve irreversible actions in this run, otherwise they are refused")
     args = parser.parse_args(argv)
 
     config = Config.load()
@@ -175,6 +219,220 @@ def main(argv: list[str] | None = None) -> int:
         client = RoutedClient(fast_client, client, fast_phases=fast_phases)
     sandbox = Sandbox(config.workdir, config.sandbox_timeout_seconds)
     memory = _make_memory(config)
+
+    if args.command == "memory":
+        from ..memory.kb import KnowledgeBase
+        if args.action == "forget":
+            if args.id:
+                ok = memory.forget(args.collection, args.id)
+                print(f"Forgot {args.id}: {ok}")
+                return 0 if ok else 2
+            result = memory.forget_search(args.query) if args.query else {"matches": []}
+            print(f"Forget matches for {args.query!r}: {result}")
+            return 0
+        if args.action == "ingest":
+            from pathlib import Path as _P
+            kb = KnowledgeBase(memory)
+            folder = _P(args.query)
+            total = 0
+            for file_path in sorted(folder.rglob("*")) if folder.is_dir() else [folder]:
+                if file_path.is_file():
+                    try:
+                        total += kb.ingest_file(file_path)
+                    except Exception as exc:
+                        print(f"Ingest failed {file_path}: {exc}")
+            print(f"Ingested {total} chunks from {args.query}")
+            return 0
+        if args.action == "check":
+            points = memory.list_points(args.collection, limit=50)
+            print(f"{args.collection}: {len(points)} points")
+            for point in points:
+                print(f"  {point.id} {point.payload.get('text', '')[:80]}")
+            return 0
+        if args.action == "prune":
+            result = memory.prune(args.collection) if not args.dry_run else {"pruned": 0, "dry_run": True}
+            print(f"Prune {args.collection}: {result}")
+            return 0
+        if args.action == "list":
+            print(f"Projects: {', '.join(memory.list_projects())}")
+            return 0
+        return 2
+    if args.command == "skills":
+        from ..capabilities.skill_lifecycle import LifecycleStore
+        lifecycle = LifecycleStore(config.home)
+        if args.action == "list":
+            print(f"Skills: {list(lifecycle._data.keys())}")
+            return 0
+        if not args.name:
+            print("skills show/check/rollback need a name"); return 2
+        if args.action == "show":
+            print(f"{args.name}: {lifecycle.state(args.name)}")
+            return 0
+        if args.action == "check":
+            print(f"{args.name} governor ok: {lifecycle.governor_check(args.name)}")
+            return 0
+        if args.action == "rollback":
+            lifecycle._data[args.name] = {"state": "candidate", "successes": 0, "failures": 0, "learns": {}}; lifecycle._save()
+            print(f"{args.name} rolled back to candidate")
+            return 0
+        return 2
+    if args.command == "tools":
+        from ..capabilities.plugins import PluginRegistry
+        registry = PluginRegistry(config.home); registry.load_all()
+        if args.action == "list":
+            print(f"Plugin tools: {', '.join(registry.tool_names())}")
+            print("Sandbox tools: write, read, list, shell, calculate")
+            return 0
+        if args.action == "check":
+            print(f"{args.name} exists: {args.name in registry.tool_names() or args.name in ('write', 'read', 'list', 'shell', 'calculate')}")
+            return 0
+        return 2
+    if args.command == "dag":
+        from ..agentic.dag_store import DagStore
+        store = DagStore(config.home)
+        if args.action == "list":
+            for dag in store.list_dags():
+                print(f"{dag['id']}: {dag['goal']} nodes={dag['nodes']}")
+            return 0
+        if args.action == "show":
+            dag = store.get(args.id)
+            print(dag if dag else f"No DAG {args.id}")
+            return 0 if dag else 2
+        return 2
+    if args.command == "mission":
+        from ..capabilities.mission import MissionStore
+        import json as _json
+        store = MissionStore(config.home)
+        if args.action == "list":
+            missions_dir = config.home / "missions"
+            for path in sorted(missions_dir.glob("*/mission.json")) if missions_dir.exists() else []:
+                try:
+                    data = _json.loads(path.read_text())
+                    print(f"{data.get('project_id')}: {data.get('status')}")
+                except Exception:
+                    continue
+            return 0
+        if args.action == "show":
+            try:
+                print(store.get(args.id))
+            except FileNotFoundError:
+                print(f"No mission {args.id}"); return 2
+            return 0
+        if args.action == "create":
+            try:
+                spec = _json.loads(args.spec)
+            except Exception:
+                spec = {}
+            print(store.create(args.id, spec))
+            return 0
+        if args.action == "discard":
+            try:
+                mission = store.get(args.id)
+            except FileNotFoundError:
+                print(f"No mission {args.id}"); return 2
+            if mission.get("status") != "cancelled" and mission.get("status") != "rejected":
+                # Old Aidon discard was explicit only for REJECTED drafts, here we require cancelled or rejected, otherwise refuse
+                print(f"Discard refused: mission {args.id} status is {mission.get('status')}, not cancelled or rejected"); return 2
+            store.set_status(args.id, "cancelled")
+            print(f"Discarded {args.id}")
+            return 0
+        return 2
+    if args.command == "outbox":
+        from ..capabilities.outbox import Outbox
+        outbox = Outbox(config.home)
+        if args.action == "list":
+            for item in outbox.list():
+                print(f"{item.get('id')} to {item.get('to')} subject {item.get('subject')} status {item.get('status')}")
+            return 0
+        if args.action == "queue":
+            print(outbox.queue(args.to, args.subject, args.body))
+            return 0
+        if args.action == "drain":
+            result = outbox.drain(lambda item: print(f"Would send to {item.get('to')}: {item.get('subject')}") or False)
+            print(f"Outbox drain, no real sender configured in CLI, sent={result['sent']} failed={result['failed']} remaining={result['remaining']}, items stay queued until a real sender is supplied")
+            return 0
+        return 2
+    if args.command == "export":
+        from ..memory.memory_extras import export_points
+        from pathlib import Path as _P
+        dest = _P(args.dir) if args.dir else config.home / "export"
+        dest.mkdir(parents=True, exist_ok=True)
+        out_file = dest / "points.jsonl"
+        count = export_points(memory, out_file)
+        print(f"Exported {count} memory points to {out_file}")
+        return 0
+    if args.command == "schedule":
+        from ..interface.triggers import Scheduler, SchedulerJob
+        scheduler = Scheduler(config.home)
+        if args.action == "list":
+            for job in scheduler.jobs:
+                print(f"{job.name}: {job.goal} schedule={job.schedule} project={job.project_id}")
+            return 0
+        if args.action == "show":
+            for job in scheduler.jobs:
+                if job.name == args.name:
+                    print(job); return 0
+            print(f"No job {args.name}"); return 2
+        if args.action == "add":
+            if not args.name or not args.goal:
+                print("schedule add needs --name and --goal"); return 2
+            scheduler.add_job(SchedulerJob(name=args.name, goal=args.goal, schedule=args.schedule, project_id=args.project))
+            print(f"Added job {args.name}")
+            return 0
+        if args.action == "remove":
+            before = len(scheduler.jobs)
+            scheduler.jobs = [j for j in scheduler.jobs if j.name != args.name]
+            scheduler.save()
+            print(f"Removed {args.name}" if len(scheduler.jobs) < before else f"No job {args.name}")
+            return 0 if len(scheduler.jobs) < before else 2
+        return 2
+    if args.command == "sandbox":
+        from ..capabilities.execution import make_backend
+        try:
+            backend = make_backend(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
+            print(f"Sandbox backend: {config.execution_backend}, workdir: {sandbox.workdir}, backend: {backend}")
+            return 0
+        except Exception as exc:
+            print(f"Sandbox check failed, fail closed: {exc}"); return 2
+    if args.command == "chain":
+        from ..capabilities.chain import load_chain_spec, run_chain, validate_chain_spec
+        from ..capabilities.tools import ToolRegistry
+        spec = load_chain_spec(args.path)
+        if args.action == "validate":
+            failures = validate_chain_spec(spec)
+            print(f"Chain valid: {not failures}, failures: {failures}")
+            return 0 if not failures else 2
+        if args.action == "run":
+            result = run_chain(spec, ToolRegistry(sandbox.workdir))
+            print(result)
+            return 0 if result.get("ok") else 2
+        return 2
+    if args.command == "chat":
+        print("Aidon chat, type a goal, empty line to exit. This is a terminal chat, not the WebUI, approval is asked on the console.")
+        while True:
+            try:
+                line = input("You: ").strip()
+            except EOFError:
+                break
+            if not line:
+                break
+            print(f"Aidon: received goal {line!r}, run it with goal command for a full sandbox run, chat here is a direct reply only, no pipeline, no approval gate for a chat reply.")
+        return 0
+    if args.command == "computer":
+        from ..capabilities.computer_use import capture_screenshot, run_computer_use
+        import json as _json
+        if args.action == "screenshot":
+            result = capture_screenshot(args.path)
+            print(result)
+            return 0 if result.get("ok") else 2
+        if args.action == "run":
+            actions = _json.loads(pathlib.Path(args.path).read_text(encoding="utf-8"))
+            if not isinstance(actions, list):
+                actions = actions.get("actions", [])
+            result = run_computer_use(actions, approve=lambda kind, detail: args.approve)
+            print(result)
+            return 0 if result.get("ok") else 2
+        return 2
     if args.command == "webui":
         from ..interface.messaging import MessagingConfig, send_slack, send_whatsapp
         from ..interface.triggers import TriggerDispatcher

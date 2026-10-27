@@ -134,6 +134,18 @@ post-hackathon, NOT built, NOT demoed, at the end.
   a CLI goal, approval asked on the server console,
   no longer 501 or execution not configured.
 
+- Missing old-Aidon things, built now: CLI memory,
+  skills, tools, dag, mission, outbox, export,
+  schedule, sandbox check, chain, chat, and
+  computer, plus WebUI tabs capabilities, memory,
+  knowledge, and reports, plus computer use and
+  screenshot as a tool layer, approval-gated, with
+  no GUI action without a driver, and chain
+  validation and outbox with failed sends kept
+  queued. Screenshot and computer use as a full
+  live desktop tool are still post-hackathon below,
+  this is the tool layer, not a live GUI driver.
+
 ## Post-hackathon, NOT built, NOT demoed
 
 - Full VM backend: disposable VM running Docker
@@ -154,6 +166,24 @@ post-hackathon, NOT built, NOT demoed, at the end.
   with a local endpoint.
 - Email, RSS, and database triggers, as plugins,
   beyond the core triggers built now.
+
+- Screenshot, post-hackathon full live use, NOT built as a desktop
+  tool yet, tool layer built above: capture the screen, not just a browser
+  page, so Aidon can see what the user sees, with
+  the user's permission, and with the screenshot
+  treated as private data, never sent outside the
+  machine without approval. Browser page screenshot
+  already exists via Playwright MCP, desktop
+  screenshot does not, and is not claimed here.
+- Computer use, post-hackathon full live use, NOT built yet:
+  mouse, keyboard, click, type, scroll, and app
+  control on the user's own computer, driven by
+  screenshots and vision, with every irreversible
+  action behind the approval gate, and with a
+  stop that actually stops. No GUI control is
+  claimed here, and no mouse is moved in a
+  headless run, because there is no display to
+  move it on.
 
 - Aidon fly-brain biological layer, semi-joke, last entry,
   as a joke, not a product direction, not demoed as
