@@ -119,9 +119,20 @@ post-hackathon, NOT built, NOT demoed, at the end.
   editing: segment and track objects in images
   and video frames, boxes, confidences, and mask
   metadata, via the Meta Model API Responses API.
-  SAM is the segment and track step only, frame
-  extraction and video re-encoding need ffmpeg,
-  not built here.
+- Video pipeline, built now, src/video.py, CLI
+  video edit: ffmpeg extracts frames, SAM segments
+  each frame, PIL annotates boxes on frames, ffmpeg
+  re-encodes to a new video. Box overlay, not
+  pixel-mask compositing, mask decoding needs the
+  optional meta-sam-parser package. ffmpeg is an
+  external tool, checked at runtime, never faked.
+- Daily report fixed: loop writes status and
+  project_id to learned/last_run.json, report falls
+  back to goal for old files, never empty.
+- v1 serve and MCP wired in main: v1 run and MCP
+  run_goal now run through the same GoalRunner as
+  a CLI goal, approval asked on the server console,
+  no longer 501 or execution not configured.
 
 ## Post-hackathon, NOT built, NOT demoed
 

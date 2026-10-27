@@ -62,7 +62,10 @@ def daily_report(home: Path) -> str:
     if last_run.exists():
         try:
             data = json.loads(last_run.read_text())
-            lines.append(f"Last run: {data.get('status', '')} project {data.get('project_id', '')}")
+            status = data.get('status') or ('done' if data.get('deliverables') else '')
+            project = data.get('project_id') or ''
+            goal = data.get('goal') or ''
+            lines.append(f"Last run: {status} project {project} goal {goal}".strip())
         except Exception:
             lines.append("Last run: unreadable")
     else:

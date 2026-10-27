@@ -131,6 +131,12 @@ def main(argv: list[str] | None = None) -> int:
     sam_parser.add_argument("prompt", help="Noun phrase, for example red toolbox")
     sam_parser.add_argument("images", nargs="+", help="Image or video frame file paths")
     sam_parser.add_argument("--propagation", default="both", choices=["both", "forward", "backward"])
+    video_parser = sub.add_parser("video", help="Video pipeline: extract frames, SAM segment, annotate, re-encode with ffmpeg, so Aidon can edit his own demo video")
+    video_parser.add_argument("action", choices=["edit", "extract", "encode"], help="edit = full pipeline, extract = frames only, encode = frames to video")
+    video_parser.add_argument("input", help="Input video for edit and extract, or frames directory for encode")
+    video_parser.add_argument("output", help="Output video for edit and encode, or frames directory for extract")
+    video_parser.add_argument("--prompt", default="", help="Noun phrase for SAM segmentation, for edit, for example red toolbox")
+    video_parser.add_argument("--fps", type=float, default=1.0, help="Frames per second, default 1")
     image_parser = sub.add_parser("image", help="Muse Image generation and editing, same .env key and endpoint as Spark")
     image_parser.add_argument("action", choices=["generate", "edit"], help="generate = prompt only, edit = prompt plus 1-10 reference images")
     image_parser.add_argument("prompt", help="Prompt, for edit refer to refs as @Image1, @Image2 in input order")
@@ -328,6 +334,29 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "v1":
         from .v1 import AuthStore, GoalStore, handle
+        # Live v1 and MCP execute callback, wired here, not 501:
+        # a v1 goal runs through the same GoalRunner as a CLI goal,
+        # with the same plugins, budget, trace, verifier, and backend.
+        # Approval is asked on the server console, via _cli_gate,
+        # so a v1 run does not auto-approve live execution.
+        def _v1_execute(goal_record):
+            from .budgets import Budget as _VB
+            from .trace import TraceRecorder as _VT
+            from .verifier_model import ModelVerifier as _VM
+            from .plugins import PluginRegistry as _VP
+            _plugins = _VP(config.home); _plugins.load_all()
+            try:
+                from .execution import make_backend as _vmb
+                _backend = _vmb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
+            except Exception:
+                _backend = None
+            _runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
+                                 memory=memory, project_id=goal_record.project_id, plugins=_plugins,
+                                 execution_backend=_backend, budget=_VB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
+                                 trace=_VT(config.home, project_id=goal_record.project_id), model_verifier=_VM(client),
+                                 kernel_mode=config.kernel_mode)
+            _report = _runner.run(goal_record.goal)
+            return {"status": _report.status, "files": _report.files, "error": _report.error}
         auth = AuthStore(config.home)
         goals = GoalStore(config.home)
         if args.action == "revoke":
@@ -342,7 +371,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.action == "mcp":
             from .mcp_server import MCPServer
-            MCPServer(auth, goals).run_stdio()
+            MCPServer(auth, goals, execute=_v1_execute).run_stdio()
             return 0
         if args.action == "mcp-http":
             # Streamable HTTP MCP: JSON-RPC over HTTP at /mcp,
@@ -350,7 +379,7 @@ def main(argv: list[str] | None = None) -> int:
             from .mcp_server import MCPServer
             import json as _json2
             from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-            mcp_server = MCPServer(auth, goals)
+            mcp_server = MCPServer(auth, goals, execute=_v1_execute)
 
             class _McpHandler(BaseHTTPRequestHandler):
                 def do_POST(self):
@@ -391,7 +420,7 @@ def main(argv: list[str] | None = None) -> int:
                 except Exception:
                     body = {}
                 status, payload = handle(auth, goals, method, self.path,
-                                         dict(self.headers), body)
+                                         dict(self.headers), body, execute=_v1_execute)
                 data = _json.dumps(payload).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
@@ -468,6 +497,36 @@ def main(argv: list[str] | None = None) -> int:
             data = edit_image(args.prompt, config.api_key, config.api_base, reference_images=args.refs or [], size=args.size, model=config.image_model)
         path = save_image(data, out)
         print(f"Image saved: {path}, model {config.image_model}")
+        return 0
+    if args.command == "video":
+        from .video import edit_video, extract_frames, encode_frames, ffmpeg_available
+        if not ffmpeg_available():
+            print("ffmpeg not found on PATH, install ffmpeg to run the video pipeline, no fake video is produced.")
+            return 2
+        if args.action == "extract":
+            frames = extract_frames(args.input, args.output, fps=args.fps)
+            print(f"Extracted {len(frames)} frames to {args.output}")
+            return 0
+        if args.action == "encode":
+            from pathlib import Path as _P
+            frames = sorted(_P(args.input).glob("frame*.jpg"))
+            out = encode_frames(frames, args.output, fps=args.fps)
+            print(f"Encoded video: {out}")
+            return 0
+        if not args.prompt:
+            print("video edit needs --prompt, a noun phrase for SAM, for example --prompt 'red toolbox'")
+            return 2
+        if not config.api_key or not config.api_base:
+            print("video edit needs SAM via AIDON_API_KEY and AIDON_API_ENDPOINT in .env, same key and endpoint as Spark.")
+            return 2
+        from .sam import SAMClient
+        sam_client = SAMClient(config.api_base, config.api_key, config.sam_model)
+        result = edit_video(args.input, args.output, args.prompt, sam_client, fps=args.fps)
+        if "error" in result:
+            print(f"Video pipeline error: {result['error']}")
+            return 1
+        print(f"Video edited: {result['output']}, frames: {len(result['frames'])}, prompt: {result['prompt']}")
+        print("Edited video uses SAM box overlays, not pixel-mask compositing, mask decoding needs the optional meta-sam-parser package, see src/video.py.")
         return 0
     if args.command == "sam":
         if not config.api_key or not config.api_base:

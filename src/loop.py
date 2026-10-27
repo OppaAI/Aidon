@@ -487,7 +487,8 @@ class GoalRunner:
                                  backend=self._backend_name())
         learn_dir = self.home / "learned"
         learn_dir.mkdir(parents=True, exist_ok=True)
-        record = {"goal": goal, "deliverables": files,
+        record = {"status": "done", "project_id": self.project_id,
+                  "goal": goal, "deliverables": files,
                   "criteria": current_plan.criteria,
                   "backend": self._backend_name(),
                   "image": getattr(self.execution_backend, "image", "")
