@@ -119,6 +119,15 @@ class AuthStore:
     def scopes_for(self, record: KeyRecord) -> tuple[str, ...]:
         return OWNER_SCOPES if record.scope == "owner" else AGENT_SCOPES
 
+    def revoke(self, name: str) -> bool:
+        """Revoke a key by name, immediate, hash removed, never the key itself."""
+        before = len(self.keys)
+        self.keys = [k for k in self.keys if k.name != name]
+        if len(self.keys) == before:
+            return False
+        self._save()
+        return True
+
     def list_keys(self) -> list[dict]:
         # Hash prefix only, never a real key.
         return [{"name": k.name, "scope": k.scope,
@@ -212,6 +221,12 @@ def handle(auth: AuthStore, goals: GoalStore, method: str, path: str,
         if denied:
             return denied
         return 200, {"keys": auth.list_keys()}
+    if path == "/api/v1/keys" and method == "DELETE":
+        denied = need("keys")
+        if denied:
+            return denied
+        ok = auth.revoke(str(body.get("name", "")))
+        return (200, {"ok": True}) if ok else (404, {"error": "key not found"})
     if path == "/api/v1/goals" and method == "POST":
         denied = need("submit")
         if denied:
@@ -246,6 +261,11 @@ def handle(auth: AuthStore, goals: GoalStore, method: str, path: str,
                 return denied
             goal.status = "cancelled"
             goals._save()
+            try:
+                from .run_control import RunControl
+                RunControl(goals.home).cancel(goal_id)
+            except Exception:
+                pass
             return 200, goal.to_dict()
         if method == "POST" and action == "steer":
             denied = need("steer")
@@ -253,6 +273,14 @@ def handle(auth: AuthStore, goals: GoalStore, method: str, path: str,
                 return denied
             goal.steer_notes.append(str(body.get("note", "")))
             goals._save()
+            try:
+                from .run_control import RunControl
+                control = RunControl(goals.home)
+                if control.get(goal_id) is None:
+                    control.register(goal_id, goal.goal, goal.project_id)
+                control.steer(goal_id, str(body.get("note", "")))
+            except Exception:
+                pass
             return 200, goal.to_dict()
         if method == "POST" and action == "approve":
             denied = need("approve")

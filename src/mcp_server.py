@@ -111,6 +111,14 @@ class MCPServer:
                             "error": {"code": -32003, "message": "goal not found"}}
                 goal.steer_notes.append(str(args.get("note", "")))
                 self.goals._save()
+                try:
+                    from .run_control import RunControl
+                    control = RunControl(self.goals.home)
+                    if control.get(str(args.get("id", ""))) is None:
+                        control.register(str(args.get("id", "")), goal.goal, goal.project_id)
+                    control.steer(str(args.get("id", "")), str(args.get("note", "")))
+                except Exception:
+                    pass
                 return {"jsonrpc": "2.0", "id": request_id,
                         "result": {"content": [{"type": "text", "text": json.dumps(goal.to_dict())}]}}
             if name == "cancel_goal":
@@ -120,6 +128,11 @@ class MCPServer:
                             "error": {"code": -32003, "message": "goal not found"}}
                 goal.status = "cancelled"
                 self.goals._save()
+                try:
+                    from .run_control import RunControl
+                    RunControl(self.goals.home).cancel(str(args.get("id", "")))
+                except Exception:
+                    pass
                 return {"jsonrpc": "2.0", "id": request_id,
                         "result": {"content": [{"type": "text", "text": json.dumps(goal.to_dict())}]}}
             if name == "approve_goal":

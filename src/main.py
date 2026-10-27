@@ -100,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     trigger_parser.add_argument("--project", default="default",
                                 help="Project id for episodic memory")
     v1_parser = sub.add_parser("v1", help="v1 API, token auth, MCP")
-    v1_parser.add_argument("action", choices=["serve", "keygen", "mcp", "mcp-http"],
+    v1_parser.add_argument("action", choices=["serve", "keygen", "mcp", "mcp-http", "revoke"],
                            help="Serve the v1 HTTP API, generate a key once, or run the MCP stdio server")
     v1_parser.add_argument("--port", type=int, default=8001,
                            help="Port for v1 serve, default 8001, localhost only")
@@ -141,6 +141,16 @@ def main(argv: list[str] | None = None) -> int:
                                  config.model)
     else:
         client = FakeClient("")
+    # Fast model, same generic client, different model name, same endpoint.
+    # This is how a local small model works too: set the endpoint to a
+    # local OpenAI-compatible endpoint, AIDON_MODEL to the strong model,
+    # and AIDON_FAST_MODEL to the small local model. No Ollama-specific
+    # code, no think flag, just endpoint plus model name, as decided.
+    if config.fast_model:
+        from .router import RoutedClient
+        fast_client = HttpModelClient(config.api_base, config.api_key, config.fast_model) if config.api_base else FakeClient("")
+        fast_phases = {s.strip() for s in config.router_fast_phases.split(",") if s.strip()}
+        client = RoutedClient(fast_client, client, fast_phases=fast_phases)
     sandbox = Sandbox(config.workdir, config.sandbox_timeout_seconds)
     memory = _make_memory(config)
     if args.command == "webui":
@@ -189,13 +199,71 @@ def main(argv: list[str] | None = None) -> int:
         def _goal_handler(event):
             from .loop import GoalRunner
             from .run_control import new_run_id
+            from .budgets import Budget
+            from .trace import TraceRecorder
+            from .verifier_model import ModelVerifier
+            from .plugins import PluginRegistry
+            from .semantic_router import SemanticRouter
+            from .scheduler_loop import AutonomyTracker, NudgeTracker
             run_id = new_run_id()
             run_control.register(run_id, event.goal, event.project_id)
+            # Full runner, same as the CLI goal run, not a thin runner:
+            # budget, trace, model verifier, plugins, execution backend,
+            # semantic router skip, and autonomy plus nudge trackers
+            # on the WebUI gate, so a WebUI, WhatsApp, or Slack run
+            # is the same run as a CLI run, with the same checks.
+            server.webui_gate.nudge_tracker = NudgeTracker(
+                nudge_minutes=config.approval_nudge_minutes,
+                channel=config.approval_nudge_channel)
+            server.webui_gate.autonomy_tracker = AutonomyTracker(
+                enabled=config.autonomy_enabled, threshold=config.autonomy_threshold,
+                decay_days=config.autonomy_decay_days)
+            server.webui_gate.slack_sender = slack_sender
+            plugins = PluginRegistry(config.home)
+            plugins.load_all()
+            budget = Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps,
+                            max_seconds=config.budget_seconds)
+            trace = TraceRecorder(config.home, project_id=event.project_id)
+            try:
+                from .execution import make_backend
+                execution_backend = make_backend(
+                    config.execution_backend, sandbox,
+                    image=config.docker_image, allow_network=config.docker_network)
+            except Exception:
+                execution_backend = None
+            try:
+                semantic_router = SemanticRouter(memory.embedder)
+            except Exception:
+                semantic_router = None
             runner = GoalRunner(client, sandbox, server.webui_gate.gate,
                                 config.home, memory=memory,
-                                project_id=event.project_id,
+                                project_id=event.project_id, plugins=plugins,
+                                execution_backend=execution_backend, budget=budget,
+                                trace=trace, model_verifier=ModelVerifier(client),
                                 kernel_mode=config.kernel_mode,
+                                semantic_router=semantic_router,
+                                use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control)
+            # Swarm, Aidon decides: if the goal genuinely splits,
+            # run the subgoals in parallel and merge, else single run.
+            try:
+                from .swarm import run_swarm
+                def _swarm_runner(subgoal):
+                    sub_runner = GoalRunner(client, sandbox, server.webui_gate.gate,
+                                            config.home, memory=memory,
+                                            project_id=event.project_id, plugins=plugins,
+                                            budget=budget, trace=trace,
+                                            model_verifier=ModelVerifier(client),
+                                            kernel_mode=config.kernel_mode,
+                                            run_id=run_id, run_control=run_control)
+                    sub_report = sub_runner.run(subgoal)
+                    return f"[{sub_report.status}] {', '.join(sub_report.files)} {sub_report.error}".strip()
+                swarm_result = run_swarm(event.goal, client, _swarm_runner)
+                if swarm_result.get("swarmed"):
+                    event.send_reply(f"[{run_id}] Swarm, subgoals: {', '.join(swarm_result['subgoals'])}\n{swarm_result['merged']}")
+                    return
+            except Exception:
+                pass
             report = runner.run(event.goal)
             if report.status == "chat":
                 event.send_reply(f"[{run_id}] {report.chat_reply or 'Received.'}")
@@ -230,6 +298,10 @@ def main(argv: list[str] | None = None) -> int:
         from .v1 import AuthStore, GoalStore, handle
         auth = AuthStore(config.home)
         goals = GoalStore(config.home)
+        if args.action == "revoke":
+            ok = auth.revoke(args.name)
+            print(f"Revoked {args.name}" if ok else f"No such key {args.name}")
+            return 0 if ok else 2
         if args.action == "keygen":
             key, record = auth.create_key(args.name, args.scope)
             print("Save this key now, it is shown once, only its hash is stored:")
@@ -369,6 +441,12 @@ def main(argv: list[str] | None = None) -> int:
         from datetime import datetime
         from .triggers import Scheduler
         print("Scheduler daemon, polling every 60 seconds, Ctrl-C to stop.")
+        print("Scheduler daemon also watches ingest and polls Slack, when configured, same loop.")
+        import os as _os
+        _slack_last_ts = ""
+        _slack_ts_path = config.home / "slack_last_ts.txt"
+        if _slack_ts_path.is_file():
+            _slack_last_ts = _slack_ts_path.read_text().strip()
         while True:
             scheduler = Scheduler(config.home)
             for job in scheduler.check_due(datetime.now()):
@@ -377,6 +455,34 @@ def main(argv: list[str] | None = None) -> int:
                                     memory=memory, project_id="default")
                 report = runner.run(job.goal)
                 print(f"Job {job.name}: {report.status}, files: {', '.join(report.files)}")
+            # Ingest watcher, same loop, same GoalRunner, no separate daemon.
+            try:
+                from .triggers import IngestWatcher
+                watcher = IngestWatcher(config.ingest_path, config.home)
+                for ingest_event in watcher.events(project_id="default"):
+                    print(f"Ingest trigger: {ingest_event.payload.get('path', '')}")
+                    ingest_runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
+                                               memory=memory, project_id="default")
+                    ingest_report = ingest_runner.run(ingest_event.goal)
+                    print(f"Ingest job: {ingest_report.status}")
+            except Exception as exc:
+                print(f"Ingest watch error: {exc}")
+            # Slack polling daemon, same loop, channel from AIDON_SLACK_INBOUND_CHANNEL.
+            try:
+                _channel = _os.environ.get("AIDON_SLACK_INBOUND_CHANNEL", "")
+                if config.slack_bot_token and _channel:
+                    from .messaging import MessagingConfig, poll_slack_once
+                    _msg_cfg = MessagingConfig(slack_bot_token=config.slack_bot_token)
+                    _messages, _slack_last_ts = poll_slack_once(_msg_cfg, _channel, last_ts=_slack_last_ts)
+                    _slack_ts_path.write_text(_slack_last_ts)
+                    for _message in _messages:
+                        print(f"Slack poll message: {_message['text'][:100]}")
+                        _poll_runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
+                                                  memory=memory, project_id="default")
+                        _poll_report = _poll_runner.run(_message["text"])
+                        print(f"Slack poll job: {_poll_report.status}")
+            except Exception as exc:
+                print(f"Slack poll error: {exc}")
             import time as _sleep
             _sleep.sleep(60)
     if args.command == "benchmark":

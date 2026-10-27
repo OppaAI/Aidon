@@ -293,8 +293,9 @@ def adapt_dag(experience, new_goal: str, client=None):
         try:
             import json as _json
             from .model_client import Message
-            reply = client.chat([Message("system", "Return JSON only, with keys keep, modify, add, remove, each a list of node ids or, for add, node objects."),
-                                 Message("user", f"Old goal: {old_goal}\nNew goal: {new_goal}\nNodes: {_json.dumps([n.to_dict() for n in dag.nodes.values()])}")])
+            _msgs = [Message("system", "Return JSON only, with keys keep, modify, add, remove, each a list of node ids or, for add, node objects."),
+                     Message("user", f"Old goal: {old_goal}\nNew goal: {new_goal}\nNodes: {_json.dumps([n.to_dict() for n in dag.nodes.values()])}")]
+            reply = client.chat_phase("adapt", _msgs) if hasattr(client, "chat_phase") else client.chat(_msgs)
             model_calls = 1
             data = _json.loads(reply)
             if isinstance(data, dict):

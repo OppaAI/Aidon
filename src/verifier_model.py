@@ -46,8 +46,11 @@ class ModelVerifier:
                   + "\n\nAnswer YES if every deliverable is complete and "
                     "matches the goal, otherwise NO, with one line reason. "
                     "Start your answer with YES or NO.")
-        reply = self.client.chat([Message("system", "You verify deliverables, strictly."),
-                                  Message("user", prompt)]).strip()
+        if hasattr(self.client, "chat_phase"):
+            reply = self.client.chat_phase("verify", [Message("system", "You verify deliverables, strictly."), Message("user", prompt)]).strip()
+        else:
+            reply = self.client.chat([Message("system", "You verify deliverables, strictly."),
+                                      Message("user", prompt)]).strip()
         if not reply:
             return {"verdict": "unknown", "reason": "empty model reply"}
         first = reply.split()[0].strip(".,:").upper()

@@ -205,8 +205,9 @@ class GoalRunner:
         self._trace("plan", "started", goal[:100])
         if self.budget is not None:
             self.budget.add_tokens(user)
+        _phase = "repair" if failure_context else "plan"
         if hasattr(self.client, "chat_phase"):
-            reply = self.client.chat_phase("plan", [Message("system", system), Message("user", user)])
+            reply = self.client.chat_phase(_phase, [Message("system", system), Message("user", user)])
         else:
             reply = self.client.chat([Message("system", system), Message("user", user)])
         if self.budget is not None:

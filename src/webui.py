@@ -254,26 +254,161 @@ render();
 </body></html>
 """
 
+FACTORY_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Aidon Factory</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+<style>body{font-family:sans-serif} #factory{width:900px;height:500px;border:1px solid #ccc} .legend{margin-top:8px}</style>
+</head>
+<body>
+<h1>Factory</h1>
+<p>Three-dimensional factory, live from trace files, not a replay and not a game. Each station is a run phase: receiving dock is intake, sorting is interpret, archive is research, blueprint table is plan, test bench is sandbox, inspection is verify, foreman desk is approval, assembly line is live, warehouse is learn. A station turns yellow while running, green when done, red when failed. The chat avatar stays in the chat, this factory is a separate view, linked from the chat sidebar.</p>
+<div id="factory"></div>
+<div class="legend" id="legend"></div>
+<div id="runs"></div>
+<script>
+const stations = [
+  {kind: 'interpret', label: 'Sorting', x: -8, z: 0},
+  {kind: 'research', label: 'Archive', x: -4, z: 0},
+  {kind: 'plan', label: 'Blueprint', x: 0, z: 0},
+  {kind: 'sandbox', label: 'Test bench', x: 4, z: 0},
+  {kind: 'verify', label: 'Inspection', x: 8, z: 0},
+  {kind: 'approval', label: 'Foreman desk', x: 8, z: 4},
+  {kind: 'live', label: 'Assembly line', x: 4, z: 4},
+  {kind: 'learn', label: 'Warehouse', x: 0, z: 4},
+  {kind: 'recall', label: 'Receiving dock', x: -8, z: 4}
+];
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf0f0f0);
+const camera = new THREE.PerspectiveCamera(50, 900/500, 0.1, 100);
+camera.position.set(0, 12, 14);
+camera.lookAt(0, 0, 1);
+const renderer = new THREE.WebGLRenderer({antialias: true});
+renderer.setSize(900, 500);
+document.getElementById('factory').appendChild(renderer.domElement);
+const floor = new THREE.Mesh(new THREE.BoxGeometry(24, 0.2, 12), new THREE.MeshStandardMaterial({color: 0xcccccc}));
+floor.position.set(0, -0.1, 2);
+scene.add(floor);
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+const light = new THREE.DirectionalLight(0xffffff, 0.8);
+light.position.set(5, 10, 5);
+scene.add(light);
+function makeLabel(text) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 256, 64);
+  ctx.fillStyle = '#000000'; ctx.font = '24px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(text, 128, 40);
+  const texture = new THREE.CanvasTexture(canvas);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({map: texture}));
+  sprite.scale.set(4, 1, 1);
+  return sprite;
+}
+const boxes = {};
+stations.forEach((station) => {
+  const box = new THREE.Mesh(new THREE.BoxGeometry(2.5, 1.5, 2.5), new THREE.MeshStandardMaterial({color: 0x999999}));
+  box.position.set(station.x, 0.75, station.z);
+  scene.add(box);
+  boxes[station.kind] = box;
+  const label = makeLabel(station.label);
+  label.position.set(station.x, 2.2, station.z);
+  scene.add(label);
+});
+function colourFor(status) {
+  if (status === 'done') return 0x2eaa66;
+  if (status === 'failed') return 0xcc3333;
+  if (status === 'started') return 0xe6b800;
+  return 0x999999;
+}
+async function refresh() {
+  try {
+    const r = await fetch('/api/factory');
+    const data = await r.json();
+    const latest = {};
+    (data.stages || []).forEach((stage) => { latest[stage.kind] = stage.status; });
+    stations.forEach((station) => {
+      if (latest[station.kind]) { boxes[station.kind].material.color.setHex(colourFor(latest[station.kind])); }
+    });
+    document.getElementById('legend').textContent = 'Latest stages: ' + Object.entries(latest).map(([k, v]) => k + '=' + v).join(', ');
+    const runs = {};
+    (data.stages || []).forEach((stage) => { runs[stage.run] = (runs[stage.run] || 0) + 1; });
+    document.getElementById('runs').textContent = 'Trace runs: ' + Object.entries(runs).map(([k, v]) => k + ' (' + v + ' stages)').join(', ');
+  } catch (e) {}
+  requestAnimationFrame(() => { scene.rotation.y += 0.001; });
+}
+setInterval(refresh, 2000);
+refresh();
+function animate() { requestAnimationFrame(animate); renderer.render(scene, camera); }
+animate();
+</script>
+</body></html>
+"""
+
 
 class WebUIGate:
-    """Approval gate backed by WebUI cards, fail-closed on timeout."""
+    """Approval gate backed by WebUI cards, fail-closed on timeout.
 
-    def __init__(self, timeout_seconds: int = 180):
+    Autonomy and nudges, wired here, not as a separate flow:
+    - On card creation, a pending time is recorded, and a
+      daemon thread nudges via the Slack sender after
+      AIDON_APPROVAL_NUDGE_MIN minutes, once per card, via
+      NudgeTracker, so an away owner is nudged, not looped.
+    - On approval, AutonomyTracker records the stake, so
+      low and medium stakes can earn standing permission
+      after the threshold, while high stakes, including
+      live execution, never auto-approve. A card that
+      qualifies for autonomy returns approved without a card.
+    """
+
+    def __init__(self, timeout_seconds: int = 180, nudge_tracker=None,
+                 autonomy_tracker=None, slack_sender=None):
         self.timeout_seconds = timeout_seconds
+        self.nudge_tracker = nudge_tracker
+        self.autonomy_tracker = autonomy_tracker
+        self.slack_sender = slack_sender
         self.cards: dict[str, dict] = {}
         self._events: dict[str, threading.Event] = {}
         self._counter = 0
         self.gate = ApprovalGate(self._decide)
 
     def _decide(self, kind: str, title: str, body: str) -> Decision:
+        import time as _time
+        stake = "high" if kind == "live" else "medium"
+        if self.autonomy_tracker is not None:
+            try:
+                if self.autonomy_tracker.should_auto_approve(stake, _time.time()):
+                    return Decision("approved")
+            except Exception:
+                pass
         self._counter += 1
         card_id = f"card-{self._counter}"
         event = threading.Event()
         self._events[card_id] = event
         self.cards[card_id] = {"kind": kind, "title": title, "body": body, "verdict": None}
+        pending_since = _time.time()
+        if self.nudge_tracker is not None:
+            def _nudge():
+                _time.sleep(max(0, self.nudge_tracker.nudge_minutes * 60))
+                if not event.is_set():
+                    try:
+                        self.nudge_tracker.check(card_id, pending_since, _time.time(),
+                                                 slack_sender=self.slack_sender)
+                    except Exception:
+                        pass
+            threading.Thread(target=_nudge, daemon=True).start()
         event.wait(timeout=self.timeout_seconds)
         card = self.cards[card_id]
         verdict = card["verdict"] or "rejected"
+        if verdict == "approved" and self.autonomy_tracker is not None:
+            try:
+                self.autonomy_tracker.record_approval(stake, _time.time())
+            except Exception:
+                pass
+        if verdict == "rejected" and self.autonomy_tracker is not None:
+            try:
+                self.autonomy_tracker.record_rejection(stake)
+            except Exception:
+                pass
         return Decision(verdict)
 
     def cancel_all(self) -> None:
@@ -592,11 +727,7 @@ class WebUIServer:
                 elif parsed.path == "/api/projects":
                     self._send_json(200, {"projects": server._projects()})
                 elif parsed.path == "/factory":
-                    stages = server.factory_stages()
-                    html = "<h1>Factory</h1><p>Trace stages, live from trace files, not a replay.</p>"
-                    for stage in stages:
-                        html += f"<p>{stage['run']} {stage['kind']} {stage['status']}</p>"
-                    self._send_html(200, html)
+                    self._send_html(200, FACTORY_HTML)
                 elif parsed.path == "/api/factory":
                     self._send_json(200, {"stages": server.factory_stages()})
                 elif parsed.path == "/dag":
