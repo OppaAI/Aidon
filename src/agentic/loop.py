@@ -374,13 +374,13 @@ class GoalRunner:
                 registry.close()
             self._mission_registry = None
 
-    def _ask_for_approval(self, kind: str, title: str, body: str) -> Decision:
+    def _ask_for_approval(self, kind: str, title: str, body: str, **kwargs) -> Decision:
         """Ask the owner while excluding human wait from active elapsed time."""
         timer = getattr(self, "_elapsed_timer", None)
         if timer is None:
-            return self.gate.ask(kind, title, body)
+            return self.gate.ask(kind, title, body, **kwargs)
         with timer.approval_wait():
-            return self.gate.ask(kind, title, body)
+            return self.gate.ask(kind, title, body, **kwargs)
 
     def _chat(self, phase: str, messages) -> str:
         """One model call, router-aware.
