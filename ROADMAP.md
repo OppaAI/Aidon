@@ -146,6 +146,30 @@ post-hackathon, NOT built, NOT demoed, at the end.
   live desktop tool are still post-hackathon below,
   this is the tool layer, not a live GUI driver.
 
+- Old Aidon parity, built now: separate modules
+  conversations, project_brief, docgen/docstore/
+  ebook, mail_rules, patterns, prompts,
+  recall_budget, registry with Markdown export,
+  remote_hub as a local hub dir, repl, report,
+  security_probe, tool_discovery, uploads, audio
+  Web Audio VRM lip sync JS, apikeys hash-only,
+  intake, lifecycle, planner, eval, governor,
+  slack_inbound, whatsapp as a separate module.
+  CLI report autonomy/daily, demo learn with real
+  counts and invent-tool drafting a plugin skeleton
+  and scanning it, adoption still gated, slack
+  listen with optional run, whatsapp status/send
+  failing if not configured, never faked, tick
+  running due jobs once, repl running goals, and
+  export --registry to Markdown. WebUI studios:
+  memory forget/prune/promote, knowledge
+  recall/ingest, capabilities success/failure/probe,
+  via /api/studio/*, live-tested. Demo learn is
+  real counts, not a live Snake to Worm benchmark,
+  which is still canned, and slack listen run
+  and tick run need a configured model, like any
+  goal run.
+
 ## Post-hackathon, NOT built, NOT demoed
 
 - Full VM backend: disposable VM running Docker

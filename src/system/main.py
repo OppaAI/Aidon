@@ -182,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     outbox_parser.add_argument("--body", default="", help="Body for queue")
     export_parser = sub.add_parser("export", help="Render a read-only markdown view of the registry, and export memory points")
     export_parser.add_argument("--dir", default="", help="Output directory, default <home>/export")
+    export_parser.add_argument("--registry", action="store_true", help="Export the full registry to Markdown, in addition to memory points")
     schedule_parser = sub.add_parser("schedule", help="Cron-like scheduled jobs, old Aidon schedule commands, scheduler serve runs them")
     schedule_parser.add_argument("action", choices=["add", "list", "remove", "show"], help="add = add a job, list = list jobs, remove = remove a job, show = show a job")
     schedule_parser.add_argument("--name", default="", help="Job name")
@@ -198,6 +199,24 @@ def main(argv: list[str] | None = None) -> int:
     computer_parser.add_argument("action", choices=["screenshot", "run"], help="screenshot = capture screen to a file, run = run a computer-use action JSON file")
     computer_parser.add_argument("path", help="Output PNG for screenshot, or action JSON file for run")
     computer_parser.add_argument("--approve", action="store_true", help="Approve irreversible actions in this run, otherwise they are refused")
+
+    report_parser = sub.add_parser("report", help="Autonomy and daily reports, old Aidon report commands")
+    report_parser.add_argument("action", choices=["autonomy", "daily"], help="autonomy = counts and gate status, daily = daily report text")
+    demo_parser = sub.add_parser("demo", help="Demo learning and invent-tool, live, not canned")
+    demo_parser.add_argument("action", choices=["learn", "invent-tool"], help="learn = real experience counts, invent-tool = draft a plugin skeleton and scan it, adoption still needs the gate")
+    demo_parser.add_argument("--name", default="", help="Plugin name for invent-tool")
+    demo_parser.add_argument("--description", default="", help="Plugin description for invent-tool")
+    slack_parser = sub.add_parser("slack", help="Slack inbound listening, old Aidon slack listen")
+    slack_parser.add_argument("action", choices=["listen", "status"], help="listen = poll Slack once or for --seconds, status = configured or not")
+    slack_parser.add_argument("--channel", default="", help="Slack channel id, or AIDON_SLACK_INBOUND_CHANNEL")
+    slack_parser.add_argument("--seconds", type=int, default=0, help="Listen duration in seconds, 0 = one poll only")
+    slack_parser.add_argument("--run", action="store_true", help="Run polled messages as goals, otherwise just print them")
+    whatsapp_parser = sub.add_parser("whatsapp", help="WhatsApp status and send, old Aidon whatsapp commands")
+    whatsapp_parser.add_argument("action", choices=["status", "send"], help="status = configured or missing, send = send a real WhatsApp message, fails if not configured, never faked")
+    whatsapp_parser.add_argument("--to", default="", help="Recipient number for send")
+    whatsapp_parser.add_argument("--text", default="", help="Message text for send")
+    tick_parser = sub.add_parser("tick", help="Run due scheduler jobs once, old Aidon tick")
+    repl_parser = sub.add_parser("repl", help="Full REPL, old Aidon repl, /help, /history, /quit, or a goal")
     args = parser.parse_args(argv)
 
     config = Config.load()
@@ -360,6 +379,10 @@ def main(argv: list[str] | None = None) -> int:
         out_file = dest / "points.jsonl"
         count = export_points(memory, out_file)
         print(f"Exported {count} memory points to {out_file}")
+        if args.registry:
+            from ..capabilities.registry import export_registry_markdown
+            reg_path = export_registry_markdown(config.home, dest / "registry.md")
+            print(f"Exported registry to {reg_path}")
         return 0
     if args.command == "schedule":
         from ..interface.triggers import Scheduler, SchedulerJob
@@ -433,6 +456,143 @@ def main(argv: list[str] | None = None) -> int:
             print(result)
             return 0 if result.get("ok") else 2
         return 2
+
+    if args.command == "report":
+        from ..interface.report import autonomy_report, daily_report
+        if args.action == "daily":
+            print(daily_report(config.home))
+        else:
+            print(autonomy_report(config.home))
+        return 0
+    if args.command == "demo":
+        if args.action == "learn":
+            # Real counts, not canned benchmark numbers: experience points and last run.
+            try:
+                points = memory.list_points("experience", limit=1000)
+                print(f"Experience points: {len(points)}")
+            except Exception as exc:
+                print(f"Experience points: error {exc}")
+            from pathlib import Path as _P
+            last = _P(config.home) / "learned" / "last_run.json"
+            print(f"Last run file: {last} exists={last.is_file()}")
+            if last.is_file():
+                print(last.read_text()[:500])
+            return 0
+        if args.action == "invent-tool":
+            if not args.name:
+                print("demo invent-tool needs --name"); return 2
+            from pathlib import Path as _P
+            from ..capabilities.plugins import scan_plugin
+            draft_dir = _P(config.home) / "plugins_draft" / args.name
+            draft_dir.mkdir(parents=True, exist_ok=True)
+            (draft_dir / "tool.py").write_text(f'"""Draft plugin {args.name}, generated by demo invent-tool, not adopted yet."""\n\ndef {args.name}_tool(text: str) -> str:\n    return text\n', encoding="utf-8")
+            (draft_dir / "skill.md").write_text(f"# {args.name}\n\n{args.description or 'Draft skill, adoption still needs the gate.'}\n", encoding="utf-8")
+            (draft_dir / "manifest.json").write_text(f'{{"name": "{args.name}", "version": "0.1.0", "description": "{args.description or "draft"}"}}', encoding="utf-8")
+            findings = scan_plugin(draft_dir)
+            print(f"Draft plugin at {draft_dir}, scan findings: {len(findings)}")
+            for finding in findings:
+                print(f"  {finding.type} {finding.path}:{finding.line} {finding.message}")
+            print("Not adopted, adoption still needs the plugin gate and your approval.")
+            return 0
+        return 2
+    if args.command == "slack":
+        from ..interface.messaging import MessagingConfig, poll_slack_once
+        import os as _os
+        cfg = MessagingConfig.from_env()
+        if args.action == "status":
+            print(f"Slack configured: {cfg.slack_configured()}, channel env set: {bool(_os.environ.get('AIDON_SLACK_INBOUND_CHANNEL'))}")
+            return 0
+        if args.action == "listen":
+            if not cfg.slack_configured():
+                print("Slack not configured, no token, nothing polled"); return 2
+            channel = args.channel or _os.environ.get("AIDON_SLACK_INBOUND_CHANNEL", "")
+            if not channel:
+                print("Slack listen needs --channel or AIDON_SLACK_INBOUND_CHANNEL"); return 2
+            import time as _time
+            last_ts = ""
+            end = _time.time() + args.seconds if args.seconds else _time.time()
+            while True:
+                messages, last_ts = poll_slack_once(cfg, channel, last_ts=last_ts)
+                for message in messages:
+                    print(f"Slack message: {message.get('text', '')[:200]}")
+                    if args.run:
+                        from ..agentic.budgets import Budget as _SB
+                        from ..agentic.trace import TraceRecorder as _ST
+                        from ..agentic.verifier_model import ModelVerifier as _SMV
+                        from ..capabilities.plugins import PluginRegistry as _SPR
+                        _splugins = _SPR(config.home); _splugins.load_all()
+                        try:
+                            from ..capabilities.execution import make_backend as _smb
+                            _sbackend = _smb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
+                        except Exception:
+                            _sbackend = None
+                        _srunner = GoalRunner(client, sandbox, _cli_gate(), config.home, memory=memory, project_id="default", plugins=_splugins, execution_backend=_sbackend, budget=_SB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_ST(config.home, project_id="default"), model_verifier=_SMV(client), kernel_mode=config.kernel_mode)
+                        _sreport = _srunner.run(message.get("text", ""))
+                        print(f"Slack run: {_sreport.status}, files: {', '.join(_sreport.files)}")
+                if not args.seconds or _time.time() >= end:
+                    break
+                _time.sleep(10)
+            return 0
+        return 2
+    if args.command == "whatsapp":
+        from ..interface.messaging import MessagingConfig
+        from ..interface.whatsapp import send_whatsapp_message
+        cfg = MessagingConfig.from_env()
+        if args.action == "status":
+            print(f"WhatsApp configured: {cfg.whatsapp_configured()}, missing: {cfg.whatsapp_missing()}")
+            return 0
+        if args.action == "send":
+            if not args.to or not args.text:
+                print("whatsapp send needs --to and --text"); return 2
+            result = send_whatsapp_message(cfg, args.to, args.text)
+            print(result)
+            return 0 if result.get("ok") else 2
+        return 2
+    if args.command == "tick":
+        from datetime import datetime
+        from ..interface.triggers import Scheduler
+        scheduler = Scheduler(config.home)
+        due = scheduler.check_due(datetime.now())
+        if not due:
+            print("Tick: no jobs due")
+            return 0
+        for job in due:
+            print(f"Tick due job: {job.name}: {job.goal}")
+            # Run via GoalRunner, same construction as scheduler serve, without semantic router.
+            from ..agentic.budgets import Budget as _B
+            from ..agentic.trace import TraceRecorder as _T
+            from ..agentic.verifier_model import ModelVerifier as _MV
+            from ..capabilities.plugins import PluginRegistry as _PR
+            _plugins = _PR(config.home); _plugins.load_all()
+            try:
+                from ..capabilities.execution import make_backend as _mb
+                _backend = _mb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
+            except Exception:
+                _backend = None
+            runner = GoalRunner(client, sandbox, _cli_gate(), config.home, memory=memory, project_id=job.project_id, plugins=_plugins, execution_backend=_backend, budget=_B(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T(config.home, project_id=job.project_id), model_verifier=_MV(client), kernel_mode=config.kernel_mode)
+            report = runner.run(job.goal)
+            print(f"Tick job {job.name}: {report.status}, files: {', '.join(report.files)}")
+        return 0
+    if args.command == "repl":
+        from ..interface.repl import Repl
+        def _repl_handler(goal: str) -> str:
+            from ..agentic.budgets import Budget as _B2
+            from ..agentic.trace import TraceRecorder as _T2
+            from ..agentic.verifier_model import ModelVerifier as _MV2
+            from ..capabilities.plugins import PluginRegistry as _PR2
+            _plugins = _PR2(config.home); _plugins.load_all()
+            try:
+                from ..capabilities.execution import make_backend as _mb2
+                _backend = _mb2(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
+            except Exception:
+                _backend = None
+            runner = GoalRunner(client, sandbox, _cli_gate(), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode)
+            report = runner.run(goal)
+            if report.status == "chat":
+                return report.chat_reply or "Received."
+            return f"[{report.status}] {', '.join(report.files)} {report.error}".strip()
+        Repl(_repl_handler).run()
+        return 0
     if args.command == "webui":
         from ..interface.messaging import MessagingConfig, send_slack, send_whatsapp
         from ..interface.triggers import TriggerDispatcher

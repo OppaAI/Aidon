@@ -942,6 +942,8 @@ class WebUIServer:
                     html = "<h1>Capabilities</h1><p>What Aidon can do, what it has learned, and the evidence.</p>"
                     html += f"<p>Sandbox tools: write, read, list, shell, calculate</p><p>Plugin tools: {', '.join(_reg.tool_names())}</p>"
                     html += "<p>Computer use: screenshot and click, type, scroll, key, approval-gated, no driver configured by default, no GUI action without a driver.</p>"
+                    html += "<h2>Capabilities studio</h2><p>Record a skill success or failure, or probe a plugin dir, via POST /api/studio/capabilities with JSON {action: success|failure|probe, name, path}.</p>"
+                    html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/capabilities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('cap_action').value,name:document.getElementById('cap_name').value,path:document.getElementById('cap_path').value})}).then(r=>r.json()).then(d=>document.getElementById('cap_result').textContent=JSON.stringify(d));\"><select id=\"cap_action\"><option>success</option><option>failure</option><option>probe</option></select> <input id=\"cap_name\" placeholder=\"skill name\"> <input id=\"cap_path\" placeholder=\"plugin dir for probe\"> <button>Run</button></form><pre id=\"cap_result\"></pre>"
                     self._send_html(200, html)
                 elif parsed.path == "/memory":
                     html = "<h1>Memory</h1><p>Episodes Aidon remembers from past work, by collection, no secret values.</p>"
@@ -954,6 +956,8 @@ class WebUIServer:
                                     html += f"<p>{point.id} {point.payload.get('text', '')[:120]}</p>"
                             except Exception:
                                 continue
+                    html += "<h2>Memory studio</h2><p>Forget a point, prune a collection, or promote an episodic point, via POST /api/studio/memory with JSON {action: forget|prune|promote, collection, point_id}.</p>"
+                    html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/memory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('mem_action').value,collection:document.getElementById('mem_coll').value,point_id:document.getElementById('mem_id').value})}).then(r=>r.json()).then(d=>document.getElementById('mem_result').textContent=JSON.stringify(d));\"><select id=\"mem_action\"><option>forget</option><option>prune</option><option>promote</option></select> <input id=\"mem_coll\" value=\"episodic\"> <input id=\"mem_id\" placeholder=\"point id\"> <button>Run</button></form><pre id=\"mem_result\"></pre>"
                     self._send_html(200, html)
                 elif parsed.path == "/knowledge":
                     html = "<h1>Knowledge</h1><p>Documents and facts Aidon has ingested, from the knowledge collection and library.</p>"
@@ -965,6 +969,8 @@ class WebUIServer:
                             pass
                     for item in server._library_files():
                         html += f"<p>Library: {item['path']}</p>"
+                    html += "<h2>Knowledge studio</h2><p>Recall knowledge, or record a knowledge text, via POST /api/studio/knowledge with JSON {action: recall|ingest, query, text}.</p>"
+                    html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('kb_action').value,query:document.getElementById('kb_query').value,text:document.getElementById('kb_text').value})}).then(r=>r.json()).then(d=>document.getElementById('kb_result').textContent=JSON.stringify(d));\"><select id=\"kb_action\"><option>recall</option><option>ingest</option></select> <input id=\"kb_query\" placeholder=\"query\"> <input id=\"kb_text\" placeholder=\"text to ingest\"> <button>Run</button></form><pre id=\"kb_result\"></pre>"
                     self._send_html(200, html)
                 elif parsed.path == "/reports":
                     from ..interface.scheduler_loop import daily_report as _daily
@@ -1091,6 +1097,57 @@ class WebUIServer:
                     verdict = str(body.get("verdict", "rejected"))
                     ok = server.webui_gate.approve(card_id, verdict)
                     self._send_json(200 if ok else 404, {"ok": ok})
+                elif parsed.path == "/api/studio/memory":
+                    if server.memory is None:
+                        self._send_json(500, {"error": "no memory"})
+                    else:
+                        action = str(body.get("action", ""))
+                        collection = str(body.get("collection", "episodic"))
+                        point_id = str(body.get("point_id", ""))
+                        if action == "forget":
+                            self._send_json(200, {"ok": server.memory.forget(collection, point_id)})
+                        elif action == "prune":
+                            self._send_json(200, server.memory.prune(collection))
+                        elif action == "promote":
+                            point = None
+                            for candidate in server.memory.list_points(collection, limit=1000):
+                                if candidate.id == point_id:
+                                    point = candidate; break
+                            if point is None:
+                                self._send_json(404, {"error": "point not found"})
+                            else:
+                                self._send_json(200, {"ok": True, "result": str(server.memory.promote_to_ltm(point))})
+                        else:
+                            self._send_json(400, {"error": "unknown memory studio action"})
+                elif parsed.path == "/api/studio/knowledge":
+                    if server.memory is None:
+                        self._send_json(500, {"error": "no memory"})
+                    else:
+                        action = str(body.get("action", ""))
+                        if action == "recall":
+                            self._send_json(200, {"results": [str(r) for r in server.memory.recall("knowledge", str(body.get("query", "")))]})
+                        elif action == "ingest":
+                            server.memory.record("knowledge", str(body.get("text", "")))
+                            self._send_json(200, {"ok": True})
+                        else:
+                            self._send_json(400, {"error": "unknown knowledge studio action"})
+                elif parsed.path == "/api/studio/capabilities":
+                    action = str(body.get("action", ""))
+                    if action in ("success", "failure"):
+                        from ..capabilities.skill_lifecycle import LifecycleStore
+                        lifecycle = LifecycleStore(server.home)
+                        name = str(body.get("name", ""))
+                        result = lifecycle.record_success(name) if action == "success" else lifecycle.record_failure(name)
+                        self._send_json(200, {"ok": True, "state": result})
+                    elif action == "probe":
+                        from ..capabilities.security_probe import probe_plugin
+                        path = str(body.get("path", ""))
+                        if not path:
+                            self._send_json(400, {"error": "probe needs a path"})
+                        else:
+                            self._send_json(200, {"findings": probe_plugin(path)})
+                    else:
+                        self._send_json(400, {"error": "unknown capabilities studio action"})
                 elif parsed.path == "/webhook/whatsapp":
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     status, payload = server.handle_whatsapp_post(body, raw, headers)
