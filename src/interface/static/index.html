@@ -127,7 +127,24 @@
   <aside id="rightbar">
     <div id="avatar-wrap" title="Aidon">
       <canvas id="avatar" width="224" height="224"></canvas>
-      <div id="avatar-placeholder">A</div>
+      <div id="avatar-placeholder" aria-label="Aidon robot avatar">
+        <svg class="fallback-robot" viewBox="0 0 200 200" role="img" aria-label="Aidon robot">
+          <g class="robot-body-anim">
+            <rect x="28" y="35" width="16" height="42" rx="8" fill="#1a2a4a"/>
+            <rect x="156" y="35" width="16" height="42" rx="8" fill="#1a2a4a"/>
+            <rect x="40" y="18" width="120" height="72" rx="22" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
+            <rect x="55" y="28" width="90" height="52" rx="14" fill="#1a2a4a"/>
+            <ellipse class="robot-eye" cx="82" cy="54" rx="10" ry="16" fill="#7de9ff"/>
+            <ellipse class="robot-eye" cx="118" cy="54" rx="10" ry="16" fill="#7de9ff"/>
+            <path d="M88 72 Q100 78 112 72" fill="none" stroke="#7de9ff" stroke-width="3" stroke-linecap="round"/>
+            <rect x="92" y="90" width="16" height="12" fill="#c2c2b8"/>
+            <path d="M62 102 Q100 92 138 102 L138 140 Q100 155 62 140Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
+            <path d="M58 108 Q35 120 32 145 Q32 160 45 160 L58 150Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
+            <path d="M142 108 Q165 120 168 145 Q168 160 155 160 L142 150Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
+            <path d="M75 155 Q100 170 125 155 Q100 165 75 155Z" fill="#1a2a4a"/>
+          </g>
+        </svg>
+      </div>
     </div>
     <canvas id="voice-wave" width="240" height="36" title="Voice activity"></canvas>
     <div id="thinking-head">
