@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memory Studio — Aidon</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  /* Standalone page: the shared stylesheet locks body overflow for
+     the chat app shell — unlock it here so the page scrolls. */
+  html, body { height: auto; }
+  body { overflow: auto; }
+  .cap-wrap { max-width: 880px; margin: 0 auto; padding: 24px 20px 60px; }
+  .cap-head { display: flex; align-items: baseline; gap: 14px; }
+  .cap-head h1 { font-size: 22px; margin: 0; }
+  .cap-head a { color: var(--muted); text-decoration: none; font-size: 13px; }
+  .cap-head a:hover { color: var(--accent); }
+  .cap-sub { color: var(--muted); font-size: 13px; margin: 6px 0 18px; }
+  .cap-card { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px 14px; margin-bottom: 10px;
+    position: relative; }
+  .cap-name { font-weight: 600; font-size: 14px; padding-right: 30px; }
+  .cap-meta { margin-top: 5px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .cap-badge { font-size: 10.5px; padding: 2px 7px; border-radius: 999px;
+    background: var(--panel-2); color: var(--muted);
+    border: 1px solid var(--line); }
+  .cap-badge.ok { color: var(--green, #4caf7d); }
+  .cap-badge.plugin { color: var(--accent); }
+  .cap-empty { color: var(--muted); font-size: 13px; padding: 8px 2px; }
+  .studio-search { display: flex; gap: 8px; margin-bottom: 16px; }
+  .studio-search input { flex: 1; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px;
+    color: var(--text); padding: 9px 12px; font-size: 13.5px; }
+  .studio-search button, #studio-more { background: var(--panel-2);
+    border: 1px solid var(--line); color: var(--text);
+    border-radius: 10px; padding: 9px 14px; cursor: pointer;
+    font-size: 13px; }
+  .studio-search button:hover, #studio-more:hover {
+    border-color: var(--accent); }
+  #studio-more { display: none; margin: 6px auto 0; }
+  .studio-del { position: absolute; top: 8px; right: 8px; border: none;
+    background: transparent; color: var(--muted); cursor: pointer;
+    font-size: 12px; padding: 4px 6px; border-radius: 6px; opacity: 0;
+    transition: opacity .12s, color .12s; }
+  .cap-card:hover .studio-del { opacity: 1; }
+  .studio-del:hover { color: var(--red, #e5534b); }
+  .studio-field { margin-top: 8px; }
+  .studio-label { font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--muted); margin-bottom: 2px; }
+  .studio-text { font-size: 13px; white-space: pre-wrap;
+    word-break: break-word; max-height: 220px; overflow-y: auto; }
+  .studio-error { display: none; background: var(--panel);
+    border: 1px solid var(--red, #e5534b); color: var(--text);
+    border-radius: 10px; padding: 10px 12px; font-size: 13px;
+    margin-bottom: 14px; }
+</style>
+</head>
+<body data-api="/api/memory/episodes" data-kind="episode">
+<div class="cap-wrap">
+  <div class="cap-head">
+    <h1>🧠 Memory Studio <span id="studio-count"></span></h1>
+    <a href="/">← back to Aidon</a>
+  </div>
+  <p class="cap-sub">The episodes Aidon remembers from past goals and
+    conversations — each one distilled when the work finished, and
+    recalled into later work when it's relevant.
+    <span id="studio-mode"></span></p>
+  <div class="studio-error" id="studio-error"></div>
+  <div class="studio-search">
+    <input id="studio-q" type="text"
+      placeholder="Filter episodes by goal, outcome, or lesson…">
+    <button id="studio-search-btn">Search</button>
+  </div>
+  <div id="studio-list"></div>
+  <button id="studio-more">Load more</button>
+</div>
+<script src="/static/studio.js"></script>
+</body>
+</html>

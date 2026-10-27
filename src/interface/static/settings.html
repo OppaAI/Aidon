@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aidon — Settings</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app" class="settings-app">
+  <header id="topbar">
+    <div id="title-block">
+      <div id="title">Aidon</div>
+      <div id="subtitle">settings — every knob, one page</div>
+    </div>
+    <div id="run-status"></div>
+    <button id="theme-toggle" class="icon-btn" title="Toggle dark / light theme">◐</button>
+    <a id="settings-link" class="icon-btn" href="/" title="Back to chat">✕</a>
+  </header>
+
+  <div id="settings-env" class="settings-env"></div>
+  <main id="settings-groups"></main>
+
+  <footer id="settings-footer">
+    <div id="settings-note">Changes are written to the <span id="env-path"></span> file.
+      Restart <code>aidon webui</code> for new values to take effect.</div>
+    <button id="settings-save">Save settings</button>
+    <span id="settings-status"></span>
+  </footer>
+</div>
+<script src="/static/settings.js"></script>
+</body>
+</html>

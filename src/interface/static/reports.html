@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aidon — Daily reports</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app" class="settings-app">
+  <header id="topbar">
+    <div id="title-block">
+      <div id="title">Aidon</div>
+      <div id="subtitle">daily reports — brief + one file per goal</div>
+    </div>
+    <div id="run-status"></div>
+    <button id="theme-toggle" class="icon-btn" title="Toggle dark / light theme">◐</button>
+    <a id="settings-link" class="icon-btn" href="/" title="Back to chat">✕</a>
+  </header>
+
+  <main id="reports-main">
+    <label>Day:
+      <select id="report-day"></select>
+    </label>
+    <button id="report-generate">Generate today's report</button>
+    <span id="report-status"></span>
+    <section id="report-brief-wrap">
+      <h2>Brief <span id="brief-play"></span></h2>
+      <div class="report-goal"><pre id="report-brief"></pre></div>
+    </section>
+    <section id="report-goals"></section>
+  </main>
+</div>
+<script src="/static/reports.js"></script>
+</body>
+</html>

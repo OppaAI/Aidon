@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aidon</title>
+<link rel="stylesheet" href="/static/style.css?v=__ASSET_V__">
+<script type="importmap">
+{
+  "imports": {
+    "three": "/static/vendor/three/build/three.module.js",
+    "three/addons/": "/static/vendor/three/examples/jsm/",
+    "@pixiv/three-vrm": "/static/vendor/@pixiv/three-vrm/lib/three-vrm.module.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <!-- ============ LEFT SIDEBAR ============ -->
+  <aside id="leftbar">
+    <div id="brand">
+      <span id="brand-mark">A</span>
+      <span id="brand-name">Aidon</span>
+      <button id="theme-toggle" class="icon-btn" title="Toggle dark / light theme">◐</button>
+    </div>
+    <nav id="main-nav">
+      <button class="nav-btn active" data-view="chat" title="Chat">
+        <span class="nav-ico">💬</span><span class="nav-label">Chat</span>
+      </button>
+      <button class="nav-btn" data-view="search" title="Search">
+        <span class="nav-ico">🔍</span><span class="nav-label">Search</span>
+      </button>
+      <button class="nav-btn" data-view="ideas" title="Ideas">
+        <span class="nav-ico">💡</span><span class="nav-label">Ideas</span>
+      </button>
+      <button class="nav-btn" data-view="goals" title="Goals">
+        <span class="nav-ico">🎯</span><span class="nav-label">Goals</span>
+      </button>
+      <button class="nav-btn" data-view="library" title="Library">
+        <span class="nav-ico">📚</span><span class="nav-label">Library</span>
+      </button>
+      <a class="nav-btn" href="/dag" title="DAG editor — view and edit the graphs Aidon builds">
+        <span class="nav-ico">🔗</span><span class="nav-label">DAGs</span>
+      </a>
+      <a class="nav-btn" href="/capabilities" title="Capabilities — what Aidon can do, what it has learned, and the evidence">
+        <span class="nav-ico">🧰</span><span class="nav-label">Capabilities</span>
+      </a>
+      <a class="nav-btn" href="/memory" title="Memory Studio — the episodes Aidon remembers from past work">
+        <span class="nav-ico">🧠</span><span class="nav-label">Memory</span>
+      </a>
+      <a class="nav-btn" href="/knowledge" title="Knowledge Studio — the documents and facts Aidon has ingested">
+        <span class="nav-ico">📖</span><span class="nav-label">Knowledge</span>
+      </a>
+    </nav>
+    <div id="projects-bar">
+      <div class="left-head">
+        <span>Projects</span>
+        <button id="new-project" class="mini-btn" title="New project">＋</button>
+      </div>
+      <div id="project-list"></div>
+    </div>
+    <div id="left-content">
+      <div class="left-view active" id="view-chat">
+        <div class="left-head">
+          <span>History</span>
+          <button id="new-chat" class="mini-btn" title="New chat">＋</button>
+        </div>
+        <div id="history-list"></div>
+      </div>
+      <div class="left-view" id="view-search">
+        <div class="left-head"><span>Search</span></div>
+        <input id="search-input" type="text" placeholder="Search chats…" autocomplete="off">
+        <div id="search-results"></div>
+      </div>
+      <div class="left-view" id="view-ideas">
+        <div class="left-head">
+          <span>Ideas</span>
+          <button id="new-idea" class="mini-btn" title="New idea">＋</button>
+        </div>
+        <div id="ideas-list"></div>
+      </div>
+      <div class="left-view" id="view-goals">
+        <div class="left-head"><span>Goals</span></div>
+        <div id="goals-list"></div>
+      </div>
+      <div class="left-view" id="view-library">
+        <div class="left-head">
+          <span>Library</span>
+          <span class="left-sub">files Aidon keeps — imports &amp; outputs, linked to memory</span>
+        </div>
+        <div id="library-list"></div>
+      </div>
+    </div>
+    <div id="left-foot">
+      <a id="reports-link" class="icon-btn" href="/reports" title="Daily reports">📰</a>
+      <a id="settings-link" class="icon-btn" href="/settings" title="Settings">⚙</a>
+      <span id="run-status"><span id="status-dot"></span><span id="status-text">idle</span></span>
+    </div>
+  </aside>
+
+  <!-- ============ CENTER: CHAT ============ -->
+  <main id="center">
+    <div id="stages"></div>
+    <div id="thread"></div>
+    <div id="approval-slot"></div>
+    <div id="img-preview" hidden></div>
+    <footer id="composer">
+      <button id="mic" title="Voice input (Meta Transcribe)">&#9679;</button>
+      <button id="attach-btn" title="Attach image" aria-label="Attach image">&#128206;</button>
+      <button id="camera-btn" title="Take photo" aria-label="Take photo">&#128247;</button>
+      <div id="composer-inputs">
+        <input id="goal-input" type="text" placeholder="Chat or give Aidon a goal…" autocomplete="off">
+        <input id="guidance-input" type="text" placeholder="Guidance (optional) — your steps or hints; Aidon follows them and fills the gaps…" autocomplete="off">
+      </div>
+      <button id="send">Run</button>
+    </footer>
+    <div id="steer-row" hidden>
+      <input id="steer-input" type="text" placeholder="Steer mid-run — Aidon finishes the current step, then follows…" autocomplete="off">
+      <button id="steer-send">Steer</button>
+      <button id="cancel-run">Cancel run</button>
+    </div>
+    <div id="hint">Enter = run &nbsp;·&nbsp; approvals appear as cards above &nbsp;·&nbsp; mic needs AIDON_API_KEY (Meta Transcribe)</div>
+  </main>
+
+  <!-- ============ RIGHT SIDEBAR ============ -->
+  <aside id="rightbar">
+    <div id="avatar-wrap" title="Aidon">
+      <canvas id="avatar" width="224" height="224"></canvas>
+      <div id="avatar-placeholder">A</div>
+    </div>
+    <canvas id="voice-wave" width="240" height="36" title="Voice activity"></canvas>
+    <div id="thinking-head">
+      <span>Thinking</span>
+      <span id="thinking-count"></span>
+      <button id="thinking-toggle-all" class="mini-btn" title="Expand/collapse all">⤢</button>
+    </div>
+    <div id="thinking-list"></div>
+  </aside>
+</div>
+<script src="/static/app.js?v=__ASSET_V__"></script>
+<script src="/static/avatar.js?v=__ASSET_V__"></script>
+</body>
+</html>

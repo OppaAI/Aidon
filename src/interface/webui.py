@@ -61,6 +61,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import mimetypes
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -71,6 +72,8 @@ from .approval import ApprovalGate, Decision
 from .messaging import (MessagingConfig, normalize_number, parse_decision,
                         verify_whatsapp_signature)
 from .triggers import TriggerDispatcher, TriggerEvent
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 # Shared page style: every WebUI page gets the same base look. The chat
 # page previously shipped only avatar-animation CSS and the handler-built
@@ -2072,6 +2075,23 @@ class WebUIServer:
                 self.end_headers()
                 self.wfile.write(data)
 
+            def _send_static(self, relative: str):
+                """Serve only files from the bundled old-Aidon WebUI assets."""
+                candidate = (STATIC_DIR / relative).resolve()
+                root = STATIC_DIR.resolve()
+                if root not in candidate.parents or not candidate.is_file():
+                    self._send_json(404, {"error": "not found"})
+                    return
+                data = candidate.read_bytes()
+                if candidate.name in {"index.html", "dag.html", "capabilities.html",
+                                      "memory.html", "knowledge.html", "reports.html",
+                                      "settings.html"}:
+                    version = str(int(candidate.stat().st_mtime)).encode()
+                    data = data.replace(b"__ASSET_V__", version)
+                content_type = mimetypes.guess_type(str(candidate))[0] or \
+                    "application/octet-stream"
+                self._send_bytes(200, content_type, data)
+
             def _read_body(self) -> bytes:
                 length = int(self.headers.get("Content-Length", 0) or 0)
                 return self.rfile.read(length) if length else b""
@@ -2086,8 +2106,14 @@ class WebUIServer:
                         return
                 if server.webhook_only and parsed.path != "/webhook/whatsapp":
                     self._send_json(404, {"error": "webhook only"})
+                elif parsed.path == "/static" or parsed.path.startswith("/static/"):
+                    relative = parsed.path[len("/static/"):] if parsed.path.startswith("/static/") else ""
+                    self._send_static(relative)
                 elif parsed.path == "/":
-                    self._send_html(200, CHAT_HTML)
+                    self._send_static("index.html")
+                elif parsed.path in ("/dag", "/capabilities", "/memory", "/knowledge",
+                                     "/reports", "/settings"):
+                    self._send_static(parsed.path.lstrip("/") + ".html")
                 elif parsed.path == "/settings":
                     keys = server.auth_store.list_keys() if server.auth_store else []
                     html = """<h1>Settings</h1>
@@ -2147,8 +2173,26 @@ loadSettings();
                     for item in files:
                         html += f"<p>{item['path']} {item['size']} bytes</p>"
                     self._send_html(200, _page_html("Library", html))
+                elif parsed.path.startswith("/api/library/") and parsed.path.endswith("/file"):
+                    from ..memory.library import Library
+                    item_id = parsed.path[len("/api/library/"):-len("/file")].strip("/")
+                    item = Library(server.home).get_item(item_id)
+                    if item is None:
+                        self._send_json(404, {"error": "library item not found"})
+                    else:
+                        data = Path(item["absolute_path"]).read_bytes()
+                        content_type = item.get("mime") or "application/octet-stream"
+                        self._send_bytes(200, content_type, data)
                 elif parsed.path == "/api/library":
-                    self._send_json(200, {"files": server._library_files()})
+                    from ..memory.library import Library
+                    query = parse_qs(parsed.query)
+                    project_id = query.get("project_id", [""])[0]
+                    items = Library(server.home).list_items(project_id)
+                    # Keep the legacy file listing visible for homes created
+                    # before the library manifest was introduced.
+                    if not items:
+                        items = server._library_files()
+                    self._send_json(200, {"files": items})
                 elif parsed.path == "/api/projects":
                     self._send_json(200, {"projects": server._projects()})
                 elif parsed.path == "/api/approvals":
@@ -2300,7 +2344,24 @@ loadSettings();
                         limit = int(query.get("limit", ["50"])[0])
                     except ValueError:
                         limit = 50
-                    self._send_json(200, server.handle_memory_points(collection, limit))
+                    try:
+                        offset = max(0, int(query.get("offset", ["0"])[0]))
+                    except ValueError:
+                        offset = 0
+                    needle = query.get("q", [""])[0].strip().lower()
+                    raw_points = server.handle_memory_points(collection, 200).get("points", [])
+                    items = []
+                    for point in raw_points:
+                        item = dict(point.get("payload", {}) or {})
+                        item["id"] = point.get("id", "")
+                        item.setdefault("text", point.get("text", ""))
+                        items.append(item)
+                    if needle:
+                        items = [item for item in items if needle in json.dumps(item).lower()]
+                    matched = len(items)
+                    page = items[offset:offset + max(1, min(limit, 200))]
+                    self._send_json(200, {"items": page, "total": len(raw_points),
+                                          "matched": matched, "mode": "Aidon memory"})
                 elif parsed.path == "/webhook/whatsapp":
                     query = parse_qs(parsed.query)
                     status, text = server.handle_whatsapp_get(query)
@@ -2344,12 +2405,24 @@ loadSettings();
                     saved = Library(server.home).add_file(tmp, kind="file", description="WebUI upload")
                     self._send_json(200, {"id": saved["id"], "name": safe})
                 elif parsed.path == "/api/settings":
-                    key = str(body.get("key", ""))
-                    if server.settings_set(key, body.get("value")):
-                        self._send_json(200, {"ok": True})
+                    if isinstance(body.get("settings"), dict):
+                        updated = []
+                        errors = []
+                        for key, value in body["settings"].items():
+                            result = server.settings_set_env(str(key), value)
+                            if result.get("ok"):
+                                updated.append(str(key))
+                            else:
+                                errors.append(result.get("error", str(key)))
+                        self._send_json(200 if not errors else 400,
+                                        {"updated": updated, "errors": errors})
                     else:
-                        result = server.settings_set_env(key, body.get("value", ""))
-                        self._send_json(200 if result.get("ok") else 400, result)
+                        key = str(body.get("key", ""))
+                        if server.settings_set(key, body.get("value")):
+                            self._send_json(200, {"ok": True})
+                        else:
+                            result = server.settings_set_env(key, body.get("value", ""))
+                            self._send_json(200 if result.get("ok") else 400, result)
                 elif parsed.path == "/api/settings/env":
                     result = server.settings_set_env(str(body.get("key", "")), body.get("value", ""))
                     self._send_json(200 if result.get("ok") else 400, result)

@@ -32,3 +32,6 @@ docs = [
 
 [tool.setuptools]
 packages = ["src", "src.system", "src.memory", "src.agentic", "src.interface", "src.capabilities", "src.social"]
+
+[tool.setuptools.package-data]
+"src.interface" = ["static/**/*"]
