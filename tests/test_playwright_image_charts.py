@@ -75,3 +75,28 @@ def test_save_image_and_charts_are_code_not_image_gen(tmp_path):
         assert False, "empty chart must raise"
     except ValueError:
         pass
+
+
+def test_muse_image_edit_multiple_refs():
+    from src.image_gen import edit_image
+    fake_bytes = b"\x89PNG edited"
+    def fake_post(url, headers, payload):
+        assert "images/edits" in url
+        assert payload["model"] == "muse-image-1.0"
+        assert len(payload["images"]) == 2
+        return {"data": [{"b64_json": base64.b64encode(fake_bytes).decode()}]}
+    data = edit_image("Combine @Image1 the product with @Image2 the background, keep @Image1 label unchanged",
+                      "test-key", "https://example.com/v1",
+                      reference_images=["https://example.com/a.jpg", "https://example.com/b.jpg"],
+                      post=fake_post)
+    assert data == fake_bytes
+    try:
+        edit_image("Hi", "test-key", "https://example.com/v1", reference_images=[], post=fake_post)
+        assert False, "0 refs must raise"
+    except ValueError:
+        pass
+    try:
+        edit_image("Hi", "test-key", "https://example.com/v1", reference_images=["x"] * 11, post=fake_post)
+        assert False, "11 refs must raise, max is 10"
+    except ValueError:
+        pass

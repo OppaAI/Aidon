@@ -73,6 +73,67 @@ def generate_image(prompt: str, api_key: str, endpoint: str,
     raise ValueError("Muse Image returned an image entry with no bytes and no URL")
 
 
+def edit_image(prompt: str, api_key: str, endpoint: str,
+               reference_images: list, size: str = "1024x1024", post=None) -> bytes:
+    """Edit or compose from reference images, 1 to 10, not text-to-image alone.
+
+    This is the second Muse Image endpoint, POST /v1/images/edits,
+    not POST /v1/images/generations. Generations takes a prompt
+    only, no reference image. Edits takes a prompt plus 1 to 10
+    reference images, and combines them into one scene, or edits
+    the first one, as the prompt says.
+
+    How to refer to them: in the prompt, address each reference
+    as @Image1, @Image2, and so on, numbered in input order.
+    Example: "Combine @Image1, the product, with @Image2, the
+    background, keep @Image1's label unchanged, match @Image2's
+    lighting." Tagging the role, subject, product, environment,
+    or palette, is what makes composition predictable. Untagged
+    references tend to average themselves.
+
+    reference_images is a list of image bytes, or image file
+    paths, or image URLs, 1 to 10, more than 10 raises, 0 raises.
+    Bytes and paths are sent as image files, URLs are sent as
+    image URLs, so the caller does not need to download a URL
+    first. As with generate_image, approval and credit gating
+    are the caller's job, before this call, and a live run
+    against the official Meta endpoint is still untested here,
+    so the first live edit should be checked against the
+    official dev.meta.ai images/edits field names, because
+    third-party wrappers differ, some use an images_list,
+    some use image_1 to image_10, and the official
+    OpenAI-compatible form is image files plus prompt.
+    """
+    if not prompt.strip():
+        raise ValueError("image edit prompt is required")
+    if not api_key:
+        raise ValueError("Muse Image API key is required, generation is credit-gated, never run without a key")
+    if not reference_images or len(reference_images) > 10:
+        raise ValueError("Muse Image edit needs 1 to 10 reference images, not 0, not more than 10")
+    url = endpoint.rstrip("/") + "/images/edits"
+    payload = {"model": MODEL, "prompt": prompt, "size": size,
+               "images": list(reference_images)}
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if post is not None:
+        data = post(url, headers, payload)
+    else:
+        req = urllib.request.Request(url, data=json.dumps(payload).encode(),
+                                     method="POST", headers=headers)
+        with urllib.request.urlopen(req, timeout=60) as response:
+            data = json.loads(response.read().decode())
+    images = data.get("data", []) if isinstance(data, dict) else []
+    if not images:
+        raise ValueError("Muse Image edit did not return an image")
+    first = images[0]
+    if isinstance(first, dict) and first.get("b64_json"):
+        return base64.b64decode(first["b64_json"])
+    if isinstance(first, dict) and first.get("url"):
+        req = urllib.request.Request(first["url"])
+        with urllib.request.urlopen(req, timeout=60) as response:
+            return response.read()
+    raise ValueError("Muse Image edit returned an image entry with no bytes and no URL")
+
+
 def save_image(data: bytes, path: Path) -> Path:
     path = Path(path)
     if path.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
