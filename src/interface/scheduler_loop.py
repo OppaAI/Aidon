@@ -26,10 +26,9 @@ is 0.
 
 from __future__ import annotations
 
-import json
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 
@@ -86,24 +85,9 @@ class SchedulerLoop:
 
 
 def daily_report(home: Path) -> str:
-    home = Path(home)
-    lines = [f"# Daily report {datetime.now(timezone.utc).date().isoformat()}", ""]
-    last_run = home / "learned" / "last_run.json"
-    if last_run.exists():
-        try:
-            data = json.loads(last_run.read_text())
-            status = data.get('status') or ('done' if data.get('deliverables') else '')
-            project = data.get('project_id') or ''
-            goal = data.get('goal') or ''
-            lines.append(f"Last run: {status} project {project} goal {goal}".strip())
-        except Exception:
-            lines.append("Last run: unreadable")
-    else:
-        lines.append("Last run: none")
-    trace_dir = home / "trace"
-    count = len(list(trace_dir.glob("*.jsonl"))) if trace_dir.exists() else 0
-    lines.append(f"Trace files: {count}")
-    return "\n".join(lines) + "\n"
+    """Return the canonical daily report used by CLI and WebUI."""
+    from .report import daily_report as _daily_report
+    return _daily_report(home)
 
 
 class NudgeTracker:

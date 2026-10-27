@@ -1229,13 +1229,16 @@ class WebUIServer:
         "research_allowlist": "AIDON_RESEARCH_ALLOWLIST",
         "router_fast_phases": "AIDON_ROUTER_FAST_PHASES",
         "kernel": "AIDON_KERNEL",
+        # Historical spelling remains writable for old installations.
+        # New configuration uses the canonical Slack variable below.
+        "AIDON_SLACK_SIGNING_SECRET": "AIDON_SLACK_SIGNING_SECRET",
     }
     _ENV_SECRET_MARKERS = ("TOKEN", "KEY", "SECRET", "PASSWORD", "CLIENT")
 
     # Settings catalog: every live Config key, grouped, with type,
-    # default, and secret flag. Dead old keys are deliberately
-    # absent: no AIDON_META_*, no verifier model, no think phases,
-    # no AIDON_DEPTH. Float-valued keys use type "string" (the
+    # default, and secret flag. Legacy Meta keys and AIDON_DEPTH are
+    # absent. Verifier model and think phases remain live because they
+    # are needed when using local model backends. Float-valued keys use type "string" (the
     # catalog has only string/int/bool/enum) and are validated
     # as numbers on write. Secrets are listed so the catalog
     # read can mask them and report is_set, never the value.
@@ -1320,7 +1323,6 @@ class WebUIServer:
             {"key": "AIDON_SLACK_POLL_SECONDS", "label": "Slack poll seconds", "type": "int", "default": "10", "desc": "Polling interval for Slack inbound messages.", "secret": False},
             {"key": "AIDON_SLACK_ACK_AFTER_SECONDS", "label": "Slack acknowledgement delay", "type": "int", "default": "15", "desc": "Seconds before a long-running Slack goal gets an acknowledgement.", "secret": False},
             {"key": "AIDON_SLACK_AUTOSTART", "label": "Slack polling autostart", "type": "bool", "default": "1", "desc": "Start Slack polling automatically with the WebUI.", "secret": False},
-            {"key": "AIDON_SPARSE_MODEL", "label": "Sparse memory model", "type": "string", "default": "", "desc": "Optional sparse embedding model; empty disables sparse embeddings.", "secret": False},
             {"key": "AIDON_OWNER_EMAIL", "label": "Owner email", "type": "string", "default": "", "desc": "Where drafts and reports to the owner are addressed.", "secret": False},
             {"key": "AIDON_DAILY_REPORT_TIME", "label": "Daily report time", "type": "string", "default": "", "desc": "Time of day for the daily report.", "secret": False},
             {"key": "AIDON_APPROVAL_NUDGE_MIN", "label": "Approval nudge minutes", "type": "int", "default": "15", "desc": "Minutes before an approval card is nudged.", "secret": False},

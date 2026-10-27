@@ -36,8 +36,10 @@ def test_catalog_groups_and_dead_keys_absent(tmp_path):
     assert "AIDON_MODEL" in keys and "AIDON_BACKEND" in keys
     assert "AIDON_QDRANT_URL" in keys and "AIDON_WEBUI_TOKEN" in keys
     for dead in ("AIDON_META_API_KEY", "AIDON_META_MODEL", "AIDON_META_ENDPOINT",
-                 "AIDON_VERIFIER_MODEL", "AIDON_THINK_PHASES", "AIDON_DEPTH"):
+                 "AIDON_DEPTH"):
         assert dead not in keys
+    assert "AIDON_VERIFIER_MODEL" in keys
+    assert "AIDON_THINK_PHASES" in keys
     # Enum options are carried for enum entries only.
     backend = [entry for group in catalog["groups"] for entry in group["settings"]
                if entry["key"] == "AIDON_BACKEND"][0]

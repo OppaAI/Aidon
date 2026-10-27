@@ -232,7 +232,9 @@ class Config:
             whatsapp_app_secret=os.environ.get("AIDON_WHATSAPP_APP_SECRET", ""),
             whatsapp_owner=os.environ.get("AIDON_WHATSAPP_OWNER", ""),
             slack_bot_token=os.environ.get("SLACK_BOT_TOKEN", ""),
-            slack_signing_secret=os.environ.get("SLACK_SIGNING_SECRET", ""),
+            slack_signing_secret=os.environ.get(
+                "SLACK_SIGNING_SECRET",
+                os.environ.get("AIDON_SLACK_SIGNING_SECRET", "")),
             search_backend=os.environ.get("AIDON_SEARCH_BACKEND", "tavily"),
             searxng_url=os.environ.get("AIDON_SEARXNG_URL", "http://localhost:8888"),
             tavily_api_key=os.environ.get("TAVILY_API_KEY", ""),

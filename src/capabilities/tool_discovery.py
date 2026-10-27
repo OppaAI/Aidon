@@ -12,9 +12,9 @@ from __future__ import annotations
 def list_tools(home) -> list[dict]:
     from .plugins import PluginRegistry
     registry = PluginRegistry(home)
-    registry.load_all()
+    plugins = registry.load_all()
     tools = [{"name": name, "source": "sandbox"} for name in ("write", "read", "list", "shell", "calculate")]
-    for plugin in registry.load_all():
+    for plugin in plugins:
         for tool in plugin.tools:
             tools.append({"name": tool.get("name", ""), "source": plugin.name, "description": tool.get("description", "")})
     return tools
