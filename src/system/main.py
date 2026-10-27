@@ -1633,7 +1633,7 @@ def main(argv: list[str] | None = None) -> int:
             from ..agentic.verifier_model import ModelVerifier
             from ..capabilities.plugins import PluginRegistry
             from ..agentic.semantic_router import SemanticRouter
-            from ..interface.scheduler_loop import AutonomyTracker, NudgeTracker
+            from ..interface.scheduler_loop import NudgeTracker
             run_id = str(event.payload.get("run_id", "")) or new_run_id()
             run_control.register(run_id, event.goal, event.project_id)
             # Full runner, same as the CLI goal run, not a thin runner:
