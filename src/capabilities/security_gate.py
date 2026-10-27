@@ -151,11 +151,13 @@ def _semgrep_scan(text: str, language: str = "python") -> list[Finding]:
         return [Finding("info", "semgrep",
                         "semgrep is not available on PATH; semgrep scan "
                         "skipped, not a clean pass")]
+    bundled_rules = Path(__file__).with_name("security_rules") / "semgrep.yml"
+    config = str(bundled_rules) if bundled_rules.exists() else "auto"
     with tempfile.TemporaryDirectory(prefix="aidon-gate-") as tmp:
         path = Path(tmp) / f"scan.{'py' if language == 'python' else 'txt'}"
         path.write_text(text or "", encoding="utf-8")
         return _run_scanner("semgrep", [
-            "semgrep", "--quiet", "--json", "--config", "auto",
+            "semgrep", "--quiet", "--json", "--config", config,
             str(path)], "semgrep")
 
 

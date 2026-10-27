@@ -1,0 +1,48 @@
+# Bundled Semgrep ruleset for Aidon's security gate.
+# Small and dependency-light; the builtin pattern scan in security.py
+# always runs even when semgrep isn't installed.
+rules:
+  - id: aidon-os-system
+    message: os.system() executes a shell — block in fetched code
+    severity: ERROR
+    languages: [python]
+    pattern: os.system(...)
+  - id: aidon-subprocess-shell
+    message: subprocess with shell=True — block in fetched code
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: subprocess.$FUNC(...)
+      - metavariable-pattern:
+          metavariable: $FUNC
+          patterns:
+            - pattern-either:
+                - pattern: Popen
+                - pattern: call
+                - pattern: run
+                - pattern: check_output
+      - pattern-inside: subprocess.$FUNC(..., shell=True, ...)
+  - id: aidon-eval-exec
+    message: eval()/exec() on dynamic data — block in fetched code
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+  - id: aidon-requests-no-verify
+    message: TLS verification disabled — flag in fetched code
+    severity: WARNING
+    languages: [python]
+    pattern: requests.$METHOD(..., verify=False, ...)
+  - id: aidon-pickle-load
+    message: pickle.load on untrusted data — block in fetched code
+    severity: ERROR
+    languages: [python]
+    pattern: pickle.load(...)
+  - id: aidon-yaml-unsafe-load
+    message: yaml.load without SafeLoader — block in fetched code
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: yaml.load(...)
+      - pattern: yaml.unsafe_load(...)

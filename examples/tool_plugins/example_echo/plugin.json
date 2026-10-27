@@ -1,0 +1,14 @@
+{
+  "name": "example_echo",
+  "version": "1.0.0",
+  "description": "A read-only example plugin.",
+  "tools": [
+    {
+      "name": "example_echo",
+      "description": "Echo text back.",
+      "module": "tool.py",
+      "function": "example_echo"
+    }
+  ],
+  "skills": ["skill.md"]
+}
