@@ -1,0 +1,1 @@
+"""Aidon capabilities group."""

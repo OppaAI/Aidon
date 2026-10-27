@@ -155,15 +155,20 @@ post-hackathon, NOT built, NOT demoed, at the end.
 - Email, RSS, and database triggers, as plugins,
   beyond the core triggers built now.
 
-- Fly-brain biological layer, semi-joke, last entry,
-  not a product direction, not demoed as sentience:
-  Aiko's fly circuits as a modulatory layer for
-  Aidon, giving Aidon fly-like reactions, approach
-  and avoid, curiosity, urgency, and so on. This
-  is NOT sentience, and it is NOT RLHF, RLHF is
-  human feedback, fly circuits are small insect
-  reactive networks, and they do not make an agent
-  conscious. It is a curiosity for later, if anyone
-  wants a toy reactive layer, and it would never
-  be presented as Aidon becoming sentient, or as
-  Aidon turning into a bug.
+- Aidon fly-brain biological layer, semi-joke, last entry,
+  as a joke, not a product direction, not demoed as
+  sentience, not a real claim: the MaleCNS one, the
+  male Drosophila central nervous system connectome,
+  as a biological layer, with sentient emergence and
+  reinforcement learning and decision, and all the
+  good stuffs, as a joke. In Aiko's real fly work,
+  MaleCNS v1.0 is about 166,700 neurons, brain plus
+  optic lobes plus ventral nerve cord, with mushroom
+  body, central complex, and other circuits used as
+  modulatory subsystems, approach and avoid,
+  curiosity, urgency, and so on, not a conscious
+  agent, and RLHF is human feedback, not fly
+  circuits. This entry is the joke version of that,
+  for later, if anyone wants a toy reactive layer,
+  and it would never be presented as Aidon becoming
+  sentient, or as Aidon turning into a bug.

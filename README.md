@@ -56,14 +56,14 @@ Aidon is self-hosted by design: clone it to your own computer or server, run it 
 
 Code lives in `src/`, grouped, not flat:
 
-- `src/system/` — config and model client, plus `src/main.py`, the entry point
+- `src/system/` — config, model client, and `main.py`, the entry point
 - `src/memory/` — Qdrant memory, embedder, entity graph, KB, experience, redaction
 - `src/agentic/` — goal loop, DAG, adapt, swarm, interview, validation, budgets, trace, research
 - `src/interface/` — WebUI, messaging, v1 API, MCP, triggers, scheduler, approval, run control
 - `src/capabilities/` — sandbox and execution, tools and plugins, search, voice, GitHub, email, image, charts, Unity, Playwright MCP, SAM, video
 - `src/social/` — one-way social publishing, Threads and Instagram, plus YouTube search, metadata, and transcripts
 
-Run it with `python -m src.main goal "..."`, or `./launch.sh goal "..."`.
+Run it with `python -m src.system.main goal "..."`, or `./launch.sh goal "..."`. `src/` itself has no modules at the top level, only `__init__.py` and the groups.
 
 ## Future — post-hackathon (NOT built, NOT demoed)
 

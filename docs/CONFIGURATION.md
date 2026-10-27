@@ -23,7 +23,7 @@ Aidon reads runtime settings from a local `.env` file. Keep secrets local and ne
 
 Layout: the code lives in `src/` only, no sub-directory, so
 `pip install -e .` installs it and
-`python -m src.main goal "..."` runs it.
+`python -m src.system.main goal "..."` runs it.
 
 Aidon is self-hosted by design: clone it to your own computer
 or server, run it there, and use the WebUI or call the API.

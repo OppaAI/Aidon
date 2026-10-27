@@ -113,9 +113,9 @@ goal starts from what actually worked.
 
 ## Layout, grouped, not flat
 
-Code lives in `src/`, grouped by what it does, so a reader can find a system without reading 70 files in one directory. `src/main.py` is the entry point, it imports from the groups, it does not contain the systems itself.
+Code lives in `src/`, grouped by what it does, so a reader can find a system without reading 70 files in one directory. `src/system/main.py` is the entry point, it imports from the groups, it does not contain the systems itself. `src/` itself contains only `__init__.py` and the group directories, no modules at the top level.
 
-- `src/system/` — config, model client. The model client is endpoint, key, and model name only, OpenAI-compatible, stdlib, FakeClient for tests.
+- `src/system/` — config, model client, and `main.py`, the entry point. The model client is endpoint, key, and model name only, OpenAI-compatible, stdlib, FakeClient for tests.
 - `src/memory/` — Qdrant memory, embedder, entity graph, KB parsing, Experience, redaction, rolling summary, library links.
 - `src/agentic/` — goal loop, DAG and DAG store, adapt, swarm, interview and spec, validation, model verifier, budgets, trace, counting, metrics, benchmark, kernel, routers, research.
 - `src/interface/` — WebUI and robot avatar, messaging, v1 API, MCP server and client, triggers, scheduler loop, run control, approval and pre-approval gates.

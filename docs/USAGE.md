@@ -49,7 +49,7 @@
    before any planning proceeds. The spec is verified by
    code and approved as a decision card, then it binds the
    planner. Run it with
-   `python -m src.main interview "Plan a dinner"`, with
+   `python -m src.system.main interview "Plan a dinner"`, with
    `--run` to run the goal after the spec is approved.
 
 ## Spec sheet
@@ -84,8 +84,8 @@ interview.
   not proceed. A verified sheet is confirmed with a spec
   sheet card, then it binds the planner, same as an
   interviewed spec.
-- CLI: `python -m src.main interview "Plan a dinner" --attach my-spec.md --run`,
-  or `python -m src.main goal --spec my-spec.md "Plan a dinner"`.
+- CLI: `python -m src.system.main interview "Plan a dinner" --attach my-spec.md --run`,
+  or `python -m src.system.main goal --spec my-spec.md "Plan a dinner"`.
 2. **Plan** — a plan with steps, deliverables, and criteria.
    Steps are tool calls, not strings: write, read, list,
    shell in the sandbox, and calculate, all confined to the
@@ -101,9 +101,9 @@ instructions, a plugin is a bundle of both, with a
 plugin.json manifest, living in `~/.aidon/plugins/<name>/`,
 never in the repo.
 
-- Adopt: `python -m src.main plugin scan <dir>`,
-  then `python -m src.main plugin adopt <dir>`, then
-  `python -m src.main plugin list`. Adoption is scan,
+- Adopt: `python -m src.system.main plugin scan <dir>`,
+  then `python -m src.system.main plugin adopt <dir>`, then
+  `python -m src.system.main plugin list`. Adoption is scan,
   then a decision card, then copy, in that order.
 - Scan: path, line, and type only, never values, never
   an invented CVE. Blocking findings reject adoption
@@ -147,7 +147,7 @@ approval, spec, or verification.
   files only, it does not move or delete user files.
 - Webhook and manual: n8n-style triggers. Webhook is an
   HTTP POST, manual is a WebUI button or a CLI run.
-  CLI: `python -m src.main trigger list`,
+  CLI: `python -m src.system.main trigger list`,
   `trigger ingest`, `trigger schedule`, and
   `trigger webhook <name> --goal "..."`.
 - n8n mapping: Schedule to scheduler, Webhook to
@@ -205,16 +205,16 @@ verification arena they will run in.
   recall, plan, sandbox, verify, approval, live, and
   learn, with no secrets and no file content values,
   written to `~/.aidon/trace/<run_id>.jsonl`.
-- v1 API: `python -m src.main v1 serve --port 8001`,
+- v1 API: `python -m src.system.main v1 serve --port 8001`,
   localhost only, at `/api/v1/`, with Bearer token
   auth, except health. Owner scope is full, agent
   scope is submit, read, steer, and cancel only for
   its own goals, never approve, never key management.
-- Token auth: `python -m src.main v1 keygen --name owner --scope owner`,
+- Token auth: `python -m src.system.main v1 keygen --name owner --scope owner`,
   key shown once, only its SHA256 hash stored, in a
   0600 file, never shown again, only a hash prefix
   in key lists.
-- MCP: `python -m src.main v1 mcp`, stdio JSON-RPC,
+- MCP: `python -m src.system.main v1 mcp`, stdio JSON-RPC,
   token from `AIDON_MCP_TOKEN`, tools filtered by
   scope, wrapping the same v1 store as the v1 API.
   Streamable HTTP MCP is future, not built here.

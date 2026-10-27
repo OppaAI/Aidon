@@ -56,7 +56,7 @@ def test_annotate_frames(tmp_path):
 
 
 def test_v1_and_mcp_wired_in_main():
-    text = (Path(__file__).resolve().parent.parent / "src" / "main.py").read_text()
+    text = (Path(__file__).resolve().parent.parent / "src" / "system" / "main.py").read_text()
     assert "def _v1_execute(goal_record)" in text
     assert "MCPServer(auth, goals, execute=_v1_execute)" in text
     assert "execute=_v1_execute" in text

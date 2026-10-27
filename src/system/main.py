@@ -27,11 +27,11 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .interface.approval import ApprovalGate, Decision
-from .system.config import Config
-from .agentic.loop import GoalRunner
-from .system.model_client import FakeClient, HttpModelClient
-from .capabilities.sandbox import Sandbox
+from ..interface.approval import ApprovalGate, Decision
+from .config import Config
+from ..agentic.loop import GoalRunner
+from .model_client import FakeClient, HttpModelClient
+from ..capabilities.sandbox import Sandbox
 
 
 def _cli_gate() -> ApprovalGate:
@@ -53,16 +53,16 @@ def _promotion_ask(point) -> bool:
 def _make_memory(config: Config):
     """Memory with the real embedder if available, else Hash, with warning."""
     try:
-        from .memory.embedder import HashEmbedder, make_embedder_cached
-        from .memory.entity_graph import EntityGraph
-        from .memory.memory import Memory
+        from ..memory.embedder import HashEmbedder, make_embedder_cached
+        from ..memory.entity_graph import EntityGraph
+        from ..memory.memory import Memory
         embedder = make_embedder_cached()
         return Memory(config.home, embedder=embedder, entity_graph=EntityGraph(config.home))
     except Exception as exc:
         print(f"warning: real embedder unavailable ({exc}), "
               "using HashEmbedder for this run", file=sys.stderr)
-        from .memory.embedder import HashEmbedder
-        from .memory.memory import Memory
+        from ..memory.embedder import HashEmbedder
+        from ..memory.memory import Memory
         return Memory(config.home, embedder=HashEmbedder())
 
 
@@ -169,17 +169,17 @@ def main(argv: list[str] | None = None) -> int:
     # and AIDON_FAST_MODEL to the small local model. No Ollama-specific
     # code, no think flag, just endpoint plus model name, as decided.
     if config.fast_model:
-        from .agentic.router import RoutedClient
+        from ..agentic.router import RoutedClient
         fast_client = HttpModelClient(config.api_base, config.api_key, config.fast_model) if config.api_base else FakeClient("")
         fast_phases = {s.strip() for s in config.router_fast_phases.split(",") if s.strip()}
         client = RoutedClient(fast_client, client, fast_phases=fast_phases)
     sandbox = Sandbox(config.workdir, config.sandbox_timeout_seconds)
     memory = _make_memory(config)
     if args.command == "webui":
-        from .interface.messaging import MessagingConfig, send_slack, send_whatsapp
-        from .interface.triggers import TriggerDispatcher
-        from .interface.v1 import AuthStore
-        from .interface.webui import WebUIServer
+        from ..interface.messaging import MessagingConfig, send_slack, send_whatsapp
+        from ..interface.triggers import TriggerDispatcher
+        from ..interface.v1 import AuthStore
+        from ..interface.webui import WebUIServer
         msg = MessagingConfig.from_env()
         # Override from Config, which already read the old names.
         msg.whatsapp_token = config.whatsapp_token or msg.whatsapp_token
@@ -206,8 +206,8 @@ def main(argv: list[str] | None = None) -> int:
             if not result["ok"]:
                 print(f"Slack send failed: {result['error']}")
 
-        from .interface.messaging import download_whatsapp_media
-        from .interface.run_control import RunControl
+        from ..interface.messaging import download_whatsapp_media
+        from ..interface.run_control import RunControl
         run_control = RunControl(config.home)
         server = WebUIServer(config.home, dispatcher=dispatcher,
                              auth_store=AuthStore(config.home), memory=memory,
@@ -221,14 +221,14 @@ def main(argv: list[str] | None = None) -> int:
                              transcribe_key=config.transcribe_api_key or config.api_key or None)
 
         def _goal_handler(event):
-            from .agentic.loop import GoalRunner
-            from .interface.run_control import new_run_id
-            from .agentic.budgets import Budget
-            from .agentic.trace import TraceRecorder
-            from .agentic.verifier_model import ModelVerifier
-            from .capabilities.plugins import PluginRegistry
-            from .agentic.semantic_router import SemanticRouter
-            from .interface.scheduler_loop import AutonomyTracker, NudgeTracker
+            from ..agentic.loop import GoalRunner
+            from ..interface.run_control import new_run_id
+            from ..agentic.budgets import Budget
+            from ..agentic.trace import TraceRecorder
+            from ..agentic.verifier_model import ModelVerifier
+            from ..capabilities.plugins import PluginRegistry
+            from ..agentic.semantic_router import SemanticRouter
+            from ..interface.scheduler_loop import AutonomyTracker, NudgeTracker
             run_id = new_run_id()
             run_control.register(run_id, event.goal, event.project_id)
             # Full runner, same as the CLI goal run, not a thin runner:
@@ -249,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
                             max_seconds=config.budget_seconds)
             trace = TraceRecorder(config.home, project_id=event.project_id)
             try:
-                from .capabilities.execution import make_backend
+                from ..capabilities.execution import make_backend
                 execution_backend = make_backend(
                     config.execution_backend, sandbox,
                     image=config.docker_image, allow_network=config.docker_network)
@@ -260,14 +260,14 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 semantic_router = None
             try:
-                from .interface.preapproval import PreapprovalStore
-                from .interface.preapproval_gate import PreapprovalGate
+                from ..interface.preapproval import PreapprovalStore
+                from ..interface.preapproval_gate import PreapprovalGate
                 _gate = PreapprovalGate(server.webui_gate.gate, PreapprovalStore(config.home), event.project_id)
             except Exception:
                 _gate = server.webui_gate.gate
             def _web_researcher(goal_text):
                 try:
-                    from .capabilities.search import search as _s
+                    from ..capabilities.search import search as _s
                     _r = _s(goal_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url)
                     return [f"{x.get('title', '')}: {x.get('snippet', '')}" for x in _r.get("results", [])]
                 except Exception:
@@ -285,7 +285,7 @@ def main(argv: list[str] | None = None) -> int:
             # Swarm, Aidon decides: if the goal genuinely splits,
             # run the subgoals in parallel and merge, else single run.
             try:
-                from .agentic.swarm import run_swarm
+                from ..agentic.swarm import run_swarm
                 def _swarm_runner(subgoal):
                     sub_runner = GoalRunner(client, sandbox, server.webui_gate.gate,
                                             config.home, memory=memory,
@@ -333,20 +333,20 @@ def main(argv: list[str] | None = None) -> int:
         server.serve(port=args.port)
         return 0
     if args.command == "v1":
-        from .interface.v1 import AuthStore, GoalStore, handle
+        from ..interface.v1 import AuthStore, GoalStore, handle
         # Live v1 and MCP execute callback, wired here, not 501:
         # a v1 goal runs through the same GoalRunner as a CLI goal,
         # with the same plugins, budget, trace, verifier, and backend.
         # Approval is asked on the server console, via _cli_gate,
         # so a v1 run does not auto-approve live execution.
         def _v1_execute(goal_record):
-            from .agentic.budgets import Budget as _VB
-            from .agentic.trace import TraceRecorder as _VT
-            from .agentic.verifier_model import ModelVerifier as _VM
-            from .capabilities.plugins import PluginRegistry as _VP
+            from ..agentic.budgets import Budget as _VB
+            from ..agentic.trace import TraceRecorder as _VT
+            from ..agentic.verifier_model import ModelVerifier as _VM
+            from ..capabilities.plugins import PluginRegistry as _VP
             _plugins = _VP(config.home); _plugins.load_all()
             try:
-                from .capabilities.execution import make_backend as _vmb
+                from ..capabilities.execution import make_backend as _vmb
                 _backend = _vmb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _backend = None
@@ -370,13 +370,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Name: {record.name}, scope: {record.scope}, hash prefix: {record.key_hash[:12]}")
             return 0
         if args.action == "mcp":
-            from .interface.mcp_server import MCPServer
+            from ..interface.mcp_server import MCPServer
             MCPServer(auth, goals, execute=_v1_execute).run_stdio()
             return 0
         if args.action == "mcp-http":
             # Streamable HTTP MCP: JSON-RPC over HTTP at /mcp,
             # Bearer token, same store and scopes as stdio MCP.
-            from .interface.mcp_server import MCPServer
+            from ..interface.mcp_server import MCPServer
             import json as _json2
             from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
             mcp_server = MCPServer(auth, goals, execute=_v1_execute)
@@ -442,7 +442,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "trigger":
         from datetime import datetime
-        from .interface.triggers import (ALLOWED_SOURCES, IngestWatcher, Scheduler,
+        from ..interface.triggers import (ALLOWED_SOURCES, IngestWatcher, Scheduler,
                                TriggerDispatcher, handle_webhook)
         if args.action == "list":
             print("Trigger sources, all start a DAG run, none bypass approval:")
@@ -472,7 +472,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         return 2
     if args.command == "unity":
-        from .capabilities.unity import UnityAssetBuilder
+        from ..capabilities.unity import UnityAssetBuilder
         builder = UnityAssetBuilder(config.home / "unity")
         if args.action == "asset":
             result = builder.generate_asset(args.name, shape=args.shape, color=args.color)
@@ -485,7 +485,7 @@ def main(argv: list[str] | None = None) -> int:
         print(builder.build_command(config.home / "unity" / args.name))
         return 0
     if args.command == "image":
-        from .capabilities.image_gen import generate_image, edit_image, save_image
+        from ..capabilities.image_gen import generate_image, edit_image, save_image
         from pathlib import Path as _Path
         if not config.api_key or not config.api_base:
             print("Image generation needs AIDON_API_KEY and AIDON_API_ENDPOINT in .env, same key and endpoint as Spark, no separate image key.")
@@ -499,7 +499,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Image saved: {path}, model {config.image_model}")
         return 0
     if args.command == "video":
-        from .capabilities.video import edit_video, extract_frames, encode_frames, ffmpeg_available
+        from ..capabilities.video import edit_video, extract_frames, encode_frames, ffmpeg_available
         if not ffmpeg_available():
             print("ffmpeg not found on PATH, install ffmpeg to run the video pipeline, no fake video is produced.")
             return 2
@@ -519,7 +519,7 @@ def main(argv: list[str] | None = None) -> int:
         if not config.api_key or not config.api_base:
             print("video edit needs SAM via AIDON_API_KEY and AIDON_API_ENDPOINT in .env, same key and endpoint as Spark.")
             return 2
-        from .capabilities.sam import SAMClient
+        from ..capabilities.sam import SAMClient
         sam_client = SAMClient(config.api_base, config.api_key, config.sam_model)
         result = edit_video(args.input, args.output, args.prompt, sam_client, fps=args.fps)
         if "error" in result:
@@ -532,7 +532,7 @@ def main(argv: list[str] | None = None) -> int:
         if not config.api_key or not config.api_base:
             print("SAM needs AIDON_API_KEY and AIDON_API_ENDPOINT in .env, same key and endpoint as Spark.")
             return 2
-        from .capabilities.sam import SAMClient, build_object_prompt
+        from ..capabilities.sam import SAMClient, build_object_prompt
         client_sam = SAMClient(config.api_base, config.api_key, config.sam_model)
         result = client_sam.segment(args.images, build_object_prompt(args.prompt), propagation=args.propagation)
         if "error" in result:
@@ -543,7 +543,7 @@ def main(argv: list[str] | None = None) -> int:
         print("SAM is the segment and track step only. Frame extraction and video re-encoding need ffmpeg, not built here.")
         return 0
     if args.command == "control":
-        from .interface.run_control import RunControl
+        from ..interface.run_control import RunControl
         control = RunControl(config.home)
         if args.action == "list":
             for run in control.list_runs():
@@ -558,7 +558,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Steered {args.run_id}: {args.note}" if ok else f"No such run {args.run_id}")
             return 0 if ok else 2
     if args.command == "scheduler":
-        from .interface.preapproval import PreapprovalStore
+        from ..interface.preapproval import PreapprovalStore
         import time as _time
         store = PreapprovalStore(config.home)
         if args.action == "preapprove":
@@ -571,17 +571,17 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         # serve: poll due jobs every 60 seconds, run each via GoalRunner.
         from datetime import datetime
-        from .interface.triggers import Scheduler
+        from ..interface.triggers import Scheduler
         print("Scheduler daemon, polling every 60 seconds, Ctrl-C to stop.")
         print("Scheduler daemon also watches ingest and polls Slack, when configured, same loop.")
         def _full_scheduler_runner():
-            from .agentic.budgets import Budget as _B2
-            from .agentic.trace import TraceRecorder as _T2
-            from .agentic.verifier_model import ModelVerifier as _M2
-            from .capabilities.plugins import PluginRegistry as _P2
+            from ..agentic.budgets import Budget as _B2
+            from ..agentic.trace import TraceRecorder as _T2
+            from ..agentic.verifier_model import ModelVerifier as _M2
+            from ..capabilities.plugins import PluginRegistry as _P2
             _pl = _P2(config.home); _pl.load_all()
             try:
-                from .capabilities.execution import make_backend as _mb2
+                from ..capabilities.execution import make_backend as _mb2
                 _be = _mb2(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _be = None
@@ -596,18 +596,18 @@ def main(argv: list[str] | None = None) -> int:
             scheduler = Scheduler(config.home)
             for job in scheduler.check_due(datetime.now()):
                 print(f"Due job: {job.name}: {job.goal}")
-                from .agentic.budgets import Budget as _Budget
-                from .agentic.trace import TraceRecorder as _Trace
-                from .agentic.verifier_model import ModelVerifier as _MV
-                from .capabilities.plugins import PluginRegistry as _PR
+                from ..agentic.budgets import Budget as _Budget
+                from ..agentic.trace import TraceRecorder as _Trace
+                from ..agentic.verifier_model import ModelVerifier as _MV
+                from ..capabilities.plugins import PluginRegistry as _PR
                 _plugins = _PR(config.home); _plugins.load_all()
                 try:
-                    from .capabilities.execution import make_backend as _mb
+                    from ..capabilities.execution import make_backend as _mb
                     _backend = _mb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
                 except Exception:
                     _backend = None
                 try:
-                    from .agentic.semantic_router import SemanticRouter as _SR2
+                    from ..agentic.semantic_router import SemanticRouter as _SR2
                     _router2 = _SR2(memory.embedder, cache_path=config.home / 'semantic_router_vectors.json')
                 except Exception:
                     _router2 = None
@@ -621,7 +621,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Job {job.name}: {report.status}, files: {', '.join(report.files)}")
             # Ingest watcher, same loop, same GoalRunner, no separate daemon.
             try:
-                from .interface.triggers import IngestWatcher
+                from ..interface.triggers import IngestWatcher
                 watcher = IngestWatcher(config.ingest_path, config.home)
                 for ingest_event in watcher.events(project_id="default"):
                     print(f"Ingest trigger: {ingest_event.payload.get('path', '')}")
@@ -634,7 +634,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 _channel = _os.environ.get("AIDON_SLACK_INBOUND_CHANNEL", "")
                 if config.slack_bot_token and _channel:
-                    from .interface.messaging import MessagingConfig, poll_slack_once
+                    from ..interface.messaging import MessagingConfig, poll_slack_once
                     _msg_cfg = MessagingConfig(slack_bot_token=config.slack_bot_token)
                     _messages, _slack_last_ts = poll_slack_once(_msg_cfg, _channel, last_ts=_slack_last_ts)
                     _slack_ts_path.write_text(_slack_last_ts)
@@ -651,9 +651,9 @@ def main(argv: list[str] | None = None) -> int:
         # Canned Snake to Worm benchmark, for the self-learning claim.
         # Fresh: a long plan JSON, adapted: a short changed-node JSON.
         # Tokens are estimated at one per four characters, as in budgets.
-        from .agentic.benchmark import benchmark_learn
-        from .agentic.counting import CountingClient
-        from .agentic.loop import RunReport, Plan
+        from ..agentic.benchmark import benchmark_learn
+        from ..agentic.counting import CountingClient
+        from ..agentic.loop import RunReport, Plan
 
         class _PlanClient:
             def __init__(self, reply):
@@ -702,12 +702,12 @@ def main(argv: list[str] | None = None) -> int:
         if not (client_id and client_secret and refresh_token):
             print("Gmail OAuth keys are missing, email stays as drafts. Fill GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN in .env, then run again.")
             return 2
-        from .capabilities.gmail import gmail_sender
+        from ..capabilities.gmail import gmail_sender
         sender = gmail_sender(client_id, client_secret, refresh_token)
         result = sender(args.to or "", args.subject, args.body)
         print(f"Gmail send result: {result.get('id', 'sent')}")
         return 0
-    from .capabilities.execution import make_backend
+    from ..capabilities.execution import make_backend
     try:
         execution_backend = make_backend(
             config.execution_backend, sandbox,
@@ -717,7 +717,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.command == "plugin":
         from pathlib import Path
-        from .capabilities.plugins import PluginRegistry, scan_plugin
+        from ..capabilities.plugins import PluginRegistry, scan_plugin
         registry = PluginRegistry(config.home)
         if args.action == "list":
             plugins = registry.load_all()
@@ -744,16 +744,16 @@ def main(argv: list[str] | None = None) -> int:
         # Semantic routing, interview surface too: a chat goal does not
         # start an interview or a spec, it gets a direct chat answer.
         try:
-            from .agentic.semantic_router import SemanticRouter
+            from ..agentic.semantic_router import SemanticRouter
             _router = SemanticRouter(memory.embedder, cache_path=config.home / 'semantic_router_vectors.json')
             _route, _conf = _router.classify(args.text)
             if _route == "chat" and _conf >= 0.15 and not any(w in args.text.lower() for w in ("write", "save", ".md", ".py")):
-                from .system.model_client import Message as _Msg
+                from .model_client import Message as _Msg
                 print(client.chat([_Msg("user", args.text)]))
                 return 0
         except Exception:
             pass
-        from .agentic.interview import InterviewRunner
+        from ..agentic.interview import InterviewRunner
         runner = InterviewRunner(client, config.home, memory=memory,
                                  gate=_cli_gate(), project_id=args.project)
         print(f"Spec template: {runner.ensure_template()}  "
@@ -778,7 +778,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         if not args.run:
             return 0
-        from .capabilities.plugins import PluginRegistry
+        from ..capabilities.plugins import PluginRegistry
         plugins = PluginRegistry(config.home)
         plugins.load_all()
         goal_runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
@@ -794,24 +794,24 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {report.error}")
             return 1
         return 0 if report.status == "done" else 2
-    from .capabilities.plugins import PluginRegistry
+    from ..capabilities.plugins import PluginRegistry
     plugins = PluginRegistry(config.home)
     plugins.load_all()
-    from .agentic.budgets import Budget
-    from .agentic.trace import TraceRecorder
+    from ..agentic.budgets import Budget
+    from ..agentic.trace import TraceRecorder
     budget = Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps,
                     max_seconds=config.budget_seconds)
     trace = TraceRecorder(config.home, project_id=args.project)
-    from .agentic.verifier_model import ModelVerifier
+    from ..agentic.verifier_model import ModelVerifier
     model_verifier = ModelVerifier(client)
     try:
-        from .agentic.semantic_router import SemanticRouter as _SR
+        from ..agentic.semantic_router import SemanticRouter as _SR
         _cli_router = _SR(memory.embedder, cache_path=config.home / 'semantic_router_vectors.json')
     except Exception:
         _cli_router = None
     def _researcher(goal_text):
         try:
-            from .capabilities.search import search as _search
+            from ..capabilities.search import search as _search
             result = _search(goal_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url)
             return [f"{r.get('title', '')}: {r.get('snippet', '')}" for r in result.get("results", [])]
         except Exception:
@@ -825,7 +825,7 @@ def main(argv: list[str] | None = None) -> int:
     spec = None
     if getattr(args, "spec", None):
         from pathlib import Path
-        from .agentic.interview import InterviewRunner, parse_spec_sheet
+        from ..agentic.interview import InterviewRunner, parse_spec_sheet
         spec = parse_spec_sheet(Path(args.spec).read_text(encoding="utf-8"))
         verified, failures = spec.verify()
         if not verified:
@@ -833,7 +833,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     if getattr(args, "swarm", False):
         try:
-            from .agentic.swarm import run_swarm
+            from ..agentic.swarm import run_swarm
             def _swarm_runner(subgoal):
                 sub_report = runner.run(subgoal, spec=spec)
                 return f"[{sub_report.status}] {', '.join(sub_report.files)} {sub_report.error}".strip()
