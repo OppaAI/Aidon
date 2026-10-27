@@ -2023,6 +2023,22 @@ class WebUIServer:
                     records.append(data)
         return {"missions": records}
 
+    def handle_mission_get(self, mission_id: str):
+        from ..capabilities.mission import MissionStore
+        try:
+            return MissionStore(self.home).get(self._safe_name(mission_id))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return None
+
+    def handle_mission_delete(self, mission_id: str) -> dict:
+        import shutil
+        safe = self._safe_name(mission_id)
+        path = self.home / "missions" / safe
+        if not path.is_dir():
+            return {"ok": False}
+        shutil.rmtree(path)
+        return {"ok": True}
+
     def handle_capabilities(self) -> dict:
         """One view over what Aidon can do: sandbox + plugin tool
         names, skill library names, and MCP server names. A source
@@ -2220,13 +2236,14 @@ class WebUIServer:
 
             def do_GET(self):
                 parsed = urlparse(self.path)
-                if not parsed.path.startswith("/webhook/"):
+                if not parsed.path.startswith(("/webhook/", "/webhooks/")):
                     from .webui_auth import is_authorized
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     if not is_authorized(headers, server.webui_token, self.client_address[0]):
                         self._send_json(401, {"error": "unauthorized"})
                         return
-                if server.webhook_only and parsed.path != "/webhook/whatsapp":
+                if server.webhook_only and parsed.path not in (
+                        "/webhook/whatsapp", "/webhooks/whatsapp"):
                     self._send_json(404, {"error": "webhook only"})
                 elif parsed.path == "/static" or parsed.path.startswith("/static/"):
                     relative = parsed.path[len("/static/"):] if parsed.path.startswith("/static/") else ""
@@ -2438,6 +2455,11 @@ loadSettings();
                     self._send_json(200 if data is not None else 404, data or {"error": "not found"})
                 elif parsed.path == "/api/ideas":
                     self._send_json(200, server.handle_ideas_list())
+                elif parsed.path.startswith("/api/files/"):
+                    from urllib.parse import unquote
+                    requested = unquote(parsed.path[len("/api/files/"):])
+                    status, content_type, data = server.handle_file(requested)
+                    self._send_bytes(status, content_type, data)
                 elif parsed.path == "/api/files":
                     # Same-origin file serving: the auth check at the
                     # top of do_GET already ran (is_authorized), so
@@ -2464,6 +2486,11 @@ loadSettings();
                                     data or {"error": "not found"})
                 elif parsed.path == "/api/missions":
                     self._send_json(200, server.handle_missions_list())
+                elif parsed.path.startswith("/api/missions/"):
+                    mission_id = parsed.path[len("/api/missions/"):].strip("/")
+                    data = server.handle_mission_get(mission_id)
+                    self._send_json(200 if data is not None else 404,
+                                    data or {"error": "mission not found"})
                 elif parsed.path == "/api/capabilities":
                     self._send_json(200, server.handle_capabilities())
                 elif parsed.path == "/api/capabilities/code":
@@ -2496,7 +2523,7 @@ loadSettings();
                     page = items[offset:offset + max(1, min(limit, 200))]
                     self._send_json(200, {"items": page, "total": len(raw_points),
                                           "matched": matched, "mode": "Aidon memory"})
-                elif parsed.path == "/webhook/whatsapp":
+                elif parsed.path in ("/webhook/whatsapp", "/webhooks/whatsapp"):
                     query = parse_qs(parsed.query)
                     status, text = server.handle_whatsapp_get(query)
                     data = text.encode()
@@ -2509,13 +2536,15 @@ loadSettings();
 
             def do_POST(self):
                 parsed = urlparse(self.path)
-                if not parsed.path.startswith("/webhook/"):
+                if not parsed.path.startswith(("/webhook/", "/webhooks/")):
                     from .webui_auth import is_authorized
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     if not is_authorized(headers, server.webui_token, self.client_address[0]):
                         self._send_json(401, {"error": "unauthorized"})
                         return
-                if server.webhook_only and parsed.path not in ("/webhook/whatsapp", "/webhook/slack"):
+                if server.webhook_only and parsed.path not in (
+                        "/webhook/whatsapp", "/webhooks/whatsapp",
+                        "/webhook/slack", "/webhooks/slack"):
                     self._send_json(404, {"error": "webhook only"})
                     return
                 raw = self._read_body()
@@ -2566,7 +2595,13 @@ loadSettings();
                         return
                     import base64 as _b64t
                     try:
-                        audio = _b64t.b64decode(str(body.get("audio_b64", "")))
+                        # The browser sends the MediaRecorder blob directly,
+                        # matching old Aidon's endpoint. Keep JSON/base64 as
+                        # a compatibility form for API clients.
+                        if raw and self.headers.get("Content-Type", "").lower().startswith("audio/"):
+                            audio = raw
+                        else:
+                            audio = _b64t.b64decode(str(body.get("audio_b64", "")))
                         from ..capabilities.voice import transcribe as _transcribe
                         result = _transcribe(audio, server.transcribe_key)
                         self._send_json(200, result)
@@ -2740,11 +2775,11 @@ loadSettings();
                 elif parsed.path == "/api/plugins/adopt":
                     result = server.handle_plugin_adopt(str(body.get("path", "")))
                     self._send_json(200 if result.get("ok") else 400, result)
-                elif parsed.path == "/webhook/whatsapp":
+                elif parsed.path in ("/webhook/whatsapp", "/webhooks/whatsapp"):
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     status, payload = server.handle_whatsapp_post(body, raw, headers)
                     self._send_json(status, payload)
-                elif parsed.path == "/webhook/slack":
+                elif parsed.path in ("/webhook/slack", "/webhooks/slack"):
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     status, payload = server.handle_slack_post(raw, headers, body)
                     # Slack Events API URL verification expects the
@@ -2755,7 +2790,7 @@ loadSettings();
 
             def do_DELETE(self):
                 parsed = urlparse(self.path)
-                if not parsed.path.startswith("/webhook/"):
+                if not parsed.path.startswith(("/webhook/", "/webhooks/")):
                     from .webui_auth import is_authorized
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     if not is_authorized(headers, server.webui_token, self.client_address[0]):
@@ -2779,6 +2814,15 @@ loadSettings();
                     idea_id = parsed.path[len("/api/ideas/"):]
                     result = server.handle_idea_delete(idea_id)
                     self._send_json(200 if result["ok"] else 404, result)
+                elif parsed.path.startswith("/api/library/"):
+                    item_id = parsed.path[len("/api/library/"):].strip("/")
+                    from ..memory.library import Library
+                    ok = Library(server.home).delete_item(item_id)
+                    self._send_json(200 if ok else 404, {"ok": ok})
+                elif parsed.path.startswith("/api/missions/"):
+                    mission_id = parsed.path[len("/api/missions/"):].strip("/")
+                    result = server.handle_mission_delete(mission_id)
+                    self._send_json(200 if result["ok"] else 404, result)
                 elif parsed.path.startswith("/api/projects/"):
                     project_id = parsed.path[len("/api/projects/"):].strip("/")
                     if project_id and "/" not in project_id:
@@ -2791,7 +2835,7 @@ loadSettings();
 
             def do_PUT(self):
                 parsed = urlparse(self.path)
-                if not parsed.path.startswith("/webhook/"):
+                if not parsed.path.startswith(("/webhook/", "/webhooks/")):
                     from .webui_auth import is_authorized
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     if not is_authorized(headers, server.webui_token, self.client_address[0]):
