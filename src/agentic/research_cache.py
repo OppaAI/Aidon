@@ -1,0 +1,105 @@
+"""Research cache: fetched pages, kept on disk, searchable offline.
+
+A fetch stores the full page text under a sha256 digest of
+the URL, in <home>/research_cache/. Nothing here touches
+the network: storing, fetching, and searching are all
+local file operations, so a fact already fetched is never
+re-fetched to be found again. Each file carries a short
+header (URL and fetch time) and the body follows, so a
+file is readable on its own and the URL survives even
+though the filename is a digest.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from datetime import datetime, timezone
+from pathlib import Path
+
+_MAX_MATCH_LINES = 5
+
+
+def digest(url: str, text: str) -> str:
+    """sha256 over URL and text, hex. The filename uses the
+    URL digest alone, so storing the same URL twice replaces
+    the older copy instead of piling up duplicates."""
+    return hashlib.sha256(f"{url}\n{text}".encode("utf-8", "replace")).hexdigest()
+
+
+def _url_digest(url: str) -> str:
+    return hashlib.sha256(url.encode("utf-8", "replace")).hexdigest()
+
+
+def _split_header(content: str) -> tuple[str, str]:
+    """Return (url, body) for a cache file's content."""
+    lines = content.splitlines()
+    url = ""
+    body_start = 0
+    for index, line in enumerate(lines):
+        if line.startswith("URL: "):
+            url = line[5:].strip()
+        elif line.startswith("Fetched: "):
+            continue
+        elif line == "":
+            body_start = index + 1
+            break
+    else:
+        body_start = len(lines)
+    return url, "\n".join(lines[body_start:])
+
+
+class ResearchCache:
+    def __init__(self, home):
+        self.home = Path(home)
+        self.dir = self.home / "research_cache"
+        self.dir.mkdir(parents=True, exist_ok=True)
+
+    def _path_for(self, url: str) -> Path:
+        return self.dir / f"{_url_digest(url)}.txt"
+
+    def store(self, url: str, text: str) -> Path:
+        """Store a page's full text. Returns the cache file path."""
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        path = self._path_for(url)
+        path.write_text(f"URL: {url}\nFetched: {stamp}\n\n{text}",
+                        encoding="utf-8", errors="replace")
+        return path
+
+    def fetch(self, url: str) -> str | None:
+        """Cached body for a URL, or None when it was never stored."""
+        path = self._path_for(url)
+        if not path.is_file():
+            return None
+        try:
+            _, body = _split_header(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            return None
+        return body
+
+    def search_research_cache(self, query: str) -> list[dict]:
+        """Cached entries whose body contains the query, newest first.
+
+        Each entry is {"url", "lines"} with up to five matching
+        lines, stripped and truncated. An empty query matches
+        nothing, and a query with no hits returns an empty list.
+        """
+        needle = (query or "").strip().lower()
+        if not needle:
+            return []
+        entries: list[dict] = []
+        try:
+            files = sorted(self.dir.glob("*.txt"),
+                           key=lambda path: path.stat().st_mtime, reverse=True)
+        except OSError:
+            return []
+        for path in files:
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            url, body = _split_header(content)
+            matches = [line.strip()[:200] for line in body.splitlines()
+                       if line.strip() and needle in line.lower()]
+            if matches:
+                entries.append({"url": url, "lines": matches[:_MAX_MATCH_LINES]})
+        return entries

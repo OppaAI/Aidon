@@ -1,0 +1,266 @@
+"""Durable conversations in SQLite, separate from the JSON store.
+
+The JSON store in conversations.py is a plain transcript file. This
+module is the durable side: projects, conversations, numbered
+exchanges, attachments, ideas, and a rolling summary per
+conversation, all in one SQLite file under the Aidon home.
+
+Exchange numbering is the part that needs care. Two writers (the
+WebUI and a messaging worker, for example) must never be handed
+the same exchange number, so numbering happens inside one
+serialised transaction: begin immediately, read the current
+maximum, insert the next number, commit. A second writer waits
+on the write lock instead of computing from a stale maximum.
+
+The rolling summary is code, not a model call: the last few
+exchanges are condensed to one paragraph by taking the first
+sentence of each, so a long conversation stays readable without
+another round trip.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+_SUMMARY_EXCHANGES = 5
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _new_id() -> str:
+    return uuid.uuid4().hex
+
+
+def _first_sentence(text: str) -> str:
+    text = (text or "").strip().replace("\n", " ")
+    for mark in (". ", "! ", "? "):
+        if mark in text:
+            return text.split(mark)[0].strip() + mark.strip()
+    return text[:200].strip()
+
+
+class ConversationStoreDB:
+    """SQLite-backed conversation store under <home>/conversations.db."""
+
+    def __init__(self, home):
+        self.home = Path(home)
+        self.home.mkdir(parents=True, exist_ok=True)
+        self.path = self.home / "conversations.db"
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(self.path, check_same_thread=False,
+                                     timeout=10.0)
+        self._conn.row_factory = sqlite3.Row
+        with self._lock:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=10000")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS exchanges (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id TEXT NOT NULL,
+                    exchange_no INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE (conversation_id, exchange_no)
+                );
+                CREATE TABLE IF NOT EXISTS attachments (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    kind TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS ideas (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS summaries (
+                    conversation_id TEXT PRIMARY KEY,
+                    text TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                """
+            )
+            self._conn.commit()
+
+    # -- projects ------------------------------------------------------
+
+    def ensure_default_project(self) -> dict:
+        row = self._conn.execute(
+            "SELECT id, name, created_at FROM projects WHERE id = 'default'"
+        ).fetchone()
+        if row:
+            return dict(row)
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO projects (id, name, created_at)"
+                " VALUES ('default', 'default', ?)", (_now(),))
+            self._conn.commit()
+        return dict(self._conn.execute(
+            "SELECT id, name, created_at FROM projects WHERE id = 'default'"
+        ).fetchone())
+
+    def create_project(self, name: str) -> dict:
+        project_id = _new_id()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)",
+                (project_id, name, _now()))
+            self._conn.commit()
+        return {"id": project_id, "name": name}
+
+    # -- conversations -------------------------------------------------
+
+    def create_conversation(self, project_id: str) -> dict:
+        conversation_id = _new_id()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO conversations (id, project_id, created_at)"
+                " VALUES (?, ?, ?)", (conversation_id, project_id, _now()))
+            self._conn.commit()
+        return {"id": conversation_id, "project_id": project_id}
+
+    def list_conversations(self, project_id: str) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT id, project_id, created_at FROM conversations"
+            " WHERE project_id = ? ORDER BY created_at",
+            (project_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_conversation(self, conversation_id: str) -> bool:
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                cur = self._conn.execute(
+                    "DELETE FROM conversations WHERE id = ?",
+                    (conversation_id,))
+                self._conn.execute(
+                    "DELETE FROM exchanges WHERE conversation_id = ?",
+                    (conversation_id,))
+                self._conn.execute(
+                    "DELETE FROM attachments WHERE conversation_id = ?",
+                    (conversation_id,))
+                self._conn.execute(
+                    "DELETE FROM summaries WHERE conversation_id = ?",
+                    (conversation_id,))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return cur.rowcount > 0
+
+    # -- exchanges -----------------------------------------------------
+
+    def record_exchange(self, conversation_id: str, role: str,
+                        text: str) -> dict:
+        """Append one exchange, numbered under a serialised transaction."""
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT COALESCE(MAX(exchange_no), 0) AS m"
+                    " FROM exchanges WHERE conversation_id = ?",
+                    (conversation_id,)).fetchone()
+                number = int(row["m"]) + 1
+                self._conn.execute(
+                    "INSERT INTO exchanges"
+                    " (conversation_id, exchange_no, role, text, created_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (conversation_id, number, role, text, _now()))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        self._refresh_summary(conversation_id)
+        return {"conversation_id": conversation_id, "exchange_no": number,
+                "role": role, "text": text}
+
+    def history(self, conversation_id: str, limit: int = 50) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT exchange_no, role, text, created_at FROM exchanges"
+            " WHERE conversation_id = ? ORDER BY exchange_no DESC LIMIT ?",
+            (conversation_id, limit)).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
+    # -- summary -------------------------------------------------------
+
+    def _refresh_summary(self, conversation_id: str) -> None:
+        recent = self.history(conversation_id, limit=_SUMMARY_EXCHANGES)
+        if not recent:
+            return
+        parts = [f"{row['role']}: {_first_sentence(row['text'])}"
+                 for row in recent]
+        summary = " ".join(parts)
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO summaries (conversation_id, text, updated_at)"
+                " VALUES (?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE"
+                " SET text = excluded.text, updated_at = excluded.updated_at",
+                (conversation_id, summary, _now()))
+            self._conn.commit()
+
+    def rolling_summary(self, conversation_id: str) -> str:
+        row = self._conn.execute(
+            "SELECT text FROM summaries WHERE conversation_id = ?",
+            (conversation_id,)).fetchone()
+        return row["text"] if row else ""
+
+    # -- attachments and ideas -----------------------------------------
+
+    def add_attachment(self, conversation_id: str, path: str,
+                       kind: str = "") -> dict:
+        attachment_id = _new_id()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO attachments (id, conversation_id, path, kind,"
+                " created_at) VALUES (?, ?, ?, ?, ?)",
+                (attachment_id, conversation_id, path, kind, _now()))
+            self._conn.commit()
+        return {"id": attachment_id, "conversation_id": conversation_id,
+                "path": path, "kind": kind}
+
+    def add_idea(self, project_id: str, text: str) -> dict:
+        idea_id = _new_id()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO ideas (id, project_id, text, created_at)"
+                " VALUES (?, ?, ?, ?)", (idea_id, project_id, text, _now()))
+            self._conn.commit()
+        return {"id": idea_id, "project_id": project_id, "text": text}
+
+    def list_ideas(self, project_id: str) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT id, project_id, text, created_at FROM ideas"
+            " WHERE project_id = ? ORDER BY created_at",
+            (project_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+
+def record_run_exchange(store: ConversationStoreDB, conversation_id: str,
+                        role: str, text: str) -> dict:
+    """Record one run exchange on a store, the module-level entry point."""
+    return store.record_exchange(conversation_id, role, text)

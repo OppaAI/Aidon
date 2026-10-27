@@ -370,3 +370,149 @@ class IngestWatcher:
                              project_id=project_id,
                              payload={"file": path.name, "path": str(path)})
                 for path in self.scan()]
+
+
+# ── Scheduler depth: cron parsing, next runs, schedule forms ──
+# These are new public helpers. They do not change Scheduler or
+# SchedulerJob above, which keep their own naive local-time
+# behaviour. These helpers are timezone-aware throughout.
+
+def parse_cron(expr: str) -> dict:
+    """Parse a 5-field cron expression into sets of values.
+
+    Accepts an optional leading "cron " word. Day-of-week
+    follows cron: Sunday is 0, and 7 is accepted as Sunday
+    and normalised to 0. Raises ValueError on the wrong
+    field count or any value outside its range.
+    """
+    parts = expr.strip().split()
+    if len(parts) == 6 and parts[0].lower() == "cron":
+        parts = parts[1:]
+    if len(parts) != 5:
+        raise ValueError(
+            f"cron needs 5 fields (minute hour dom month dow), got {len(parts)}")
+    return {
+        "minute": _cron_field(parts[0], 0, 59),
+        "hour": _cron_field(parts[1], 0, 23),
+        "dom": _cron_field(parts[2], 1, 31),
+        "month": _cron_field(parts[3], 1, 12),
+        "dow": _cron_field(parts[4], 0, 7, dow=True),
+    }
+
+
+def _cron_matches(cron: dict, dom_any: bool, dow_any: bool, moment: datetime) -> bool:
+    if moment.minute not in cron["minute"]:
+        return False
+    if moment.hour not in cron["hour"]:
+        return False
+    if moment.month not in cron["month"]:
+        return False
+    weekday = (moment.weekday() + 1) % 7  # cron: Sunday = 0
+    if dom_any and dow_any:
+        day_ok = True
+    elif dom_any:
+        day_ok = weekday in cron["dow"]
+    elif dow_any:
+        day_ok = moment.day in cron["dom"]
+    else:
+        day_ok = moment.day in cron["dom"] or weekday in cron["dow"]
+    return day_ok
+
+
+def _zone(name: str):
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(name)
+    except Exception:
+        from datetime import timezone
+        return timezone.utc
+
+
+def next_cron_run(expr: str, from_dt: datetime | None = None,
+                  tz: str = "UTC") -> datetime:
+    """Next run strictly after from_dt for a cron expression.
+
+    Cron fields are interpreted in tz (default UTC). The
+    result is timezone-aware in tz. Raises ValueError when
+    no run falls within the next year.
+    """
+    from datetime import timezone
+    zone = _zone(tz)
+    parts = expr.strip().split()
+    if len(parts) == 6 and parts[0].lower() == "cron":
+        parts = parts[1:]
+    cron = parse_cron(expr)
+    dom_any = parts[2].strip() == "*"
+    dow_any = parts[4].strip() == "*"
+    base = from_dt or datetime.now(timezone.utc)
+    moment = base.astimezone(zone).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    for _ in range(366 * 24 * 60):
+        if _cron_matches(cron, dom_any, dow_any, moment):
+            return moment
+        moment += timedelta(minutes=1)
+    raise ValueError(f"no run within a year for cron {expr!r}")
+
+
+def is_oneshot(schedule: str) -> bool:
+    """True for a one-time schedule: "at:<ISO datetime>" or a
+    bare ISO datetime. Cron expressions and "every ..." are
+    recurring, not oneshot.
+    """
+    text = (schedule or "").strip()
+    if text.startswith("at:"):
+        return True
+    if text.startswith(("every ", "daily", "weekly", "monthly", "cron ")):
+        return False
+    if len(text.split()) == 5 and all(
+            all(ch.isdigit() or ch in "*/,-" for ch in part) for part in text.split()):
+        return False
+    try:
+        datetime.fromisoformat(text)
+    except ValueError:
+        return False
+    return True
+
+
+def parse_schedule(schedule: str, from_dt: datetime | None = None,
+                   tz: str = "UTC") -> datetime:
+    """Next run for a schedule string, timezone-aware in tz.
+
+    Accepted forms:
+    - cron expression, with or without a leading "cron "
+    - "at:<ISO datetime>" (naive datetimes are read in tz)
+    - a bare ISO datetime, same oneshot meaning as "at:"
+    - "every N minutes", "every N hours", "every N days"
+    Anything else raises ValueError.
+    """
+    from datetime import timezone
+    zone = _zone(tz)
+    text = (schedule or "").strip()
+    if not text:
+        raise ValueError("empty schedule")
+    if text.startswith("at:"):
+        moment = datetime.fromisoformat(text[3:].strip())
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=zone)
+        return moment.astimezone(zone)
+    if is_oneshot(text):
+        moment = datetime.fromisoformat(text)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=zone)
+        return moment.astimezone(zone)
+    if text.startswith("every "):
+        rest = text[6:].strip().split()
+        if len(rest) != 2:
+            raise ValueError(f"bad relative schedule: {schedule!r}")
+        amount = int(rest[0])
+        unit = rest[1].lower().rstrip("s")
+        if unit == "minute":
+            delta = timedelta(minutes=amount)
+        elif unit == "hour":
+            delta = timedelta(hours=amount)
+        elif unit == "day":
+            delta = timedelta(days=amount)
+        else:
+            raise ValueError(f"unknown relative unit: {rest[1]!r}")
+        base = from_dt or datetime.now(timezone.utc)
+        return base.astimezone(zone) + delta
+    return next_cron_run(text, from_dt, tz)

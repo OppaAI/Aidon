@@ -253,6 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     whatsapp_parser.add_argument("--text", default="", help="Message text for send")
     tick_parser = sub.add_parser("tick", help="Run due scheduler jobs once, old Aidon tick")
     repl_parser = sub.add_parser("repl", help="Full REPL, old Aidon repl, /help, /history, /quit, or a goal")
+    learn_parser = sub.add_parser("learn", help="Idle learn cycle: re-test candidate skills, promote passers, consolidate validated duplicates")
     args = parser.parse_args(argv)
 
     config = Config.load()
@@ -283,6 +284,14 @@ def main(argv: list[str] | None = None) -> int:
     sandbox = Sandbox(config.workdir, config.sandbox_timeout_seconds)
     memory = _LazyMemory(config)
 
+    if args.command == "learn":
+        from ..agentic.learn_cycle import run_learn_cycle
+        summary = run_learn_cycle(config.home, sandbox)
+        print(f"Learn cycle: promoted={summary.get('promoted', [])} "
+              f"retired={summary.get('retired_duplicates', [])} "
+              f"trusted_for_review={summary.get('trusted_duplicates_for_review', [])} "
+              f"skipped={summary.get('skipped', [])}")
+        return 0
     if args.command == "memory":
         from ..memory.kb import KnowledgeBase
         if args.action == "forget":

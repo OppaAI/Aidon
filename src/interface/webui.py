@@ -391,6 +391,19 @@ document.getElementById('vrm-mic').onclick = async () => {
 </script></body></html>
 """
 
+# VRM lip sync, wired in: the audio module's Web Audio script drives
+# mouth morphs from audio RMS and blinks on a timer, not phonemes.
+# It is appended to the VRM page, not a separate page, so the page
+# above keeps its existing content and gains the sync script.
+try:
+    from ..capabilities.audio import VRM_LIP_SYNC_JS as _VRM_LIP_SYNC_JS
+    VRM_HTML = VRM_HTML.replace(
+        "</body></html>",
+        "<script>\n" + _VRM_LIP_SYNC_JS +
+        "\n// startVrmLipSync(vrm, audioElement): RMS mouth, blink timer.\n</script></body></html>")
+except Exception:
+    pass
+
 FACTORY_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Aidon Factory</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
@@ -569,7 +582,8 @@ class WebUIServer:
                  slack_reply=None, whatsapp_verify_token: str = "",
                  slack_signing_secret: str = "", messaging_config=None,
                  whatsapp_sender=None, slack_sender=None, webhook_only: bool = False,
-                 media_downloader=None, run_control=None, webui_token=None, transcribe_key=None):
+                 media_downloader=None, run_control=None, webui_token=None, transcribe_key=None,
+                 tts_key=None):
         self.home = Path(home)
         self.dispatcher = dispatcher or TriggerDispatcher()
         self.auth_store = auth_store
@@ -596,6 +610,7 @@ class WebUIServer:
         self.run_control = run_control
         self.webui_token = webui_token
         self.transcribe_key = transcribe_key
+        self.tts_key = tts_key
         # Default chat handler: echo, for the server core. A real
         # goal handler is registered by the caller, with GoalRunner,
         # interview, or a trigger handler. This used to sit after an
@@ -875,6 +890,168 @@ class WebUIServer:
             return {"entity": entity, "related": []}
         return {"entity": entity, "related": graph.points_for(entity)}
 
+    # -- Group D additions: tools, conversations, briefs, ideas, hub runs,
+    #    reports, TTS, and goals with images. These are new routes only;
+    #    they do not change any existing route or page above. ----------
+    @staticmethod
+    def _safe_name(name: str) -> str:
+        safe = "".join(c for c in str(name) if c.isalnum() or c in ("-", "_", "."))
+        return safe or "item"
+
+    def _json_dir(self, subdir: str) -> Path:
+        path = self.home / subdir
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _read_json_file(self, path: Path):
+        if not path.is_file():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    def _write_json_file(self, path: Path, data: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    def handle_tools(self) -> dict:
+        from ..capabilities.plugins import PluginRegistry
+        registry = PluginRegistry(self.home)
+        registry.load_all()
+        return {"sandbox_tools": ["write", "read", "list", "shell", "calculate"],
+                "plugin_tools": registry.tool_names()}
+
+    def handle_conversations_list(self) -> dict:
+        directory = self._json_dir("conversations")
+        records = []
+        for path in sorted(directory.glob("*.json")):
+            data = self._read_json_file(path)
+            if data is not None:
+                records.append(data)
+        return {"conversations": records}
+
+    def handle_conversation_create(self, body: dict) -> dict:
+        import uuid
+        conversation_id = str(body.get("id", "")) or uuid.uuid4().hex[:12]
+        record = {"id": conversation_id,
+                  "project_id": str(body.get("project_id", "default")),
+                  "turns": list(body.get("turns", []))}
+        self._write_json_file(
+            self._json_dir("conversations") / f"{self._safe_name(conversation_id)}.json",
+            record)
+        return record
+
+    def handle_conversation_get(self, conversation_id: str):
+        return self._read_json_file(
+            self.home / "conversations" / f"{self._safe_name(conversation_id)}.json")
+
+    def handle_conversation_delete(self, conversation_id: str) -> dict:
+        path = self.home / "conversations" / f"{self._safe_name(conversation_id)}.json"
+        if not path.is_file():
+            return {"ok": False}
+        path.unlink()
+        return {"ok": True}
+
+    def handle_brief_get(self, project_id: str):
+        return self._read_json_file(
+            self.home / "project_briefs" / f"{self._safe_name(project_id)}.json")
+
+    def handle_brief_save(self, project_id: str, body: dict) -> dict:
+        record = {"project_id": project_id, "brief": body.get("brief", body)}
+        self._write_json_file(
+            self._json_dir("project_briefs") / f"{self._safe_name(project_id)}.json",
+            record)
+        return record
+
+    def handle_ideas_list(self) -> dict:
+        directory = self._json_dir("ideas")
+        records = []
+        for path in sorted(directory.glob("*.json")):
+            data = self._read_json_file(path)
+            if data is not None:
+                records.append(data)
+        return {"ideas": records}
+
+    def handle_idea_create(self, body: dict) -> dict:
+        import uuid
+        idea_id = uuid.uuid4().hex[:12]
+        record = {"id": idea_id, "text": str(body.get("text", ""))}
+        self._write_json_file(self._json_dir("ideas") / f"{idea_id}.json", record)
+        return record
+
+    def handle_idea_delete(self, idea_id: str) -> dict:
+        path = self.home / "ideas" / f"{self._safe_name(idea_id)}.json"
+        if not path.is_file():
+            return {"ok": False}
+        path.unlink()
+        return {"ok": True}
+
+    def _hub_run_path(self, run_id: str) -> Path:
+        return self.home / "hub_runs" / f"{self._safe_name(run_id)}.json"
+
+    def handle_hub_run_create(self, body: dict) -> dict:
+        run_id = str(body.get("id", "") or body.get("run_id", ""))
+        if not run_id:
+            return {"ok": False, "error": "run needs an id"}
+        record = {"id": run_id, "goal": str(body.get("goal", "")),
+                  "events": [], "stages": [], "traces": []}
+        self._write_json_file(self._hub_run_path(run_id), record)
+        return {"ok": True, **record}
+
+    def _hub_run_append(self, run_id: str, key: str, entry: dict) -> dict:
+        path = self._hub_run_path(run_id)
+        record = self._read_json_file(path)
+        if record is None:
+            record = {"id": run_id, "goal": "", "events": [], "stages": [], "traces": []}
+        record.setdefault(key, []).append(entry)
+        self._write_json_file(path, record)
+        return {"ok": True, "id": run_id}
+
+    def handle_hub_run_event(self, run_id: str, body: dict) -> dict:
+        return self._hub_run_append(run_id, "events", body)
+
+    def handle_hub_run_stage(self, run_id: str, body: dict) -> dict:
+        return self._hub_run_append(run_id, "stages", body)
+
+    def handle_hub_run_trace(self, run_id: str, body: dict) -> dict:
+        return self._hub_run_append(run_id, "traces", body)
+
+    def handle_report_generate(self, body: dict) -> dict:
+        day = self._safe_name(body.get("day", "")) or "report"
+        summary = str(body.get("summary", ""))
+        path = self._json_dir("reports") / f"{day}.md"
+        path.write_text(f"# Report {day}\n\n{summary}\n", encoding="utf-8")
+        return {"ok": True, "day": day, "path": str(path)}
+
+    def handle_tts(self, body: dict) -> tuple[int, dict]:
+        tts_key = getattr(self, "tts_key", None)
+        if not tts_key:
+            return 501, {"error": "TTS key not configured"}
+        from ..capabilities.voice import tts as _tts
+        result = _tts(str(body.get("text", "")), tts_key,
+                      str(body.get("voice_id", "")))
+        if not result.get("ok"):
+            return 500, {"error": result.get("error", "TTS failed")}
+        return 200, {"ok": True, "audio_bytes": len(result.get("audio", b""))}
+
+    def handle_goal_with_images(self, body: dict) -> dict:
+        import base64 as _b64
+        goal = str(body.get("goal", ""))
+        library_dir = self._json_dir("library")
+        saved = []
+        for image in body.get("images", []) or []:
+            name = self._safe_name(image.get("name", "image.png"))
+            try:
+                data = _b64.b64decode(str(image.get("data_b64", "")))
+            except Exception:
+                continue
+            (library_dir / name).write_bytes(data)
+            saved.append(name)
+        return {"goal": goal, "images": saved,
+                "note": "JSON variant of the multipart goals-with-images endpoint; "
+                        "no run is started by this route."}
+
     def make_handler(self):
         server = self
 
@@ -1022,6 +1199,20 @@ class WebUIServer:
                     query = parse_qs(parsed.query)
                     entity = query.get("entity", [""])[0]
                     self._send_json(200, server.handle_entities(entity))
+                elif parsed.path == "/api/tools":
+                    self._send_json(200, server.handle_tools())
+                elif parsed.path == "/api/conversations":
+                    self._send_json(200, server.handle_conversations_list())
+                elif parsed.path.startswith("/api/conversations/"):
+                    conv_id = parsed.path[len("/api/conversations/"):]
+                    data = server.handle_conversation_get(conv_id)
+                    self._send_json(200 if data is not None else 404, data or {"error": "not found"})
+                elif parsed.path.startswith("/api/projects/") and parsed.path.endswith("/brief"):
+                    project_id = parsed.path[len("/api/projects/"):-len("/brief")].strip("/")
+                    data = server.handle_brief_get(project_id)
+                    self._send_json(200 if data is not None else 404, data or {"error": "not found"})
+                elif parsed.path == "/api/ideas":
+                    self._send_json(200, server.handle_ideas_list())
                 elif parsed.path == "/webhook/whatsapp":
                     query = parse_qs(parsed.query)
                     status, text = server.handle_whatsapp_get(query)
@@ -1149,6 +1340,29 @@ class WebUIServer:
                             self._send_json(200, {"findings": probe_plugin(path)})
                     else:
                         self._send_json(400, {"error": "unknown capabilities studio action"})
+                elif parsed.path == "/api/conversations":
+                    self._send_json(200, server.handle_conversation_create(body))
+                elif parsed.path == "/api/ideas":
+                    self._send_json(200, server.handle_idea_create(body))
+                elif parsed.path == "/api/hub/runs":
+                    result = server.handle_hub_run_create(body)
+                    self._send_json(200 if result.get("ok") else 400, result)
+                elif parsed.path.startswith("/api/hub/runs/") and parsed.path.endswith("/events"):
+                    run_id = parsed.path[len("/api/hub/runs/"):-len("/events")].strip("/")
+                    self._send_json(200, server.handle_hub_run_event(run_id, body))
+                elif parsed.path.startswith("/api/hub/runs/") and parsed.path.endswith("/stage"):
+                    run_id = parsed.path[len("/api/hub/runs/"):-len("/stage")].strip("/")
+                    self._send_json(200, server.handle_hub_run_stage(run_id, body))
+                elif parsed.path.startswith("/api/hub/runs/") and parsed.path.endswith("/trace"):
+                    run_id = parsed.path[len("/api/hub/runs/"):-len("/trace")].strip("/")
+                    self._send_json(200, server.handle_hub_run_trace(run_id, body))
+                elif parsed.path == "/api/reports/generate":
+                    self._send_json(200, server.handle_report_generate(body))
+                elif parsed.path == "/api/tts":
+                    status, payload = server.handle_tts(body)
+                    self._send_json(status, payload)
+                elif parsed.path == "/api/goals/with-images":
+                    self._send_json(200, server.handle_goal_with_images(body))
                 elif parsed.path == "/webhook/whatsapp":
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     status, payload = server.handle_whatsapp_post(body, raw, headers)
@@ -1165,6 +1379,33 @@ class WebUIServer:
                 if parsed.path.startswith("/api/dags/"):
                     dag_id = parsed.path[len("/api/dags/"):]
                     self._send_json(200, server.handle_dag_delete(dag_id))
+                elif parsed.path.startswith("/api/conversations/"):
+                    conv_id = parsed.path[len("/api/conversations/"):]
+                    result = server.handle_conversation_delete(conv_id)
+                    self._send_json(200 if result["ok"] else 404, result)
+                elif parsed.path.startswith("/api/ideas/"):
+                    idea_id = parsed.path[len("/api/ideas/"):]
+                    result = server.handle_idea_delete(idea_id)
+                    self._send_json(200 if result["ok"] else 404, result)
+                else:
+                    self._send_json(404, {"error": "not found"})
+
+            def do_PUT(self):
+                parsed = urlparse(self.path)
+                if not parsed.path.startswith("/webhook/"):
+                    from .webui_auth import is_authorized
+                    headers = {k.lower(): v for k, v in self.headers.items()}
+                    if not is_authorized(headers, server.webui_token, self.client_address[0]):
+                        self._send_json(401, {"error": "unauthorized"})
+                        return
+                raw = self._read_body()
+                try:
+                    body = json.loads(raw) if raw else {}
+                except json.JSONDecodeError:
+                    body = {}
+                if parsed.path.startswith("/api/projects/") and parsed.path.endswith("/brief"):
+                    project_id = parsed.path[len("/api/projects/"):-len("/brief")].strip("/")
+                    self._send_json(200, server.handle_brief_save(project_id, body))
                 else:
                     self._send_json(404, {"error": "not found"})
 

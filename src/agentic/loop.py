@@ -184,6 +184,22 @@ class GoalRunner:
                         raise ValueError(f"extra tool {name} rejected by approval gate")
                 from ..capabilities.extra_tools import dispatch_extra_tool
                 return dispatch_extra_tool(self.extra_tools, name, args)
+            if str(exc).startswith("unknown tool:"):
+                # No registered tool covers it: hand the run a
+                # binding re-plan instruction instead of a bare
+                # error, from the capability ladder (exact tool,
+                # then skill, then approved MCP).
+                from ..capabilities.capability_lookup import (
+                    lookup_capability, recovery_note)
+                tool_rows = {t: "" for t in self.tools.names()}
+                if self.plugins is not None:
+                    try:
+                        for t in self.plugins.tool_names():
+                            tool_rows.setdefault(t, "")
+                    except Exception:
+                        pass
+                matches = lookup_capability(name, tools=tool_rows)
+                raise ValueError(f"unknown tool: {name}\n{recovery_note(name, matches)}")
             raise
 
     def _plan(self, goal: str, failure_context: str = "",
