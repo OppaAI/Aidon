@@ -214,8 +214,11 @@ def _validate_conditional_step(step: Any, where: str) -> list[str]:
     if not isinstance(step, dict):
         return [f"{where}: must be an object"]
     if "tool" in step:
-        if not isinstance(step["tool"], str) or not step["tool"].strip():
+        tool = step["tool"]
+        if not isinstance(tool, str) or not tool.strip():
             errors.append(f"{where}: 'tool' must be a non-empty string")
+        elif tool not in ALLOWED_CHAIN_TOOLS:
+            errors.append(f"{where}: tool is not permitted: {tool}")
         if "args" in step and not isinstance(step["args"], (dict, list, str)):
             errors.append(f"{where}: 'args' must be an object, list, or string")
         if "as" in step and not isinstance(step["as"], str):
@@ -255,10 +258,19 @@ def run_conditional_chain(
 ) -> dict[str, Any]:
     """Execute a conditional chain. Returns a summary of what ran.
 
-    Defensive by design: chains are validated at schedule creation, but a
-    hand-edited job record can bypass that. Malformed steps are recorded
-    in ``errors`` and skipped — one bad step never aborts the rest.
+    Defensive by design: validate first (allowlist + shape). Hand-edited
+    job records cannot skip the policy. Malformed steps after that are
+    recorded in ``errors`` and skipped — one bad step never aborts the rest.
     """
+    pre = validate_conditional_chain(chain)
+    if pre:
+        return {
+            "ok": False,
+            "ran": [],
+            "skipped": [],
+            "errors": pre,
+            "bindings": {},
+        }
     bindings: dict[str, Any] = {}
     ran: list[str] = []
     skipped: list[str] = []
