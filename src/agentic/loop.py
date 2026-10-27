@@ -232,6 +232,81 @@ class GoalRunner:
             return body + "\nSandbox network: on"
         return body
 
+    def _start_mission(self, goal: str) -> None:
+        """Create the durable review record for a real, cross-surface run."""
+        if not self.run_id or getattr(self, "_mission_lifecycle", None) is not None:
+            return
+        try:
+            from ..capabilities.registry_db import Registry
+            from .lifecycle import MissionLifecycle
+            self._mission_registry = Registry(self.home)
+            self._mission_lifecycle = MissionLifecycle(self._mission_registry)
+            self._mission = self._mission_lifecycle.start(
+                goal, str(self.run_id), workspace=str(self.sandbox.workdir),
+                guidance=self.guidance)
+        except Exception as exc:
+            self._mission_lifecycle = None
+            self._trace("mission", "failed", f"mission start failed: {exc}")
+
+    def _mission_prepare_review(self, goal: str, plan: Plan,
+                                files: list[str], verified: list[str]) -> None:
+        lifecycle = getattr(self, "_mission_lifecycle", None)
+        mission = getattr(self, "_mission", None)
+        if lifecycle is None or mission is None:
+            return
+        try:
+            current = lifecycle.get(mission["id"])
+            if current["state"] == "researching":
+                lifecycle.transition(mission["id"], "testing", "sandbox execution started")
+            criteria = [{"name": str(item), "status": "passed",
+                         "evidence": "sandbox verification passed"}
+                        for item in (plan.criteria or verified or files)]
+            lifecycle.freeze_snapshot(
+                mission["id"],
+                changes=[{"path": name, "sha256": ""} for name in files],
+                test_results={"passed": True, "verified": list(verified)},
+                artifacts=list(files), criteria=criteria)
+            from .lifecycle import NotificationOutbox
+            NotificationOutbox(self._mission_registry).enqueue(
+                "review_ready", "Mission ready for review",
+                f"{goal}: sandbox verification passed", self.project_id)
+        except Exception as exc:
+            self._trace("mission", "failed", f"review snapshot failed: {exc}")
+
+    def _mission_approval(self, approved: bool) -> None:
+        lifecycle = getattr(self, "_mission_lifecycle", None)
+        mission = getattr(self, "_mission", None)
+        if lifecycle is None or mission is None:
+            return
+        try:
+            state = lifecycle.get(mission["id"])["state"]
+            if approved and state == "ready_for_review":
+                lifecycle.transition(mission["id"], "approved", "owner approved live execution")
+            elif not approved and state in ("researching", "testing", "ready_for_review"):
+                lifecycle.transition(mission["id"], "rejected", "owner rejected live execution")
+        except Exception as exc:
+            self._trace("mission", "failed", f"mission approval update failed: {exc}")
+
+    def _finish_mission(self, report: RunReport) -> None:
+        lifecycle = getattr(self, "_mission_lifecycle", None)
+        mission = getattr(self, "_mission", None)
+        if lifecycle is None or mission is None:
+            return
+        try:
+            current = lifecycle.get(mission["id"])
+            if report.status != "done" and current["state"] in (
+                    "researching", "testing", "ready_for_review"):
+                lifecycle.transition(mission["id"], "rejected",
+                                     report.error or report.status)
+            lifecycle.set_report(mission["id"], report.delivery_summary or report.status)
+        except Exception as exc:
+            self._trace("mission", "failed", f"mission finalization failed: {exc}")
+        finally:
+            registry = getattr(self, "_mission_registry", None)
+            if registry is not None:
+                registry.close()
+            self._mission_registry = None
+
     def _ask_for_approval(self, kind: str, title: str, body: str) -> Decision:
         """Ask the owner while excluding human wait from active elapsed time."""
         timer = getattr(self, "_elapsed_timer", None)
@@ -605,6 +680,7 @@ class GoalRunner:
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
+        self._start_mission(goal)
         if spec is not None:
             spec_deliverables = spec.deliverables if hasattr(spec, "deliverables") else spec.get("deliverables", [])
             try:
@@ -760,6 +836,7 @@ class GoalRunner:
                     report.error, {"goal": report.goal, "attempts": report.attempts})
         except Exception:
             pass
+        self._finish_mission(report)
         # Save the run state so `resume` can list and show it:
         # goal, steps, completed files, status. Best effort only;
         # a failed save must never fail the run itself.
@@ -946,12 +1023,14 @@ class GoalRunner:
         else:
             attempt = MAX_ATTEMPTS
         files = sorted(passed) if passed else list(current_plan.deliverables)
+        self._mission_prepare_review(goal, current_plan, files, sorted(verified))
         self._trace("approval", "started", "live approval requested")
         decision: Decision = self._ask_for_approval(
             "live", "Approve live execution?",
             self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"))
         self._trace("approval", decision.verdict, "live approval")
         approved = decision.verdict == "approved"
+        self._mission_approval(approved)
         if not approved:
             return RunReport("rejected", goal, current_plan, True, False,
                              files=files, attempts=attempt,
