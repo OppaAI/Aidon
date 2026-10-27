@@ -1070,13 +1070,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.command == "tools":
         from ..capabilities.plugins import PluginRegistry
+        from ..capabilities.tool_catalog import all_tool_names
         registry = PluginRegistry(config.home); registry.load_all()
+        available = all_tool_names(registry.tool_names())
         if args.action == "list":
             print(f"Plugin tools: {', '.join(registry.tool_names())}")
-            print("Sandbox tools: write, read, list, shell, calculate")
+            print("Goal tools: " + ", ".join(available))
             return 0
         if args.action == "check":
-            print(f"{args.name} exists: {args.name in registry.tool_names() or args.name in ('write', 'read', 'list', 'shell', 'calculate')}")
+            print(f"{args.name} exists: {args.name in available}")
             return 0
         return 2
     if args.command == "dag":
