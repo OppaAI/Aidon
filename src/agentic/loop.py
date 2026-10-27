@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -530,7 +531,13 @@ class GoalRunner:
         if self.memory is not None:
             try:
                 from ..memory.experience import recall_experiences
-                experiences = recall_experiences(self.memory, goal, limit=1)
+                try:
+                    recall_limit = max(0, int(os.environ.get(
+                        "AIDON_EPISODE_RECALL_LIMIT", "1") or "1"))
+                except ValueError:
+                    recall_limit = 1
+                experiences = recall_experiences(
+                    self.memory, goal, limit=recall_limit)
                 if experiences and experiences[0].dag_nodes:
                     # Adaptive DAG first: add, remove, modify, reorder,
                     # validated, with rollback to the saved graph on failure.
