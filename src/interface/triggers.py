@@ -326,8 +326,16 @@ class Scheduler:
                 spec = json.loads(job.goal)
             except (TypeError, json.JSONDecodeError) as exc:
                 raise ValueError(f"chain jobs need JSON in goal: {exc}") from exc
-            from ..capabilities.chain import validate_chain_spec
-            failures = validate_chain_spec(spec)
+            from ..capabilities.chain import (
+                validate_chain_spec,
+                validate_conditional_chain,
+            )
+            if isinstance(spec, list):
+                failures = validate_conditional_chain(spec)
+            elif isinstance(spec, dict):
+                failures = validate_chain_spec(spec)
+            else:
+                failures = ["chain goal must be a JSON object or array"]
             if failures:
                 raise ValueError("invalid chain: " + "; ".join(failures))
         self.jobs = [j for j in self.jobs if j.name != job.name]
