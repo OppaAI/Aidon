@@ -51,13 +51,15 @@ def _tools_for_scope(scope: str) -> list[dict]:
     if scope == "owner":
         tools.append({"name": "approve_goal", "description": "Approve a goal, owner only."})
         tools.append({"name": "list_keys", "description": "List key hash prefixes, owner only."})
+        tools.append({"name": "run_goal", "description": "Run a goal, owner only, returns the run result."})
     return tools
 
 
 class MCPServer:
-    def __init__(self, auth: AuthStore, goals: GoalStore):
+    def __init__(self, auth: AuthStore, goals: GoalStore, execute=None):
         self.auth = auth
         self.goals = goals
+        self.execute = execute
 
     def handle(self, request: dict, token: str | None) -> dict:
         method = request.get("method", "")
@@ -144,6 +146,19 @@ class MCPServer:
                 self.goals._save()
                 return {"jsonrpc": "2.0", "id": request_id,
                         "result": {"content": [{"type": "text", "text": json.dumps(goal.to_dict())}]}}
+            if name == "run_goal":
+                goal = self.goals.get(str(args.get("id", "")))
+                if goal is None or record.scope != "owner":
+                    return {"jsonrpc": "2.0", "id": request_id,
+                            "error": {"code": -32003, "message": "goal not found or not owner"}}
+                if self.execute is None:
+                    return {"jsonrpc": "2.0", "id": request_id,
+                            "error": {"code": -32001, "message": "execution not configured"}}
+                result = self.execute(goal)
+                goal.status = str(result.get("status", "done")) if isinstance(result, dict) else "done"
+                self.goals._save()
+                return {"jsonrpc": "2.0", "id": request_id,
+                        "result": {"content": [{"type": "text", "text": json.dumps({"goal": goal.to_dict(), "result": result})}]}}
             if name == "list_keys":
                 return {"jsonrpc": "2.0", "id": request_id,
                         "result": {"content": [{"type": "text", "text": json.dumps(self.auth.list_keys())}]}}

@@ -191,7 +191,7 @@ class GoalStore:
 
 
 def handle(auth: AuthStore, goals: GoalStore, method: str, path: str,
-           headers: dict, body: dict | None) -> tuple[int, dict]:
+           headers: dict, body: dict | None, execute=None) -> tuple[int, dict]:
     """v1 API handler, no socket, testable directly."""
     body = body or {}
     if path == "/api/v1/health" and method == "GET":
@@ -289,5 +289,17 @@ def handle(auth: AuthStore, goals: GoalStore, method: str, path: str,
             goal.status = "approved"
             goals._save()
             return 200, goal.to_dict()
+        if method == "POST" and action == "run":
+            denied = need("submit")
+            if denied:
+                return denied
+            if record.scope != "owner":
+                return 403, {"error": "run is owner only"}
+            if execute is None:
+                return 501, {"error": "execution not configured for this v1 server"}
+            result = execute(goal)
+            goal.status = str(result.get("status", "done")) if isinstance(result, dict) else "done"
+            goals._save()
+            return 200, {"goal": goal.to_dict(), "result": result}
         return 404, {"error": "unknown v1 route"}
     return 404, {"error": "unknown v1 route"}

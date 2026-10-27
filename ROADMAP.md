@@ -71,13 +71,6 @@ post-hackathon, NOT built, NOT demoed, at the end.
 - Demo capability tools end to end: dinner menu PDF
   plus grocery app, store run, and job search plus
   publish, through plugins Aidon climbs to.
-- Vision, Spark verifier, swarm, kernel, and routers,
-  built now: image input path in the model client,
-  Muse Spark 1.3 multimodal, model verifier second
-  opinion with code verifier primary, swarm decided
-  by the model with parallel workers and merge,
-  kernel mode seed-only, semantic router by embedding
-  with no LLM call, and phase router fast vs strong.
 - Live verification on a real model and a real
   Qdrant and EmbeddingGemma 2 run: all runs so far
   in the new repo are FakeClient tests, plus a local
@@ -85,19 +78,66 @@ post-hackathon, NOT built, NOT demoed, at the end.
   real Qdrant run are still owed.
 - Demo video, 3 minutes, required for submission.
 
+## Built since the earlier roadmap, now in the repo
+
+- Adaptive DAG, steer and cancel across WebUI,
+  WhatsApp, Slack, CLI, v1, and MCP, with RunControl.
+- WebUI avatar and mic, DAG editor, entity graph,
+  3D factory, run replay, 9-stage pills, VRM avatar
+  viewer with SVG fallback, Meta Transcribe via
+  /api/transcribe when a key is set, library upload,
+  settings edit with an allowlist, projects history,
+  WebUI token auth for remote access, and DAG merge
+  on save plus memory DAGs in the editor.
+- Semantic routing in CLI, WebUI, and interview,
+  with a write-intent guard, a webchat fast path
+  from researcher facts, and a vector cache at
+  <home>/semantic_router_vectors.json, pre-made on
+  first run, reused after, ignored if the embedder
+  or example lists change.
+- Unity asset pipeline, Playwright MCP wiring,
+  Muse Image generation and editing with 1 to 10
+  reference images, code charts and graphs, and
+  a fast model via AIDON_FAST_MODEL, same endpoint,
+  different model name, for local small models.
+- Metrics truth grading, elapsed excluding approval
+  wait, Gmail inbox read, mission frozen snapshots
+  ready for review, skill lifecycle and governor,
+  cross-file validator, code-level repair with
+  rollback, multi-agent research, model-written
+  rolling summary with code fallback, automatic
+  redaction at record time, pre-approval live gate,
+  WhatsApp media to vision preparation, extra loop
+  tools with approval for post and send, full
+  runners in scheduler, ingest, and Slack polling,
+  v1 and MCP actually running a goal, owner only,
+  and CLI swarm with --swarm.
+- Streamable HTTP MCP, cross-file validator, and
+  image generation, all built now, no longer
+  post-hackathon.
+
 ## Post-hackathon, NOT built, NOT demoed
 
 - Full VM backend: disposable VM running Docker
   inside it, for untrusted code and separate-kernel work.
-- Procedural 3D game-asset generation.
+- Unity factory: a full Unity factory, editor
+  install, project, and build, beyond the Unity
+  asset pipeline built now, and beyond the Three.js
+  factory built now.
+- Procedural 3D game-asset generation, beyond the
+  cube, sphere, and cylinder primitives built now.
 - Dedicated live toolset distinct from sandbox tools,
   beyond the closed live actions built now.
 - Stronger sandbox backend spike, beyond bubblewrap
   and Docker.
-- Deterministic plan validation and cross-file validator.
-- Streamable HTTP MCP, beyond stdio MCP built now.
+- Local server manager: start, stop, and download
+  for local models, beyond the generic endpoint plus
+  model name client built now, which already works
+  with a local endpoint.
+- SAM 3.1 segmentation: pixel-precise masks, boxes,
+  and video tracks, for cutouts, counting, and
+  tracking. Not needed for the dinner, store, or
+  job demo, which need no mask, so it is optional,
+  not core.
 - Email, RSS, and database triggers, as plugins,
   beyond the core triggers built now.
-- Image generation tools, beyond the Fish TTS and
-  transcribe interface built now, and beyond the
-  model selection already decided.

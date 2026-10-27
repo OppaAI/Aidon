@@ -73,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     goal_parser.add_argument("text", help="Goal in plain language")
     goal_parser.add_argument("--project", default="default",
                              help="Project id for episodic memory")
+    goal_parser.add_argument("--swarm", action="store_true", help="Attempt swarm split, Aidon decides, fallback to single run")
     goal_parser.add_argument("--spec", default=None,
                              help="Attached spec sheet file, skips interview")
     interview_parser = sub.add_parser("interview", help="Interview to a spec")
@@ -205,7 +206,9 @@ def main(argv: list[str] | None = None) -> int:
                              slack_sender=slack_sender,
                              webhook_only=args.webhook_only,
                              media_downloader=lambda media_id: download_whatsapp_media(msg, media_id),
-                             run_control=run_control)
+                             run_control=run_control,
+                             webui_token=config.webui_token or None,
+                             transcribe_key=config.transcribe_api_key or config.api_key or None)
 
         def _goal_handler(event):
             from .loop import GoalRunner
@@ -246,7 +249,20 @@ def main(argv: list[str] | None = None) -> int:
                 semantic_router = SemanticRouter(memory.embedder, cache_path=config.home / 'semantic_router_vectors.json')
             except Exception:
                 semantic_router = None
-            runner = GoalRunner(client, sandbox, server.webui_gate.gate,
+            try:
+                from .preapproval import PreapprovalStore
+                from .preapproval_gate import PreapprovalGate
+                _gate = PreapprovalGate(server.webui_gate.gate, PreapprovalStore(config.home), event.project_id)
+            except Exception:
+                _gate = server.webui_gate.gate
+            def _web_researcher(goal_text):
+                try:
+                    from .search import search as _s
+                    _r = _s(goal_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url)
+                    return [f"{x.get('title', '')}: {x.get('snippet', '')}" for x in _r.get("results", [])]
+                except Exception:
+                    return []
+            runner = GoalRunner(client, sandbox, _gate,
                                 config.home, memory=memory,
                                 project_id=event.project_id, plugins=plugins,
                                 execution_backend=execution_backend, budget=budget,
@@ -254,7 +270,8 @@ def main(argv: list[str] | None = None) -> int:
                                 kernel_mode=config.kernel_mode,
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
-                                run_id=run_id, run_control=run_control)
+                                run_id=run_id, run_control=run_control,
+                                researcher=_web_researcher, extra_tools={})
             # Swarm, Aidon decides: if the goal genuinely splits,
             # run the subgoals in parallel and merge, else single run.
             try:
@@ -480,6 +497,19 @@ def main(argv: list[str] | None = None) -> int:
         from .triggers import Scheduler
         print("Scheduler daemon, polling every 60 seconds, Ctrl-C to stop.")
         print("Scheduler daemon also watches ingest and polls Slack, when configured, same loop.")
+        def _full_scheduler_runner():
+            from .budgets import Budget as _B2
+            from .trace import TraceRecorder as _T2
+            from .verifier_model import ModelVerifier as _M2
+            from .plugins import PluginRegistry as _P2
+            _pl = _P2(config.home); _pl.load_all()
+            try:
+                from .execution import make_backend as _mb2
+                _be = _mb2(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
+            except Exception:
+                _be = None
+            return GoalRunner(client, sandbox, _cli_gate(), config.home, memory=memory, project_id="default", plugins=_pl, execution_backend=_be, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_M2(client), kernel_mode=config.kernel_mode)
+
         import os as _os
         _slack_last_ts = ""
         _slack_ts_path = config.home / "slack_last_ts.txt"
@@ -489,8 +519,27 @@ def main(argv: list[str] | None = None) -> int:
             scheduler = Scheduler(config.home)
             for job in scheduler.check_due(datetime.now()):
                 print(f"Due job: {job.name}: {job.goal}")
+                from .budgets import Budget as _Budget
+                from .trace import TraceRecorder as _Trace
+                from .verifier_model import ModelVerifier as _MV
+                from .plugins import PluginRegistry as _PR
+                _plugins = _PR(config.home); _plugins.load_all()
+                try:
+                    from .execution import make_backend as _mb
+                    _backend = _mb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
+                except Exception:
+                    _backend = None
+                try:
+                    from .semantic_router import SemanticRouter as _SR2
+                    _router2 = _SR2(memory.embedder, cache_path=config.home / 'semantic_router_vectors.json')
+                except Exception:
+                    _router2 = None
                 runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
-                                    memory=memory, project_id="default")
+                                    memory=memory, project_id="default", plugins=_plugins,
+                                    execution_backend=_backend, budget=_Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
+                                    trace=_Trace(config.home, project_id="default"), model_verifier=_MV(client),
+                                    kernel_mode=config.kernel_mode, semantic_router=_router2,
+                                    use_semantic_router_skip=True)
                 report = runner.run(job.goal)
                 print(f"Job {job.name}: {report.status}, files: {', '.join(report.files)}")
             # Ingest watcher, same loop, same GoalRunner, no separate daemon.
@@ -499,8 +548,7 @@ def main(argv: list[str] | None = None) -> int:
                 watcher = IngestWatcher(config.ingest_path, config.home)
                 for ingest_event in watcher.events(project_id="default"):
                     print(f"Ingest trigger: {ingest_event.payload.get('path', '')}")
-                    ingest_runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
-                                               memory=memory, project_id="default")
+                    ingest_runner = _full_scheduler_runner()
                     ingest_report = ingest_runner.run(ingest_event.goal)
                     print(f"Ingest job: {ingest_report.status}")
             except Exception as exc:
@@ -515,8 +563,7 @@ def main(argv: list[str] | None = None) -> int:
                     _slack_ts_path.write_text(_slack_last_ts)
                     for _message in _messages:
                         print(f"Slack poll message: {_message['text'][:100]}")
-                        _poll_runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
-                                                  memory=memory, project_id="default")
+                        _poll_runner = _full_scheduler_runner()
                         _poll_report = _poll_runner.run(_message["text"])
                         print(f"Slack poll job: {_poll_report.status}")
             except Exception as exc:
@@ -685,12 +732,19 @@ def main(argv: list[str] | None = None) -> int:
         _cli_router = _SR(memory.embedder, cache_path=config.home / 'semantic_router_vectors.json')
     except Exception:
         _cli_router = None
+    def _researcher(goal_text):
+        try:
+            from .search import search as _search
+            result = _search(goal_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url)
+            return [f"{r.get('title', '')}: {r.get('snippet', '')}" for r in result.get("results", [])]
+        except Exception:
+            return []
     runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
                         memory=memory, promotion_ask=_promotion_ask,
                         project_id=args.project, plugins=plugins, execution_backend=execution_backend,
                         budget=budget, trace=trace, model_verifier=model_verifier,
                         kernel_mode=config.kernel_mode, semantic_router=_cli_router,
-                        use_semantic_router_skip=True)
+                        use_semantic_router_skip=True, researcher=_researcher, extra_tools={})
     spec = None
     if getattr(args, "spec", None):
         from pathlib import Path
@@ -700,6 +754,20 @@ def main(argv: list[str] | None = None) -> int:
         if not verified:
             print(f"Attached spec is not verified: {'; '.join(failures)}")
             return 2
+    if getattr(args, "swarm", False):
+        try:
+            from .swarm import run_swarm
+            def _swarm_runner(subgoal):
+                sub_report = runner.run(subgoal, spec=spec)
+                return f"[{sub_report.status}] {', '.join(sub_report.files)} {sub_report.error}".strip()
+            swarm_result = run_swarm(args.text, client, _swarm_runner)
+            if swarm_result.get("swarmed"):
+                print(f"Swarm, subgoals: {', '.join(swarm_result['subgoals'])}")
+                print(swarm_result["merged"])
+                print("status: swarm")
+                return 0
+        except Exception as exc:
+            print(f"Swarm failed, falling back to single run: {exc}")
     report = runner.run(args.text, spec=spec)
     print(f"status: {report.status}")
     print(f"verified: {report.verified}")

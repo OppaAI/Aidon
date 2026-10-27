@@ -107,7 +107,8 @@ class GoalRunner:
                  budget=None, trace=None, model_verifier=None,
                  kernel_mode: bool = False, semantic_router=None,
                  use_semantic_router_skip: bool = False,
-                 run_id: str | None = None, run_control=None):
+                 run_id: str | None = None, run_control=None,
+                 researcher=None, extra_tools=None):
         self.client = client
         self.sandbox = sandbox
         self.gate = gate
@@ -130,6 +131,8 @@ class GoalRunner:
         self.run_control = run_control
         self._dag_summary: dict = {}
         self.last_route = None
+        self.researcher = researcher
+        self.extra_tools = extra_tools or {}
 
     def _trace(self, kind: str, status: str, detail: str = "") -> None:
         if self.trace is not None:
@@ -167,7 +170,20 @@ class GoalRunner:
             return self.tools.call(name, args)
         except ValueError as exc:
             if str(exc).startswith("unknown tool:") and self.plugins is not None:
-                return self.plugins.call(name, args)
+                try:
+                    return self.plugins.call(name, args)
+                except Exception:
+                    pass
+            if str(exc).startswith("unknown tool:") and name in self.extra_tools:
+                # Extra tools are outside the confined set, so a
+                # post or send tool is approval-gated here, before
+                # dispatch, fail-closed on rejection.
+                if any(word in name for word in ("post", "send", "publish")):
+                    decision = self.gate.ask("live", f"Extra tool {name}", f"Run extra tool {name} with {args}?")
+                    if decision.verdict != "approved":
+                        raise ValueError(f"extra tool {name} rejected by approval gate")
+                from .extra_tools import dispatch_extra_tool
+                return dispatch_extra_tool(self.extra_tools, name, args)
             raise
 
     def _plan(self, goal: str, failure_context: str = "",
@@ -258,6 +274,12 @@ class GoalRunner:
         _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
         if self.use_semantic_router_skip and self.last_route and self.last_route[0] == "chat" and spec is None and not _write_intent:
             reply = self.client.chat([Message("user", goal)])
+            report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                               False, False, chat_reply=reply)
+            return self._finalize(report)
+        if self.use_semantic_router_skip and self.last_route and self.last_route[0] == "webchat" and spec is None and not _write_intent and self.researcher is not None:
+            from .webchat import webchat_reply
+            reply = webchat_reply(goal, self.researcher, self.client)
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)

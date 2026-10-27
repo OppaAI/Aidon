@@ -464,3 +464,27 @@ built during Oct 26 - Nov 4.
 4. **Deterministic plan validation.** A canonical plan format
    plus a cross-file validator, so plan, ledger, and
    deliverables must agree by code before approval.
+
+## New modules, built since the first roadmap
+
+- Adaptive DAG, steer and cancel, 3D factory, run
+  replay, 9-stage pills, VRM avatar viewer, DAG
+  editor with merge and memory DAGs, entity graph.
+- Semantic routing, webchat fast path, vector cache,
+  Unity assets, Playwright MCP, Muse Image, code
+  charts, fast model for local models.
+- Metrics truth grading, elapsed excluding approval
+  wait, Gmail inbox read, mission frozen snapshots,
+  skill lifecycle and governor, cross-file validator,
+  code repair, multi-agent research, model rolling
+  summary, redaction at record time, pre-approval
+  live gate, WhatsApp media to vision, v1 and MCP
+  goal execution, CLI swarm.
+- WebUI token auth: set AIDON_WEBUI_TOKEN in .env
+  to require Bearer token for WebUI, localhost
+  alone needs no token, remote without a token
+  is denied.
+- Post-hackathon, not built, not demoed: VM backend,
+  Unity factory, procedural 3D assets, local server
+  manager, stronger sandbox, dedicated live toolset,
+  and SAM 3.1 segmentation, see ROADMAP.md.

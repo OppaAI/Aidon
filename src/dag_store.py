@@ -61,8 +61,22 @@ class DagStore:
         except (json.JSONDecodeError, OSError):
             return None
 
-    def save(self, dag_id: str, goal: str, nodes: list[dict], memory=None) -> tuple[bool, list[str]]:
-        """Save a valid DAG, or return validation failures, unsaved."""
+    def save(self, dag_id: str, goal: str, nodes: list[dict], memory=None, merge: bool = False) -> tuple[bool, list[str]]:
+        """Save a valid DAG, or return validation failures, unsaved.
+        With merge=True, nodes from an existing saved DAG are kept
+        unless a new node has the same id, in which case the new
+        node replaces it, so a library save does not silently
+        drop nodes the editor did not send. Without merge, the
+        editor's list is the whole DAG, and a delete really deletes.
+        """
+        if merge:
+            existing = self.get(dag_id)
+            if existing:
+                by_id = {n.get("id"): n for n in existing.get("nodes", []) if isinstance(n, dict)}
+                for node in nodes:
+                    if isinstance(node, dict) and node.get("id"):
+                        by_id[node["id"]] = node
+                nodes = list(by_id.values())
         try:
             dag = DAG([DAGNode.from_dict(node) for node in nodes])
         except Exception as exc:

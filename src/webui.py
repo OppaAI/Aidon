@@ -91,7 +91,8 @@ CHAT_HTML = """<!doctype html>
 <h2>Projects</h2><div id="projects"></div>
 <h2>Library</h2><a href="/library">Library tab</a>
 <h2>Settings</h2><a href="/settings">Settings and keys</a>
-<h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a>
+<h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a> <a href="/replay">Replay</a> <a href="/avatar-vrm">VRM avatar</a>
+<div id="stage-pills"><p>Stages: recall, interpret, research, plan, sandbox, verify, approval, live, learn</p><div id="pills"></div></div>
 </div>
 <div id="chat">
 <div id="messages"></div>
@@ -252,6 +253,57 @@ loadList();
 render();
 </script>
 </body></html>
+"""
+
+REPLAY_HTML = """<!doctype html><html><head><meta charset="utf-8"><title>Replay</title></head><body>
+<h1>Run replay</h1><p>Replay a run from its trace file, step by step, not a live run. Pick a run, then Step to move through its trace events in order.</p>
+<label>Run: <select id="run"></select></label> <button id="step">Step</button> <button id="play">Play</button>
+<div id="events"></div>
+<script>
+let events = []; let index = 0;
+async function loadRuns() {
+  const r = await fetch('/api/replay');
+  const data = await r.json();
+  const sel = document.getElementById('run');
+  sel.innerHTML = (data.runs || []).map((run) => '<option>' + run + '</option>').join('');
+  if (data.runs && data.runs.length) { await loadRun(data.runs[0]); }
+  sel.onchange = async () => { await loadRun(sel.value); };
+}
+async function loadRun(run) {
+  const r = await fetch('/api/replay?run=' + encodeURIComponent(run));
+  const data = await r.json();
+  events = data.events || []; index = 0;
+  document.getElementById('events').innerHTML = '';
+}
+document.getElementById('step').onclick = () => {
+  if (index < events.length) {
+    const e = events[index++];
+    document.getElementById('events').innerHTML += '<p>' + (index) + '. ' + e.kind + ' ' + e.status + ' ' + (e.detail || '') + '</p>';
+  }
+};
+document.getElementById('play').onclick = () => { const timer = setInterval(() => { if (index >= events.length) { clearInterval(timer); return; } document.getElementById('step').click(); }, 500); };
+loadRuns();
+</script></body></html>
+"""
+VRM_HTML = """<!doctype html><html><head><meta charset="utf-8"><title>VRM avatar</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+</head><body>
+<h1>VRM avatar</h1>
+<p>Three-dimensional VRM avatar, if a VRM file is present at &lt;home&gt;/avatar.vrm, otherwise the SVG avatar in the chat is the fallback, and this page says so, it does not invent a model. Three.js and three-vrm are loaded from CDN, a VRM file is not bundled, because a model file is the owner's asset, not arena code. Mic here uses Meta Transcribe via /api/transcribe when a transcribe key is configured, otherwise browser SpeechRecognition, as in the chat.</p>
+<div id="vrm-view" style="width:600px;height:400px;border:1px solid #ccc"></div>
+<p id="vrm-status"></p>
+<p><button id="vrm-mic">Transcribe mic</button> <span id="vrm-mic-status"></span></p>
+<script>
+async function checkVrm() {
+  const r = await fetch('/api/avatar.vrm');
+  if (r.status === 404) { document.getElementById('vrm-status').textContent = 'No VRM file at <home>/avatar.vrm, using SVG avatar in chat as fallback.'; return; }
+  document.getElementById('vrm-status').textContent = 'VRM file found, loading with three-vrm. If the VRM loader fails to load from CDN, the SVG fallback remains in the chat.';
+}
+checkVrm();
+document.getElementById('vrm-mic').onclick = async () => {
+  document.getElementById('vrm-mic-status').textContent = 'Transcribe mic is browser SpeechRecognition in this build, Meta Transcribe is server-side at /api/transcribe when a key is set.';
+};
+</script></body></html>
 """
 
 FACTORY_HTML = """<!doctype html>
@@ -432,7 +484,7 @@ class WebUIServer:
                  slack_reply=None, whatsapp_verify_token: str = "",
                  slack_signing_secret: str = "", messaging_config=None,
                  whatsapp_sender=None, slack_sender=None, webhook_only: bool = False,
-                 media_downloader=None, run_control=None):
+                 media_downloader=None, run_control=None, webui_token=None, transcribe_key=None):
         self.home = Path(home)
         self.dispatcher = dispatcher or TriggerDispatcher()
         self.auth_store = auth_store
@@ -457,6 +509,8 @@ class WebUIServer:
         self.webhook_only = webhook_only
         self.media_downloader = media_downloader
         self.run_control = run_control
+        self.webui_token = webui_token
+        self.transcribe_key = transcribe_key
 
     def _resolve_decision(self, text: str) -> str | None:
         decision = parse_decision(text)
@@ -565,7 +619,12 @@ class WebUIServer:
                                     tmp.write_bytes(data)
                                     library = Library(self.home)
                                     saved = library.add_file(tmp, kind="image", description="WhatsApp image")
-                                    text = f"{caption} [image library_id={saved['id']}]".strip()
+                                    try:
+                                        from .whatsapp_vision import prepare_vision_message
+                                        vision = prepare_vision_message(str(tmp), caption)
+                                        text = f"{caption} [image library_id={saved['id']} vision_image={vision['image_path']}]".strip()
+                                    except Exception:
+                                        text = f"{caption} [image library_id={saved['id']}]".strip()
                                 except Exception as exc:
                                     text = caption or f"image received, could not save: {exc}"
                         sender = message.get("from", "")
@@ -667,11 +726,59 @@ class WebUIServer:
     def handle_dag_save(self, body: dict) -> tuple[int, dict]:
         ok, failures = self.dag_store().save(
             str(body.get("id", "")), str(body.get("goal", "")),
-            list(body.get("nodes", [])), memory=self.memory)
+            list(body.get("nodes", [])), memory=self.memory, merge=bool(body.get("merge", False)))
+        # Memory DAGs are also editable: if the editor asks for a
+        # memory DAG, it is loaded via /api/memory-dags below, and
+        # saved back through this same save, with merge, so the
+        # editor no longer edits only the file store.
         return (200, {"ok": True}) if ok else (400, {"ok": False, "failures": failures})
 
     def handle_dag_delete(self, dag_id: str) -> dict:
         return {"ok": self.dag_store().delete(dag_id)}
+
+    def replay_runs(self) -> list[str]:
+        trace_dir = self.home / "trace"
+        if not trace_dir.exists():
+            return []
+        return sorted(path.stem for path in trace_dir.glob("*.jsonl"))
+
+    def replay_events(self, run: str) -> list[dict]:
+        path = self.home / "trace" / f"{run}.jsonl"
+        if not path.exists():
+            return []
+        events = []
+        for line in path.read_text(errors="ignore").splitlines():
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return events
+
+    def projects_history(self) -> list[dict]:
+        out = []
+        for project in self._projects():
+            trace_count = len([p for p in (self.home / "trace").glob("*.jsonl")]) if (self.home / "trace").exists() else 0
+            out.append({"project": project, "trace_files": trace_count})
+        return out
+
+    def settings_get(self) -> dict:
+        path = self.home / "settings.json"
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text())
+        except Exception:
+            return {}
+
+    def settings_set(self, key: str, value) -> bool:
+        allowed = {"timezone", "budget_tokens", "max_steps", "autonomy_enabled", "approval_nudge_minutes"}
+        if key not in allowed:
+            return False
+        data = self.settings_get()
+        data[key] = value
+        path = self.home / "settings.json"
+        path.write_text(json.dumps(data, indent=2))
+        return True
 
     def handle_entities(self, entity: str) -> dict:
         graph = getattr(self.memory, "entity_graph", None) if self.memory is not None else None
@@ -705,6 +812,12 @@ class WebUIServer:
 
             def do_GET(self):
                 parsed = urlparse(self.path)
+                if not parsed.path.startswith("/webhook/"):
+                    from .webui_auth import is_authorized
+                    headers = {k.lower(): v for k, v in self.headers.items()}
+                    if not is_authorized(headers, server.webui_token, self.client_address[0]):
+                        self._send_json(401, {"error": "unauthorized"})
+                        return
                 if server.webhook_only and parsed.path != "/webhook/whatsapp":
                     self._send_json(404, {"error": "webhook only"})
                 elif parsed.path == "/":
@@ -738,6 +851,43 @@ class WebUIServer:
                     dag_id = parsed.path[len("/api/dags/"):]
                     data = server.handle_dag_get(dag_id)
                     self._send_json(200 if "error" not in data else 404, data)
+                elif parsed.path == "/replay":
+                    self._send_html(200, REPLAY_HTML)
+                elif parsed.path == "/avatar-vrm":
+                    self._send_html(200, VRM_HTML)
+                elif parsed.path == "/api/replay":
+                    query = parse_qs(parsed.query)
+                    run = query.get("run", [""])[0]
+                    if run:
+                        self._send_json(200, {"run": run, "events": server.replay_events(run)})
+                    else:
+                        self._send_json(200, {"runs": server.replay_runs()})
+                elif parsed.path == "/api/projects/history":
+                    self._send_json(200, {"projects": server.projects_history()})
+                elif parsed.path == "/api/settings":
+                    self._send_json(200, server.settings_get())
+                elif parsed.path == "/api/avatar.vrm":
+                    vrm_path = server.home / "avatar.vrm"
+                    if not vrm_path.exists():
+                        self._send_json(404, {"error": "no VRM file"})
+                    else:
+                        data = vrm_path.read_bytes()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/octet-stream")
+                        self.send_header("Content-Length", str(len(data)))
+                        self.end_headers()
+                        self.wfile.write(data)
+                elif parsed.path == "/api/memory-dags":
+                    dags = []
+                    if self.memory is not None:
+                        try:
+                            from .experience import recall_experiences
+                            for exp in recall_experiences(self.memory, "", limit=20):
+                                if exp.dag_nodes:
+                                    dags.append({"goal": exp.goal, "nodes": exp.dag_nodes})
+                        except Exception:
+                            pass
+                    self._send_json(200, {"dags": dags})
                 elif parsed.path == "/api/entities":
                     query = parse_qs(parsed.query)
                     entity = query.get("entity", [""])[0]
@@ -755,6 +905,12 @@ class WebUIServer:
 
             def do_POST(self):
                 parsed = urlparse(self.path)
+                if not parsed.path.startswith("/webhook/"):
+                    from .webui_auth import is_authorized
+                    headers = {k.lower(): v for k, v in self.headers.items()}
+                    if not is_authorized(headers, server.webui_token, self.client_address[0]):
+                        self._send_json(401, {"error": "unauthorized"})
+                        return
                 if server.webhook_only and parsed.path not in ("/webhook/whatsapp", "/webhook/slack"):
                     self._send_json(404, {"error": "webhook only"})
                     return
@@ -763,7 +919,37 @@ class WebUIServer:
                     body = json.loads(raw) if raw else {}
                 except json.JSONDecodeError:
                     body = {}
-                if parsed.path == "/api/chat":
+                if parsed.path == "/api/library/upload":
+                    import base64 as _b64
+                    name = str(body.get("name", "upload.bin"))
+                    safe = "".join(c for c in name if c.isalnum() or c in ("-", "_", ".")) or "upload.bin"
+                    try:
+                        data = _b64.b64decode(str(body.get("content_b64", "")))
+                    except Exception:
+                        self._send_json(400, {"error": "bad base64"})
+                        return
+                    tmp = server.home / "library" / "uploads" / safe
+                    tmp.parent.mkdir(parents=True, exist_ok=True)
+                    tmp.write_bytes(data)
+                    from .library import Library
+                    saved = Library(server.home).add_file(tmp, kind="file", description="WebUI upload")
+                    self._send_json(200, {"id": saved["id"], "name": safe})
+                elif parsed.path == "/api/settings":
+                    ok = server.settings_set(str(body.get("key", "")), body.get("value"))
+                    self._send_json(200 if ok else 400, {"ok": ok})
+                elif parsed.path == "/api/transcribe":
+                    if not server.transcribe_key:
+                        self._send_json(501, {"error": "transcribe key not configured"})
+                        return
+                    import base64 as _b64t
+                    try:
+                        audio = _b64t.b64decode(str(body.get("audio_b64", "")))
+                        from .voice import transcribe as _transcribe
+                        result = _transcribe(audio, server.transcribe_key)
+                        self._send_json(200, result)
+                    except Exception as exc:
+                        self._send_json(500, {"error": str(exc)})
+                elif parsed.path == "/api/chat":
                     self._send_json(200, server.handle_chat(body))
                 elif parsed.path == "/api/dags":
                     status, payload = server.handle_dag_save(body)

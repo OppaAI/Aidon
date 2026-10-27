@@ -473,6 +473,17 @@ class Memory:
 
     def record(self, collection: str, text: str,
                payload: dict | None = None) -> Point:
+        # Automatic redaction at record time: credential-like
+        # patterns are replaced before embedding and storage,
+        # so a secret pasted into a goal never lands in Qdrant.
+        # Email addresses are NOT redacted here, they are
+        # legitimate recipients in specs and drafts.
+        try:
+            from .redaction import redact_dict, redact_text
+            text = redact_text(text)
+            payload = redact_dict(payload or {})
+        except Exception:
+            payload = payload or {}
         point = self._record_with_vector(
             collection, text, self.embedder.embed(text),
             self.embedder.embed_sparse(text), payload or {})
