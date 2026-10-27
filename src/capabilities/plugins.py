@@ -394,8 +394,13 @@ class PluginRegistry:
             except TypeError:
                 approved = bool(approve(plugin, findings))
         elif gate is not None:
-            decision = gate.ask("plugin", "Adopt this plugin?", body)
-            approved = decision.verdict == "approved"
+            decision = gate.ask(
+                "plugin",
+                "Adopt this plugin?",
+                body,
+                action_class="plugin",
+            )
+            approved = decision.verdict in ("approved", "auto_approved")
         if not approved:
             return False, findings, "Adoption rejected by owner"
         # Re-hash immediately before the copy, before touching any
