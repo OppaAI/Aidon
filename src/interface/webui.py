@@ -1676,6 +1676,203 @@ class WebUIServer:
                 "note": "JSON variant of the multipart goals-with-images endpoint; "
                         "no run is started by this route."}
 
+    # -- routes added for old-Aidon WebUI parity -------------------------
+    # Each handler below is pure server logic (no socket), so tests
+    # can call it directly; the do_GET/do_POST/do_DELETE branches
+    # only map paths and status codes onto these results. Auth is
+    # the same is_authorized check the other /api/ routes use, run
+    # at the top of each do_* method.
+
+    def handle_dag_layout(self, body: dict) -> tuple[int, dict]:
+        """Layered layout for a DAG, owned by the server so the
+        editor and any caller agree on where a node goes.
+
+        Body: {"dag": {"nodes": [...]}} (a bare list of nodes, or a
+        dag dict with "steps" instead of "nodes", is also accepted).
+        layer = longest-path depth from roots via depends_on
+        (roots layer 0); x = layer * 200, y = index within the
+        layer * 90. Entries follow topological order. An invalid
+        or missing dag, an empty node id, an unknown dependency,
+        or a cycle is 400, never a half-layout.
+        """
+        from ..agentic.dag import DAG, DAGNode
+        dag_data = body.get("dag", {}) if isinstance(body, dict) else {}
+        if isinstance(dag_data, list):
+            raw_nodes = dag_data
+        elif isinstance(dag_data, dict):
+            raw_nodes = dag_data.get("nodes", dag_data.get("steps"))
+        else:
+            raw_nodes = None
+        if not isinstance(raw_nodes, list) or not raw_nodes:
+            return 400, {"error": "dag object with nodes required"}
+        nodes = []
+        for item in raw_nodes:
+            if not isinstance(item, dict) or not str(item.get("id", "")):
+                return 400, {"error": "every node needs a non-empty id"}
+            try:
+                nodes.append(DAGNode.from_dict(item))
+            except Exception as exc:
+                return 400, {"error": f"invalid node: {exc}"}
+        dag = DAG(nodes)
+        failures = dag.validate()
+        if failures:
+            return 400, {"error": "; ".join(failures)[:500]}
+        layers: dict[str, int] = {}
+        for node in dag.topological_order():
+            deps = [d for d in node.depends_on if d in layers]
+            layers[node.id] = (1 + max(layers[d] for d in deps)) if deps else 0
+        per_layer: dict[int, int] = {}
+        layout = []
+        for node in dag.topological_order():
+            layer = layers[node.id]
+            index = per_layer.get(layer, 0)
+            per_layer[layer] = index + 1
+            layout.append({"id": node.id, "x": layer * 200,
+                           "y": index * 90, "layer": layer})
+        return 200, {"layout": layout}
+
+    def handle_voice(self) -> dict:
+        """Voice capability info: whether spoken replies are
+        announced, and whether a TTS key is configured. No secret
+        is ever returned, only booleans.
+        """
+        return {"announce": bool(getattr(self, "voice_announce", False)),
+                "tts_available": bool(getattr(self, "tts_key", None))}
+
+    def handle_reports_list(self) -> dict:
+        directory = self._json_dir("reports")
+        days = sorted(path.stem for path in directory.glob("*.md"))
+        return {"reports": days}
+
+    def handle_report_get(self, day: str):
+        """Return {"day", "content"} for a stored report, or None
+        when no report exists for that day. The day is sanitised
+        with _safe_name, so a traversal cannot escape reports/.
+        """
+        path = self._json_dir("reports") / f"{self._safe_name(day)}.md"
+        if not path.is_file():
+            return None
+        return {"day": self._safe_name(day),
+                "content": path.read_text(encoding="utf-8")}
+
+    def handle_missions_list(self) -> dict:
+        """Mission records stored under <home>/missions/<project>/
+        mission.json. No missions is an empty list, never an error;
+        a directory without a mission.json is skipped.
+        """
+        records = []
+        missions_dir = self.home / "missions"
+        if missions_dir.is_dir():
+            for project_dir in sorted(missions_dir.iterdir()):
+                if not project_dir.is_dir():
+                    continue
+                data = self._read_json_file(project_dir / "mission.json")
+                if data is not None:
+                    records.append(data)
+        return {"missions": records}
+
+    def handle_capabilities(self) -> dict:
+        """One view over what Aidon can do: sandbox + plugin tool
+        names, skill library names, and MCP server names. A source
+        that is missing or unreadable contributes an empty list,
+        never an error, so the route works on a fresh home.
+        """
+        try:
+            tools = self.handle_tools()
+            tool_names = list(tools.get("sandbox_tools", [])) \
+                + list(tools.get("plugin_tools", []))
+        except Exception:
+            tool_names = []
+        try:
+            from ..capabilities.skill_library import SkillLibrary
+            skill_names = [skill.name for skill in SkillLibrary(self.home).list()]
+        except Exception:
+            skill_names = []
+        mcp_servers: list[str] = []
+        try:
+            data = self._read_json_file(self.home / "mcp_servers.json")
+            if isinstance(data, dict):
+                mcp_servers = [str(key) for key in data]
+            elif isinstance(data, list):
+                mcp_servers = [str(item.get("name", item)) if isinstance(item, dict)
+                               else str(item) for item in data]
+        except Exception:
+            mcp_servers = []
+        return {"tools": tool_names, "skills": skill_names,
+                "mcp_servers": mcp_servers}
+
+    def handle_capability_code(self, name: str):
+        """Python source for a named capability handler, or None
+        when no importable handler carries that name.
+
+        The search covers module-level callables in the
+        capabilities and agentic packages (the handlers a plan
+        step can actually name). Extra-tool closures built
+        inside main._goal_extra_tools are not importable from
+        the server — it holds no config — so they are not
+        listed here; a name that only exists as such a closure
+        is a 404, not a wrong source.
+        """
+        import importlib
+        import inspect
+        import pkgutil
+        wanted = str(name or "")
+        if not wanted:
+            return None
+        for package in ("src.capabilities", "src.agentic"):
+            try:
+                pkg = importlib.import_module(package)
+            except Exception:
+                continue
+            for info in pkgutil.iter_modules(pkg.__path__):
+                try:
+                    module = importlib.import_module(f"{package}.{info.name}")
+                except Exception:
+                    continue
+                candidate = getattr(module, wanted, None)
+                if callable(candidate):
+                    try:
+                        return {"name": wanted,
+                                "code": inspect.getsource(candidate)}
+                    except (OSError, TypeError):
+                        continue
+        return None
+
+    def handle_memory_points(self, collection: str, limit: int = 50) -> dict:
+        """Points from one memory collection, as JSON-safe dicts.
+        limit defaults to 50 and is capped at 200. No memory
+        configured is an empty list, never an error.
+        """
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            limit = 50
+        limit = max(1, min(limit, 200))
+        if self.memory is None:
+            return {"points": []}
+        try:
+            points = self.memory.list_points(collection, limit=limit)
+        except Exception:
+            return {"points": []}
+        out = []
+        for point in points:
+            out.append({"id": getattr(point, "id", ""),
+                        "text": getattr(point, "text", ""),
+                        "payload": dict(getattr(point, "payload", {}) or {})})
+        return {"points": out}
+
+    def handle_memory_point_delete(self, collection: str, point_id: str) -> dict:
+        """Forget one point, via the same forget path the studio
+        memory handler uses. Unknown points (or no memory) report
+        ok False, which the route maps to 404.
+        """
+        if self.memory is None:
+            return {"ok": False}
+        try:
+            return {"ok": bool(self.memory.forget(collection, point_id))}
+        except Exception:
+            return {"ok": False}
+
     def make_handler(self):
         server = self
 
@@ -1854,6 +2051,32 @@ class WebUIServer:
                     requested = query.get("path", [""])[0]
                     status, content_type, data = server.handle_file(requested)
                     self._send_bytes(status, content_type, data)
+                elif parsed.path == "/api/voice":
+                    self._send_json(200, server.handle_voice())
+                elif parsed.path == "/api/reports":
+                    self._send_json(200, server.handle_reports_list())
+                elif parsed.path.startswith("/api/reports/"):
+                    day = parsed.path[len("/api/reports/"):].strip("/")
+                    data = server.handle_report_get(day)
+                    self._send_json(200 if data is not None else 404,
+                                    data or {"error": "not found"})
+                elif parsed.path == "/api/missions":
+                    self._send_json(200, server.handle_missions_list())
+                elif parsed.path == "/api/capabilities":
+                    self._send_json(200, server.handle_capabilities())
+                elif parsed.path == "/api/capabilities/code":
+                    query = parse_qs(parsed.query)
+                    data = server.handle_capability_code(query.get("name", [""])[0])
+                    self._send_json(200 if data is not None else 404,
+                                    data or {"error": "capability not found"})
+                elif parsed.path in ("/api/memory/episodes", "/api/memory/knowledge"):
+                    query = parse_qs(parsed.query)
+                    collection = parsed.path.rsplit("/", 1)[-1]
+                    try:
+                        limit = int(query.get("limit", ["50"])[0])
+                    except ValueError:
+                        limit = 50
+                    self._send_json(200, server.handle_memory_points(collection, limit))
                 elif parsed.path == "/webhook/whatsapp":
                     query = parse_qs(parsed.query)
                     status, text = server.handle_whatsapp_get(query)
@@ -1922,6 +2145,9 @@ class WebUIServer:
                     self._send_json(200, server.handle_chat(body))
                 elif parsed.path == "/api/dags":
                     status, payload = server.handle_dag_save(body)
+                    self._send_json(status, payload)
+                elif parsed.path == "/api/dags/layout":
+                    status, payload = server.handle_dag_layout(body)
                     self._send_json(status, payload)
                 elif parsed.path == "/api/runs":
                     runs = server.run_control.list_runs() if server.run_control else []
@@ -2056,7 +2282,20 @@ class WebUIServer:
 
             def do_DELETE(self):
                 parsed = urlparse(self.path)
-                if parsed.path.startswith("/api/dags/"):
+                if not parsed.path.startswith("/webhook/"):
+                    from .webui_auth import is_authorized
+                    headers = {k.lower(): v for k, v in self.headers.items()}
+                    if not is_authorized(headers, server.webui_token, self.client_address[0]):
+                        self._send_json(401, {"error": "unauthorized"})
+                        return
+                if parsed.path.startswith("/api/memory/episodes/") or \
+                        parsed.path.startswith("/api/memory/knowledge/"):
+                    parts = parsed.path.split("/")
+                    collection = parts[3]
+                    point_id = "/".join(parts[4:]).strip("/")
+                    result = server.handle_memory_point_delete(collection, point_id)
+                    self._send_json(200 if result["ok"] else 404, result)
+                elif parsed.path.startswith("/api/dags/"):
                     dag_id = parsed.path[len("/api/dags/"):]
                     self._send_json(200, server.handle_dag_delete(dag_id))
                 elif parsed.path.startswith("/api/conversations/"):

@@ -51,7 +51,7 @@ def _promotion_ask(point) -> bool:
     return answer in ("y", "yes")
 
 
-def _goal_extra_tools(config, workdir, gate=None) -> dict:
+def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     The loop approval-gates any extra tool whose name contains
@@ -61,6 +61,18 @@ def _goal_extra_tools(config, workdir, gate=None) -> dict:
     write files (charts) are confined to the sandbox workdir.
     No Gmail MCP here: that direction is dropped by the owner,
     Gmail API send already exists via the email draft/sender path.
+    The research/messaging/schedule tools below are the old
+    default-tool set, rebuilt on the same modules the CLI already
+    uses: web_search runs the run's researcher when one is given
+    (otherwise it says so plainly), fetch_url and read_document
+    go through the documents module's SSRF/allowlist guards,
+    search_document uses the home DocStore, search_research_cache
+    uses the home research cache, slack_send and whatsapp_send
+    use the messaging senders (their "send" names keep them
+    approval-gated by the loop, no second gate here), and
+    list_schedule/cancel_schedule use the home Scheduler.
+    Every one of these returns a readable string on failure and
+    never raises out of the tool.
     """
     from pathlib import Path
     workdir = Path(workdir)
@@ -222,9 +234,130 @@ def _goal_extra_tools(config, workdir, gate=None) -> dict:
                                        goal=goal, project_id="default"))
         return f"scheduled {name} ({kind}) {schedule}: {goal}"
 
+    def web_search(query):
+        try:
+            if researcher is None:
+                return "web search not configured: no researcher available for this run"
+            results = researcher(str(query))
+            if not results:
+                return f"web search for {query!r} returned no results"
+            return "\n".join(str(r) for r in results)
+        except Exception as exc:
+            return f"web search failed: {type(exc).__name__}: {exc}"
+
+    def fetch_url(url):
+        try:
+            from ..capabilities.documents import read_document as _read_doc
+            return _read_doc(str(url))
+        except Exception as exc:
+            return f"fetch failed: {type(exc).__name__}: {exc}"
+
+    def read_document(path_or_url):
+        try:
+            from ..capabilities.documents import read_document as _read_doc
+            return _read_doc(str(path_or_url))
+        except Exception as exc:
+            return f"read failed: {type(exc).__name__}: {exc}"
+
+    def search_document(query):
+        try:
+            from ..memory.docstore import DocStore
+            hits = DocStore(home=config.home).search_all(str(query))
+            if not hits:
+                return f"no documents matched {query!r}"
+            lines = []
+            for hit in hits[:6]:
+                text = str(hit.get("text", hit.get("chunk", "")))[:300]
+                lines.append(f"{hit.get('collection', '')}: {text}")
+            return "\n".join(lines)
+        except Exception as exc:
+            return f"document search failed: {type(exc).__name__}: {exc}"
+
+    def search_research_cache(query):
+        try:
+            from ..agentic.research_cache import ResearchCache
+            hits = ResearchCache(config.home).search_research_cache(str(query))
+            if not hits:
+                return f"no cached research matched {query!r}"
+            lines = []
+            for hit in hits[:6]:
+                lines.append(f"{hit.get('url', '')}: " + " | ".join(hit.get("lines", [])[:3]))
+            return "\n".join(lines)
+        except Exception as exc:
+            return f"research cache search failed: {type(exc).__name__}: {exc}"
+
+    def _msg_config():
+        # Config fields (loaded from .env) win; environment fills gaps.
+        # MessagingConfig.from_env alone would miss tokens that live
+        # only in the Config object, not in os.environ.
+        from ..interface.messaging import MessagingConfig
+        env_cfg = MessagingConfig.from_env()
+        return MessagingConfig(
+            whatsapp_token=config.whatsapp_token or env_cfg.whatsapp_token,
+            whatsapp_phone_id=config.whatsapp_phone_id or env_cfg.whatsapp_phone_id,
+            whatsapp_verify_token=config.whatsapp_verify_token or env_cfg.whatsapp_verify_token,
+            whatsapp_app_secret=config.whatsapp_app_secret or env_cfg.whatsapp_app_secret,
+            whatsapp_owner=config.whatsapp_owner or env_cfg.whatsapp_owner,
+            slack_bot_token=config.slack_bot_token or env_cfg.slack_bot_token,
+            slack_signing_secret=config.slack_signing_secret or env_cfg.slack_signing_secret)
+
+    def slack_send(channel, text):
+        try:
+            from ..interface.messaging import send_slack
+            result = send_slack(_msg_config(), str(channel), str(text))
+            if result.get("ok"):
+                return f"slack message sent to {channel} (ts {result.get('ts', '')})"
+            return f"slack send failed: {result.get('error', 'unknown error')}"
+        except Exception as exc:
+            return f"slack send failed: {type(exc).__name__}: {exc}"
+
+    def whatsapp_send(to, text):
+        try:
+            from ..interface.messaging import send_whatsapp
+            result = send_whatsapp(_msg_config(), str(to), str(text))
+            if result.get("ok"):
+                return f"whatsapp message sent to {to} (id {result.get('message_id', '')})"
+            return f"whatsapp send failed: {result.get('error', 'unknown error')}"
+        except Exception as exc:
+            return f"whatsapp send failed: {type(exc).__name__}: {exc}"
+
+    def list_schedule():
+        try:
+            from ..interface.triggers import Scheduler
+            jobs = Scheduler(config.home).jobs
+            if not jobs:
+                return "(no scheduled jobs)"
+            return "\n".join(
+                f"{job.name}: {job.goal} schedule={job.schedule} project={job.project_id}"
+                for job in jobs)
+        except Exception as exc:
+            return f"schedule list failed: {type(exc).__name__}: {exc}"
+
+    def cancel_schedule(name):
+        try:
+            from ..interface.triggers import Scheduler
+            scheduler = Scheduler(config.home)
+            before = len(scheduler.jobs)
+            scheduler.jobs = [job for job in scheduler.jobs if job.name != str(name)]
+            if len(scheduler.jobs) == before:
+                return f"no job named {name}"
+            scheduler.save()
+            return f"cancelled {name}"
+        except Exception as exc:
+            return f"schedule cancel failed: {type(exc).__name__}: {exc}"
+
     tools["ask_user"] = ask_user
     tools["declare_blocked"] = declare_blocked
     tools["schedule_job"] = schedule_job
+    tools["web_search"] = web_search
+    tools["fetch_url"] = fetch_url
+    tools["read_document"] = read_document
+    tools["search_document"] = search_document
+    tools["search_research_cache"] = search_research_cache
+    tools["slack_send"] = slack_send
+    tools["whatsapp_send"] = whatsapp_send
+    tools["list_schedule"] = list_schedule
+    tools["cancel_schedule"] = cancel_schedule
     return tools
 
 
@@ -1192,7 +1325,7 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_gate), router=model_router, versioned_writes=True)
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_gate, researcher=_web_researcher), router=model_router, versioned_writes=True)
             # Swarm, Aidon decides: if the goal genuinely splits,
             # run the subgoals in parallel and merge, else single run.
             try:
@@ -1204,7 +1337,7 @@ def main(argv: list[str] | None = None) -> int:
                                             budget=budget, trace=trace,
                                             model_verifier=ModelVerifier(client),
                                             kernel_mode=config.kernel_mode,
-                                            run_id=run_id, run_control=run_control, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=server.webui_gate.gate), router=model_router, versioned_writes=True)
+                                            run_id=run_id, run_control=run_control, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=server.webui_gate.gate, researcher=_web_researcher), router=model_router, versioned_writes=True)
                     sub_report = sub_runner.run(subgoal)
                     return f"[{sub_report.status}] {', '.join(sub_report.files)} {sub_report.error}".strip()
                 swarm_result = run_swarm(event.goal, client, _swarm_runner)
@@ -1760,7 +1893,7 @@ def main(argv: list[str] | None = None) -> int:
                         budget=budget, trace=trace, model_verifier=model_verifier,
                         kernel_mode=config.kernel_mode, semantic_router=_cli_router,
                         use_semantic_router_skip=True, researcher=_researcher,
-                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate()),
+                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(), researcher=_researcher),
                         router=model_router, versioned_writes=True,
                         run_id=_uuid.uuid4().hex[:12])
     spec = None

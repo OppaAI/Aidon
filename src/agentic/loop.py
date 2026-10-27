@@ -309,6 +309,11 @@ class GoalRunner:
             if skill_texts:
                 system += " Skills, follow them when relevant: " + " ".join(
                     f"{name}: {text[:200]}" for name, text in skill_texts.items())
+        if self.extra_tools and not self.kernel_mode:
+            # Kernel mode restricts _call_tool to seed tools, so
+            # extra tools are advertised only outside kernel mode.
+            system += (" Extra tools available to plan steps: "
+                       + ", ".join(sorted(self.extra_tools)) + ".")
         user = goal
         if spec is not None:
             spec_dict = spec.to_dict() if hasattr(spec, "to_dict") else spec
@@ -564,6 +569,12 @@ class GoalRunner:
             self._trace("recall", "done", "experience recall attempted")
         from .validator import validate_plan, ALLOWED_TOOLS
         _allowed = set(ALLOWED_TOOLS) | {"llm"}
+        if self.extra_tools:
+            # Extra tools are dispatchable by _call_tool, so a plan
+            # step naming one must pass validation here instead of
+            # failing the run up front; the plan-guard cycle check
+            # below reuses this same widened set.
+            _allowed.update(self.extra_tools)
         if self.plugins is not None:
             try:
                 _allowed.update(self.plugins.tool_names())
