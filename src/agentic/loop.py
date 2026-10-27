@@ -515,8 +515,12 @@ class GoalRunner:
                 # post or send tool is approval-gated here, before
                 # dispatch, fail-closed on rejection.
                 if any(word in name for word in ("post", "send", "publish")):
-                    decision = self._ask_for_approval("live", f"Extra tool {name}", self._approval_body(f"Run extra tool {name} with {args}?"))
-                    if decision.verdict != "approved":
+                    decision = self._ask_for_approval(
+                        "live", f"Extra tool {name}",
+                        self._approval_body(f"Run extra tool {name} with {args}?"),
+                        action_class="publish",   # can graduate after threshold
+                    )
+                    if decision.verdict not in ("approved", "auto_approved"):
                         raise ValueError(f"extra tool {name} rejected by approval gate")
                 from ..capabilities.extra_tools import dispatch_extra_tool
                 return dispatch_extra_tool(self.extra_tools, name, args)
