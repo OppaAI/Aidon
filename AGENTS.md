@@ -144,15 +144,20 @@ a rung:
 
 ## Model routing
 
-Two-tier routing (the ClawRouter idea, stolen from OpenClaw/OpenCode):
-when `AIDON_FAST_MODEL` names a different model, cheap phases run on
-the fast tier and hard phases on the strong tier. `AIDON_ROUTER_FAST_PHASES`
-(default `interpret,learn,respond`) picks the fast phases; everything else is
-strong.
-Per-tier calls + tokens land in `aidon report autonomy`. Routing is
-opt-in — empty `AIDON_FAST_MODEL` means everything runs on the strong
-model, exactly as before. When widening the fast phases, watch quality:
-a cheap model that misclassifies in interpret costs more than it saves.
+Two-tier model routing, inspired by approaches used in projects such as OpenClaw and OpenCode.
+
+When `AIDON_FAST_MODEL` specifies a different model, Aidon routes lightweight 
+phases to the fast tier and more demanding phases to the strong tier. 
+`AIDON_ROUTER_FAST_PHASES` (default: `interpret,learn,respond`) determines 
+which phases use the fast tier; all other phases use the strong tier.
+
+Per-tier call and token usage is available through `aidon report autonomy`. 
+Routing is opt-in: when `AIDON_FAST_MODEL` is empty, all phases continue using 
+the strong model, preserving the default behavior.
+
+When expanding the set of fast-routed phases, monitor output quality carefully. 
+A cheaper model that makes mistakes during interpretation can cost more to recover 
+from than it saves in inference costs.
 
 ## Messaging channels (two-way: WhatsApp + Slack; one-way: Threads + Instagram)
 
