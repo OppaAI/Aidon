@@ -1279,7 +1279,7 @@ class WebUIServer:
         {"group": "Research", "settings": [
             {"key": "AIDON_SEARCH_BACKEND", "label": "Search backend", "type": "enum", "default": "tavily", "desc": "Web search backend.", "secret": False, "options": ["tavily", "searxng"]},
             {"key": "AIDON_SEARXNG_URL", "label": "SearXNG URL", "type": "string", "default": "http://localhost:8888", "desc": "SearXNG server for the searxng backend.", "secret": False},
-            {"key": "AIDON_TAVILY_API_KEY", "label": "Tavily API key", "type": "string", "default": "", "desc": "Key for Tavily search.", "secret": True},
+            {"key": "TAVILY_API_KEY", "label": "Tavily API key", "type": "string", "default": "", "desc": "Key for Tavily search.", "secret": True},
             {"key": "AIDON_RESEARCH_MAX_ROUNDS", "label": "Research max rounds", "type": "int", "default": "10", "desc": "Max research rounds per run.", "secret": False},
             {"key": "AIDON_MAX_STUCK_ITERATIONS", "label": "Max stuck iterations", "type": "int", "default": "8", "desc": "Iterations without progress before the run stops.", "secret": False},
             {"key": "AIDON_PARALLEL_TOOLS", "label": "Parallel tools", "type": "int", "default": "4", "desc": "Parallel research/tool workers.", "secret": False},
@@ -1298,7 +1298,12 @@ class WebUIServer:
             {"key": "AIDON_THREADS_ACCESS_TOKEN", "label": "Threads access token", "type": "string", "default": "", "desc": "Threads access token for publishing.", "secret": True},
             {"key": "AIDON_IG_USER_ID", "label": "Instagram user id", "type": "string", "default": "", "desc": "Instagram user id for publishing.", "secret": False},
             {"key": "AIDON_IG_ACCESS_TOKEN", "label": "Instagram access token", "type": "string", "default": "", "desc": "Instagram access token for publishing.", "secret": True},
-            {"key": "AIDON_GITHUB_TOKEN", "label": "GitHub token", "type": "string", "default": "", "desc": "GitHub token for repository tools.", "secret": True},
+            {"key": "GITHUB_TOKEN", "label": "GitHub token", "type": "string", "default": "", "desc": "GitHub token for repository tools.", "secret": True},
+            {"key": "AIDON_SLACK_INBOUND_CHANNEL", "label": "Slack inbound channel(s)", "type": "string", "default": "", "desc": "Comma-separated Slack channel or DM IDs for polling.", "secret": False},
+            {"key": "AIDON_SLACK_POLL_SECONDS", "label": "Slack poll seconds", "type": "int", "default": "10", "desc": "Polling interval for Slack inbound messages.", "secret": False},
+            {"key": "AIDON_SLACK_ACK_AFTER_SECONDS", "label": "Slack acknowledgement delay", "type": "int", "default": "15", "desc": "Seconds before a long-running Slack goal gets an acknowledgement.", "secret": False},
+            {"key": "AIDON_SLACK_AUTOSTART", "label": "Slack polling autostart", "type": "bool", "default": "1", "desc": "Start Slack polling automatically with the WebUI.", "secret": False},
+            {"key": "AIDON_SPARSE_MODEL", "label": "Sparse memory model", "type": "string", "default": "", "desc": "Optional sparse embedding model; empty disables sparse embeddings.", "secret": False},
             {"key": "AIDON_OWNER_EMAIL", "label": "Owner email", "type": "string", "default": "", "desc": "Where drafts and reports to the owner are addressed.", "secret": False},
             {"key": "AIDON_DAILY_REPORT_TIME", "label": "Daily report time", "type": "string", "default": "", "desc": "Time of day for the daily report.", "secret": False},
             {"key": "AIDON_APPROVAL_NUDGE_MIN", "label": "Approval nudge minutes", "type": "int", "default": "15", "desc": "Minutes before an approval card is nudged.", "secret": False},
@@ -1315,6 +1320,9 @@ class WebUIServer:
             {"key": "AIDON_VOICE_ANNOUNCE", "label": "Voice announcements", "type": "bool", "default": "0", "desc": "Automatically play spoken WebUI replies.", "secret": False},
             {"key": "AIDON_FISH_API_KEY", "label": "Fish API key", "type": "string", "default": "", "desc": "Key for Fish TTS.", "secret": True},
             {"key": "AIDON_TRANSCRIBE_API_KEY", "label": "Transcribe API key", "type": "string", "default": "", "desc": "Key for voice transcription.", "secret": True},
+            {"key": "AIDON_WEBUI_PORT", "label": "WebUI port", "type": "int", "default": "8765", "desc": "Port used by launch.sh when starting the WebUI.", "secret": False},
+            {"key": "AIDON_WEBUI_ALLOWED_HOSTS", "label": "WebUI allowed hosts", "type": "string", "default": "", "desc": "Additional Host names accepted by the WebUI.", "secret": False},
+            {"key": "AIDON_VRM_PATH", "label": "Avatar VRM path", "type": "string", "default": "", "desc": "Optional absolute path to the avatar VRM model.", "secret": False},
         ]},
     ]
     _CATALOG_FLOAT_KEYS = frozenset({
