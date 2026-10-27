@@ -10,6 +10,10 @@
 #   ./launch.sh interview "Plan a dinner" --run
 #   ./launch.sh trigger list
 #   ./launch.sh plugin list
+#   ./launch.sh --both
+#     Starts the full WebUI and a separate webhook-only listener. Slack
+#     polling is enabled in the full WebUI when AIDON_SLACK_INBOUND_CHANNEL
+#     is configured.
 #     Passes arguments through to the CLI, instead of
 #     starting the WebUI server.
 #
@@ -52,6 +56,37 @@ if [ ! -f "$AIDON_HOME/.env" ] && [ ! -f "$REPO_DIR/.env" ]; then
 fi
 
 cd "$REPO_DIR"
+
+if [ "${1:-}" = "--both" ]; then
+  WEBUI_PORT=${AIDON_WEBUI_PORT:-8002}
+  WEBHOOK_PORT=${AIDON_WEBHOOK_PORT:-8003}
+
+  if command -v ss >/dev/null 2>&1; then
+    for port in "$WEBUI_PORT" "$WEBHOOK_PORT"; do
+      if ss -ltn "sport = :$port" 2>/dev/null | tail -n +2 | grep -q .; then
+        echo "ERROR: port $port is already in use; stop that process first." >&2
+        exit 1
+      fi
+    done
+  fi
+
+  # The public tunnel should point at this listener. It exposes only the
+  # signed WhatsApp and Slack webhook endpoints.
+  AIDON_SLACK_AUTOSTART=0 "$PYTHON" -m src.system.main webui serve \
+    --webhook-only --port "$WEBHOOK_PORT" &
+  WEBHOOK_PID=$!
+  cleanup() {
+    kill "$WEBHOOK_PID" 2>/dev/null || true
+  }
+  trap cleanup EXIT INT TERM
+
+  echo "Webhook listener on :$WEBHOOK_PORT (pid $WEBHOOK_PID)"
+  echo "WebUI on :$WEBUI_PORT; Ctrl+C stops both"
+  AIDON_SLACK_AUTOSTART=1 "$PYTHON" -m src.system.main webui serve \
+    --port "$WEBUI_PORT"
+  exit $?
+fi
+
 if [ $# -eq 0 ]; then
   exec "$PYTHON" -m src.system.main webui serve
 else

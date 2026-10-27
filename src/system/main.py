@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 
 from ..interface.approval import ApprovalGate, Decision
 from .config import Config
@@ -1361,6 +1362,64 @@ def main(argv: list[str] | None = None) -> int:
         dispatcher.register("webui", _goal_handler)
         dispatcher.register("whatsapp", _goal_handler)
         dispatcher.register("slack", _goal_handler)
+        # Preserve the old ``launch.sh --both`` behavior: the full WebUI
+        # can poll Slack when explicitly enabled, while the separate
+        # webhook-only process does not start a duplicate poller.
+        import os as _slack_os
+        if (_slack_os.environ.get("AIDON_SLACK_AUTOSTART", "0") == "1"
+                and msg.slack_bot_token):
+            from ..interface.messaging import poll_slack_once as _poll_slack_once
+            _channels = [c.strip() for c in _slack_os.environ.get(
+                "AIDON_SLACK_INBOUND_CHANNEL", "").split(",") if c.strip()]
+            if _channels:
+                _poll_seconds = max(3, int(_slack_os.environ.get(
+                    "AIDON_SLACK_POLL_SECONDS", "30")))
+                _cursor_path = config.home / "slack_poll_cursors.json"
+
+                def _slack_poll_loop():
+                    import json as _slack_json
+                    import time as _slack_time
+                    try:
+                        _cursors = _slack_json.loads(_cursor_path.read_text()) \
+                            if _cursor_path.is_file() else {}
+                    except (OSError, ValueError):
+                        _cursors = {}
+                    while True:
+                        for _channel in _channels:
+                            try:
+                                _messages, _last = _poll_slack_once(
+                                    msg, _channel,
+                                    last_ts=str(_cursors.get(_channel, "")))
+                                if _last:
+                                    _cursors[_channel] = _last
+                                    _cursor_path.write_text(
+                                        _slack_json.dumps(_cursors, indent=2))
+                                for _message in _messages:
+                                    _text = _message.get("text", "")
+                                    _replies = []
+                                    _decision = server._resolve_decision(_text)
+                                    if _decision is None:
+                                        _decision = server._resolve_control(_text)
+                                    if _decision is not None:
+                                        _replies.append(_decision)
+                                    else:
+                                        _event = TriggerEvent(
+                                            source="slack", kind="message",
+                                            goal=_text, project_id="default",
+                                            payload={"channel": _channel},
+                                            reply=_replies.append)
+                                        dispatcher.dispatch(_event)
+                                    for _reply in _replies:
+                                        slack_sender(_channel, _reply,
+                                                     _message.get("ts"))
+                            except Exception as _exc:
+                                print(f"Slack poll error: {_exc}")
+                        _slack_time.sleep(_poll_seconds)
+
+                _slack_thread = threading.Thread(
+                    target=_slack_poll_loop, daemon=True, name="slack-inbound")
+                _slack_thread.start()
+                print("Slack inbound polling auto-started")
         missing = msg.whatsapp_missing()
         if missing:
             print(f"WhatsApp not fully configured, missing: {', '.join(missing)}")
