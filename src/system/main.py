@@ -1430,7 +1430,9 @@ def main(argv: list[str] | None = None) -> int:
                 "AIDON_SLACK_INBOUND_CHANNEL", "").split(",") if c.strip()]
             if _channels:
                 _poll_seconds = max(3, int(_slack_os.environ.get(
-                    "AIDON_SLACK_POLL_SECONDS", "30")))
+                    "AIDON_SLACK_POLL_SECONDS", "10")))
+                _ack_after = max(0, int(_slack_os.environ.get(
+                    "AIDON_SLACK_ACK_AFTER_SECONDS", "15")))
                 _cursor_path = config.home / "slack_poll_cursors.json"
 
                 def _slack_poll_loop():
@@ -1465,7 +1467,16 @@ def main(argv: list[str] | None = None) -> int:
                                             goal=_text, project_id="default",
                                             payload={"channel": _channel},
                                             reply=_replies.append)
-                                        dispatcher.dispatch(_event)
+                                        _run_thread = threading.Thread(
+                                            target=dispatcher.dispatch,
+                                            args=(_event,), daemon=True)
+                                        _run_thread.start()
+                                        _run_thread.join(_ack_after)
+                                        if _run_thread.is_alive():
+                                            slack_sender(
+                                                _channel, "Working on it…",
+                                                _message.get("ts"))
+                                        _run_thread.join()
                                     for _reply in _replies:
                                         slack_sender(_channel, _reply,
                                                      _message.get("ts"))
@@ -1486,8 +1497,8 @@ def main(argv: list[str] | None = None) -> int:
             print("Warning: AIDON_WHATSAPP_APP_SECRET not set, webhook signature check is off.")
         if not msg.slack_bot_token:
             print("Slack send not configured: SLACK_BOT_TOKEN not set.")
-        if not msg.slack_signing_secret:
-            print("Warning: SLACK_SIGNING_SECRET not set, Slack signature check is off.")
+        if args.webhook_only and not msg.slack_signing_secret:
+            print("Warning: SLACK_SIGNING_SECRET not set; Slack webhook signature check is off (Slack polling does not need it).")
         if args.webhook_only:
             print(f"Webhook listener on http://127.0.0.1:{args.port}/, WhatsApp and Slack only")
         else:
