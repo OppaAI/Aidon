@@ -3,6 +3,7 @@ from src.agentic.resume import save_run_state, resume_state
 from src.agentic.plan_guard import validate_plan
 from src.agentic.artifact_inventory import inventory_markdown
 from src.agentic.delivery_summary import delivery_summary
+from src.agentic.loop import Plan, RunReport, format_run_stats
 
 
 class _Cfg:
@@ -47,6 +48,14 @@ def test_resume_save_and_show(tmp_path):
 
 def test_delivery_summary_render(tmp_path):
     (tmp_path / "a.md").write_text("x")
-    text = delivery_summary({"goal": "g", "deliverables": {"a.md": True}, "files": ["a.md"], "elapsed": 5, "repairs": 0})
+    text = delivery_summary({"goal": "g", "deliverables": {"a.md": True}, "files": ["a.md"], "elapsed": 5, "model_tokens_estimated": 1234, "repairs": 0})
     assert "a.md" in text and "g" in text
+    assert "**Tokens:** 1,234 (estimated)" in text
     assert "a.md" in inventory_markdown(tmp_path)
+
+
+def test_finished_run_stats_put_tokens_next_to_elapsed():
+    report = RunReport("done", "g", Plan(), True, True,
+                       elapsed_seconds=12.34,
+                       model_tokens_estimated=5678)
+    assert format_run_stats(report) == "⏱️ 12.3s · 5,678 tokens (estimated)"

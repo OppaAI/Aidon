@@ -47,6 +47,7 @@ from ..system.model_client import Message, ModelClient
 from ..capabilities.sandbox import Sandbox
 from ..capabilities.tools import ToolRegistry
 from .verify import verify_plan
+from .elapsed import ElapsedTimer
 
 MAX_ATTEMPTS = 3
 
@@ -113,6 +114,19 @@ class RunReport:
     # approval cards), False means network off, None means
     # unknown (nothing announced, nothing shown).
     network: bool | None = None
+    elapsed_seconds: float = 0.0
+
+
+def format_run_stats(report: RunReport) -> str:
+    """Format the completion metrics shown beside a finished task."""
+    elapsed = max(0.0, float(getattr(report, "elapsed_seconds", 0.0) or 0.0))
+    if elapsed >= 60:
+        minutes, seconds = divmod(int(round(elapsed)), 60)
+        elapsed_text = f"{minutes}m {seconds}s"
+    else:
+        elapsed_text = f"{elapsed:.1f}s"
+    tokens = int(getattr(report, "model_tokens_estimated", 0) or 0)
+    return f"⏱️ {elapsed_text} · {tokens:,} tokens (estimated)"
 
 
 class GoalRunner:
@@ -512,6 +526,7 @@ class GoalRunner:
 
     def run(self, goal: str, spec=None, research_report=None,
             live_actions=None) -> RunReport:
+        self._elapsed_timer = ElapsedTimer().start()
         # Sandbox network-on announcement, one line on
         # stderr at run start. Unknown (None) or off says
         # nothing.
@@ -656,6 +671,10 @@ class GoalRunner:
 
     def _finalize(self, report: RunReport) -> RunReport:
         """Fill model-usage and adaptation fields, from the counting client if present."""
+        timer = getattr(self, "_elapsed_timer", None)
+        if timer is not None:
+            timer.stop()
+            report.elapsed_seconds = round(timer.elapsed_total(), 1)
         client = self.client
         if hasattr(client, "calls") and hasattr(client, "tokens_estimated"):
             report.model_calls = int(client.calls)
@@ -699,7 +718,9 @@ class GoalRunner:
                 "goal": report.goal,
                 "deliverables": {f: (f in report.files) for f in report.plan.deliverables},
                 "files": list(report.files),
-                "elapsed": 0, "repairs": max(0, report.attempts - 1)})
+                "elapsed": report.elapsed_seconds,
+                "model_tokens_estimated": report.model_tokens_estimated,
+                "repairs": max(0, report.attempts - 1)})
             if report.error:
                 report.narration = problem_narration(
                     report.error, {"goal": report.goal, "attempts": report.attempts})

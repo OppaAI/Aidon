@@ -31,7 +31,7 @@ import threading
 
 from ..interface.approval import ApprovalGate, Decision
 from .config import Config
-from ..agentic.loop import GoalRunner
+from ..agentic.loop import GoalRunner, format_run_stats
 from .model_client import FakeClient
 from ..capabilities.sandbox import Sandbox
 
@@ -1619,7 +1619,7 @@ def main(argv: list[str] | None = None) -> int:
         server.voice_announce = config.voice_announce
 
         def _goal_handler(event):
-            from ..agentic.loop import GoalRunner
+            from ..agentic.loop import GoalRunner, format_run_stats
             from ..interface.run_control import new_run_id
             from ..agentic.budgets import Budget
             from ..agentic.trace import TraceRecorder
@@ -1716,15 +1716,15 @@ def main(argv: list[str] | None = None) -> int:
             report = runner.run(event.goal)
             run_control.set_status(run_id, report.status)
             if report.status == "chat":
-                _surface_reply(report.chat_reply or "Received.")
+                _surface_reply((report.chat_reply or "Received.") + "\n" + format_run_stats(report))
             elif report.status == "done":
-                _surface_reply(f"Done: {', '.join(report.files)}")
+                _surface_reply(f"Done: {', '.join(report.files)}\n{format_run_stats(report)}")
             elif report.status == "rejected":
-                _surface_reply("Rejected, no live action taken.")
+                _surface_reply("Rejected, no live action taken.\n" + format_run_stats(report))
             elif report.status == "cancelled":
-                _surface_reply("Cancelled, no further steps run.")
+                _surface_reply("Cancelled, no further steps run.\n" + format_run_stats(report))
             else:
-                _surface_reply(f"Failed: {report.error}")
+                _surface_reply(f"Failed: {report.error}\n{format_run_stats(report)}")
 
         dispatcher.register("webui", _goal_handler)
         dispatcher.register("whatsapp", _goal_handler)
@@ -2377,6 +2377,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"approved: {report.approved}")
         print(f"files: {', '.join(report.files)}")
         print(f"attempts: {report.attempts}")
+        print(format_run_stats(report))
         if report.error:
             print(f"error: {report.error}")
             return 1
@@ -2473,6 +2474,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"approved: {report.approved}")
     print(f"files: {', '.join(report.files)}")
     print(f"attempts: {report.attempts}")
+    print(format_run_stats(report))
     if report.error:
         print(f"error: {report.error}")
         return 1

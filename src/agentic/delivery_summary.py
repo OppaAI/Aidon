@@ -46,6 +46,10 @@ def delivery_summary(report: dict) -> str:
     if elapsed is not None:
         lines.append(f"**Elapsed:** {elapsed}")
         lines.append("")
+    tokens = report.get("model_tokens_estimated", report.get("tokens_used"))
+    if tokens is not None:
+        lines.append(f"**Tokens:** {int(tokens):,} (estimated)")
+        lines.append("")
     repairs = report.get("repairs")
     if repairs is not None:
         if isinstance(repairs, list):
