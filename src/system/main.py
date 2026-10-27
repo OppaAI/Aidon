@@ -169,8 +169,15 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
                          voice_id or getattr(config, "tts_voice_id", ""))
             return str(result.get("ok", False))
 
-        def transcribe_audio(audio_bytes, key=""):
-            result = transcribe(audio_bytes, key or getattr(config, "transcribe_api_key", ""))
+        def transcribe_audio(audio, key=""):
+            # The old tool accepted a local audio path; the WebUI uses raw
+            # bytes. Support both forms so migrated goals keep working.
+            if isinstance(audio, (str, Path)):
+                path = _confined(str(audio))
+                if not path.is_file():
+                    return f"TRANSCRIBE_FAILED: no such file: {audio}"
+                audio = path.read_bytes()
+            result = transcribe(bytes(audio), key or getattr(config, "transcribe_api_key", ""))
             return result.get("text", "")
 
         tools["tts_speak"] = tts_speak
@@ -276,6 +283,26 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
             return decision.verdict == "approved", decision.verdict
         except Exception as exc:
             return False, f"approval failed: {exc}"
+
+    # Recording host audio is a sensitive side effect. Keep the old
+    # mandatory approval boundary even though the recorder itself lives in
+    # capabilities/audio.py.
+    if "record_system_audio" in tools:
+        _record_system_audio = tools["record_system_audio"]
+
+        def approved_record_system_audio(seconds, output="recording.wav"):
+            target = _confined(output)
+            ok, why = _approval(
+                "record", "Record system audio",
+                f"Capture {seconds} seconds of host audio to {target}")
+            if not ok:
+                return f"recording rejected: {why}"
+            try:
+                return _record_system_audio(int(seconds), str(target))
+            except Exception as exc:
+                return f"recording failed: {type(exc).__name__}: {exc}"
+
+        tools["record_system_audio"] = approved_record_system_audio
 
     try:
         from ..capabilities.install import (apt_install as _apt_install,
