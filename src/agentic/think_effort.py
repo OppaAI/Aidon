@@ -13,6 +13,8 @@ where thinking harder cannot fix the problem.
 
 from __future__ import annotations
 
+import os
+
 EFFORT_LEVELS = ("off", "low", "medium", "high")
 
 _EFFORT_TABLE = {
@@ -49,7 +51,22 @@ def effort_for(phase: str, overrides: dict | None = None) -> str:
 
 def sampling_for(phase: str) -> dict:
     """Sampling parameters for a phase; unknown phases get the default."""
-    return dict(_SAMPLING_TABLE.get(phase, _DEFAULT_SAMPLING))
+    result = dict(_SAMPLING_TABLE.get(phase, _DEFAULT_SAMPLING))
+    # Preserve old per-phase .env overrides, e.g.
+    # AIDON_TEMP_VERIFY=0.0 and AIDON_TOP_P_RESPOND=0.95.
+    temp = os.environ.get(f"AIDON_TEMP_{str(phase).upper()}")
+    top_p = os.environ.get(f"AIDON_TOP_P_{str(phase).upper()}")
+    try:
+        if temp is not None and temp.strip():
+            result["temperature"] = float(temp)
+    except ValueError:
+        pass
+    try:
+        if top_p is not None and top_p.strip():
+            result["top_p"] = float(top_p)
+    except ValueError:
+        pass
+    return result
 
 
 def resolve_effort(phase: str, requested: str | None = None,
