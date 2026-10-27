@@ -281,14 +281,14 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
     except Exception:
         pass
 
-    def _approval(kind, title, body):
-        if gate is None:
-            return False, "no approval gate configured"
-        try:
-            decision = gate.ask(kind, title, body)
-            return decision.verdict in ("approved", "auto_approved"), decision.verdict
-        except Exception as exc:
-            return False, f"approval failed: {exc}"
+    def _approval(kind, title, body, action_class=None, force_ask=False):
+        ...
+        decision = gate.ask(
+            kind, title, body,
+            action_class=action_class,
+            force_ask=force_ask,
+        )
+        return decision.verdict in ("approved", "auto_approved"), decision.verdict
 
     # Recording host audio is a sensitive side effect. Keep the old
     # mandatory approval boundary even though the recorder itself lives in
@@ -483,14 +483,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         pass
 
     def ask_user(question):
-        if gate is None:
-            return "no gate configured"
-        try:
-            decision = gate.ask("live", "Aidon asks", str(question))
-            if decision.verdict != "approved":
-                return f"question not approved: {question}"
-        except Exception:
-            pass
+        # Interview / clarifying questions are chat turns, not approval cards.
         return str(question)
 
     def declare_blocked(reason):
