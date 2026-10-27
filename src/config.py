@@ -113,6 +113,7 @@ class Config:
     corrected_subject: bool = True
     # Old routing / kernel keys, only, no new duplicates.
     fast_model: str = ""
+    image_model: str = "muse-image-1.0"
     router_fast_phases: str = "interpret,learn,respond"
     kernel_mode: bool = False
 
@@ -185,6 +186,7 @@ class Config:
             owner_email=os.environ.get("AIDON_OWNER_EMAIL", ""),
             corrected_subject=os.environ.get("AIDON_CORRECTED_SUBJECT", "1") not in ("0", "false", "no"),
             fast_model=os.environ.get("AIDON_FAST_MODEL", ""),
+            image_model=os.environ.get("AIDON_IMAGE_MODEL", "muse-image-1.0"),
             router_fast_phases=os.environ.get("AIDON_ROUTER_FAST_PHASES", "interpret,learn,respond"),
             kernel_mode=os.environ.get("AIDON_KERNEL", "0") not in ("0", "false", "no"),
         )

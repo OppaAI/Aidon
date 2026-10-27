@@ -44,14 +44,14 @@ MODEL = "muse-image-1.0"
 
 
 def generate_image(prompt: str, api_key: str, endpoint: str,
-                   size: str = "1024x1024", post=None) -> bytes:
+                   size: str = "1024x1024", post=None, model: str = MODEL) -> bytes:
     """Generate one image, or raise. Approval is the caller's job, before this call."""
     if not prompt.strip():
         raise ValueError("image prompt is required")
     if not api_key:
         raise ValueError("Muse Image API key is required, generation is credit-gated, never run without a key")
     url = endpoint.rstrip("/") + "/images/generations"
-    payload = {"model": MODEL, "prompt": prompt, "size": size}
+    payload = {"model": model, "prompt": prompt, "size": size}
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     if post is not None:
         data = post(url, headers, payload)
@@ -74,7 +74,7 @@ def generate_image(prompt: str, api_key: str, endpoint: str,
 
 
 def edit_image(prompt: str, api_key: str, endpoint: str,
-               reference_images: list, size: str = "1024x1024", post=None) -> bytes:
+               reference_images: list, size: str = "1024x1024", post=None, model: str = MODEL) -> bytes:
     """Edit or compose from reference images, 1 to 10, not text-to-image alone.
 
     This is the second Muse Image endpoint, POST /v1/images/edits,
@@ -111,7 +111,7 @@ def edit_image(prompt: str, api_key: str, endpoint: str,
     if not reference_images or len(reference_images) > 10:
         raise ValueError("Muse Image edit needs 1 to 10 reference images, not 0, not more than 10")
     url = endpoint.rstrip("/") + "/images/edits"
-    payload = {"model": MODEL, "prompt": prompt, "size": size,
+    payload = {"model": model, "prompt": prompt, "size": size,
                "images": list(reference_images)}
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     if post is not None:

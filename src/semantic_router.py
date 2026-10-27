@@ -105,20 +105,93 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 class SemanticRouter:
-    """Embedding-based chat / webchat / artifact / agentic classifier."""
+    """Embedding-based chat / webchat / artifact / agentic classifier.
 
-    def __init__(self, embedder, example_vectors: dict | None = None):
-        self._embed = embedder.embed_dense
+    Pre-made vectors? No, not in the repo, and not required.
+    By default the router computes the example vectors on
+    first construction, by embedding the 4 example lists,
+    about 57 phrases, with the embedder already loaded for
+    memory, and keeps them in memory for that router. That
+    is cheap, but it repeats on every new router, and the
+    WebUI handler builds a router per run, so it repeats
+    per run. With cache_path, the first construction writes
+    the vectors to that JSON file, pre-made from then on,
+    and later constructions load them, no re-embedding,
+    unless the embedder name or the example lists change,
+    in which case the cache is ignored and recomputed.
+    The cache file lives under the Aidon home, never in
+    the repo, because vectors depend on the embedder model,
+    and a HashEmbedder cache must never be reused for a
+    real EmbeddingGemma 2 embedder, or vice versa.
+    """
+
+    def __init__(self, embedder, example_vectors: dict | None = None, cache_path=None):
+        # Embedder interface, in order: embed_dense, embed_batch,
+        # or single embed. HashEmbedder and EmbeddingGemma 2
+        # use embed_batch, old Aidon used embed_dense, so accept
+        # all three, otherwise the router silently disables itself
+        # in the WebUI handler's try/except, which is what was
+        # happening before this fix, because HashEmbedder has no
+        # embed_dense, and the real embedder has embed_batch.
+        if hasattr(embedder, "embed_dense"):
+            self._embed = embedder.embed_dense
+        elif hasattr(embedder, "embed_batch"):
+            self._embed = embedder.embed_batch
+        else:
+            self._embed = lambda texts: [embedder.embed(text) for text in texts]
+        self._embedder_name = type(embedder).__name__
+        self.cache_path = cache_path
         if example_vectors is not None:
             self._chat_vecs = example_vectors["chat"]
             self._webchat_vecs = example_vectors["webchat"]
             self._agentic_vecs = example_vectors["agentic"]
             self._artifact_vecs = example_vectors["artifact"]
-        else:
-            self._chat_vecs = self._embed(CHAT_EXAMPLES)
-            self._webchat_vecs = self._embed(WEBCHAT_EXAMPLES)
-            self._agentic_vecs = self._embed(AGENTIC_EXAMPLES)
-            self._artifact_vecs = self._embed(ARTIFACT_EXAMPLES)
+            return
+        cached = self._load_cache(cache_path) if cache_path else None
+        if cached is not None:
+            self._chat_vecs = cached["chat"]
+            self._webchat_vecs = cached["webchat"]
+            self._agentic_vecs = cached["agentic"]
+            self._artifact_vecs = cached["artifact"]
+            return
+        self._chat_vecs = self._embed(CHAT_EXAMPLES)
+        self._webchat_vecs = self._embed(WEBCHAT_EXAMPLES)
+        self._agentic_vecs = self._embed(AGENTIC_EXAMPLES)
+        self._artifact_vecs = self._embed(ARTIFACT_EXAMPLES)
+        if cache_path:
+            self._save_cache(cache_path)
+
+    def _load_cache(self, cache_path):
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+            data = _json.loads(_Path(cache_path).read_text())
+            if data.get("embedder") != self._embedder_name:
+                return None
+            if data.get("examples") != {"chat": CHAT_EXAMPLES, "webchat": WEBCHAT_EXAMPLES,
+                                        "agentic": AGENTIC_EXAMPLES, "artifact": ARTIFACT_EXAMPLES}:
+                return None
+            vecs = data["vectors"]
+            if len(vecs["chat"]) != len(CHAT_EXAMPLES) or len(vecs["webchat"]) != len(WEBCHAT_EXAMPLES):
+                return None
+            return vecs
+        except Exception:
+            return None
+
+    def _save_cache(self, cache_path):
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+            path = _Path(cache_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data = {"embedder": self._embedder_name,
+                    "examples": {"chat": CHAT_EXAMPLES, "webchat": WEBCHAT_EXAMPLES,
+                                 "agentic": AGENTIC_EXAMPLES, "artifact": ARTIFACT_EXAMPLES},
+                    "vectors": {"chat": self._chat_vecs, "webchat": self._webchat_vecs,
+                                "agentic": self._agentic_vecs, "artifact": self._artifact_vecs}}
+            path.write_text(_json.dumps(data))
+        except Exception:
+            pass
 
     def classify(self, text: str) -> tuple[str, float]:
         vec = self._embed([text])[0]
