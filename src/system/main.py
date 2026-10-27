@@ -1623,6 +1623,12 @@ def main(argv: list[str] | None = None) -> int:
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
                                 researcher=_web_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_gate, researcher=_web_researcher), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, sandbox))
+            def _surface_reply(text):
+                # The WebUI already displays and polls the run ID. Keep the
+                # ID in Slack/WhatsApp replies where it is needed for
+                # cross-surface control commands, but do not show it in chat.
+                event.send_reply(str(text) if event.source == "webui"
+                                 else f"[{run_id}] {text}")
             # Swarm, Aidon decides: if the goal genuinely splits,
             # run the subgoals in parallel and merge, else single run.
             try:
@@ -1642,22 +1648,22 @@ def main(argv: list[str] | None = None) -> int:
                     return f"[{sub_report.status}] {', '.join(sub_report.files)} {sub_report.error}".strip()
                 swarm_result = run_swarm(event.goal, client, _swarm_runner)
                 if swarm_result.get("swarmed"):
-                    event.send_reply(f"[{run_id}] Swarm, subgoals: {', '.join(swarm_result['subgoals'])}\n{swarm_result['merged']}")
+                    _surface_reply(f"Swarm, subgoals: {', '.join(swarm_result['subgoals'])}\n{swarm_result['merged']}")
                     return
             except Exception:
                 pass
             report = runner.run(event.goal)
             run_control.set_status(run_id, report.status)
             if report.status == "chat":
-                event.send_reply(f"[{run_id}] {report.chat_reply or 'Received.'}")
+                _surface_reply(report.chat_reply or "Received.")
             elif report.status == "done":
-                event.send_reply(f"[{run_id}] Done: {', '.join(report.files)}")
+                _surface_reply(f"Done: {', '.join(report.files)}")
             elif report.status == "rejected":
-                event.send_reply(f"[{run_id}] Rejected, no live action taken.")
+                _surface_reply("Rejected, no live action taken.")
             elif report.status == "cancelled":
-                event.send_reply(f"[{run_id}] Cancelled, no further steps run.")
+                _surface_reply("Cancelled, no further steps run.")
             else:
-                event.send_reply(f"[{run_id}] Failed: {report.error}")
+                _surface_reply(f"Failed: {report.error}")
 
         dispatcher.register("webui", _goal_handler)
         dispatcher.register("whatsapp", _goal_handler)
