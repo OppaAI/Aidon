@@ -1993,6 +1993,14 @@ class WebUIServer:
                 self.end_headers()
                 self.wfile.write(data)
 
+            def _send_text(self, status: int, value: str):
+                data = str(value).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
             def _send_html(self, status: int, html: str):
                 data = html.encode()
                 self.send_response(status)
@@ -2390,7 +2398,16 @@ class WebUIServer:
                 elif parsed.path == "/webhook/slack":
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     status, payload = server.handle_slack_post(raw, headers, body)
-                    self._send_json(status, payload)
+                    # Slack URL verification is strict about seeing the
+                    # challenge value in the response body. Return it as
+                    # plain text instead of wrapping it in another JSON
+                    # object through the generic response helper.
+                    if (status == 200 and body.get("type") == "url_verification"
+                            and isinstance(payload, dict)
+                            and "challenge" in payload):
+                        self._send_text(status, payload["challenge"])
+                    else:
+                        self._send_json(status, payload)
                 else:
                     self._send_json(404, {"error": "not found"})
 
