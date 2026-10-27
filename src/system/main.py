@@ -36,13 +36,19 @@ from .model_client import FakeClient
 from ..capabilities.sandbox import Sandbox
 
 
-def _cli_gate(timeout_seconds: int = 180) -> ApprovalGate:
+def _cli_gate(home, timeout_seconds: int = 180) -> ApprovalGate:
+    from ..interface.autonomy import policy_for
+
     def decide(kind: str, title: str, body: str) -> Decision:
         print(f"\n[{kind}] {title}\n{body}\n")
         answer = input("Approve? [y/N] ").strip().lower()
         return Decision("approved" if answer in ("y", "yes") else "rejected")
 
-    return ApprovalGate(decide, timeout_seconds=timeout_seconds)
+    return ApprovalGate(
+        decide,
+        timeout_seconds=timeout_seconds,
+        policy=policy_for(home),
+    )
 
 
 def _network_available(execution_backend, sandbox) -> bool:
