@@ -2050,6 +2050,24 @@ class WebUIServer:
         wanted = str(name or "")
         if not wanted:
             return None
+        # Goal-run tools are closures assembled by main.py, so they do not
+        # exist as importable module-level functions. They are nevertheless
+        # real tools; show their builder source instead of returning a
+        # misleading 404 from the capabilities studio.
+        try:
+            from ..capabilities.tool_catalog import all_tool_names
+            if wanted in all_tool_names():
+                if wanted in {"write", "read", "list", "shell", "calculate"}:
+                    source_module = importlib.import_module("src.capabilities.tools")
+                    source = inspect.getsource(source_module.ToolRegistry)
+                    note = "Built-in sandbox tool; implementation is shown from ToolRegistry."
+                else:
+                    source_module = importlib.import_module("src.system.main")
+                    source = inspect.getsource(source_module._goal_extra_tools)
+                    note = "Goal tool assembled by _goal_extra_tools; implementation is shown from its builder."
+                return {"name": wanted, "code": source, "origin": "core", "note": note}
+        except (ImportError, OSError, TypeError):
+            pass
         for package in ("src.capabilities", "src.agentic"):
             try:
                 pkg = importlib.import_module(package)
