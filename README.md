@@ -1,4 +1,14 @@
-# Aidon
+# 🤖 Aidon
+
+**Autonomous AI agent for safe, verifiable goal execution.**
+
+[![Repo](https://img.shields.io/badge/Repo-OppaAI%2FAidon-76B900)](https://github.com/OppaAI/Aidon)
+![Status](https://img.shields.io/badge/Status-experimental-orange.svg)
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![Sandbox](https://img.shields.io/badge/Sandbox-bubblewrap%20%7C%20Docker-2496ED?logo=docker&logoColor=white)
+![Memory](https://img.shields.io/badge/Memory-Qdrant-8E75B2)
+
+---
 
 **Autonomous AI agent. You give it one goal — it does the rest.**
 

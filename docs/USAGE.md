@@ -1,6 +1,6 @@
-# Usage
+# 📖 Usage
 
-## WebUI and messaging
+## 🖥️ WebUI and messaging
 
 - WebUI: `./launch.sh` starts the WebUI server on
   `http://127.0.0.1:8765/` by default (`AIDON_WEBUI_PORT`
@@ -16,7 +16,7 @@
   `AIDON_WHATSAPP_TOKEN`, `AIDON_WHATSAPP_PHONE_ID`,
   `AIDON_WHATSAPP_VERIFY_TOKEN`,
   `AIDON_WHATSAPP_APP_SECRET`, `AIDON_WHATSAPP_OWNER`,
-  and `SLACK_BOT_TOKEN`, plus `SLACK_SIGNING_SECRET`,
+  and `SLACK_BOT_TOKEN`, plus `AIDON_SLACK_SIGNING_SECRET`,
   which is new, because old Slack was polling, not a
   webhook. WhatsApp is owner only, empty owner means
   inbound disabled, never open to everyone. Slack
@@ -300,8 +300,9 @@ collection, never a silent resize.
 **Recall, hybrid:** dense plus sparse, fused with RRF,
 over-fetching 2x, in Qdrant with named vectors `dense` and
 `sparse`, and the same RRF shape in the in-memory fallback.
-Sparse is SPLADE when `AIDON_SPARSE_MODEL` is set, otherwise
-keyword sparse, no extra download. `recall_both` embeds once
+Sparse is SPLADE when `AIDON_SPARSE_MODEL` is set and the
+optional `sparse` extra is installed; otherwise it falls back
+to keyword sparse weights with no extra download. `recall_both` embeds once
 and recalls episodic plus knowledge. A recall is an access:
 access count, last accessed, and distinct access days are
 updated, and a deterministic forgetting curve, 21-day

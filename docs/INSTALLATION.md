@@ -1,6 +1,6 @@
-# Installation
+# 🧰 Installation
 
-## Run it
+## 🚀 Run it
 
 ```sh
 ./setup.sh
@@ -25,12 +25,16 @@ only, not installed by setup, and not needed now.
 then starts the WebUI server with the same home, backend, and
 ingest path.
 
-Configuration is just an endpoint, a key, and a model name:
+At minimum, configure an endpoint, key, and model. Optional features can be installed separately:
 
 - `AIDON_API_ENDPOINT` — endpoint URL for the model API
 - `AIDON_API_KEY` — API key for that endpoint
 - `AIDON_MODEL` — model name at that endpoint
 - `AIDON_HOME` — where Aidon keeps its state (default `~/.aidon`)
+
+The base install does not pull heavyweight ML packages. Use `uv sync --extra memory`,
+`--extra embed`, `--extra sparse`, `--extra vision`, `--extra kb`, or `--extra docs`
+for the corresponding capabilities. `./setup.sh --with-optional` installs all optional groups.
 
 Setup and launch, in that order, are the entry points, as in the old Aidon guides.
 

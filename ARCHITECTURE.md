@@ -1,4 +1,4 @@
-# Architecture
+# 🏗️ Architecture
 
 Aidon is an autonomous agent: the user gives only a goal,
 in plain language, and Aidon researches, plans, tests in
@@ -7,6 +7,23 @@ approval, and learns from the run, so the next similar
 goal starts from what actually worked.
 
 ## Run order
+
+```mermaid
+flowchart LR
+    A[🎯 Goal] --> B[🧭 Interpret]
+    B --> C[💬 Interview / Spec]
+    C --> D[🧠 Recall]
+    D --> E[🔎 Research]
+    E --> F[📋 Plan DAG]
+    F --> G[🧪 Sandbox]
+    G --> H[✅ Verify]
+    H -->|failed| I[🔧 Repair]
+    I --> G
+    H --> J{👤 Approval}
+    J -->|rejected / timeout| K[🛑 Stop]
+    J -->|approved| L[🚀 Live]
+    L --> M[📚 Learn]
+```
 
 1. Interpret: a chat message, an attached spec sheet,
    a trigger event, or a v1 or MCP goal submission.
@@ -44,6 +61,23 @@ goal starts from what actually worked.
     that flag or that request.
 
 ## Components
+
+```mermaid
+flowchart TB
+    UI[🖥️ WebUI / CLI / WhatsApp / Slack]
+    T[⚡ Trigger dispatcher]
+    LOOP[🔁 Goal runner]
+    TOOLS[🧰 Tools and plugins]
+    SANDBOX[🔒 Bubblewrap or Docker]
+    MEMORY[(🧠 Qdrant / memory)]
+    APPROVAL[👤 Approval gate]
+    REPORT[📊 Trace, reports, metrics]
+    UI --> T --> LOOP
+    LOOP --> MEMORY
+    LOOP --> TOOLS --> SANDBOX
+    LOOP --> APPROVAL --> SANDBOX
+    LOOP --> REPORT
+```
 
 - Model client: endpoint, key, and model name only,
   OpenAI-compatible chat completions, stdlib urllib,

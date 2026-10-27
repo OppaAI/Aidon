@@ -1,6 +1,19 @@
-# Configuration
+# ⚙️ Configuration
 
 Aidon reads runtime settings from a local `.env` file. Keep secrets local and never commit `.env`.
+
+Base installation is intentionally lightweight. Optional capabilities are installed with extras:
+
+```sh
+uv sync --extra memory   # Qdrant vector storage
+uv sync --extra embed    # SentenceTransformers/Torchvision embeddings
+uv sync --extra sparse   # FastEmbed/SPLADE sparse recall
+uv sync --extra vision   # Pillow image and video handling
+uv sync --extra kb       # PDF, Word, and HTML parsing
+uv sync --extra docs     # EPUB and universal document tooling
+```
+
+`./setup.sh` offers these packages interactively; `./setup.sh --with-optional` installs all of them.
 
 ## Models
 
@@ -33,11 +46,20 @@ There is no central Aidon cloud, and your data is not sent to
 one. Your memory, workdirs, and keys stay on your machine,
 under your Aidon home, outside this repository.
 
-Configuration is just an endpoint, a key, and a model name, plus the Aidon home:
+Important runtime settings include the model backend, execution isolation, memory, messaging, budgets, and the Aidon home:
 
 - `AIDON_API_ENDPOINT` — endpoint URL for the model API
 - `AIDON_API_KEY` — API key for that endpoint
 - `AIDON_MODEL` — model name at that endpoint
 - `AIDON_HOME` — where Aidon keeps its state (default `~/.aidon`)
+- `AIDON_EXECUTION_BACKEND` — `bubblewrap` by default, or `docker`
+- `AIDON_DOCKER_IMAGE` — Docker image when Docker execution is selected
+- `AIDON_DOCKER_NETWORK` — keep `0` unless network access is required
+- `AIDON_EMBED_MODEL` / `AIDON_SPARSE_MODEL` — dense and sparse memory models
+- `AIDON_VERIFIER_MODEL` — optional independent local verifier model
+- `AIDON_THINK_PHASES` — local-model phases that may use extended thinking
+- `AIDON_SLACK_SIGNING_SECRET` — Slack webhook signing secret
+
+See `examples/.env.example` for the complete commented configuration.
 
 See `examples/.env.example` for the full list, with old key names only, no duplicates.

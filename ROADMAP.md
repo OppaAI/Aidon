@@ -1,11 +1,11 @@
-# Roadmap
+# 🗺️ Roadmap
 
 Status, as of the current head: built, in the repo,
 tested, and verified by API read-back, unless a line
 says otherwise. Post-hackathon items are marked
 post-hackathon, NOT built, NOT demoed, at the end.
 
-## Built
+## ✅ Built
 
 - Skeleton: config, generic model client, approval gate,
   sandbox, goal loop, CLI.

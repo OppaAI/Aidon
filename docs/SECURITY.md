@@ -1,8 +1,8 @@
-# Security notes
+# 🛡️ Security notes
 
 Aidon can write files, execute generated commands in a sandbox, and connect to external services. Treat it as software with meaningful permissions, not as a harmless chatbot. This page summarizes operational precautions, it is not a formal security audit or a guarantee.
 
-## Security boundaries
+## 🔐 Security boundaries
 
 - Approval is for decisions, chat is for conversation.
   Questions have no clock and no card, decisions have
