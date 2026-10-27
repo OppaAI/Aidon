@@ -1713,11 +1713,18 @@ class WebUIServer:
     def handle_tools(self) -> dict:
         from ..capabilities.plugins import PluginRegistry
         from ..capabilities.tool_catalog import all_tool_names
+        from ..capabilities.tool_discovery import list_tools as discover_tools
         registry = PluginRegistry(self.home)
         registry.load_all()
         plugin_tools = registry.tool_names()
+        # Keep the static core manifest for built-in tools, but merge the
+        # live registry as well. Adopted tools therefore cannot disappear
+        # from the WebUI just because the manifest was not edited.
+        live_names = [str(item.get("name", "")) for item in discover_tools(self.home)
+                      if item.get("name")]
+        goal_tools = list(dict.fromkeys(all_tool_names(plugin_tools) + live_names))
         return {"sandbox_tools": ["write", "read", "list", "shell", "calculate"],
-                "goal_tools": all_tool_names(plugin_tools),
+                "goal_tools": goal_tools,
                 "plugin_tools": plugin_tools}
 
     _FILE_CONTENT_TYPES = {

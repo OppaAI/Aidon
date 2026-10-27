@@ -13,13 +13,6 @@ resolution-markers = [
 name = "aidon"
 version = "0.1.0"
 source = { editable = "." }
-dependencies = [
-    { name = "fastembed" },
-    { name = "pillow" },
-    { name = "qdrant-client" },
-    { name = "sentence-transformers", extra = ["image"] },
-    { name = "torchvision" },
-]
 
 [package.optional-dependencies]
 docs = [
@@ -27,8 +20,8 @@ docs = [
     { name = "markitdown" },
 ]
 embed = [
-    { name = "pillow" },
     { name = "sentence-transformers" },
+    { name = "torchvision" },
     { name = "transformers" },
 ]
 kb = [
@@ -36,28 +29,31 @@ kb = [
     { name = "pypdf" },
     { name = "python-docx" },
 ]
+memory = [
+    { name = "qdrant-client" },
+]
 sparse = [
     { name = "fastembed" },
+]
+vision = [
+    { name = "pillow" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", marker = "extra == 'kb'" },
     { name = "ebooklib", marker = "extra == 'docs'", specifier = ">=0.20" },
-    { name = "fastembed", specifier = ">=0.3" },
-    { name = "fastembed", marker = "extra == 'sparse'" },
+    { name = "fastembed", marker = "extra == 'sparse'", specifier = ">=0.3" },
     { name = "markitdown", marker = "extra == 'docs'", specifier = ">=0.1.9" },
-    { name = "pillow", specifier = ">=13.0.0" },
-    { name = "pillow", marker = "extra == 'embed'" },
+    { name = "pillow", marker = "extra == 'vision'", specifier = ">=13.0.0" },
     { name = "pypdf", marker = "extra == 'kb'" },
     { name = "python-docx", marker = "extra == 'kb'" },
-    { name = "qdrant-client", specifier = ">=1.10" },
+    { name = "qdrant-client", marker = "extra == 'memory'", specifier = ">=1.10" },
     { name = "sentence-transformers", marker = "extra == 'embed'", specifier = ">=6.1" },
-    { name = "sentence-transformers", extras = ["image"], specifier = ">=6.1" },
-    { name = "torchvision", specifier = ">=0.29.1" },
+    { name = "torchvision", marker = "extra == 'embed'", specifier = ">=0.29.1" },
     { name = "transformers", marker = "extra == 'embed'" },
 ]
-provides-extras = ["embed", "sparse", "kb", "docs"]
+provides-extras = ["embed", "vision", "memory", "sparse", "kb", "docs"]
 
 [[package]]
 name = "annotated-doc"
@@ -2367,11 +2363,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/66/ae/aac4fcaf7aa27daee96aa15d74770b38bb5ff50b1d31ccf12becd68c6e8b/sentence_transformers-6.2.0-py3-none-any.whl", hash = "sha256:ffb51ccfef65427cfa61776d0eeeb257600b0099cf0c7533ae9a6856d31e4665", size = 760709, upload-time = "2026-10-21T12:26:49.022Z" },
 ]
 
-[package.optional-dependencies]
-image = [
-    { name = "transformers", extra = ["vision"] },
-]
-
 [[package]]
 name = "setuptools"
 version = "84.2.1"
@@ -2589,12 +2580,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f6/9d/59e6232df8761e2c82d52e0bef5382e830d1cd65f02f648712ccd7675e7b/transformers-5.21.0.tar.gz", hash = "sha256:43c971a3eb9ab68dc9dfff430f8ab8a0fba09af2f68b608fd70c6245d2ddb8e7", size = 10321727, upload-time = "2026-10-26T18:17:26.892Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/73/fa/fb638d54bffff44700c8d487608c1f2872823e606fbd043b3c29c93236cf/transformers-5.21.0-py3-none-any.whl", hash = "sha256:8803a8712932aa3441c1e8bb340e66d5e3eca079fe65d9b717ede2f3ead01c79", size = 12978463, upload-time = "2026-10-26T18:17:23.647Z" },
-]
-
-[package.optional-dependencies]
-vision = [
-    { name = "pillow" },
-    { name = "torchvision" },
 ]
 
 [[package]]
