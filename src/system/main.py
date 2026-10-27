@@ -2139,14 +2139,22 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"Job {job.name}: report\n{_daily(config.home)}")
                     _handled = True
                 elif job.kind == "chain":
-                    from ..capabilities.chain import run_chain as _run_chain
+                    from ..capabilities.chain import (
+                        run_chain as _run_chain,
+                        run_conditional_chain as _run_cond,
+                    )
                     from ..capabilities.tools import ToolRegistry as _ChainTools
                     import json as _chain_json
                     _chain = _chain_json.loads(job.goal)
                     _tools = _ChainTools(
                         sandbox.workdir, sandbox=sandbox,
                         network_available=_network_available(_backend, sandbox))
-                    _chain_result = _run_chain(_chain, _tools)
+                    if isinstance(_chain, list):
+                        def _invoke(name, args):
+                            return _tools.call(name, args)
+                        _chain_result = _run_cond(_chain, _invoke)
+                    else:
+                        _chain_result = _run_chain(_chain, _tools)
                     print(f"Job {job.name}: chain {_chain_result}")
                     _handled = True
                 elif job.kind == "brief":
