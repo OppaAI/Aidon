@@ -1640,10 +1640,14 @@ def main(argv: list[str] | None = None) -> int:
             server.webui_gate.nudge_tracker = NudgeTracker(
                 nudge_minutes=config.approval_nudge_minutes,
                 channel=config.approval_nudge_channel)
-            server.webui_gate.autonomy_tracker = AutonomyTracker(
-                enabled=config.autonomy_enabled, threshold=config.autonomy_threshold,
+            from ..interface.autonomy import policy_for
+            server.webui_gate.gate.policy = policy_for(
+                config.home,
+                threshold=config.autonomy_threshold,
                 decay_days=config.autonomy_decay_days,
-                path=config.home / "autonomy.json")
+            )
+            # Optional: disable AutonomyTracker so it cannot double-count
+            server.webui_gate.autonomy_tracker = None
             server.webui_gate.slack_sender = slack_sender
             plugins = PluginRegistry(config.home)
             plugins.load_all()
