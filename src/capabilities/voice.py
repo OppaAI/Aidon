@@ -37,6 +37,7 @@ def tts(text: str, fish_key: str, voice_id: str = "", post=None) -> dict:
         request = urllib.request.Request(
             "https://api.fish.audio/v1/tts", data=data, method="POST",
             headers={"Authorization": f"Bearer {fish_key}",
+                     "model": "s2.1-pro-free",
                      "Content-Type": "application/json"})
         with urllib.request.urlopen(request, timeout=60) as response:
             return {"ok": True, "audio": response.read()}

@@ -1885,7 +1885,14 @@ class WebUIServer:
         if not tts_key:
             return 501, {"error": "TTS key not configured"}
         from ..capabilities.voice import tts as _tts
-        result = _tts(str(body.get("text", "")), tts_key,
+        import re
+        text = str(body.get("text", "")).strip()
+        if not text:
+            return 400, {"error": "empty text"}
+        text = text[:2000]
+        text = re.sub(r"[#>*`_\[\]()|]", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        result = _tts(text, tts_key,
                       str(body.get("voice_id", "")))
         if not result.get("ok"):
             return 500, {"error": result.get("error", "TTS failed")}
