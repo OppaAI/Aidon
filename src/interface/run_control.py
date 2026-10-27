@@ -97,6 +97,15 @@ class RunControl:
         self._path(run_id).write_text(json.dumps(record, indent=2))
         return True
 
+    def set_status(self, run_id: str, status: str) -> bool:
+        """Record the terminal/current status of a run."""
+        record = self.get(run_id)
+        if record is None:
+            return False
+        record["status"] = str(status)
+        self._path(run_id).write_text(json.dumps(record, indent=2))
+        return True
+
     def is_cancelled(self, run_id: str | None) -> bool:
         if not run_id:
             return False

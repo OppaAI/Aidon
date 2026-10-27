@@ -780,6 +780,7 @@ class WebUIServer:
         self.webhook_only = webhook_only
         self.media_downloader = media_downloader
         self.run_control = run_control
+        self._web_runs: dict[str, dict] = {}
         self.webui_token = webui_token
         self.transcribe_key = transcribe_key
         self.tts_key = tts_key
@@ -855,6 +856,59 @@ class WebUIServer:
         except Exception as exc:
             return {"reply": f"Error: {exc}"}
         return {"reply": replies[0] if replies else "Received."}
+
+    def start_goal(self, body: dict) -> dict:
+        """Start the same dispatcher path used by messaging triggers."""
+        from .run_control import new_run_id
+        goal = str(body.get("goal", "")).strip()
+        if not goal:
+            return {"error": "goal is required"}
+        project_id = str(body.get("project_id", "default") or "default")
+        run_id = new_run_id()
+        if self.run_control is not None:
+            self.run_control.register(run_id, goal, project_id)
+        record = {"run_id": run_id, "goal": goal, "project_id": project_id,
+                  "status": "running", "events": [], "trace": []}
+        self._web_runs[run_id] = record
+
+        def reply(text):
+            record["events"].append({"kind": "aidon-final", "text": str(text)})
+
+        event = TriggerEvent(source="webui", kind="goal", goal=goal,
+                             project_id=project_id,
+                             payload={"run_id": run_id,
+                                      "guidance": str(body.get("guidance", ""))},
+                             reply=reply)
+
+        def dispatch():
+            try:
+                self.dispatcher.dispatch(event)
+            except Exception as exc:
+                record["events"].append({"kind": "aidon-final",
+                                         "text": f"Error: {exc}"})
+                if self.run_control is not None:
+                    self.run_control.set_status(run_id, "failed")
+
+        threading.Thread(target=dispatch, daemon=True,
+                         name=f"aidon-run-{run_id}").start()
+        return {"run_id": run_id, "conversation_id": body.get("conversation_id", "")}
+
+    def run_snapshot(self, run_id: str) -> dict | None:
+        record = self._web_runs.get(run_id)
+        control = self.run_control.get(run_id) if self.run_control is not None else None
+        if record is None and control is None:
+            return None
+        out = dict(record or {})
+        if control:
+            out.update({"status": control.get("status", out.get("status", "running")),
+                        "goal": control.get("goal", out.get("goal", ""))})
+        out.setdefault("events", [])
+        out.setdefault("trace", [])
+        out["event_total"] = len(out["events"])
+        out["trace_total"] = len(out["trace"])
+        pending = self.webui_gate.pending_cards()
+        out["pending"] = pending[0] if pending else None
+        return out
 
     def handle_whatsapp_get(self, query: dict) -> tuple[int, str]:
         mode = query.get("hub.mode", [""])[0]
