@@ -1554,6 +1554,7 @@ def main(argv: list[str] | None = None) -> int:
                              run_control=run_control,
                              webui_token=config.webui_token or None,
                              transcribe_key=config.transcribe_api_key or config.api_key or None,
+                             tts_key=config.fish_api_key or config.api_key or None,
                              config=config)
 
         def _goal_handler(event):

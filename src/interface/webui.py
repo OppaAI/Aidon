@@ -1889,7 +1889,9 @@ class WebUIServer:
                       str(body.get("voice_id", "")))
         if not result.get("ok"):
             return 500, {"error": result.get("error", "TTS failed")}
-        return 200, {"ok": True, "audio_bytes": len(result.get("audio", b""))}
+        return 200, {"ok": True,
+                     "audio_bytes": len(result.get("audio", b"")),
+                     "_audio": result.get("audio", b"")}
 
     def handle_goal_with_images(self, body: dict) -> dict:
         import base64 as _b64
@@ -2670,7 +2672,18 @@ loadSettings();
                     self._send_json(200, server.handle_report_generate(body))
                 elif parsed.path == "/api/tts":
                     status, payload = server.handle_tts(body)
-                    self._send_json(status, payload)
+                    audio = payload.pop("_audio", None) if isinstance(payload, dict) else None
+                    if status == 200 and isinstance(audio, (bytes, bytearray)):
+                        self.send_response(200)
+                        self.send_header("Content-Type", "audio/mpeg")
+                        self.send_header("Content-Length", str(len(audio)))
+                        self.end_headers()
+                        try:
+                            self.wfile.write(audio)
+                        except (BrokenPipeError, ConnectionResetError):
+                            return
+                    else:
+                        self._send_json(status, payload)
                 elif parsed.path == "/api/goals/with-images":
                     self._send_json(200, server.handle_goal_with_images(body))
                 elif parsed.path == "/api/plugins/adopt":
