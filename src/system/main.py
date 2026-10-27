@@ -1848,9 +1848,19 @@ def main(argv: list[str] | None = None) -> int:
         from ..capabilities.plugins import PluginRegistry
         plugins = PluginRegistry(config.home)
         plugins.load_all()
+        def _interview_researcher(goal_text):
+            try:
+                from ..agentic.research_allow import DomainGrants, load_allowlist
+                from ..capabilities.search import search as _search
+                result = _search(goal_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url,
+                                 allowlist=load_allowlist(config.home, config.research_allowlist),
+                                 grants=DomainGrants(config.home))
+                return [f"{r.get('title', '')}: {r.get('snippet', '')}" for r in result.get("results", [])]
+            except Exception:
+                return []
         goal_runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
                                  memory=memory, promotion_ask=_promotion_ask,
-                                 project_id=args.project, plugins=plugins, execution_backend=execution_backend, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate()), router=model_router, versioned_writes=True)
+                                 project_id=args.project, plugins=plugins, execution_backend=execution_backend, researcher=_interview_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(), researcher=_interview_researcher), router=model_router, versioned_writes=True)
         report = goal_runner.run(args.text, spec=result.spec)
         print(f"status: {report.status}")
         print(f"verified: {report.verified}")
