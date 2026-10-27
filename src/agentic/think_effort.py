@@ -77,6 +77,12 @@ def sampling_for(phase: str) -> dict:
                 result["seed"] = int(raw_seed)
             except ValueError:
                 pass
+    phases_raw = os.environ.get("AIDON_THINK_PHASES")
+    if phases_raw is not None:
+        phases = {part.strip().lower() for part in phases_raw.split(",")
+                  if part.strip()}
+        result["think"] = ("all" in phases or
+                            str(phase).lower() in phases)
     return result
 
 

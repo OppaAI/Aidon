@@ -197,6 +197,8 @@ class OllamaClient(ModelClient):
     def chat(self, messages: list[Message], sampling=None) -> str:
         body = self._body(messages)
         if sampling:
+            if sampling.get("think") is not None:
+                body["think"] = bool(sampling["think"])
             body.setdefault("options", {})
             if sampling.get("temperature") is not None:
                 body["options"]["temperature"] = sampling["temperature"]

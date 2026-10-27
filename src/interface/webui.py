@@ -1259,6 +1259,7 @@ class WebUIServer:
             {"key": "AIDON_VERIFIER_MODEL", "label": "Verifier model", "type": "string", "default": "", "desc": "Independent model for verification; empty uses the main model.", "secret": False},
             {"key": "AIDON_VERIFY_SEED", "label": "Verifier seed", "type": "string", "default": "42", "desc": "Deterministic verify seed; leave empty to disable.", "secret": False},
             {"key": "AIDON_VISION_TIERS", "label": "Vision tiers", "type": "string", "default": "strong", "desc": "Comma-separated model tiers allowed to receive images.", "secret": False},
+            {"key": "AIDON_THINK_PHASES", "label": "Thinking phases", "type": "string", "default": "interpret,verify", "desc": "Comma-separated phases that enable Ollama thinking; empty disables phase overrides.", "secret": False},
             {"key": "AIDON_MAX_TOKENS_PER_RUN", "label": "Max tokens per run", "type": "int", "default": "200000", "desc": "Hard token budget for one goal run.", "secret": False},
             {"key": "AIDON_MAX_STEPS", "label": "Max steps", "type": "int", "default": "50", "desc": "Hard step budget for one goal run.", "secret": False},
             {"key": "AIDON_MAX_WALLCLOCK_MIN", "label": "Max wallclock minutes", "type": "int", "default": "60", "desc": "Hard wallclock budget for one goal run, in minutes.", "secret": False},
