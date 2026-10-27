@@ -3,6 +3,7 @@
 **Autonomous AI agent for safe, verifiable goal execution.**
 
 [![Repo](https://img.shields.io/badge/Repo-OppaAI%2FAidon-D9578C)](https://github.com/OppaAI/Aidon)
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/Status-experimental-orange.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu&logoColor=white)
