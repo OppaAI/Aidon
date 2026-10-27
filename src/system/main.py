@@ -1488,8 +1488,11 @@ def main(argv: list[str] | None = None) -> int:
             print("Slack send not configured: SLACK_BOT_TOKEN not set.")
         if not msg.slack_signing_secret:
             print("Warning: SLACK_SIGNING_SECRET not set, Slack signature check is off.")
-        print(f"WebUI on http://127.0.0.1:{args.port}/, localhost only, WhatsApp and Slack webhooks at /webhook/whatsapp and /webhook/slack")
-        print("Public reachability still needs a tunnel, localhost alone is not reachable by Meta or Slack.")
+        if args.webhook_only:
+            print(f"Webhook listener on http://127.0.0.1:{args.port}/, WhatsApp and Slack only")
+        else:
+            print(f"WebUI on http://127.0.0.1:{args.port}/, localhost only, WhatsApp and Slack webhooks at /webhook/whatsapp and /webhook/slack")
+            print("Public reachability still needs a tunnel, localhost alone is not reachable by Meta or Slack.")
         server.serve(port=args.port)
         return 0
     if args.command == "v1":
