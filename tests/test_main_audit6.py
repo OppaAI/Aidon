@@ -43,8 +43,8 @@ def test_cli_gate_default_timeout_is_180(tmp_path):
     assert _cli_gate(tmp_path).timeout_seconds == 180
 
 
-def test_cli_gate_accepts_configured_timeout():
-    assert _cli_gate(42).timeout_seconds == 42
+def test_cli_gate_accepts_configured_timeout(tmp_path):
+    assert _cli_gate(tmp_path, 42).timeout_seconds == 42
 
 
 def test_declare_blocked_keeps_exact_string_shape():
