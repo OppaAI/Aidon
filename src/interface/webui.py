@@ -637,16 +637,20 @@ animate();
 class WebUIGate:
     """Approval gate backed by WebUI cards, fail-closed on timeout.
 
-    Autonomy and nudges, wired here, not as a separate flow:
-    - On card creation, a pending time is recorded, and a
-      daemon thread nudges via the Slack sender after
+    Cards and nudges live here; graduated autonomy lives on the
+    inner ApprovalGate (same AutonomyPolicy / autonomy.json as CLI).
+
+    - On card creation, a pending time is recorded, and a daemon
+      thread nudges via the Slack sender after
       AIDON_APPROVAL_NUDGE_MIN minutes, once per card, via
       NudgeTracker, so an away owner is nudged, not looped.
-    - On approval, AutonomyTracker records the stake, so
-      low and medium stakes can earn standing permission
-      after the threshold, while high stakes, including
-      live execution, never auto-approve. A card that
-      qualifies for autonomy returns approved without a card.
+    - Autonomy: pass policy= into __init__ (or set
+      self.gate.policy later). Callers use self.gate.ask(...,
+      action_class=..., force_ask=...). High-stakes and
+      force_ask paths always prompt; medium classes can
+      auto-approve after the threshold. autonomy_tracker is
+      optional legacy only — leave it None so counts are not
+      double-recorded.
     """
 
     def __init__(self, timeout_seconds: int = 180, nudge_tracker=None,
