@@ -1057,7 +1057,22 @@ def main(argv: list[str] | None = None) -> int:
             print(skill if skill else f"No skill {args.name}"); return 0 if skill else 2
         if args.action == "promote":
             print(lib.promote(args.name, {"passed": True, "evidence": "CLI promote"})); return 0
+        # src/system/main.py — skill-library trust branch
         if args.action == "trust":
+            skill = lib.get(args.name)
+            if skill is None:
+                print(f"No skill {args.name}"); return 2
+            action_class = "skill_privileged" if skill.privileged else "skill"
+            gate = _cli_gate(config.home)
+            decision = gate.ask(
+                "skill",
+                f"Trust skill {args.name}?",
+                f"Promote {args.name} (v{skill.version}) to trusted.\n"
+                f"{skill.description or '(no description)'}",
+                action_class=action_class,
+            )
+            if decision.verdict not in ("approved", "auto_approved", "edited"):
+                print(f"trust rejected: {decision.verdict}"); return 1
             print(lib.trust(args.name, approved=True)); return 0
         if args.action == "retire":
             print(lib.retire(args.name, "retired from CLI")); return 0
