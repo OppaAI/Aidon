@@ -489,8 +489,12 @@ class GoalRunner:
             command_text = " ".join(str(c) for c in args.get("command", [])) if isinstance(args.get("command"), list) else str(args.get("command", ""))
             reason = command_needs_mandatory_approval(command_text)
             if reason:
-                decision = self._ask_for_approval("live", f"Mandatory approval: shell ({reason})", self._approval_body(f"Run shell command: {command_text}?"))
-                if decision.verdict != "approved":
+                decision = self._ask_for_approval(
+                    "live", f"Mandatory approval: shell ({reason})",
+                    self._approval_body(f"Run shell command: {command_text}?"),
+                    force_ask=True,
+                )
+                if decision.verdict not in ("approved", "edited"):
                     raise ValueError(f"shell command rejected by approval gate ({reason})")
         if name == "shell" and self.execution_backend is not None:
             command = args["command"]
