@@ -5,14 +5,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.approval import ApprovalGate, Decision
-from src.embedder import HashEmbedder
-from src.loop import GoalRunner
-from src.memory import Memory
-from src.model_client import FakeClient
-from src.sandbox import Sandbox
-from src.semantic_router import SemanticRouter
-from src.unity import UnityAssetBuilder
+from src.interface.approval import ApprovalGate, Decision
+from src.memory.embedder import HashEmbedder
+from src.agentic.loop import GoalRunner
+from src.memory.memory import Memory
+from src.core.model_client import FakeClient
+from src.capabilities.sandbox import Sandbox
+from src.agentic.semantic_router import SemanticRouter
+from src.capabilities.unity import UnityAssetBuilder
 
 
 def test_semantic_router_classifies_and_loop_guard():

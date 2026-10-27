@@ -5,12 +5,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.sam import FakeSAMClient
-from src.video import annotate_frames, edit_video, encode_frames, extract_frames, ffmpeg_available
+from src.capabilities.sam import FakeSAMClient
+from src.capabilities.video import annotate_frames, edit_video, encode_frames, extract_frames, ffmpeg_available
 
 
 def test_daily_report_fix(tmp_path):
-    from src.scheduler_loop import daily_report
+    from src.interface.scheduler_loop import daily_report
     (tmp_path / "learned").mkdir()
     # Old file, no status, no project_id, only goal and deliverables: report must not be empty
     (tmp_path / "learned" / "last_run.json").write_text('{"goal": "plan dinner", "deliverables": ["menu.pdf"]}')

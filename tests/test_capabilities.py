@@ -7,13 +7,13 @@ results. Publishing and email to non-owners are approval
 gated, fail closed.
 """
 
-from src import search as search_mod
-from src import youtube as youtube_mod
-from src import voice as voice_mod
-from src import social as social_mod
-from src import github_tools as github_mod
-from src import email as email_mod
-from src.scheduler_loop import (AutonomyTracker, NudgeTracker,
+from src.capabilities import search as search_mod
+from src.capabilities import youtube as youtube_mod
+from src.capabilities import voice as voice_mod
+from src.capabilities import social as social_mod
+from src.capabilities import github_tools as github_mod
+from src.capabilities import email as email_mod
+from src.interface.scheduler_loop import (AutonomyTracker, NudgeTracker,
                                 SchedulerLoop, daily_report)
 
 

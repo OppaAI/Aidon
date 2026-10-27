@@ -7,14 +7,14 @@ is used when qdrant_client is installed, via make_store(),
 with the same collection / point / search shape.
 """
 
-from src.approval import ApprovalGate, Decision
-from src.embedder import HashEmbedder
-from src.experience import build_experience, recall_experiences, store_experience
-from src.kb import KnowledgeBase, chunk_text
-from src.loop import GoalRunner
-from src.memory import InMemoryStore, Memory
-from src.model_client import FakeClient
-from src.sandbox import Sandbox
+from src.interface.approval import ApprovalGate, Decision
+from src.memory.embedder import HashEmbedder
+from src.memory.experience import build_experience, recall_experiences, store_experience
+from src.memory.kb import KnowledgeBase, chunk_text
+from src.agentic.loop import GoalRunner
+from src.memory.memory import InMemoryStore, Memory
+from src.core.model_client import FakeClient
+from src.capabilities.sandbox import Sandbox
 
 
 def _memory(tmp_path):

@@ -12,15 +12,15 @@ Kernel blocks non-seed tools, semantic router classifies
 by embedding, with no LLM call, low confidence to agentic.
 """
 
-from src.kernel import kernel_allowed, kernel_filter_tools
-from src.loop import GoalRunner
-from src.model_client import FakeClient, Message, image_message
-from src.router import RoutedClient
-from src.semantic_router import SemanticRouter
-from src.swarm import decide_subgoals, run_swarm
-from src.verifier_model import ModelVerifier
-from src.approval import ApprovalGate
-from src.sandbox import Sandbox
+from src.agentic.kernel import kernel_allowed, kernel_filter_tools
+from src.agentic.loop import GoalRunner
+from src.core.model_client import FakeClient, Message, image_message
+from src.agentic.router import RoutedClient
+from src.agentic.semantic_router import SemanticRouter
+from src.agentic.swarm import decide_subgoals, run_swarm
+from src.agentic.verifier_model import ModelVerifier
+from src.interface.approval import ApprovalGate
+from src.capabilities.sandbox import Sandbox
 
 
 def test_image_message_payload():
@@ -91,7 +91,7 @@ def test_loop_model_verifier_no_triggers_repair(tmp_path):
     # Code verifier passes, model verifier says NO, so the
     # run should repair, not approve, and with a FakeClient
     # plan it will fail after attempts, not go live.
-    from src.approval import Decision
+    from src.interface.approval import Decision
     client = FakeClient('{"steps": [{"tool": "write", "args": {"file": "a.md", "text": "hello"}, "deliverable": "a.md"}], "deliverables": ["a.md"], "criteria": []}')
     # FakeClient always returns the plan, so model verifier
     # needs a separate client that says NO.

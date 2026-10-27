@@ -13,12 +13,12 @@ import time
 import urllib.request
 from http.server import HTTPServer
 
-from src.messaging import (MessagingConfig, normalize_number, parse_decision,
+from src.interface.messaging import (MessagingConfig, normalize_number, parse_decision,
                            send_slack, send_whatsapp,
                            verify_whatsapp_signature)
-from src.triggers import TriggerDispatcher
-from src.v1 import AuthStore
-from src.webui import WebUIServer
+from src.interface.triggers import TriggerDispatcher
+from src.interface.v1 import AuthStore
+from src.interface.webui import WebUIServer
 
 
 def _start_server(tmp_path):
@@ -148,7 +148,7 @@ def test_whatsapp_approve_resolves_card(tmp_path):
         card_id_holder: list[str] = []
 
         def decide(kind, title, body):
-            from src.approval import Decision
+            from src.interface.approval import Decision
             card_id_holder.append("card-1")
             return Decision("approved")
 

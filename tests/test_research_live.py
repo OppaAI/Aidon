@@ -9,12 +9,12 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from src.approval import ApprovalGate, Decision
-from src.live import LiveExecutor
-from src.loop import GoalRunner
-from src.model_client import FakeClient
-from src.research import Researcher
-from src.sandbox import Sandbox
+from src.interface.approval import ApprovalGate, Decision
+from src.capabilities.live import LiveExecutor
+from src.agentic.loop import GoalRunner
+from src.core.model_client import FakeClient
+from src.agentic.research import Researcher
+from src.capabilities.sandbox import Sandbox
 
 
 class _Handler(BaseHTTPRequestHandler):

@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.sam import FakeSAMClient, SAMClient, build_object_prompt, parse_sam_output
+from src.capabilities.sam import FakeSAMClient, SAMClient, build_object_prompt, parse_sam_output
 
 
 def test_parse_sam_output():

@@ -9,11 +9,11 @@ These tests prove the core shape, not the full agent:
   fake client standing in for the real endpoint in tests
 """
 
-from src.approval import ApprovalGate, Decision
-from src.config import Config
-from src.loop import GoalRunner
-from src.model_client import FakeClient
-from src.sandbox import Sandbox
+from src.interface.approval import ApprovalGate, Decision
+from src.core.config import Config
+from src.agentic.loop import GoalRunner
+from src.core.model_client import FakeClient
+from src.capabilities.sandbox import Sandbox
 
 
 def test_sandbox_runs_in_workdir(tmp_path):

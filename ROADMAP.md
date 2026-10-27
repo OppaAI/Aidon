@@ -119,7 +119,7 @@ post-hackathon, NOT built, NOT demoed, at the end.
   editing: segment and track objects in images
   and video frames, boxes, confidences, and mask
   metadata, via the Meta Model API Responses API.
-- Video pipeline, built now, src/video.py, CLI
+- Video pipeline, built now, src/capabilities/video.py, CLI
   video edit: ffmpeg extracts frames, SAM segments
   each frame, PIL annotates boxes on frames, ffmpeg
   re-encodes to a new video. Box overlay, not

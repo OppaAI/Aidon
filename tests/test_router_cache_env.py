@@ -6,9 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.config import Config
-from src.embedder import HashEmbedder
-from src.semantic_router import SemanticRouter
+from src.core.config import Config
+from src.memory.embedder import HashEmbedder
+from src.agentic.semantic_router import SemanticRouter
 
 
 class CountingEmbedder(HashEmbedder):

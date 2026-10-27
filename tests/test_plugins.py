@@ -8,11 +8,11 @@ adopted only after approval, with warnings on the card.
 
 import json
 
-from src.approval import ApprovalGate, Decision
-from src.loop import GoalRunner
-from src.model_client import FakeClient
-from src.plugins import PluginRegistry, load_plugin, scan_plugin
-from src.sandbox import Sandbox
+from src.interface.approval import ApprovalGate, Decision
+from src.agentic.loop import GoalRunner
+from src.core.model_client import FakeClient
+from src.capabilities.plugins import PluginRegistry, load_plugin, scan_plugin
+from src.capabilities.sandbox import Sandbox
 
 
 def _plugin_dir(tmp_path, name="upper", code=None, skills=None):

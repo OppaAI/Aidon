@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.webui import CHAT_HTML, VRM_HTML
+from src.interface.webui import CHAT_HTML, VRM_HTML
 
 
 def test_robot_avatar_default():

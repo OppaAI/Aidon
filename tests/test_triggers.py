@@ -8,7 +8,7 @@ from datetime import datetime
 
 import pytest
 
-from src.triggers import (ALLOWED_SOURCES, IngestWatcher, Scheduler,
+from src.interface.triggers import (ALLOWED_SOURCES, IngestWatcher, Scheduler,
                           SchedulerJob, TriggerDispatcher, TriggerEvent,
                           handle_webhook)
 

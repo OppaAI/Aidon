@@ -5,11 +5,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.approval import Decision
-from src.model_summary import rolling_summary_model
-from src.preapproval_gate import PreapprovalGate
-from src.redaction import redact_dict, redact_text
-from src.research_agents import run_research_agents
+from src.interface.approval import Decision
+from src.memory.model_summary import rolling_summary_model
+from src.interface.preapproval_gate import PreapprovalGate
+from src.memory.redaction import redact_dict, redact_text
+from src.agentic.research_agents import run_research_agents
 
 
 def test_research_agents_merge_dedup_and_one_angle_failure():

@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from src.execution import (BubblewrapBackend, DockerBackend,
+from src.capabilities.execution import (BubblewrapBackend, DockerBackend,
                            make_backend)
-from src.sandbox import Sandbox
+from src.capabilities.sandbox import Sandbox
 
 
 def test_docker_command_is_locked_down(tmp_path):

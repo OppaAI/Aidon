@@ -9,11 +9,11 @@ embedding. Files are copied under a tmp home, never the repo.
 
 import math
 
-from src.embedder import (DIM, EmbeddingGemma2Embedder, HashEmbedder,
+from src.memory.embedder import (DIM, EmbeddingGemma2Embedder, HashEmbedder,
                           make_embedder)
-from src.kb import KnowledgeBase
-from src.library import Library, library_url
-from src.memory import InMemoryStore, Memory
+from src.memory.kb import KnowledgeBase
+from src.memory.library import Library, library_url
+from src.memory.memory import InMemoryStore, Memory
 
 
 class _StubModel:

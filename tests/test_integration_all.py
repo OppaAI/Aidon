@@ -5,16 +5,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.approval import ApprovalGate, Decision
-from src.dag_store import DagStore
-from src.embedder import HashEmbedder
-from src.loop import GoalRunner
-from src.memory import Memory
-from src.model_client import FakeClient
-from src.sandbox import Sandbox
-from src.v1 import AuthStore, GoalStore, handle
-from src.mcp_server import MCPServer
-from src.webui import WebUIServer
+from src.interface.approval import ApprovalGate, Decision
+from src.agentic.dag_store import DagStore
+from src.memory.embedder import HashEmbedder
+from src.agentic.loop import GoalRunner
+from src.memory.memory import Memory
+from src.core.model_client import FakeClient
+from src.capabilities.sandbox import Sandbox
+from src.interface.v1 import AuthStore, GoalStore, handle
+from src.interface.mcp_server import MCPServer
+from src.interface.webui import WebUIServer
 
 
 def test_memory_redacts_at_record(tmp_path):

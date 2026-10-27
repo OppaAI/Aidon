@@ -6,15 +6,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.gmail import gmail_sender, refresh_access_token
-from src.mcp_client import McpClient
-from src.memory_extras import backup, export_points, redact, rolling_summary
-from src.preapproval import PreapprovalStore
-from src.research_allow import is_allowed, load_allowlist, research_multiround
-from src.youtube_transcript import fetch_transcript
-from src.messaging import poll_slack_once, MessagingConfig
-from src.webui import WebUIServer
-from src.triggers import TriggerDispatcher
+from src.capabilities.gmail import gmail_sender, refresh_access_token
+from src.interface.mcp_client import McpClient
+from src.memory.memory_extras import backup, export_points, redact, rolling_summary
+from src.interface.preapproval import PreapprovalStore
+from src.agentic.research_allow import is_allowed, load_allowlist, research_multiround
+from src.capabilities.youtube_transcript import fetch_transcript
+from src.interface.messaging import poll_slack_once, MessagingConfig
+from src.interface.webui import WebUIServer
+from src.interface.triggers import TriggerDispatcher
 
 
 def test_gmail_sender_fake(tmp_path):

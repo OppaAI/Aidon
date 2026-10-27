@@ -5,9 +5,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.elapsed import ElapsedTimer
-from src.gmail_read import read_inbox
-from src.metrics import grade, grade_from_directory
+from src.agentic.elapsed import ElapsedTimer
+from src.capabilities.gmail_read import read_inbox
+from src.agentic.metrics import grade, grade_from_directory
 
 
 def test_grade_passes_fails_and_score():

@@ -6,9 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.charts import bar_chart, line_chart
-from src.image_gen import generate_image, save_image
-from src.playwright_mcp import PlaywrightMcpClient
+from src.capabilities.charts import bar_chart, line_chart
+from src.capabilities.image_gen import generate_image, save_image
+from src.capabilities.playwright_mcp import PlaywrightMcpClient
 
 
 class FakeMcp:
@@ -78,7 +78,7 @@ def test_save_image_and_charts_are_code_not_image_gen(tmp_path):
 
 
 def test_muse_image_edit_multiple_refs():
-    from src.image_gen import edit_image
+    from src.capabilities.image_gen import edit_image
     fake_bytes = b"\x89PNG edited"
     def fake_post(url, headers, payload):
         assert "images/edits" in url

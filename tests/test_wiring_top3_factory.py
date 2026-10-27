@@ -5,12 +5,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.model_client import FakeClient, Message
-from src.router import RoutedClient
-from src.run_control import RunControl
-from src.v1 import AuthStore, GoalStore, handle
-from src.webui import FACTORY_HTML, WebUIGate
-from src.scheduler_loop import AutonomyTracker, NudgeTracker
+from src.core.model_client import FakeClient, Message
+from src.agentic.router import RoutedClient
+from src.interface.run_control import RunControl
+from src.interface.v1 import AuthStore, GoalStore, handle
+from src.interface.webui import FACTORY_HTML, WebUIGate
+from src.interface.scheduler_loop import AutonomyTracker, NudgeTracker
 
 
 def test_auth_revoke():
@@ -72,6 +72,6 @@ def test_factory_is_3d_and_keeps_avatar_link():
     assert "Foreman desk" in FACTORY_HTML
     assert "Warehouse" in FACTORY_HTML
     assert "/api/factory" in FACTORY_HTML
-    from src.webui import CHAT_HTML
+    from src.interface.webui import CHAT_HTML
     assert 'id="avatar"' in CHAT_HTML
     assert "/factory" in CHAT_HTML

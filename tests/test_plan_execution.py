@@ -6,15 +6,15 @@ plan JSON, then repaired plan JSON on the second call.
 
 import json
 
-from src.approval import ApprovalGate, Decision
-from src.embedder import HashEmbedder
-from src.kb import KnowledgeBase, parser_needed_for
-from src.loop import GoalRunner, Plan, Step
-from src.memory import InMemoryStore, Memory
-from src.model_client import FakeClient
-from src.sandbox import Sandbox
-from src.tools import ToolRegistry
-from src.verify import check_criterion, verify_plan
+from src.interface.approval import ApprovalGate, Decision
+from src.memory.embedder import HashEmbedder
+from src.memory.kb import KnowledgeBase, parser_needed_for
+from src.agentic.loop import GoalRunner, Plan, Step
+from src.memory.memory import InMemoryStore, Memory
+from src.core.model_client import FakeClient
+from src.capabilities.sandbox import Sandbox
+from src.capabilities.tools import ToolRegistry
+from src.agentic.verify import check_criterion, verify_plan
 
 
 def _runner(tmp_path, client, memory=None):

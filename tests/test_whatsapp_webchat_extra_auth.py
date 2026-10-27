@@ -7,11 +7,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from src.extra_tools import build_extra_tools, dispatch_extra_tool
-from src.model_client import FakeClient
-from src.webchat import webchat_reply
-from src.webui_auth import is_authorized
-from src.whatsapp_vision import prepare_vision_message
+from src.capabilities.extra_tools import build_extra_tools, dispatch_extra_tool
+from src.core.model_client import FakeClient
+from src.capabilities.webchat import webchat_reply
+from src.interface.webui_auth import is_authorized
+from src.capabilities.whatsapp_vision import prepare_vision_message
 
 
 def test_whatsapp_vision_with_fake_downloader(tmp_path):

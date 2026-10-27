@@ -7,10 +7,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.cross_validate import cross_validate
-from src.mission import MissionStore
-from src.repair import apply_patch
-from src.skill_lifecycle import LifecycleStore
+from src.capabilities.cross_validate import cross_validate
+from src.capabilities.mission import MissionStore
+from src.capabilities.repair import apply_patch
+from src.capabilities.skill_lifecycle import LifecycleStore
 
 
 # Mission lifecycle -------------------------------------------------------

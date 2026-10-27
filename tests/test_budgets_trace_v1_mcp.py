@@ -8,14 +8,14 @@ continue it.
 
 import json
 
-from src.approval import ApprovalGate, Decision
-from src.budgets import Budget, BudgetExceeded
-from src.loop import GoalRunner
-from src.mcp_server import MCPServer
-from src.model_client import FakeClient
-from src.sandbox import Sandbox
-from src.trace import TraceRecorder
-from src.v1 import AuthStore, GoalStore, handle
+from src.interface.approval import ApprovalGate, Decision
+from src.agentic.budgets import Budget, BudgetExceeded
+from src.agentic.loop import GoalRunner
+from src.interface.mcp_server import MCPServer
+from src.core.model_client import FakeClient
+from src.capabilities.sandbox import Sandbox
+from src.agentic.trace import TraceRecorder
+from src.interface.v1 import AuthStore, GoalStore, handle
 
 
 def test_budget_step_limit_fails_run(tmp_path):

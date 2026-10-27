@@ -5,12 +5,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.dag_store import DagStore
-from src.embedder import HashEmbedder
-from src.entity_graph import EntityGraph, extract_entities
-from src.memory import Memory
-from src.triggers import TriggerDispatcher
-from src.webui import CHAT_HTML, DAG_HTML, WebUIServer
+from src.agentic.dag_store import DagStore
+from src.memory.embedder import HashEmbedder
+from src.memory.entity_graph import EntityGraph, extract_entities
+from src.memory.memory import Memory
+from src.interface.triggers import TriggerDispatcher
+from src.interface.webui import CHAT_HTML, DAG_HTML, WebUIServer
 
 
 def test_chat_html_has_avatar_and_mic():

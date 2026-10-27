@@ -7,14 +7,14 @@ returns question JSON, then a completed spec JSON.
 
 import json
 
-from src.approval import ApprovalGate, Decision
-from src.embedder import HashEmbedder
-from src.interview import (InterviewRunner, Spec, parse_spec_sheet,
+from src.interface.approval import ApprovalGate, Decision
+from src.memory.embedder import HashEmbedder
+from src.agentic.interview import (InterviewRunner, Spec, parse_spec_sheet,
                            spec_sheet, spec_sheet_md, SPEC_SHEET_TEMPLATE)
-from src.loop import GoalRunner
-from src.memory import InMemoryStore, Memory
-from src.model_client import FakeClient
-from src.sandbox import Sandbox
+from src.agentic.loop import GoalRunner
+from src.memory.memory import InMemoryStore, Memory
+from src.core.model_client import FakeClient
+from src.capabilities.sandbox import Sandbox
 
 
 def _memory(tmp_path):

@@ -11,16 +11,16 @@ UTF-8 without crashing.
 
 from datetime import datetime, timedelta, timezone
 
-from src.embedder import HashEmbedder, HybridEmbedder, SpladeEmbedder
-from src.experience import (build_experience, goal_shape_for,
+from src.memory.embedder import HashEmbedder, HybridEmbedder, SpladeEmbedder
+from src.memory.experience import (build_experience, goal_shape_for,
                             recall_experiences, store_experience)
-from src.kb import KnowledgeBase, extract_text
-from src.memory import (Memory, decay_score, is_grace_protected,
+from src.memory.kb import KnowledgeBase, extract_text
+from src.memory.memory import (Memory, decay_score, is_grace_protected,
                         should_prune, InMemoryStore)
-from src.loop import GoalRunner
-from src.model_client import FakeClient
-from src.sandbox import Sandbox
-from src.approval import ApprovalGate, Decision
+from src.agentic.loop import GoalRunner
+from src.core.model_client import FakeClient
+from src.capabilities.sandbox import Sandbox
+from src.interface.approval import ApprovalGate, Decision
 
 
 def _memory(tmp_path):

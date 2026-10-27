@@ -5,20 +5,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.adapt import adapt_experience, generalize_nodes, instantiate_template
-from src.benchmark import benchmark_learn, benchmark_total
-from src.counting import CountingClient
-from src.dag import DAG, DAGNode, adapt_dag, dag_from_experience
-from src.experience import build_experience
-from src.loop import GoalRunner, RunReport, Plan
-from src.memory import Memory
-from src.approval import ApprovalGate, Decision
-from src.embedder import HashEmbedder
-from src.model_client import FakeClient
-from src.run_control import RunControl, new_run_id
-from src.sandbox import Sandbox
-from src.webui import WebUIServer
-from src.triggers import TriggerDispatcher
+from src.agentic.adapt import adapt_experience, generalize_nodes, instantiate_template
+from src.agentic.benchmark import benchmark_learn, benchmark_total
+from src.agentic.counting import CountingClient
+from src.agentic.dag import DAG, DAGNode, adapt_dag, dag_from_experience
+from src.memory.experience import build_experience
+from src.agentic.loop import GoalRunner, RunReport, Plan
+from src.memory.memory import Memory
+from src.interface.approval import ApprovalGate, Decision
+from src.memory.embedder import HashEmbedder
+from src.core.model_client import FakeClient
+from src.interface.run_control import RunControl, new_run_id
+from src.capabilities.sandbox import Sandbox
+from src.interface.webui import WebUIServer
+from src.interface.triggers import TriggerDispatcher
 
 
 def _memory(tmp_path):
@@ -138,7 +138,7 @@ def test_webui_steer_cancel_commands(tmp_path):
 def test_loop_adapted_dag_via_experience(tmp_path):
     # A Snake experience in memory, then a Worm goal, should adapt, not replay Snake.
     memory = _memory(tmp_path)
-    from src.experience import store_experience
+    from src.memory.experience import store_experience
     experience = build_experience(
         "Write a Snake game", "game snake write",
         [{"tool": "write", "args": {"file": "snake.py", "text": "Snake game loop"}, "deliverable": "snake.py"}],
