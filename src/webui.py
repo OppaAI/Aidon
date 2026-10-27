@@ -73,25 +73,64 @@ from .messaging import (MessagingConfig, normalize_number, parse_decision,
 from .triggers import TriggerDispatcher, TriggerEvent
 
 CHAT_HTML = """<!doctype html>
-<html><head><meta charset="utf-8"><title>Aidon</title></head>
+<html><head><meta charset="utf-8"><title>Aidon</title>
+<style>
+#avatar { width: 220px; }
+#robot { animation: robot-bob 4s ease-in-out infinite; transform-origin: 100px 190px; }
+@keyframes robot-bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+#robot-head { animation: robot-head-sway 6s ease-in-out infinite; transform-origin: 100px 60px; }
+@keyframes robot-head-sway { 0%,100% { transform: rotate(0deg); } 25% { transform: rotate(1.5deg); } 75% { transform: rotate(-1.5deg); } }
+#robot-arm-left { animation: robot-arm-sway 5s ease-in-out infinite; transform-origin: 35px 120px; }
+#robot-arm-right { animation: robot-arm-sway 5s ease-in-out infinite reverse; transform-origin: 165px 120px; }
+@keyframes robot-arm-sway { 0%,100% { transform: rotate(0deg); } 50% { transform: rotate(3deg); } }
+.robot-eye { animation: robot-blink 4.2s infinite; transform-origin: center; transform-box: fill-box; }
+@keyframes robot-blink { 0%,92%,98%,100% { transform: scaleY(1); } 94%,96% { transform: scaleY(0.1); } }
+#mouth-smile { opacity: 1; }
+#mouth-open { opacity: 0; }
+#avatar.speaking #mouth-smile { opacity: 0; }
+#avatar.speaking #mouth-open { opacity: 1; animation: robot-mouth-wave 0.28s ease-in-out infinite alternate; transform-origin: center; transform-box: fill-box; }
+@keyframes robot-mouth-wave { from { transform: scaleY(0.4); } to { transform: scaleY(1.4); } }
+#wave-bars span { display: inline-block; width: 6px; background: #336699; margin-right: 2px; vertical-align: bottom; height: 4px; }
+#avatar.speaking #wave-bars span { animation: robot-wave 0.3s ease-in-out infinite alternate; }
+@keyframes robot-wave { from { height: 4px; } to { height: 18px; } }
+.karaoke-word { background: #ffeb3b; }
+.karaoke-done { background: transparent; }
+</style></head>
 <body>
 <h1>Aidon</h1>
-<div id="avatar" aria-label="Aidon avatar">
-<svg id="avatar-face" width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="Aidon">
-<circle cx="60" cy="60" r="50" fill="#ddeeff" stroke="#336699" stroke-width="3"/>
-<circle id="eye-left" cx="42" cy="52" r="6" fill="#223344"/>
-<circle id="eye-right" cx="78" cy="52" r="6" fill="#223344"/>
-<path id="mouth" d="M 42 78 Q 60 90 78 78" fill="none" stroke="#223344" stroke-width="3" stroke-linecap="round"/>
+<div id="avatar" aria-label="Aidon avatar, robot, default, VRM is the fallback">
+<svg id="robot-avatar" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="Aidon robot">
+<g id="robot">
+<g id="robot-head">
+<rect x="28" y="35" width="16" height="42" rx="8" fill="#1a2a4a"/>
+<rect x="156" y="35" width="16" height="42" rx="8" fill="#1a2a4a"/>
+<rect x="40" y="18" width="120" height="72" rx="22" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
+<rect x="55" y="28" width="90" height="52" rx="14" fill="#1a2a4a"/>
+<rect x="62" y="34" width="76" height="40" rx="10" fill="#22355e"/>
+<ellipse class="robot-eye" id="eye-left" cx="82" cy="54" rx="10" ry="16" fill="#7de9ff"/>
+<ellipse class="robot-eye" id="eye-right" cx="118" cy="54" rx="10" ry="16" fill="#7de9ff"/>
+<path id="mouth-smile" d="M 88 72 Q 100 78 112 72" fill="none" stroke="#7de9ff" stroke-width="3" stroke-linecap="round"/>
+<ellipse id="mouth-open" cx="100" cy="73" rx="12" ry="6" fill="#7de9ff"/>
+</g>
+<rect x="92" y="90" width="16" height="12" fill="#c2c2b8"/>
+<g id="robot-body">
+<path d="M 62 102 Q 100 92 138 102 L 138 140 Q 100 155 62 140 Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
+<path d="M 62 125 Q 100 140 138 125 L 138 140 Q 100 155 62 140 Z" fill="#c2c8d9"/>
+</g>
+<g id="robot-arm-left"><path d="M 58 108 Q 35 120 32 145 Q 32 160 45 160 L 58 150 Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/><circle cx="38" cy="162" r="4" fill="#1a2a4a"/><circle cx="48" cy="162" r="4" fill="#1a2a4a"/></g>
+<g id="robot-arm-right"><path d="M 142 108 Q 165 120 168 145 Q 168 160 155 160 L 142 150 Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/><circle cx="152" cy="162" r="4" fill="#1a2a4a"/><circle cx="162" cy="162" r="4" fill="#1a2a4a"/></g>
+<path d="M 75 155 Q 100 170 125 155 Q 100 165 75 155 Z" fill="#1a2a4a"/>
 </svg>
 <p id="avatar-status">Idle</p>
-<p><button id="mic" type="button">🎤 Mic</button> <label><input id="announce" type="checkbox"> Voice announce</label></p>
+<div id="wave-bars"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+<p><button id="mic" type="button">Mic</button> <label><input id="announce" type="checkbox"> Voice announce</label></p>
 <p id="mic-status"></p>
 </div>
 <div id="sidebar">
 <h2>Projects</h2><div id="projects"></div>
 <h2>Library</h2><a href="/library">Library tab</a>
 <h2>Settings</h2><a href="/settings">Settings and keys</a>
-<h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a> <a href="/replay">Replay</a> <a href="/avatar-vrm">VRM avatar</a>
+<h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a> <a href="/replay">Replay</a> <a href="/avatar-vrm">VRM avatar, fallback</a>
 <div id="stage-pills"><p>Stages: recall, interpret, research, plan, sandbox, verify, approval, live, learn</p><div id="pills"></div></div>
 </div>
 <div id="chat">
@@ -101,26 +140,61 @@ CHAT_HTML = """<!doctype html>
 <div id="approval"></div>
 </div>
 <script>
-function setAvatar(status, mouth) {
+function setAvatarStatus(status) {
   document.getElementById('avatar-status').textContent = status;
-  document.getElementById('mouth').setAttribute('d', mouth);
 }
-function speak(text) {
+function setSpeaking(on) {
+  document.getElementById('avatar').classList.toggle('speaking', !!on);
+  const bars = document.querySelectorAll('#wave-bars span');
+  bars.forEach((bar, i) => { bar.style.animationDelay = (i * 0.05) + 's'; });
+}
+function mouthForChar(ch) {
+  if ('aeiouAEIOU'.includes(ch)) return 1.4;
+  if (ch === ' ') return 0.4;
+  return 0.9;
+}
+async function typewriterKaraoke(element, text) {
+  const words = text.split(/([ \t\n]+)/);
+  let done = '';
+  setSpeaking(true);
+  setAvatarStatus('Speaking');
+  for (let wi = 0; wi < words.length; wi++) {
+    const word = words[wi];
+    for (let ci = 0; ci < word.length; ci++) {
+      const ch = word[ci];
+      const mouth = document.getElementById('mouth-open');
+      if (mouth) { mouth.setAttribute('ry', String(3 + mouthForChar(ch) * 4)); }
+      done += ch;
+      element.innerHTML = '<span class="karaoke-done">' + done.slice(0, done.length - word.length) + '</span>' +
+        '<span class="karaoke-word">' + word.slice(0, ci + 1) + '</span>' +
+        '<span>' + word.slice(ci + 1) + '</span>';
+      await new Promise((r) => setTimeout(r, 18));
+    }
+  }
+  element.innerHTML = '<span class="karaoke-done">' + text + '</span>';
+  setSpeaking(false);
+  setAvatarStatus('Idle');
+}
+function speak(text, onWord) {
   if (document.getElementById('announce').checked && 'speechSynthesis' in window) {
-    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onstart = () => { setSpeaking(true); setAvatarStatus('Speaking'); };
+    utterance.onend = () => { setSpeaking(false); setAvatarStatus('Idle'); };
+    if (onWord) { utterance.onboundary = (event) => { if (event.charIndex !== undefined) { onWord(event.charIndex); } }; }
+    window.speechSynthesis.speak(utterance);
   }
 }
 async function sendMessage(message) {
-  setAvatar('Working', 'M 42 78 Q 60 84 78 78');
+  setAvatarStatus('Working');
   const r = await fetch('/api/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message})});
   const data = await r.json();
   const reply = data.reply || '';
-  document.getElementById('messages').innerHTML += '<p>' + reply + '</p>';
-  if (reply.includes('Done:')) { setAvatar('Done', 'M 42 76 Q 60 94 78 76'); }
-  else if (reply.includes('Failed:')) { setAvatar('Failed', 'M 42 86 Q 60 74 78 86'); }
-  else if (reply.includes('Cancelled')) { setAvatar('Cancelled', 'M 42 80 L 78 80'); }
-  else if (reply.includes('Rejected')) { setAvatar('Waiting', 'M 42 80 L 78 80'); }
-  else { setAvatar('Idle', 'M 42 78 Q 60 90 78 78'); }
+  const p = document.createElement('p');
+  document.getElementById('messages').appendChild(p);
+  await typewriterKaraoke(p, reply);
+  if (reply.includes('Done:')) { setAvatarStatus('Done'); }
+  else if (reply.includes('Failed:')) { setAvatarStatus('Failed'); }
+  else { setAvatarStatus('Idle'); }
   speak(reply);
 }
 document.getElementById('form').onsubmit = async (e) => {
@@ -149,6 +223,17 @@ document.getElementById('mic').onclick = () => {
   };
   recognition.start();
 };
+async function refreshPills() {
+  try {
+    const r = await fetch('/api/factory');
+    const data = await r.json();
+    const latest = {};
+    (data.stages || []).forEach((s) => { latest[s.kind] = s.status; });
+    const kinds = ['recall','interpret','research','plan','sandbox','verify','approval','live','learn'];
+    document.getElementById('pills').innerHTML = kinds.map((k) => '<span>' + k + '=' + (latest[k] || 'idle') + '</span> ').join('');
+  } catch (e) {}
+}
+setInterval(refreshPills, 2000); refreshPills();
 </script>
 </body></html>
 """
@@ -288,16 +373,16 @@ loadRuns();
 VRM_HTML = """<!doctype html><html><head><meta charset="utf-8"><title>VRM avatar</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
 </head><body>
-<h1>VRM avatar</h1>
-<p>Three-dimensional VRM avatar, if a VRM file is present at &lt;home&gt;/avatar.vrm, otherwise the SVG avatar in the chat is the fallback, and this page says so, it does not invent a model. Three.js and three-vrm are loaded from CDN, a VRM file is not bundled, because a model file is the owner's asset, not arena code. Mic here uses Meta Transcribe via /api/transcribe when a transcribe key is configured, otherwise browser SpeechRecognition, as in the chat.</p>
+<h1>VRM avatar, fallback</h1>
+<p>Three-dimensional VRM avatar, if a VRM file is present at &lt;home&gt;/avatar.vrm, otherwise the robot SVG avatar in the chat is the default, and this page says so, it does not invent a model. Three.js and three-vrm are loaded from CDN, a VRM file is not bundled, because a model file is the owner's asset, not arena code. Mic here uses Meta Transcribe via /api/transcribe when a transcribe key is configured, otherwise browser SpeechRecognition, as in the chat.</p>
 <div id="vrm-view" style="width:600px;height:400px;border:1px solid #ccc"></div>
 <p id="vrm-status"></p>
 <p><button id="vrm-mic">Transcribe mic</button> <span id="vrm-mic-status"></span></p>
 <script>
 async function checkVrm() {
   const r = await fetch('/api/avatar.vrm');
-  if (r.status === 404) { document.getElementById('vrm-status').textContent = 'No VRM file at <home>/avatar.vrm, using SVG avatar in chat as fallback.'; return; }
-  document.getElementById('vrm-status').textContent = 'VRM file found, loading with three-vrm. If the VRM loader fails to load from CDN, the SVG fallback remains in the chat.';
+  if (r.status === 404) { document.getElementById('vrm-status').textContent = 'No VRM file at <home>/avatar.vrm, using robot SVG avatar in chat as default.'; return; }
+  document.getElementById('vrm-status').textContent = 'VRM file found, loading with three-vrm. If the VRM loader fails to load from CDN, the robot SVG remains the default.';
 }
 checkVrm();
 document.getElementById('vrm-mic').onclick = async () => {
