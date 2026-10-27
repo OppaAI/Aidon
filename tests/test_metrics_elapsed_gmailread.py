@@ -6,6 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.agentic.elapsed import ElapsedTimer
+from src.agentic.loop import GoalRunner
+from src.interface.approval import Decision
 from src.capabilities.gmail_read import read_inbox
 from src.agentic.metrics import grade, grade_from_directory
 
@@ -75,6 +77,23 @@ def test_timer_note_methods_and_nested_wait():
     timer.note_approval_end()
     assert timer.approval_wait_seconds() == 30
     assert timer.elapsed_active() == 0
+
+
+def test_goal_runner_excludes_approval_wait_from_workflow_timer():
+    clock = FakeClock()
+
+    class Gate:
+        def ask(self, kind, title, body):
+            clock.advance(30)
+            return Decision("approved")
+
+    runner = GoalRunner.__new__(GoalRunner)
+    runner.gate = Gate()
+    runner._elapsed_timer = ElapsedTimer(time_fn=clock).start()
+    clock.advance(10)
+    assert runner._ask_for_approval("live", "title", "body").verdict == "approved"
+    assert runner._elapsed_timer.elapsed_total() == 40
+    assert runner._elapsed_timer.elapsed_active() == 10
 
 
 def _fake_post(url, payload):

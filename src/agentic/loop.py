@@ -115,18 +115,42 @@ class RunReport:
     # unknown (nothing announced, nothing shown).
     network: bool | None = None
     elapsed_seconds: float = 0.0
+    approval_wait_seconds: float = 0.0
+
+
+def format_duration(seconds: float | int | None) -> str:
+    """Render elapsed seconds in compact human units."""
+    if seconds is None:
+        return ""
+    total = max(0, int(round(float(seconds))))
+    if total >= 3600:
+        hours, remainder = divmod(total, 3600)
+        return f"{hours}h {remainder // 60}m"
+    minutes, remainder = divmod(total, 60)
+    return f"{minutes}m {remainder}s" if minutes else f"{remainder}s"
+
+
+def format_elapsed(report: dict) -> str:
+    """Render the old-compatible elapsed footer for a report dictionary."""
+    elapsed = report.get("elapsed_seconds")
+    if elapsed is None:
+        return ""
+    line = f"\n\n⏱️ {format_duration(elapsed)}"
+    waited = float(report.get("approval_wait_seconds") or 0)
+    if waited >= 1:
+        line += f" (plus {format_duration(waited)} waiting for you)"
+    return line
 
 
 def format_run_stats(report: RunReport) -> str:
     """Format the completion metrics shown beside a finished task."""
     elapsed = max(0.0, float(getattr(report, "elapsed_seconds", 0.0) or 0.0))
-    if elapsed >= 60:
-        minutes, seconds = divmod(int(round(elapsed)), 60)
-        elapsed_text = f"{minutes}m {seconds}s"
-    else:
-        elapsed_text = f"{elapsed:.1f}s"
+    elapsed_text = format_duration(elapsed)
     tokens = int(getattr(report, "model_tokens_estimated", 0) or 0)
-    return f"⏱️ {elapsed_text} · {tokens:,} total workflow tokens (estimated)"
+    waited = float(getattr(report, "approval_wait_seconds", 0.0) or 0.0)
+    waiting = (f" (plus {format_duration(waited)} waiting for you)"
+               if waited >= 1 else "")
+    return f"⏱️ {elapsed_text}{waiting} · {tokens:,} total workflow tokens (estimated)"
 
 
 class GoalRunner:
@@ -207,6 +231,14 @@ class GoalRunner:
         if self.network_available is True:
             return body + "\nSandbox network: on"
         return body
+
+    def _ask_for_approval(self, kind: str, title: str, body: str) -> Decision:
+        """Ask the owner while excluding human wait from active elapsed time."""
+        timer = getattr(self, "_elapsed_timer", None)
+        if timer is None:
+            return self.gate.ask(kind, title, body)
+        with timer.approval_wait():
+            return self.gate.ask(kind, title, body)
 
     def _chat(self, phase: str, messages) -> str:
         """One model call, router-aware.
@@ -315,7 +347,7 @@ class GoalRunner:
             command_text = " ".join(str(c) for c in args.get("command", [])) if isinstance(args.get("command"), list) else str(args.get("command", ""))
             reason = command_needs_mandatory_approval(command_text)
             if reason:
-                decision = self.gate.ask("live", f"Mandatory approval: shell ({reason})", self._approval_body(f"Run shell command: {command_text}?"))
+                decision = self._ask_for_approval("live", f"Mandatory approval: shell ({reason})", self._approval_body(f"Run shell command: {command_text}?"))
                 if decision.verdict != "approved":
                     raise ValueError(f"shell command rejected by approval gate ({reason})")
         if name == "shell" and self.execution_backend is not None:
@@ -341,7 +373,7 @@ class GoalRunner:
                 # post or send tool is approval-gated here, before
                 # dispatch, fail-closed on rejection.
                 if any(word in name for word in ("post", "send", "publish")):
-                    decision = self.gate.ask("live", f"Extra tool {name}", self._approval_body(f"Run extra tool {name} with {args}?"))
+                    decision = self._ask_for_approval("live", f"Extra tool {name}", self._approval_body(f"Run extra tool {name} with {args}?"))
                     if decision.verdict != "approved":
                         raise ValueError(f"extra tool {name} rejected by approval gate")
                 from ..capabilities.extra_tools import dispatch_extra_tool
@@ -674,7 +706,8 @@ class GoalRunner:
         timer = getattr(self, "_elapsed_timer", None)
         if timer is not None:
             timer.stop()
-            report.elapsed_seconds = round(timer.elapsed_total(), 1)
+            report.elapsed_seconds = round(timer.elapsed_active(), 1)
+            report.approval_wait_seconds = round(timer.approval_wait_seconds(), 1)
         client = self.client
         if hasattr(client, "calls") and hasattr(client, "tokens_estimated"):
             report.model_calls = int(client.calls)
@@ -719,6 +752,7 @@ class GoalRunner:
                 "deliverables": {f: (f in report.files) for f in report.plan.deliverables},
                 "files": list(report.files),
                 "elapsed": report.elapsed_seconds,
+                "approval_wait_seconds": report.approval_wait_seconds,
                 "model_tokens_estimated": report.model_tokens_estimated,
                 "repairs": max(0, report.attempts - 1)})
             if report.error:
@@ -913,7 +947,7 @@ class GoalRunner:
             attempt = MAX_ATTEMPTS
         files = sorted(passed) if passed else list(current_plan.deliverables)
         self._trace("approval", "started", "live approval requested")
-        decision: Decision = self.gate.ask(
+        decision: Decision = self._ask_for_approval(
             "live", "Approve live execution?",
             self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"))
         self._trace("approval", decision.verdict, "live approval")

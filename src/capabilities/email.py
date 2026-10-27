@@ -31,6 +31,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .mail_rules import base_subject, enabled
+
 
 def _sent_log(home: Path) -> Path:
     return Path(home) / "email" / "sent.json"
@@ -46,21 +48,46 @@ def _load_sent(home: Path) -> dict:
         return {}
 
 
+def _attachment_fingerprint(paths) -> list[dict]:
+    out = []
+    for raw in paths or []:
+        path = Path(raw)
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            digest = None
+        out.append({"path": str(path), "name": path.name, "sha": digest})
+    return out
+
+
 def make_draft(home: Path, to: str, subject: str, body: str,
-               corrected_subject: bool = True) -> dict:
+               corrected_subject: bool = True, attachments=None) -> dict:
     home = Path(home)
     drafts = home / "email" / "drafts"
     drafts.mkdir(parents=True, exist_ok=True)
     sent = _load_sent(home)
-    key = f"{to}|{subject}"
+    attachments = list(attachments or [])
+    key = f"{to}|{base_subject(subject)}"
     body_hash = hashlib.sha256(body.encode()).hexdigest()
+    attachment_data = _attachment_fingerprint(attachments)
+    fingerprint = {"body": body_hash,
+                   "files": [{"name": x["name"], "sha": x["sha"]}
+                             for x in attachment_data]}
     final_subject = subject
-    if corrected_subject and key in sent and sent[key] != body_hash:
+    old = sent.get(key)
+    if isinstance(old, str):
+        old = {"body": old, "files": []}
+    if (corrected_subject and enabled() and old is not None
+            and old != fingerprint):
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-        final_subject = f"Corrected: [{stamp}] {subject}"
+        final_subject = f"Corrected: [{stamp}] {base_subject(subject)}"
     draft_id = uuid.uuid4().hex[:12]
     path = drafts / f"{draft_id}.md"
-    path.write_text(f"To: {to}\nSubject: {final_subject}\nOriginal-Subject: {subject}\n\n{body}\n", encoding="utf-8")
+    path.write_text(
+        f"To: {to}\nSubject: {final_subject}\n"
+        f"Original-Subject: {base_subject(subject)}\n"
+        f"Attachments: {json.dumps(attachment_data)}\n\n{body}\n",
+        encoding="utf-8")
     return {"ok": True, "draft_id": draft_id, "subject": final_subject,
             "path": str(path)}
 
@@ -70,6 +97,7 @@ def send_draft(home: Path, draft: dict, owner_email: str = "",
     to = ""
     original_subject = draft["subject"]
     body = ""
+    attachments = []
     try:
         text = Path(draft["path"]).read_text()
         for line in text.splitlines():
@@ -77,6 +105,8 @@ def send_draft(home: Path, draft: dict, owner_email: str = "",
                 to = line[4:].strip()
             if line.startswith("Original-Subject: "):
                 original_subject = line[len("Original-Subject: "):].strip()
+            if line.startswith("Attachments: "):
+                attachments = json.loads(line[len("Attachments: "):])
         body = text.split("\n\n", 1)[1] if "\n\n" in text else text
     except Exception as exc:
         return {"ok": False, "error": type(exc).__name__}
@@ -88,7 +118,12 @@ def send_draft(home: Path, draft: dict, owner_email: str = "",
     result = sender(to, draft["subject"], body)
     if result.get("ok"):
         sent = _load_sent(home)
-        sent[f"{to}|{original_subject}"] = hashlib.sha256(body.encode()).hexdigest()
+        sent[f"{to}|{base_subject(original_subject)}"] = {
+            "body": hashlib.sha256(body.encode()).hexdigest(),
+            "files": [{"name": item.get("name", ""),
+                       "sha": item.get("sha")}
+                      for item in attachments if isinstance(item, dict)],
+        }
         log = _sent_log(home)
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text(json.dumps(sent), encoding="utf-8")

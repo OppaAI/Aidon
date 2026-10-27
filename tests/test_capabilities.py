@@ -113,3 +113,18 @@ def test_email_draft_owner_and_corrected(tmp_path):
     assert result["ok"] is True
     draft3 = email_mod.make_draft(home, "owner@example.invalid", "Hi", "v2")
     assert draft3["subject"].startswith("Corrected:")
+
+
+def test_email_changed_attachment_is_corrected(tmp_path):
+    home = tmp_path / "home"
+    attachment = tmp_path / "report.pdf"
+    attachment.write_bytes(b"version one")
+    first = email_mod.make_draft(home, "owner@example.invalid", "Report", "same",
+                                 attachments=[attachment])
+    assert email_mod.send_draft(
+        home, first, owner_email="owner@example.invalid",
+        sender=lambda to, subject, body: {"ok": True})["ok"]
+    attachment.write_bytes(b"version two")
+    second = email_mod.make_draft(home, "owner@example.invalid", "Report", "same",
+                                  attachments=[attachment])
+    assert second["subject"].startswith("Corrected:")

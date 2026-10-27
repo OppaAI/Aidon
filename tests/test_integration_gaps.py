@@ -3,7 +3,8 @@ from src.agentic.resume import save_run_state, resume_state
 from src.agentic.plan_guard import validate_plan
 from src.agentic.artifact_inventory import inventory_markdown
 from src.agentic.delivery_summary import delivery_summary
-from src.agentic.loop import Plan, RunReport, format_run_stats
+from src.agentic.loop import (Plan, RunReport, format_duration, format_elapsed,
+                              format_run_stats)
 
 
 class _Cfg:
@@ -58,4 +59,12 @@ def test_finished_run_stats_put_tokens_next_to_elapsed():
     report = RunReport("done", "g", Plan(), True, True,
                        elapsed_seconds=12.34,
                        model_tokens_estimated=5678)
-    assert format_run_stats(report) == "⏱️ 12.3s · 5,678 total workflow tokens (estimated)"
+    assert format_run_stats(report) == "⏱️ 12s · 5,678 total workflow tokens (estimated)"
+
+
+def test_elapsed_helpers_keep_old_human_format():
+    assert format_duration(124) == "2m 4s"
+    assert format_duration(3600) == "1h 0m"
+    assert "2m 4s" in format_elapsed({"elapsed_seconds": 124})
+    assert "waiting for you" in format_elapsed({"elapsed_seconds": 40,
+                                                "approval_wait_seconds": 180})

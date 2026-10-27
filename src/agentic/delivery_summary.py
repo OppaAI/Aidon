@@ -46,6 +46,10 @@ def delivery_summary(report: dict) -> str:
     if elapsed is not None:
         lines.append(f"**Elapsed:** {elapsed}")
         lines.append("")
+    approval_wait = report.get("approval_wait_seconds")
+    if approval_wait:
+        lines.append(f"**Approval wait:** {approval_wait}")
+        lines.append("")
     tokens = report.get("model_tokens_estimated", report.get("tokens_used"))
     if tokens is not None:
         lines.append(f"**Total workflow tokens:** {int(tokens):,} (estimated)")

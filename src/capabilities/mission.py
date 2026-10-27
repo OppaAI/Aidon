@@ -30,6 +30,42 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 STATUSES = ("draft", "ready_for_review", "in_progress", "done", "cancelled")
+CRITERION_STATUSES = ("passed", "failed", "unverified")
+GUARDED_ACTIONS = frozenset({
+    "git_commit", "git_push", "publish", "post", "production_change",
+    "live_execute",
+})
+
+
+class InvalidTransition(ValueError):
+    """Raised when a mission attempts an unsafe state transition."""
+
+
+class GuardViolation(PermissionError):
+    """Raised when an external action lacks an approved mission."""
+
+
+def guard_external_action(mission_state: str, action: str) -> None:
+    """Keep mission work local until the mission is approved or promoted."""
+    if action in GUARDED_ACTIONS and mission_state not in ("approved", "promoted"):
+        raise GuardViolation(
+            f"action {action!r} requires an approved mission "
+            f"(mission is {mission_state!r})")
+
+
+def grade_criteria(criteria: list[dict]) -> list[dict]:
+    """Require evidence before accepting a criterion as passed."""
+    graded = []
+    for criterion in criteria or []:
+        status = criterion.get("status")
+        if status not in CRITERION_STATUSES:
+            raise ValueError(f"criterion status must be one of {CRITERION_STATUSES}")
+        evidence = str(criterion.get("evidence") or "").strip()
+        if status == "passed" and not evidence:
+            raise ValueError("passed criteria require executed-check evidence")
+        graded.append({"name": criterion.get("name", ""),
+                       "status": status, "evidence": evidence})
+    return graded
 
 
 def _mission_dir(home: Path, project_id: str) -> Path:
@@ -95,7 +131,10 @@ class MissionStore:
         _save_mission(self.home, mission)
         return copy.deepcopy(mission)
 
-    def freeze(self, project_id: str, force: bool = False) -> dict:
+    def freeze(self, project_id: str, force: bool = False,
+               test_results: dict | None = None,
+               artifacts: list[str] | None = None,
+               criteria: list[dict] | None = None) -> dict:
         mission = _load_mission(self.home, project_id)
         directory = _mission_dir(self.home, project_id)
         snapshot_path = directory / "snapshot.json"
@@ -110,6 +149,9 @@ class MissionStore:
             "status": "ready_for_review",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "sha256": _snapshot_hash(spec, deliverables),
+            "test_results": copy.deepcopy(test_results or {}),
+            "artifacts": list(artifacts or []),
+            "criteria": grade_criteria(criteria or []),
         }
         directory.mkdir(parents=True, exist_ok=True)
         snapshot_path.write_text(

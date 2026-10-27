@@ -8,7 +8,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.capabilities.cross_validate import cross_validate
-from src.capabilities.mission import MissionStore
+from src.capabilities.mission import (GuardViolation, MissionStore,
+                                      grade_criteria, guard_external_action)
 from src.capabilities.repair import apply_patch
 from src.capabilities.skill_lifecycle import LifecycleStore
 
@@ -73,6 +74,29 @@ def test_mission_freeze_missing_raises_and_status_rules(tmp_path):
         pass
     assert store.set_status("dinner", "done")["status"] == "done"
     assert store.unfreeze("dinner")["status"] == "in_progress"
+
+
+def test_mission_freeze_requires_evidence_for_passed_criteria(tmp_path):
+    store = MissionStore(tmp_path)
+    store.create("dinner", {"goal": "Dinner", "deliverables": []})
+    try:
+        store.freeze("dinner", criteria=[{"name": "tests", "status": "passed"}])
+        assert False, "passed criteria without evidence must fail"
+    except ValueError:
+        pass
+    snapshot = store.freeze(
+        "dinner", criteria=[{"name": "tests", "status": "passed",
+                              "evidence": "pytest: 3 passed"}])
+    assert snapshot["criteria"][0]["status"] == "passed"
+
+
+def test_mission_external_actions_are_guarded():
+    try:
+        guard_external_action("testing", "git_push")
+        assert False, "unapproved mission must not push"
+    except GuardViolation:
+        pass
+    guard_external_action("approved", "git_push")
 
 
 # Skill lifecycle and governor --------------------------------------------
