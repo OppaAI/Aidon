@@ -2022,8 +2022,27 @@ class WebUIServer:
         try:
             tools = self.handle_tools()
             tool_names = list(tools.get("goal_tools", []))
+            plugin_names = set(tools.get("plugin_tools", []))
         except Exception:
             tool_names = []
+            plugin_names = set()
+        side_effect_tools = {
+            "schedule_job", "cancel_schedule", "slack_send", "whatsapp_send",
+            "threads_publish", "threads_post", "instagram_publish",
+            "instagram_post", "email_send", "record_system_audio", "notify",
+            "uv_venv", "install_python_package", "apt_install",
+            "adopt_tool_plugin", "mcp_connect", "mcp_disconnect", "tts_speak",
+            "write_file", "write_versioned", "sam_segment",
+        }
+        tool_rows = []
+        for name in tool_names:
+            tool_rows.append({
+                "name": name,
+                "description": ("Adopted plugin tool." if name in plugin_names
+                                 else "Goal-run tool."),
+                "origin": "plugin" if name in plugin_names else "core",
+                "side_effect": name in side_effect_tools,
+            })
         try:
             from ..capabilities.skill_library import SkillLibrary
             skill_names = [skill.name for skill in SkillLibrary(self.home).list()]
@@ -2039,7 +2058,7 @@ class WebUIServer:
                                else str(item) for item in data]
         except Exception:
             mcp_servers = []
-        return {"tools": tool_names, "skills": skill_names,
+        return {"tools": tool_rows, "skills": skill_names,
                 "mcp_servers": mcp_servers}
 
     def handle_capability_code(self, name: str):
