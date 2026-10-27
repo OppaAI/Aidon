@@ -334,13 +334,16 @@ class GoalRunner:
         except Exception as exc:
             self._trace("checkpoint", "failed", f"save failed: {exc}")
 
-    def _load_checkpoint(self, workdir):
+    def _load_checkpoint(self, workdir, goal: str = ""):
         store = self._checkpoint_store()
         if store is None:
             return None
         try:
             from .checkpoint import filter_resumable_passed
-            cp = store.load(str(self.run_id))
+            if goal:
+                cp = store.load_for_goal(str(self.run_id), goal)
+            else:
+                cp = store.load(str(self.run_id))
             if cp is None:
                 return None
             cp.passed = filter_resumable_passed(cp.passed, workdir)
