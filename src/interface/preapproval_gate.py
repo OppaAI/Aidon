@@ -65,7 +65,7 @@ class PreapprovalGate:
     def ask(self, kind: str, title: str, body: str, **kwargs) -> Decision:
         """Return an approved decision for a pre-approved reversible kind, else ask the real gate."""
         if kind in _EXTERNAL_KINDS or kind in self._irreversible():
-            return self.gate.ask(kind, title, body)
+            return self.gate.ask(kind, title, body, **kwargs)
         try:
             preapproved = self.store.is_preapproved(self.spec_id, kind, time.time())
         except Exception:
