@@ -119,6 +119,8 @@ th{background:var(--surface2)}
 #approval>div{background:rgba(245,166,35,.12);border:1px solid var(--amber);border-radius:10px;padding:12px;margin:0.8em 0}
 #approval>div button{margin-right:8px}
 body.chat-page{max-width:1200px}
+body.chat-page h1{display:inline-block;margin-right:12px;vertical-align:middle}
+#theme-toggle{padding:6px 12px;font-size:1.1em;vertical-align:middle}
 @media (max-width:700px){#layout{display:block}#sidecol{width:auto;margin-bottom:20px}}
 """
 
@@ -154,7 +156,7 @@ CHAT_HTML = """<!doctype html>
 .karaoke-done { background: transparent; }
 </style></head>
 <body class="chat-page">
-<h1>Aidon</h1><button id="theme-toggle" title="Toggle dark / light theme">&#9684;</button>
+<h1>Aidon</h1><button id="theme-toggle" title="Toggle dark / light theme">Theme</button>
 <div id="layout">
 <div id="sidecol">
 <div id="avatar" aria-label="Aidon avatar, robot, default, VRM is the fallback">
