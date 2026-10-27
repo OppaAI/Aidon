@@ -118,7 +118,7 @@ def test_messaging_old_keys_senders_and_decisions():
         "AIDON_WHATSAPP_TOKEN": "wa", "AIDON_WHATSAPP_PHONE_ID": "pid",
         "AIDON_WHATSAPP_VERIFY_TOKEN": "vt", "AIDON_WHATSAPP_APP_SECRET": "sec",
         "AIDON_WHATSAPP_OWNER": "+1 (604) 555-1234",
-        "SLACK_BOT_TOKEN": "xoxb-1", "SLACK_SIGNING_SECRET": "sig"})
+        "SLACK_BOT_TOKEN": "xoxb-1", "AIDON_SLACK_SIGNING_SECRET": "sig"})
     assert config.whatsapp_owner == "+1 (604) 555-1234"
     assert normalize_number(config.whatsapp_owner) == "16045551234"
     assert parse_decision("approve card-1") == ("approve", "card-1")

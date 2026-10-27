@@ -4,7 +4,7 @@ Old key names are canonical here, exactly as in old Aidon:
 - WhatsApp: AIDON_WHATSAPP_TOKEN, AIDON_WHATSAPP_PHONE_ID,
   AIDON_WHATSAPP_VERIFY_TOKEN, AIDON_WHATSAPP_APP_SECRET,
   AIDON_WHATSAPP_OWNER
-- Slack: SLACK_BOT_TOKEN, plus SLACK_SIGNING_SECRET, which is
+- Slack: SLACK_BOT_TOKEN, plus AIDON_SLACK_SIGNING_SECRET, which is
   Slack's own name, not an old Aidon name, because old Slack
   was polling, not a webhook, so it had no signing secret.
   AIDON_SLACK_INBOUND_CHANNEL, AIDON_SLACK_POLL_SECONDS, and
@@ -141,7 +141,7 @@ class MessagingConfig:
             whatsapp_app_secret=get("AIDON_WHATSAPP_APP_SECRET"),
             whatsapp_owner=get("AIDON_WHATSAPP_OWNER"),
             slack_bot_token=get("SLACK_BOT_TOKEN"),
-            slack_signing_secret=get("SLACK_SIGNING_SECRET"),
+            slack_signing_secret=get("AIDON_SLACK_SIGNING_SECRET"),
             slack_webhooks=webhooks,
         )
 

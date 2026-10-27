@@ -1812,7 +1812,7 @@ def main(argv: list[str] | None = None) -> int:
         if not msg.slack_bot_token:
             print("Slack send not configured: SLACK_BOT_TOKEN not set.")
         if args.webhook_only and not msg.slack_signing_secret:
-            print("Warning: SLACK_SIGNING_SECRET not set; Slack webhook signature check is off (Slack polling does not need it).")
+            print("Warning: AIDON_SLACK_SIGNING_SECRET not set; Slack webhook signature check is off (Slack polling does not need it).")
         if args.webhook_only:
             print(f"Webhook listener on http://127.0.0.1:{args.port}/, WhatsApp and Slack only")
         else:

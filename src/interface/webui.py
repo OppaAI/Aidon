@@ -1313,7 +1313,7 @@ class WebUIServer:
             {"key": "AIDON_WHATSAPP_APP_SECRET", "label": "WhatsApp app secret", "type": "string", "default": "", "desc": "App secret for WhatsApp signature checks.", "secret": True},
             {"key": "AIDON_WHATSAPP_OWNER", "label": "WhatsApp owner", "type": "string", "default": "", "desc": "Owner phone number for the WhatsApp owner gate.", "secret": False},
             {"key": "SLACK_BOT_TOKEN", "label": "Slack bot token", "type": "string", "default": "", "desc": "Slack bot token for inbound/outbound Slack polling.", "secret": True},
-            {"key": "SLACK_SIGNING_SECRET", "label": "Slack signing secret", "type": "string", "default": "", "desc": "Only needed if Slack webhook signature verification is enabled.", "secret": True},
+            {"key": "AIDON_SLACK_SIGNING_SECRET", "label": "Slack signing secret", "type": "string", "default": "", "desc": "Only needed if Slack webhook signature verification is enabled.", "secret": True},
             {"key": "AIDON_THREADS_ACCOUNT_ID", "label": "Threads account id", "type": "string", "default": "", "desc": "Threads account id for publishing.", "secret": False},
             {"key": "AIDON_THREADS_ACCESS_TOKEN", "label": "Threads access token", "type": "string", "default": "", "desc": "Threads access token for publishing.", "secret": True},
             {"key": "AIDON_IG_USER_ID", "label": "Instagram user id", "type": "string", "default": "", "desc": "Instagram user id for publishing.", "secret": False},
