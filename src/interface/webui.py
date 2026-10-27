@@ -1267,6 +1267,10 @@ class WebUIServer:
             {"key": "AIDON_DOCKER_IMAGE", "label": "Docker image", "type": "string", "default": "python:3.12-slim", "desc": "Pinned image for the Docker backend.", "secret": False},
             {"key": "AIDON_DOCKER_NETWORK", "label": "Docker network", "type": "bool", "default": "0", "desc": "Allow network for the Docker backend.", "secret": False},
             {"key": "AIDON_MAX_SANDBOX_SECONDS", "label": "Sandbox timeout seconds", "type": "int", "default": "120", "desc": "Timeout for one sandbox command.", "secret": False},
+            {"key": "AIDON_SANDBOX_MEM_MB", "label": "Sandbox memory MB", "type": "int", "default": "1024", "desc": "Maximum address space for a sandbox child; 0 disables this limit.", "secret": False},
+            {"key": "AIDON_SANDBOX_NPROC", "label": "Sandbox process limit", "type": "int", "default": "256", "desc": "Maximum processes for a sandbox child; 0 disables this limit.", "secret": False},
+            {"key": "AIDON_SANDBOX_FSIZE_MB", "label": "Sandbox file-size MB", "type": "int", "default": "512", "desc": "Maximum file size created by a sandbox child; 0 disables this limit.", "secret": False},
+            {"key": "AIDON_SANDBOX_CPU_S", "label": "Sandbox CPU seconds", "type": "int", "default": "0", "desc": "CPU limit for a sandbox child; 0 disables this limit.", "secret": False},
             {"key": "AIDON_KERNEL", "label": "Kernel mode", "type": "bool", "default": "0", "desc": "Kernel mode: write/read/list/shell only, no calculate, no plugins.", "secret": False},
         ]},
         {"group": "Memory", "settings": [

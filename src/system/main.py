@@ -932,7 +932,11 @@ def main(argv: list[str] | None = None) -> int:
             model_router = RouterClient(phase_clients, default=main_client)
         except Exception:
             model_router = None
-    sandbox = Sandbox(config.workdir, config.sandbox_timeout_seconds)
+    sandbox = Sandbox(
+        config.workdir, config.sandbox_timeout_seconds,
+        mem_mb=config.sandbox_mem_mb, nproc=config.sandbox_nproc,
+        fsize_mb=config.sandbox_fsize_mb,
+        cpu_seconds=config.sandbox_cpu_seconds)
     memory = _LazyMemory(config)
 
     if args.command == "learn":

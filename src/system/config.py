@@ -98,6 +98,10 @@ class Config:
     api_key: str = ""
     embed_model: str = "google/embeddinggemma-2"
     sandbox_timeout_seconds: int = 120
+    sandbox_mem_mb: int = 1024
+    sandbox_nproc: int = 256
+    sandbox_fsize_mb: int = 512
+    sandbox_cpu_seconds: int = 0
     max_steps: int = 50
     approval_timeout_seconds: int = 180
     execution_backend: str = "bubblewrap"
@@ -186,6 +190,10 @@ class Config:
                                        "google/embeddinggemma-2"),
             sandbox_timeout_seconds=_env_int(
                 "AIDON_MAX_SANDBOX_SECONDS", 120),
+            sandbox_mem_mb=_env_int("AIDON_SANDBOX_MEM_MB", 1024),
+            sandbox_nproc=_env_int("AIDON_SANDBOX_NPROC", 256),
+            sandbox_fsize_mb=_env_int("AIDON_SANDBOX_FSIZE_MB", 512),
+            sandbox_cpu_seconds=_env_int("AIDON_SANDBOX_CPU_S", 0),
             max_steps=_env_int("AIDON_MAX_STEPS", 50),
             approval_timeout_seconds=_env_int(
                 "AIDON_APPROVAL_TIMEOUT_S", 180),

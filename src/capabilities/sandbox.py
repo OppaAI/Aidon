@@ -40,10 +40,16 @@ class SandboxResult:
 
 
 class Sandbox:
-    def __init__(self, workdir: Path, timeout_seconds: int = 120):
+    def __init__(self, workdir: Path, timeout_seconds: int = 120,
+                 mem_mb: int = 1024, nproc: int = 256,
+                 fsize_mb: int = 512, cpu_seconds: int = 0):
         self.workdir = Path(workdir)
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.timeout_seconds = timeout_seconds
+        self.mem_mb = max(0, int(mem_mb))
+        self.nproc = max(0, int(nproc))
+        self.fsize_mb = max(0, int(fsize_mb))
+        self.cpu_seconds = max(0, int(cpu_seconds))
         self.bwrap = shutil.which("bwrap")
 
     @property
@@ -68,11 +74,35 @@ class Sandbox:
         try:
             proc = subprocess.run(
                 full, cwd=self.workdir, capture_output=True, text=True,
-                timeout=self.timeout_seconds)
+                timeout=self.timeout_seconds,
+                preexec_fn=self._apply_resource_limits)
             return SandboxResult(proc.returncode, proc.stdout, proc.stderr,
                                  isolated)
         except subprocess.TimeoutExpired as exc:
             return SandboxResult(124, exc.stdout or "", "timeout", isolated)
+
+    def _apply_resource_limits(self) -> None:
+        """Apply old Aidon's optional POSIX limits to the child process."""
+        try:
+            import resource
+            limits = (
+                (resource.RLIMIT_AS, self.mem_mb * 1024 * 1024),
+                (resource.RLIMIT_NPROC, self.nproc),
+                (resource.RLIMIT_FSIZE, self.fsize_mb * 1024 * 1024),
+                (resource.RLIMIT_CPU, self.cpu_seconds),
+            )
+            for kind, value in limits:
+                if value <= 0:
+                    continue
+                current = resource.getrlimit(kind)
+                hard = current[1]
+                if hard != resource.RLIM_INFINITY:
+                    value = min(value, hard)
+                resource.setrlimit(kind, (value, value))
+        except (ImportError, OSError, ValueError):
+            # Resource limits are defense-in-depth; the wall-clock timeout
+            # and isolation boundary remain active if a platform refuses one.
+            return
 
     def _bwrap_argv(self, command: list[str]) -> list[str]:
         """Build the bubblewrap invocation for one command.
