@@ -371,6 +371,44 @@ class GoalRunner:
             system += (" Extra tools available to plan steps: "
                        + ", ".join(sorted(self.extra_tools)) + ".")
         user = goal
+        # Old Aidon recalled both prior experiences and ingested knowledge
+        # before planning. Keep the block bounded so memory cannot crowd
+        # out the actual goal or the plan schema.
+        if self.memory is not None:
+            try:
+                episode_limit = max(0, int(os.environ.get(
+                    "AIDON_EPISODE_RECALL_LIMIT", "1") or "1"))
+                knowledge_limit = max(0, int(os.environ.get(
+                    "AIDON_KNOWLEDGE_RECALL_LIMIT", "3") or "3"))
+                recall_tokens = max(0, int(os.environ.get(
+                    "AIDON_RECALL_MAX_TOKENS", "2000") or "2000"))
+                episodes, knowledge = self.memory.recall_both(
+                    goal, episode_limit, knowledge_limit)
+                sections = []
+                for label, hits in (("Earlier experiences", episodes),
+                                    ("Relevant knowledge", knowledge)):
+                    texts = []
+                    for hit in hits:
+                        payload = getattr(getattr(hit, "point", None),
+                                          "payload", {}) or {}
+                        text = str(payload.get("text", "")).strip()
+                        if text:
+                            texts.append(text)
+                    if texts:
+                        sections.append("## " + label + "\n- " +
+                                        "\n- ".join(texts))
+                memory_text = "\n\n".join(sections)
+                if recall_tokens:
+                    memory_text = memory_text[:recall_tokens * 4]
+                else:
+                    memory_text = ""
+                if memory_text:
+                    user += "\n\nRelevant long-term memory (reference only; " \
+                            "verify it against the current goal):\n" + memory_text
+            except Exception:
+                # Memory is an enhancement; a missing or unavailable store
+                # must never prevent a plan from being generated.
+                pass
         if spec is not None:
             spec_dict = spec.to_dict() if hasattr(spec, "to_dict") else spec
             user = (f"Goal: {goal}\n\nFrozen spec, binding for this plan, "
