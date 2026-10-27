@@ -14,6 +14,7 @@ name = "aidon"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "fastembed" },
     { name = "pillow" },
     { name = "qdrant-client" },
     { name = "sentence-transformers", extra = ["image"] },
@@ -43,6 +44,7 @@ sparse = [
 requires-dist = [
     { name = "beautifulsoup4", marker = "extra == 'kb'" },
     { name = "ebooklib", marker = "extra == 'docs'", specifier = ">=0.20" },
+    { name = "fastembed", specifier = ">=0.3" },
     { name = "fastembed", marker = "extra == 'sparse'" },
     { name = "markitdown", marker = "extra == 'docs'", specifier = ">=0.1.9" },
     { name = "pillow", specifier = ">=13.0.0" },

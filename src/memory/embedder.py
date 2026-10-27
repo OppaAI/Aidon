@@ -50,6 +50,7 @@ import threading
 DIM = 768
 HASH_DIM = 128
 EMBEDDINGGEMMA2_MODEL = "google/embeddinggemma-2"
+DEFAULT_SPARSE_MODEL = "prithivida/Splade_PP_en_v1"
 _WORD = re.compile(r"[a-z0-9]+")
 
 
@@ -252,10 +253,10 @@ def make_embedder(name: str | None = None) -> Embedder:
     ``hash`` -> HashEmbedder (tests, offline).
     Anything else, or empty -> EmbeddingGemma 2 440M, with
     AIDON_EMBED_MODEL overriding the model id, and
-    AIDON_SPARSE_MODEL, when set and not empty, wrapping it
-    in a HybridEmbedder with SPLADE sparse. An empty
-    AIDON_SPARSE_MODEL means dense + keyword sparse, which
-    is the default, so no fastembed download is forced.
+    AIDON_SPARSE_MODEL, when set, wrapping it in a HybridEmbedder
+    with SPLADE sparse. The default is the old Aidon SPLADE model;
+    set AIDON_SPARSE_MODEL= (an explicitly empty value) to opt out
+    and use the deterministic keyword sparse fallback instead.
     """
     name = (name or os.environ.get("AIDON_EMBEDDER", "")).strip()
     if name == "hash":
@@ -264,7 +265,8 @@ def make_embedder(name: str | None = None) -> Embedder:
                                 EMBEDDINGGEMMA2_MODEL).strip()
     dense = EmbeddingGemma2Embedder(model_name=model_name or
                                     EMBEDDINGGEMMA2_MODEL)
-    sparse_model = os.environ.get("AIDON_SPARSE_MODEL", "").strip()
+    sparse_model = os.environ.get("AIDON_SPARSE_MODEL",
+                                  DEFAULT_SPARSE_MODEL).strip()
     if sparse_model:
         return HybridEmbedder(dense, SpladeEmbedder(sparse_model))
     return dense
