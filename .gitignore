@@ -1,8 +1,5 @@
-.env
 .venv/
 __pycache__/
 *.pyc
+.env
 .pytest_cache/
-api_keys.json
-*.db
-qdrant/
