@@ -1507,7 +1507,7 @@ def main(argv: list[str] | None = None) -> int:
                             _sbackend = _smb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
                         except Exception:
                             _sbackend = None
-                        _srunner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_splugins, execution_backend=_sbackend, budget=_SB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_ST(config.home, project_id="default"), model_verifier=_SMV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_sbackend, sandbox))
+                        _srunner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_splugins, execution_backend=_sbackend, budget=_SB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_ST(config.home, project_id="default"), model_verifier=_SMV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_sbackend, sandbox))
                         _sreport = _srunner.run(message.get("text", ""))
                         print(f"Slack run: {_sreport.status}, files: {', '.join(_sreport.files)}")
                 if not args.seconds or _time.time() >= end:
@@ -1556,7 +1556,7 @@ def main(argv: list[str] | None = None) -> int:
             _tick_control = _TickControl(config.home)
             _tick_control.register(_tick_run_id, job.goal, job.project_id)
             print(f"Tick job {job.name}: run id {_tick_run_id}")
-            runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home, memory=memory, project_id=job.project_id, plugins=_plugins, execution_backend=_backend, budget=_B(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T(config.home, project_id=job.project_id), model_verifier=_MV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), run_id=_tick_run_id, run_control=_tick_control)
+            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id=job.project_id, plugins=_plugins, execution_backend=_backend, budget=_B(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T(config.home, project_id=job.project_id), model_verifier=_MV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), run_id=_tick_run_id, run_control=_tick_control)
             report = runner.run(job.goal)
             print(f"Tick job {job.name}: {report.status}, files: {', '.join(report.files)}")
         return 0
@@ -1573,7 +1573,7 @@ def main(argv: list[str] | None = None) -> int:
                 _backend = _mb2(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _backend = None
-            runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox))
+            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox))
             report = runner.run(goal)
             if report.status == "chat":
                 return report.chat_reply or "Received."
@@ -1844,7 +1844,7 @@ def main(argv: list[str] | None = None) -> int:
                 _backend = _vmb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _backend = None
-            _runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home,
+            _runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home,
                                  memory=memory, project_id=goal_record.project_id, plugins=_plugins,
                                  execution_backend=_backend, budget=_VB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
                                  trace=_VT(config.home, project_id=goal_record.project_id), model_verifier=_VM(client),
@@ -2079,7 +2079,7 @@ def main(argv: list[str] | None = None) -> int:
                 _be = _mb2(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _be = None
-            return GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_pl, execution_backend=_be, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_M2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_be, sandbox))
+            return GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_pl, execution_backend=_be, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_M2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_be, sandbox))
 
         import os as _os
         _slack_last_ts = ""
@@ -2171,7 +2171,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"Job {job.name}: brief delivery {_sent}")
                     _handled = True
                 if not _handled:
-                    runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home,
+                    runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home,
                                         memory=memory, project_id=job.project_id, plugins=_plugins,
                                         execution_backend=_backend, budget=_Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
                                         trace=_Trace(config.home, project_id=job.project_id), model_verifier=_MV(client),
@@ -2297,7 +2297,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"findings: {len(findings)}")
             return 0
         ok, findings, message = registry.adopt(
-            Path(args.path), gate=_cli_gate(config.approval_timeout_seconds), memory=memory,
+            Path(args.path), gate=_cli_gate(config.home, config.approval_timeout_seconds), memory=memory,
             project_id=args.project)
         print(message)
         for finding in findings:
@@ -2318,7 +2318,7 @@ def main(argv: list[str] | None = None) -> int:
             pass
         from ..agentic.interview import InterviewRunner
         runner = InterviewRunner(client, config.home, memory=memory,
-                                 gate=_cli_gate(config.approval_timeout_seconds), project_id=args.project)
+                                 gate=_cli_gate(config.home, config.approval_timeout_seconds), project_id=args.project)
         print(f"Spec template: {runner.ensure_template()}  "
               f"(copy it, fill it in, attach it to skip the interview; "
               f"docs: README, Spec sheet section)")
@@ -2372,9 +2372,9 @@ def main(argv: list[str] | None = None) -> int:
         _i_control = _IRunControl(config.home)
         _i_control.register(_i_run_id, args.text, args.project)
         print(f"interview run id: {_i_run_id}")
-        goal_runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home,
+        goal_runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home,
                                  memory=memory, promotion_ask=_promotion_ask,
-                                 project_id=args.project, plugins=plugins, execution_backend=execution_backend, researcher=_interview_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.approval_timeout_seconds), researcher=_interview_researcher), router=model_router, versioned_writes=True,
+                                 project_id=args.project, plugins=plugins, execution_backend=execution_backend, researcher=_interview_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds), researcher=_interview_researcher), router=model_router, versioned_writes=True,
                                  budget=_IBudget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
                                  trace=_ITrace(config.home, project_id=args.project),
                                  model_verifier=_IModelVerifier(client),
@@ -2423,13 +2423,13 @@ def main(argv: list[str] | None = None) -> int:
     _goal_control = _GoalControl(config.home)
     _goal_control.register(_goal_run_id, args.text, args.project)
     print(f"run id: {_goal_run_id}")
-    runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home,
+    runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home,
                         memory=memory, promotion_ask=_promotion_ask,
                         project_id=args.project, plugins=plugins, execution_backend=execution_backend,
                         budget=budget, trace=trace, model_verifier=model_verifier,
                         kernel_mode=config.kernel_mode, semantic_router=_cli_router,
                         use_semantic_router_skip=True, researcher=_researcher,
-                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.approval_timeout_seconds), researcher=_researcher),
+                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds), researcher=_researcher),
                         router=model_router, versioned_writes=True,
                         run_id=_goal_run_id, run_control=_goal_control,
                         network_available=_network_available(execution_backend, sandbox),
