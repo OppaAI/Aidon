@@ -144,6 +144,10 @@ class Config:
     corrected_subject: bool = True
     # Old routing / kernel keys, only, no new duplicates.
     fast_model: str = ""
+    verifier_model: str = ""
+    voice_announce: bool = False
+    sam_base_url: str = "https://api.meta.ai/v1"
+    sam_api_key: str = ""
     # Backend selection, old Aidon keys: AIDON_BACKEND decides
     # between a local Ollama, the Meta Model API, a plain
     # OpenAI-compatible endpoint, and the offline fake client.
@@ -233,6 +237,10 @@ class Config:
             owner_email=os.environ.get("AIDON_OWNER_EMAIL", ""),
             corrected_subject=os.environ.get("AIDON_CORRECTED_SUBJECT", "1") not in ("0", "false", "no"),
             fast_model=os.environ.get("AIDON_FAST_MODEL", ""),
+            verifier_model=os.environ.get("AIDON_VERIFIER_MODEL", ""),
+            voice_announce=os.environ.get("AIDON_VOICE_ANNOUNCE", "0") not in ("0", "false", "no", ""),
+            sam_base_url=os.environ.get("AIDON_SAM_BASE_URL", "https://api.meta.ai/v1"),
+            sam_api_key=os.environ.get("AIDON_SAM_API_KEY", ""),
             backend=os.environ.get("AIDON_BACKEND", "").strip().lower(),
             ollama_endpoint=os.environ.get(
                 "AIDON_OLLAMA_ENDPOINT", "http://localhost:11434"),

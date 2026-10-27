@@ -337,8 +337,11 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         def sam_segment(image_paths, prompt):
             paths = [image_paths] if isinstance(image_paths, str) else list(image_paths)
             confined = [str(_confined(path)) for path in paths]
-            result = _sam_segment(confined, str(prompt), getattr(config, "api_key", ""),
-                                  getattr(config, "api_base", ""), getattr(config, "sam_model", "meta-sam"))
+            result = _sam_segment(
+                confined, str(prompt),
+                getattr(config, "sam_api_key", "") or getattr(config, "api_key", ""),
+                getattr(config, "sam_base_url", "https://api.meta.ai/v1"),
+                getattr(config, "sam_model", "meta-sam"))
             return json.dumps(result, ensure_ascii=False)
 
         tools["sam_segment"] = sam_segment
@@ -1556,6 +1559,7 @@ def main(argv: list[str] | None = None) -> int:
                              transcribe_key=config.transcribe_api_key or config.api_key or None,
                              tts_key=config.fish_api_key or config.api_key or None,
                              config=config)
+        server.voice_announce = config.voice_announce
 
         def _goal_handler(event):
             from ..agentic.loop import GoalRunner
