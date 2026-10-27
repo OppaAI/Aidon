@@ -12,12 +12,79 @@ from a live client, which a report function does not have.
 from __future__ import annotations
 
 import json
+import re
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 
 def daily_report(home) -> str:
-    from .scheduler_loop import daily_report as _daily
-    return _daily(home)
+    return generate_daily_report(home)["brief"]
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")[:48] or "goal"
+
+
+def _run_day(record: dict, tz) -> date | None:
+    try:
+        stamp = record.get("created_at") or record.get("updated_at")
+        if not stamp:
+            return None
+        parsed = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(tz).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def generate_daily_report(home, day: date | None = None,
+                          tz_name: str = "UTC") -> dict:
+    """Write a deterministic daily brief and one detail file per goal."""
+    from zoneinfo import ZoneInfo
+    from .run_control import RunControl
+
+    try:
+        tz = ZoneInfo(tz_name or "UTC")
+    except Exception:
+        tz = timezone.utc
+    home = Path(home)
+    day = day or datetime.now(tz).date()
+    records = [record for record in RunControl(home).list_runs()
+               if _run_day(record, tz) == day]
+    status_counts = {}
+    for record in records:
+        status = str(record.get("status", "?"))
+        status_counts[status] = status_counts.get(status, 0) + 1
+    lines = [f"# Aidon daily report — {day.isoformat()}", ""]
+    if not records:
+        lines.append("No runs recorded today.")
+    else:
+        parts = [f"{count} {status}" for status, count in sorted(status_counts.items())]
+        lines.append(f"{len(records)} runs: {', '.join(parts)}.")
+        lines.extend(f"- {r.get('goal', '?')} → {r.get('status', '?')}"
+                     for r in records)
+    brief = "\n".join(lines) + "\n"
+    outdir = home / "reports" / day.isoformat()
+    goals_dir = outdir / "goals"
+    goals_dir.mkdir(parents=True, exist_ok=True)
+    (outdir / "brief.md").write_text(brief, encoding="utf-8")
+    by_goal = {}
+    for record in records:
+        by_goal.setdefault(str(record.get("goal", "?")), []).append(record)
+    slugs = []
+    for goal, grouped in sorted(by_goal.items()):
+        slug = _slug(goal)
+        slugs.append(slug)
+        detail = [f"# {goal}", "", f"{len(grouped)} run(s) on {day.isoformat()}", ""]
+        for record in grouped:
+            detail.append(f"## {record.get('run_id', '?')} — {record.get('status', '?')}")
+            if record.get("report"):
+                detail.extend(["", str(record["report"])[:4000]])
+            detail.append("")
+        (goals_dir / f"{slug}.md").write_text("\n".join(detail), encoding="utf-8")
+    return {"dir": str(outdir), "brief": brief, "goals": slugs,
+            "runs": len(records)}
 
 
 def build_nightly_brief(home, client) -> dict:
@@ -30,7 +97,8 @@ def build_nightly_brief(home, client) -> dict:
     """
     from ..system.model_client import Message
 
-    report = daily_report(home).strip()
+    report_result = generate_daily_report(home)
+    report = report_result["brief"].strip()
     prompt = (
         "Rewrite this Aidon activity report as a short nightly brief for "
         "the owner. Use 2-5 plain sentences, no markdown headers or bullet "
@@ -43,7 +111,8 @@ def build_nightly_brief(home, client) -> dict:
             text = client.chat(messages)
     except Exception:
         text = report
-    return {"text": str(text or report).strip(), "report": report}
+    return {"text": str(text or report).strip(), "report": report,
+            "runs": report_result["runs"], "dir": report_result["dir"]}
 
 
 def autonomy_report(home) -> dict:

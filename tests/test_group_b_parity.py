@@ -171,6 +171,17 @@ def test_nightly_brief_uses_respond_phase(tmp_path):
     assert client.phase == "respond"
 
 
+def test_daily_report_writes_brief_and_goal_details(tmp_path):
+    from src.interface.report import generate_daily_report
+    from src.interface.run_control import RunControl
+
+    RunControl(tmp_path).register("r1", "Check the garden")
+    result = generate_daily_report(tmp_path)
+    assert result["runs"] == 1
+    assert (tmp_path / "reports" / result["dir"].split("/")[-1] / "brief.md").is_file()
+    assert result["goals"] == ["check-the-garden"]
+
+
 # ── docstore ──
 
 def test_docstore_hash_and_collection():

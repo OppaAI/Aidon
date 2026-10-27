@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -56,7 +57,8 @@ class RunControl:
 
     def register(self, run_id: str, goal: str, project_id: str = "default") -> dict:
         record = {"run_id": run_id, "goal": goal, "project_id": project_id,
-                  "status": "running", "steer_notes": [], "cancelled": False}
+                  "status": "running", "steer_notes": [], "cancelled": False,
+                  "created_at": datetime.now(timezone.utc).isoformat()}
         self._path(run_id).write_text(json.dumps(record, indent=2))
         return record
 
