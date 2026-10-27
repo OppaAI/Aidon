@@ -1057,7 +1057,6 @@ def main(argv: list[str] | None = None) -> int:
             print(skill if skill else f"No skill {args.name}"); return 0 if skill else 2
         if args.action == "promote":
             print(lib.promote(args.name, {"passed": True, "evidence": "CLI promote"})); return 0
-        # src/system/main.py — skill-library trust branch
         if args.action == "trust":
             skill = lib.get(args.name)
             if skill is None:
