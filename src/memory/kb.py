@@ -93,7 +93,10 @@ def strip_html(html: str) -> str:
             script_type = (script.get("type") or "").lower()
             if "ld+json" in script_type:
                 # Lift structured data into the text, in place.
-                script.replace_with(script.string or "")
+                # ``.string`` can be None when the parser has represented
+                # the contents as more than one text node; get_text keeps
+                # the structured facts in both cases.
+                script.replace_with(script.get_text())
             else:
                 script.decompose()
         for style in soup.find_all("style"):
