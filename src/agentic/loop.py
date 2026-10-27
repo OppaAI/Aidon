@@ -205,6 +205,22 @@ class GoalRunner:
         hard-required, so a plain client passed as router
         still works.
         """
+        # USER.md is the owner's identity/profile. Keep it in the model
+        # context for every phase; having the file on disk is not enough if
+        # it is never included in the request.
+        try:
+            from .prompts import build_identity_prompt
+            identity = build_identity_prompt(str(phase))
+            messages = list(messages or [])
+            if messages and getattr(messages[0], "role", "") == "system":
+                messages[0] = Message(
+                    "system", identity + "\n\n" + str(messages[0].content))
+            else:
+                messages.insert(0, Message("system", identity))
+        except Exception:
+            # Prompt loading must never prevent a goal from running.
+            messages = list(messages or [])
+
         # Think effort/sampling for this phase, and the image
         # guard: a fast-phase call carrying image parts goes to
         # the strong client instead, because fast tiers are

@@ -125,6 +125,21 @@ def build_minimal_prompt(phase: str = "", user_text: str = "") -> str:
     return "\n".join(parts)
 
 
+def build_identity_prompt(phase: str = "", user_text: str = "",
+                          persona: str = "") -> str:
+    """Compact runtime identity: Aidon's persona plus the user profile."""
+    parts = [SYSTEM_LINE]
+    if phase:
+        parts.append(f"You are in the {phase} phase.")
+    persona = persona or _read_doc("SOUL.md")
+    if persona:
+        parts.append("\n# Persona\n" + persona)
+    user_text = user_text or _read_doc("USER.md")
+    if user_text:
+        parts.append("\n# The user\n" + user_text)
+    return "\n".join(parts)
+
+
 def guidance_block(guidance: str) -> str:
     """User guidance as a binding block, or '' when there is none."""
     if not (guidance or "").strip():
