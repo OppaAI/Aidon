@@ -580,8 +580,10 @@ class InterviewRunner:
             elif self.gate is not None:
                 decision = self.gate.ask(
                     "spec", "Approve this spec sheet?",
-                    spec_sheet_md(spec))
-                approved = decision.verdict == "approved"
+                    spec_sheet_md(spec),
+                    force_ask=True,
+                )
+                approved = decision.verdict in ("approved", "edited")
         return InterviewResult(spec=spec, approved=approved,
                                verified=verified, failures=failures,
                                exchanges=[])
