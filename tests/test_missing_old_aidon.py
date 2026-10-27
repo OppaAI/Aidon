@@ -42,12 +42,16 @@ def test_chain_validate_and_run():
 
 def test_outbox_drain_keeps_failed():
     import tempfile
+    from datetime import datetime, timedelta, timezone
     with tempfile.TemporaryDirectory() as tmp:
         outbox = Outbox(Path(tmp))
         outbox.queue("a@example.com", "hi", "body")
         result = outbox.drain(lambda item: False)
         assert result["sent"] == 0 and result["remaining"] == 1
-        result = outbox.drain(lambda item: True)
+        # Cadence: a failed item is not due again for 60s, so the
+        # retry must pass a time at or past the rescheduled attempt.
+        result = outbox.drain(lambda item: True,
+                              now=datetime.now(timezone.utc) + timedelta(seconds=61))
         assert result["sent"] == 1 and result["remaining"] == 0
 
 

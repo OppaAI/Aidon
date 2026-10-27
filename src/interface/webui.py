@@ -576,6 +576,9 @@ class WebUIGate:
         return True
 
 
+HUB_MAX_EVENTS = 500
+
+
 class WebUIServer:
     def __init__(self, home: Path, dispatcher: TriggerDispatcher | None = None,
                  auth_store=None, memory=None, whatsapp_reply=None,
@@ -1515,6 +1518,8 @@ class WebUIServer:
         if record is None:
             record = {"id": run_id, "goal": "", "events": [], "stages": [], "traces": []}
         record.setdefault(key, []).append(entry)
+        if len(record[key]) > HUB_MAX_EVENTS:
+            record[key] = record[key][-HUB_MAX_EVENTS:]
         self._write_json_file(path, record)
         return {"ok": True, "id": run_id}
 
@@ -1526,6 +1531,38 @@ class WebUIServer:
 
     def handle_hub_run_trace(self, run_id: str, body: dict) -> dict:
         return self._hub_run_append(run_id, "traces", body)
+
+    @staticmethod
+    def _elide_base64(value):
+        """Return a copy of value with long base64 strings elided.
+
+        A string longer than 1000 chars, made only of base64
+        characters, with a length that is a multiple of 4, is
+        replaced with "<elided:base64>". Short strings and
+        non-base64 strings are untouched. Dicts and lists are
+        recursed into; the caller's structure is never mutated.
+        """
+        import re
+        if isinstance(value, dict):
+            return {k: WebUIServer._elide_base64(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [WebUIServer._elide_base64(v) for v in value]
+        if isinstance(value, str) and len(value) > 1000 and len(value) % 4 == 0 \
+                and re.fullmatch(r"[A-Za-z0-9+/=]+", value):
+            return "<elided:base64>"
+        return value
+
+    def finish_hub_run(self, run_id: str) -> dict:
+        path = self._hub_run_path(run_id)
+        record = self._read_json_file(path)
+        if record is None:
+            return {"ok": False, "error": "run not found"}
+        record["status"] = "done"
+        for key in ("events", "stages", "traces"):
+            if key in record:
+                record[key] = self._elide_base64(record[key])
+        self._write_json_file(path, record)
+        return {"ok": True, "id": run_id, "status": "done"}
 
     def handle_report_generate(self, body: dict) -> dict:
         day = self._safe_name(body.get("day", "")) or "report"
@@ -1900,6 +1937,10 @@ class WebUIServer:
                 elif parsed.path.startswith("/api/hub/runs/") and parsed.path.endswith("/trace"):
                     run_id = parsed.path[len("/api/hub/runs/"):-len("/trace")].strip("/")
                     self._send_json(200, server.handle_hub_run_trace(run_id, body))
+                elif parsed.path.startswith("/api/hub/runs/") and parsed.path.endswith("/finish"):
+                    run_id = parsed.path[len("/api/hub/runs/"):-len("/finish")].strip("/")
+                    result = server.finish_hub_run(run_id)
+                    self._send_json(200 if result.get("ok") else 404, result)
                 elif parsed.path == "/api/reports/generate":
                     self._send_json(200, server.handle_report_generate(body))
                 elif parsed.path == "/api/tts":

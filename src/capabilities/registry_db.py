@@ -92,6 +92,12 @@ class Registry:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS run_state (
+                run_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (run_id, key)
+            );
             """
         )
         self._db.commit()
@@ -131,6 +137,28 @@ class Registry:
             " updated_at FROM run_records WHERE run_id = ?",
             (run_id,)).fetchone()
         return dict(row) if row else None
+
+    # -- run-state KV (crash-resume checkpoints) ---------------------
+
+    def save_state(self, run_id: str, key: str, value: str) -> None:
+        """Store a string value scoped per run; overwriting replaces it."""
+        self._db.execute(
+            "INSERT INTO run_state (run_id, key, value) VALUES (?, ?, ?)"
+            " ON CONFLICT(run_id, key) DO UPDATE SET value = excluded.value",
+            (run_id, key, str(value)))
+        self._db.commit()
+
+    def get_state(self, run_id: str, key: str) -> str:
+        """Return the stored value, or "" when absent."""
+        row = self._db.execute(
+            "SELECT value FROM run_state WHERE run_id = ? AND key = ?",
+            (run_id, key)).fetchone()
+        return row["value"] if row else ""
+
+    def clear_state(self, run_id: str) -> None:
+        """Delete all state keys for one run."""
+        self._db.execute("DELETE FROM run_state WHERE run_id = ?", (run_id,))
+        self._db.commit()
 
     def list_runs(self, state: str | None = None) -> list[dict]:
         if state is None:

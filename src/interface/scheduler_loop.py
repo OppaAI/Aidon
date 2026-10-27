@@ -34,19 +34,49 @@ from pathlib import Path
 
 
 class SchedulerLoop:
-    def __init__(self, scheduler, dispatcher, interval_seconds: float = 60.0):
+    """Poll due jobs, notify, dispatch, then drain the outbox.
+
+    on_due is the scheduled-run notify hook: it is called with each
+    due event BEFORE dispatch, so a scheduled run is announced
+    even if dispatch then fails. A scheduled run that needs
+    approval still goes through the normal approval gate, which
+    fails closed on timeout — there is no separate approval path
+    for scheduled runs, and on_due never approves anything.
+    Outbox draining is cadence-spaced (see Outbox): run_once
+    drains only due notifications through outbox_sender, and
+    records the result on last_outbox_drain instead of
+    returning it, so run_once still returns the due events.
+    """
+
+    def __init__(self, scheduler, dispatcher=None, interval_seconds: float = 60.0,
+                 outbox=None, outbox_sender=None, on_due=None):
         self.scheduler = scheduler
         self.dispatcher = dispatcher
         self.interval_seconds = interval_seconds
+        self.outbox = outbox
+        self.outbox_sender = outbox_sender
+        self.on_due = on_due
+        self.last_outbox_drain = None
         self._stop = threading.Event()
 
     def stop(self):
         self._stop.set()
 
+    def drain_outbox(self) -> dict | None:
+        """Drain the outbox once through outbox_sender, if both are set."""
+        if self.outbox is None or self.outbox_sender is None:
+            return None
+        self.last_outbox_drain = self.outbox.drain(self.outbox_sender)
+        return self.last_outbox_drain
+
     def run_once(self) -> list:
         due = self.scheduler.check_due(datetime.now())
         for event in due:
-            self.dispatcher.dispatch(event)
+            if self.on_due is not None:
+                self.on_due(event)
+            if self.dispatcher is not None:
+                self.dispatcher.dispatch(event)
+        self.drain_outbox()
         return due
 
     def run(self):

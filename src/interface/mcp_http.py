@@ -17,15 +17,51 @@ on later calls, as Streamable HTTP servers expect.
 
 No network call happens at import time. Tests use a local HTTP
 server double, never a real endpoint.
+
+A token may be given as "$VAR" or "Bearer $VAR": it is expanded
+from the environment at connect time (see expand_env_value),
+and the client records which variable supplied it as
+``token_var``. The expanded value, never the "$VAR" text, is
+what goes into the Authorization header.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import re
 import urllib.error
 import urllib.request
 
 PROTOCOL_VERSION = "2024-11-05"
+
+# A $VAR reference: "$NAME" or "${NAME}", NAME = [A-Z0-9_]+.
+_VAR_REF_RE = re.compile(r"\$(?:\{([A-Z0-9_]+)\}|([A-Z0-9_]+))")
+
+
+def expand_env_value(value) -> tuple[str, str | None]:
+    """Expand $VAR references in a token/header value.
+
+    Returns (expanded, variable_name). The variable name is the
+    first $NAME reference found, or None when the value contains
+    no reference at all — that name is what an approval card
+    should show, so the owner sees *which* variable supplies the
+    secret instead of the secret itself. A reference to an unset
+    variable expands to "" (documented, not an error): the
+    caller then has no token, rather than a literal "$NAME"
+    sent to a server. A value with no $ reference is returned
+    unchanged with None.
+    """
+    text = "" if value is None else str(value)
+    names: list[str] = []
+
+    def _replace(match: "re.Match[str]") -> str:
+        name = match.group(1) or match.group(2)
+        names.append(name)
+        return os.environ.get(name, "")
+
+    expanded = _VAR_REF_RE.sub(_replace, text)
+    return expanded, (names[0] if names else None)
 
 
 class McpHttpError(Exception):
@@ -62,7 +98,25 @@ class McpHttpClient:
         if not endpoint:
             raise ValueError("MCP HTTP endpoint is required")
         self.endpoint = endpoint.rstrip("/")
-        self.token = token or None
+        if token is None:
+            self.token = None
+            self.token_var = None
+        else:
+            # $VAR form is the recommended form: the token is
+            # expanded at connect time from the environment, and
+            # token_var records which variable supplied it, for
+            # display on an approval card. A literal token is
+            # still accepted as-is (not refused here); only the
+            # $VAR form gets a token_var.
+            expanded, var = expand_env_value(token)
+            # The header adds "Bearer " itself, so a caller using
+            # the old "Bearer $VAR" form must not end up with a
+            # doubled "Bearer Bearer" header: strip a leading
+            # scheme from the expanded value.
+            if expanded.lower().startswith("bearer "):
+                expanded = expanded[len("bearer "):]
+            self.token = expanded or None
+            self.token_var = var
         self.timeout = timeout
         self.session_id: str | None = None
         self.server_info: dict = {}

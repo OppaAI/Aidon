@@ -1505,7 +1505,27 @@ def main(argv: list[str] | None = None) -> int:
             _slack_last_ts = _slack_ts_path.read_text().strip()
         while True:
             scheduler = Scheduler(config.home)
+            # Tick wiring: SchedulerLoop carries the outbox drain
+            # and the scheduled-run notify hook for this daemon.
+            # Sending is not configured here, so the outbox sender
+            # prints the notification and reports it sent; the
+            # on_due hook queues a "Scheduled run due" notice
+            # before each due job runs. Job execution below is
+            # unchanged: the loop object is not asked to dispatch,
+            # it only notifies and drains once per tick.
+            from ..capabilities.outbox import Outbox as _ServeOutbox
+            from ..interface.scheduler_loop import SchedulerLoop as _ServeLoop
+            _serve_outbox = _ServeOutbox(config.home)
+            def _serve_sender(item):
+                print(f"Outbox notification to {item.get('to', '')}: {item.get('subject', '')}: {item.get('body', '')}")
+                return True
+            def _serve_on_due(event):
+                _serve_outbox.queue("", "Scheduled run due",
+                                    f"Scheduled run due: {getattr(event, 'goal', event)}")
+            _serve_loop = _ServeLoop(scheduler, dispatcher=None, outbox=_serve_outbox,
+                                     outbox_sender=_serve_sender, on_due=_serve_on_due)
             for job in scheduler.check_due(datetime.now()):
+                _serve_on_due(job)
                 print(f"Due job: {job.name}: {job.goal}")
                 from ..agentic.budgets import Budget as _Budget
                 from ..agentic.trace import TraceRecorder as _Trace
@@ -1530,6 +1550,9 @@ def main(argv: list[str] | None = None) -> int:
                                     use_semantic_router_skip=True)
                 report = runner.run(job.goal)
                 print(f"Job {job.name}: {report.status}, files: {', '.join(report.files)}")
+            # Tick drain: once per tick, due notifications only,
+            # cadence-spaced by the Outbox itself.
+            _serve_loop.drain_outbox()
             # Ingest watcher, same loop, same GoalRunner, no separate daemon.
             try:
                 from ..interface.triggers import IngestWatcher
