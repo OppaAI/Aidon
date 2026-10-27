@@ -2147,10 +2147,18 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"Job {job.name}: chain {_chain_result}")
                     _handled = True
                 elif job.kind == "brief":
-                    # The new report subsystem does not yet have the old
-                    # model-synthesized WhatsApp brief builder. Fail loudly
-                    # instead of silently treating a brief as a goal.
-                    print(f"Job {job.name}: brief jobs are not implemented in the new report subsystem")
+                    from ..interface.report import build_nightly_brief as _brief
+                    from ..interface.messaging import MessagingConfig, send_whatsapp
+                    _brief_result = _brief(config.home, client)
+                    _msg = MessagingConfig(
+                        whatsapp_token=config.whatsapp_token,
+                        whatsapp_phone_id=config.whatsapp_phone_id,
+                        whatsapp_verify_token=config.whatsapp_verify_token,
+                        whatsapp_app_secret=config.whatsapp_app_secret,
+                        whatsapp_owner=config.whatsapp_owner)
+                    _sent = send_whatsapp(_msg, config.whatsapp_owner,
+                                          _brief_result["text"])
+                    print(f"Job {job.name}: brief delivery {_sent}")
                     _handled = True
                 if not _handled:
                     runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home,

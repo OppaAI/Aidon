@@ -155,6 +155,22 @@ def test_gate_text_accepts_old_compatibility_arguments():
     assert metrics.calls
 
 
+def test_nightly_brief_uses_respond_phase(tmp_path):
+    from src.interface.report import build_nightly_brief
+
+    class Client:
+        def __init__(self):
+            self.phase = None
+        def chat_phase(self, phase, messages):
+            self.phase = phase
+            return "A quiet night."
+
+    client = Client()
+    result = build_nightly_brief(tmp_path, client)
+    assert result["text"] == "A quiet night."
+    assert client.phase == "respond"
+
+
 # ── docstore ──
 
 def test_docstore_hash_and_collection():

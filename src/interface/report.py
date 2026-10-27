@@ -20,6 +20,32 @@ def daily_report(home) -> str:
     return _daily(home)
 
 
+def build_nightly_brief(home, client) -> dict:
+    """Create the old short nightly brief from the deterministic report.
+
+    The report is the source of truth; the model only rewrites it for
+    readability.  Routing through ``respond`` preserves the fast-tier
+    behavior when a fast model is configured, while remaining compatible
+    with older test clients that only expose ``chat(messages)``.
+    """
+    from ..system.model_client import Message
+
+    report = daily_report(home).strip()
+    prompt = (
+        "Rewrite this Aidon activity report as a short nightly brief for "
+        "the owner. Use 2-5 plain sentences, no markdown headers or bullet "
+        "lists. If nothing happened, say so briefly.\n\n" + report)
+    messages = [Message("user", prompt)]
+    try:
+        if hasattr(client, "chat_phase"):
+            text = client.chat_phase("respond", messages)
+        else:
+            text = client.chat(messages)
+    except Exception:
+        text = report
+    return {"text": str(text or report).strip(), "report": report}
+
+
 def autonomy_report(home) -> dict:
     home = Path(home)
     last_run_path = home / "learned" / "last_run.json"
