@@ -94,10 +94,11 @@ def _post_json(url: str, token: str, payload: dict, post=None) -> dict:
     if post is not None:
         return post(url, token, payload)
     data = json.dumps(payload).encode()
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(
-        url, data=data, method="POST",
-        headers={"Authorization": f"Bearer {token}",
-                 "Content-Type": "application/json"})
+        url, data=data, method="POST", headers=headers)
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read())
 
@@ -111,6 +112,9 @@ class MessagingConfig:
     whatsapp_owner: str = ""
     slack_bot_token: str = ""
     slack_signing_secret: str = ""
+    # Slack Incoming Webhook URLs are destination-specific. Keys are Slack
+    # conversation IDs (C..., D..., or G...), values are secret URLs.
+    slack_webhooks: dict[str, str] | None = None
 
     @classmethod
     def from_env(cls, env=None) -> "MessagingConfig":
@@ -123,6 +127,11 @@ class MessagingConfig:
                     return value
             return ""
 
+        webhooks = {
+            key[len("AIDON_SLACK_WEBHOOK_"):]: value
+            for key, value in env.items()
+            if key.startswith("AIDON_SLACK_WEBHOOK_") and value
+        }
         return cls(
             # Old names only. A duplicate new name for the
             # same setting was removed, not kept as an alias.
@@ -133,6 +142,7 @@ class MessagingConfig:
             whatsapp_owner=get("AIDON_WHATSAPP_OWNER"),
             slack_bot_token=get("SLACK_BOT_TOKEN"),
             slack_signing_secret=get("SLACK_SIGNING_SECRET"),
+            slack_webhooks=webhooks,
         )
 
     def whatsapp_configured(self) -> bool:
@@ -172,6 +182,17 @@ def send_whatsapp(config: MessagingConfig, to: str, text: str, post=None) -> dic
 
 def send_slack(config: MessagingConfig, channel: str, text: str,
                thread_ts: str | None = None, post=None) -> dict:
+    webhook = (config.slack_webhooks or {}).get(str(channel), "")
+    if webhook:
+        try:
+            # Incoming Webhooks are already bound to their destination, so
+            # the channel and thread fields are intentionally not sent.
+            result = _post_json(webhook, "", {"text": text}, post=post)
+            if isinstance(result, dict) and result.get("error"):
+                return {"ok": False, "error": str(result["error"])}
+            return {"ok": True, "webhook": True}
+        except Exception as exc:
+            return {"ok": False, "error": type(exc).__name__}
     if not config.slack_configured():
         return {"ok": False, "error": "SLACK_BOT_TOKEN not set"}
     if not channel:
