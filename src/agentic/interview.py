@@ -510,7 +510,7 @@ class InterviewRunner:
                     spec_sheet_md(spec),
                     force_ask=True,
                 )
-                approved = decision.verdict in ("approved", "edited")
+                approved = decision.verdict in ("approved", "auto_approved")
         return InterviewResult(spec=spec, approved=approved,
                                verified=verified, failures=failures,
                                exchanges=exchanges)
@@ -583,7 +583,7 @@ class InterviewRunner:
                     spec_sheet_md(spec),
                     force_ask=True,
                 )
-                approved = decision.verdict in ("approved", "edited")
+                approved = decision.verdict in ("approved", "auto_approved")
         return InterviewResult(spec=spec, approved=approved,
                                verified=verified, failures=failures,
                                exchanges=[])
