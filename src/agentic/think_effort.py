@@ -66,6 +66,17 @@ def sampling_for(phase: str) -> dict:
             result["top_p"] = float(top_p)
     except ValueError:
         pass
+    if str(phase).lower() == "verify":
+        raw_seed = os.environ.get("AIDON_VERIFY_SEED")
+        # Old default: deterministic verify calls use seed 42. An explicitly
+        # empty value disables the seed; an invalid value is ignored.
+        if raw_seed is None:
+            result["seed"] = 42
+        elif raw_seed.strip():
+            try:
+                result["seed"] = int(raw_seed)
+            except ValueError:
+                pass
     return result
 
 

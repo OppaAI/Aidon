@@ -120,6 +120,8 @@ class HttpModelClient(ModelClient):
                 payload["temperature"] = sampling["temperature"]
             if sampling.get("top_p") is not None:
                 payload["top_p"] = sampling["top_p"]
+            if sampling.get("seed") is not None:
+                payload["seed"] = sampling["seed"]
         # A list content is sent as-is, so image parts reach
         # the model, not just the text part. A string content
         # is unchanged, so old text-only calls keep working.
@@ -200,6 +202,8 @@ class OllamaClient(ModelClient):
                 body["options"]["temperature"] = sampling["temperature"]
             if sampling.get("top_p") is not None:
                 body["options"]["top_p"] = sampling["top_p"]
+            if sampling.get("seed") is not None:
+                body["options"]["seed"] = sampling["seed"]
         req = urllib.request.Request(
             f"{self.base}/api/chat",
             data=json.dumps(body).encode("utf-8"),
