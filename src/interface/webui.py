@@ -72,6 +72,46 @@ from .messaging import (MessagingConfig, normalize_number, parse_decision,
                         verify_whatsapp_signature)
 from .triggers import TriggerDispatcher, TriggerEvent
 
+# Shared page style: every WebUI page gets the same base look. The chat
+# page previously shipped only avatar-animation CSS and the handler-built
+# pages shipped no <head> at all, so they rendered as plain white text.
+# No external assets: everything here is inline, so pages work offline.
+BASE_CSS = """
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#f4f5f7;color:#1d232a;margin:0 auto;padding:24px;max-width:980px;line-height:1.5}
+h1{font-size:1.6em;color:#14213d;margin:0 0 0.5em}
+h2{font-size:1.2em;color:#14213d;margin:1.2em 0 0.4em}
+h3{font-size:1em;margin:1em 0 0.3em}
+a{color:#336699}
+button{background:#336699;color:#fff;border:0;border-radius:6px;padding:7px 14px;font-size:1em;cursor:pointer}
+button:hover{background:#264d73}
+input,select,textarea{border:1px solid #c3c9d1;border-radius:6px;padding:7px 9px;font-size:1em;background:#fff;color:#1d232a}
+label{margin-right:0.6em}
+form{margin:0.8em 0}
+pre{background:#eef1f4;border-radius:6px;padding:12px;overflow-x:auto;white-space:pre-wrap}
+code{background:#eef1f4;border-radius:4px;padding:1px 5px}
+table{border-collapse:collapse;margin:0.8em 0}
+th,td{border:1px solid #c3c9d1;padding:6px 10px;text-align:left}
+th{background:#e6ecf2}
+#chat{background:#fff;border:1px solid #dde2e8;border-radius:10px;padding:16px;margin-top:16px}
+#messages{min-height:120px}
+#messages p{background:#eef3f8;border-radius:10px;padding:10px 12px;margin:0.5em 0}
+#messages table{background:#fff}
+#form{display:flex;gap:8px}
+#msg{flex:1}
+#pills span{display:inline-block;background:#dbe7f3;border-radius:12px;padding:2px 10px;margin:2px;font-size:0.9em}
+#avatar{background:#fff;border:1px solid #dde2e8;border-radius:10px;padding:8px;margin-bottom:16px}
+#nodes>div{background:#fff;border:1px solid #dde2e8;border-radius:10px;padding:12px;margin:0.8em 0}
+#factory{max-width:100%}
+#vrm-view{max-width:100%}
+"""
+
+
+def _page_html(title, body):
+    """Wrap a handler-built fragment in a full styled page."""
+    return ("<!doctype html><html><head><meta charset=\"utf-8\"><title>" + title +
+            "</title><style>" + BASE_CSS + "</style></head><body>" + body + "</body></html>")
+
+
 CHAT_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Aidon</title>
 <style>
@@ -621,6 +661,14 @@ class WebUIGate:
 
 
 HUB_MAX_EVENTS = 500
+
+
+# Inject the shared style into the full-page constants defined above.
+CHAT_HTML = CHAT_HTML.replace("</style></head>", "</style><style>" + BASE_CSS + "</style></head>", 1)
+DAG_HTML = DAG_HTML.replace("</head>", "<style>" + BASE_CSS + "</style></head>", 1)
+REPLAY_HTML = REPLAY_HTML.replace("</head>", "<style>" + BASE_CSS + "</style></head>", 1)
+VRM_HTML = VRM_HTML.replace("</head>", "<style>" + BASE_CSS + "</style></head>", 1)
+FACTORY_HTML = FACTORY_HTML.replace("</head>", "<style>" + BASE_CSS + "</style></head>", 1)
 
 
 class WebUIServer:
@@ -1922,13 +1970,13 @@ class WebUIServer:
                     html += "<h2>Keys, hash prefixes only, never real keys</h2>"
                     for key in keys:
                         html += f"<p>{key['name']} {key['scope']} {key['key_hash_prefix']}</p>"
-                    self._send_html(200, html)
+                    self._send_html(200, _page_html("Settings", html))
                 elif parsed.path == "/library":
                     files = server._library_files()
                     html = "<h1>Library</h1>"
                     for item in files:
                         html += f"<p>{item['path']} {item['size']} bytes</p>"
-                    self._send_html(200, html)
+                    self._send_html(200, _page_html("Library", html))
                 elif parsed.path == "/api/library":
                     self._send_json(200, {"files": server._library_files()})
                 elif parsed.path == "/api/projects":
@@ -1953,7 +2001,7 @@ class WebUIServer:
                     html += "<p>Computer use: screenshot and click, type, scroll, key, approval-gated, no driver configured by default, no GUI action without a driver.</p>"
                     html += "<h2>Capabilities studio</h2><p>Record a skill success or failure, or probe a plugin dir, or edit a skill's description, via POST /api/studio/capabilities with JSON {action: success|failure|probe|edit, name, path, description}.</p>"
                     html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/capabilities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('cap_action').value,name:document.getElementById('cap_name').value,path:document.getElementById('cap_path').value,description:document.getElementById('cap_desc').value})}).then(r=>r.json()).then(d=>document.getElementById('cap_result').textContent=JSON.stringify(d));\"><select id=\"cap_action\"><option>success</option><option>failure</option><option>probe</option></select> <input id=\"cap_name\" placeholder=\"skill name\"> <input id=\"cap_path\" placeholder=\"plugin dir for probe\"> <button>Run</button></form><pre id=\"cap_result\"></pre>"
-                    self._send_html(200, html)
+                    self._send_html(200, _page_html("Capabilities", html))
                 elif parsed.path == "/memory":
                     html = "<h1>Memory</h1><p>Episodes Aidon remembers from past work, by collection, no secret values.</p>"
                     if server.memory is not None:
@@ -1967,7 +2015,7 @@ class WebUIServer:
                                 continue
                     html += "<h2>Memory studio</h2><p>Forget a point, prune a collection, or promote an episodic point, or edit a point's text, via POST /api/studio/memory with JSON {action: forget|prune|promote|edit, collection, point_id, text}.</p>"
                     html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/memory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('mem_action').value,collection:document.getElementById('mem_coll').value,point_id:document.getElementById('mem_id').value,text:document.getElementById('mem_text').value})}).then(r=>r.json()).then(d=>document.getElementById('mem_result').textContent=JSON.stringify(d));\"><select id=\"mem_action\"><option>forget</option><option>prune</option><option>promote</option></select> <input id=\"mem_coll\" value=\"episodic\"> <input id=\"mem_id\" placeholder=\"point id\"> <button>Run</button></form><pre id=\"mem_result\"></pre>"
-                    self._send_html(200, html)
+                    self._send_html(200, _page_html("Memory", html))
                 elif parsed.path == "/knowledge":
                     html = "<h1>Knowledge</h1><p>Documents and facts Aidon has ingested, from the knowledge collection and library.</p>"
                     if server.memory is not None:
@@ -1980,12 +2028,12 @@ class WebUIServer:
                         html += f"<p>Library: {item['path']}</p>"
                     html += "<h2>Knowledge studio</h2><p>Recall, record, edit, or delete knowledge, via POST /api/studio/knowledge with JSON {action: recall|ingest|edit|delete, query, text, point_id}.</p>"
                     html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('kb_action').value,query:document.getElementById('kb_query').value,text:document.getElementById('kb_text').value})}).then(r=>r.json()).then(d=>document.getElementById('kb_result').textContent=JSON.stringify(d));\"><select id=\"kb_action\"><option>recall</option><option>ingest</option></select> <input id=\"kb_query\" placeholder=\"query\"> <input id=\"kb_text\" placeholder=\"text to ingest\"> <button>Run</button></form><pre id=\"kb_result\"></pre>"
-                    self._send_html(200, html)
+                    self._send_html(200, _page_html("Knowledge", html))
                 elif parsed.path == "/reports":
                     from ..interface.scheduler_loop import daily_report as _daily
                     html = "<h1>Reports</h1><p>Daily reports, from learned last run and trace files, never invented.</p>"
                     html += f"<pre>{_daily(server.home)}</pre>"
-                    self._send_html(200, html)
+                    self._send_html(200, _page_html("Reports", html))
                 elif parsed.path == "/replay":
                     self._send_html(200, REPLAY_HTML)
                 elif parsed.path == "/avatar-vrm":
