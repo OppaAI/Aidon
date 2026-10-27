@@ -27,6 +27,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+def normalize_goal(goal: str) -> str:
+    """Stable comparison form: collapse whitespace, strip."""
+    return " ".join(str(goal or "").split())
+  
 CHECKPOINT_KEY = "goal_checkpoint"
 
 # Phases ordered roughly through the pipeline. "live" means owner
@@ -105,7 +109,16 @@ class CheckpointStore:
             return None
         raw = self.registry.get_state(run_id, CHECKPOINT_KEY)
         return RunCheckpoint.from_json(raw)
-
+      
+    def load_for_goal(self, run_id: str, goal: str) -> RunCheckpoint | None:
+        """Load checkpoint only when the saved goal matches."""
+        cp = self.load(run_id)
+        if cp is None:
+            return None
+        if normalize_goal(cp.goal) != normalize_goal(goal):
+            return None
+        return cp
+      
     def clear(self, run_id: str) -> None:
         if not run_id:
             return
