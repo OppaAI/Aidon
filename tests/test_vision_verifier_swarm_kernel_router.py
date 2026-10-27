@@ -45,8 +45,14 @@ def test_swarm_decided_by_model():
                        lambda subgoal: f"Done {subgoal}")
     assert result["swarmed"] is True
     assert result["results"] == ["Done Research A", "Done Research B"]
-    single = run_swarm("Do one thing", FakeClient("SINGLE"), lambda goal: "single done")
-    assert single["swarmed"] is False and single["merged"] == "single done"
+    calls = []
+    single = run_swarm("Do one thing", FakeClient("SINGLE"),
+                       lambda goal: calls.append(goal) or "single done")
+    # No swarm, no run here: the caller runs the goal once
+    # itself, so run_swarm must not call the runner at all.
+    assert single == {"swarmed": False, "subgoals": [], "results": [],
+                      "merged": None}
+    assert calls == []
 
 
 def test_kernel_blocks_non_seed():

@@ -60,6 +60,12 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+import hashlib
+
+# Adoption size cap: a plugin tree larger than this is rejected before
+# any approval card, so an oversized or bloated source never reaches
+# the owner as something to approve.
+MAX_PLUGIN_BYTES = 10 * 1024 * 1024
 
 BLOCKING_TYPES = ("eval_exec", "subprocess", "network", "secret")
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -228,6 +234,34 @@ def load_plugin(directory: Path, execute: bool = True) -> Plugin:
     return plugin
 
 
+def plugin_tree_hash(source_dir: Path) -> str:
+    """Deterministic sha256 over a plugin source tree.
+
+    Covers everything copytree would copy: every entry's relative
+    path (directories included, so a structural change is detected)
+    and every file's bytes, in sorted relative-path order. Nothing
+    the copy would copy is skipped, so the hash binds an approval
+    to exactly the bytes that get adopted.
+    """
+    source_dir = Path(source_dir)
+    digest = hashlib.sha256()
+    for path in sorted(source_dir.rglob("*"),
+                       key=lambda p: str(p.relative_to(source_dir))):
+        rel = str(path.relative_to(source_dir))
+        digest.update(rel.encode("utf-8"))
+        digest.update(b"\0")
+        if path.is_file():
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def plugin_tree_size(source_dir: Path) -> int:
+    """Total bytes of all files in a plugin source tree."""
+    source_dir = Path(source_dir)
+    return sum(p.stat().st_size for p in source_dir.rglob("*") if p.is_file())
+
+
 class PluginRegistry:
     def __init__(self, home: Path):
         self.home = Path(home)
@@ -283,6 +317,19 @@ class PluginRegistry:
         blocking = [f for f in findings if f.type in BLOCKING_TYPES]
         if blocking:
             return False, findings, "Adoption rejected: blocking scan findings"
+        # Size cap, before any approval card: an oversized source is
+        # not something the owner should be asked to approve.
+        total_size = plugin_tree_size(source_dir)
+        if total_size > MAX_PLUGIN_BYTES:
+            return False, findings, (
+                f"Adoption rejected: plugin source is {total_size} bytes, "
+                f"over the {MAX_PLUGIN_BYTES} byte cap")
+        # Approval binding: hash the approved bytes now, re-hash
+        # immediately before the copy, and abort if they changed.
+        try:
+            approved_hash = plugin_tree_hash(source_dir)
+        except OSError as exc:
+            return False, findings, f"Adoption rejected: cannot hash source: {exc}"
         # Full security gate over the plugin's own code: a fail
         # verdict (os.system, eval/exec, piped download-to-shell,
         # secret-like strings) blocks adoption even when the
@@ -299,8 +346,11 @@ class PluginRegistry:
                 gate_findings.extend(result.findings)
                 if result.verdict == "fail":
                     return False, findings, "Adoption rejected: security gate fail"
-        except Exception:
-            gate_findings = []
+        except Exception as exc:
+            # Fail closed: a gate that failed to run must never present
+            # as a clean scan. The old code reset findings to [] and
+            # proceeded to an approval card showing "no findings".
+            return False, findings, f"Adoption rejected: security gate error: {exc}"
         try:
             # Static validation only. Importing the module here would
             # run its top-level code on the host before the owner has
@@ -312,7 +362,8 @@ class PluginRegistry:
         body_lines = [f"Plugin: {plugin.name} {plugin.version}",
                       f"Description: {plugin.description}",
                       f"Tools: {', '.join(plugin.tool_names()) or 'none'}",
-                      f"Skills: {', '.join(plugin.skills) or 'none'}"]
+                      f"Skills: {', '.join(plugin.skills) or 'none'}",
+                      f"Approved source hash: {approved_hash}"]
         if findings:
             body_lines.append("Scan warnings:")
             body_lines.extend(f"  {f.path}:{f.line} {f.type}" for f in findings)
@@ -330,6 +381,19 @@ class PluginRegistry:
             approved = decision.verdict == "approved"
         if not approved:
             return False, findings, "Adoption rejected by owner"
+        # Re-hash immediately before the copy, before touching any
+        # existing install: if the source changed after approval, the
+        # approval no longer binds to these bytes, so abort and leave
+        # any previously installed version untouched.
+        try:
+            current_hash = plugin_tree_hash(source_dir)
+        except OSError as exc:
+            return False, findings, f"Adoption aborted: cannot re-hash source: {exc}"
+        if current_hash != approved_hash:
+            return False, findings, (
+                "Adoption aborted: plugin source changed after approval "
+                f"(approved hash {approved_hash}, current hash {current_hash}); "
+                "approve the new source to adopt it")
         target = self.plugins_dir / plugin.name
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
         if target.exists():

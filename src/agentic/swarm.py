@@ -48,13 +48,13 @@ def decide_subgoals(goal: str, client: ModelClient) -> list[str]:
 def run_swarm(goal: str, client: ModelClient, runner, max_workers: int = 3) -> dict:
     subgoals = decide_subgoals(goal, client)
     if not subgoals:
-        try:
-            result = runner(goal)
-            return {"swarmed": False, "subgoals": [], "results": [result],
-                    "merged": result}
-        except Exception as exc:
-            return {"swarmed": False, "subgoals": [], "results": [f"failed: {exc}"],
-                    "merged": f"failed: {exc}"}
+        # No swarm: the caller runs the goal once itself, so
+        # run_swarm must not run it here too — the old code
+        # executed runner(goal) and the caller then ran it
+        # again and discarded this result (double model calls,
+        # double sandbox writes, approvals asked twice).
+        return {"swarmed": False, "subgoals": [], "results": [],
+                "merged": None}
     with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(subgoals)))) as pool:
         futures = [pool.submit(_run_one, runner, subgoal) for subgoal in subgoals]
         results = [f.result() for f in futures]

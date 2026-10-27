@@ -72,6 +72,61 @@ def parser_needed_for(path: Path) -> str | None:
     return PARSER_NEEDED.get(suffix, "unknown-parser")
 
 
+def strip_html(html: str) -> str:
+    """Shared HTML-to-text: one contract for the KB and research paths.
+
+    - script and style elements are removed, never kept as text;
+    - JSON-LD script content (type application/ld+json) is lifted
+      into the text instead of dropped, so structured facts survive;
+    - table rows survive as separate lines, one row per line.
+    BeautifulSoup is used when installed; the regex fallback keeps
+    the same three rules when it is not. Returns lines joined by
+    newlines, with blank lines removed.
+    """
+    try:
+        from bs4 import BeautifulSoup
+    except Exception:
+        BeautifulSoup = None
+    if BeautifulSoup is not None:
+        soup = BeautifulSoup(html, "html.parser")
+        for script in soup.find_all("script"):
+            script_type = (script.get("type") or "").lower()
+            if "ld+json" in script_type:
+                # Lift structured data into the text, in place.
+                script.replace_with(script.string or "")
+            else:
+                script.decompose()
+        for style in soup.find_all("style"):
+            style.decompose()
+        for row in soup.find_all("tr"):
+            cells = [cell.get_text(" ", strip=True)
+                     for cell in row.find_all(["td", "th"])]
+            row.replace_with("\n" + " ".join(c for c in cells if c) + "\n")
+        lines = []
+        for line in soup.get_text("\n").splitlines():
+            line = re.sub(r"\s+", " ", line).strip()
+            if line:
+                lines.append(line)
+        return "\n".join(lines)
+    # Regex fallback, same three rules, no dependency.
+    ld_json = re.findall(
+        r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<script.*?</script>", " ", html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<style.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"</tr\s*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</(p|div|li|h[1-6])\s*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    lines = []
+    for line in text.splitlines():
+        line = re.sub(r"\s+", " ", line).strip()
+        if line:
+            lines.append(line)
+    lines.extend(line.strip() for line in ld_json if line.strip())
+    return "\n".join(lines)
+
+
 def extract_text(path: Path) -> str:
     """Extract readable text from a file, by suffix.
 
@@ -103,11 +158,7 @@ def extract_text(path: Path) -> str:
             return Path(path).read_text(encoding="utf-8", errors="ignore")
     if suffix in (".html", ".htm"):
         raw = Path(path).read_text(encoding="utf-8", errors="ignore")
-        try:
-            from bs4 import BeautifulSoup
-            return BeautifulSoup(raw, "html.parser").get_text("\n")
-        except Exception:
-            return re.sub(r"<[^>]+>", " ", raw)
+        return strip_html(raw)
     return Path(path).read_text(encoding="utf-8", errors="ignore")
 
 

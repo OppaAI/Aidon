@@ -43,18 +43,17 @@ missing or stale, instead of starting from scratch.
 
 from __future__ import annotations
 
-import re
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
 
 
-def _strip_html(text: str) -> str:
-    text = re.sub(r"<script.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<style.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+from ..memory.kb import strip_html
+
+# Shared contract (see src/memory/kb.py): script/style removed,
+# JSON-LD lifted as text, table rows kept as separate lines.
+# Old name kept for callers that imported it from here.
+_strip_html = strip_html
 
 
 @dataclass
@@ -173,12 +172,17 @@ class Researcher:
                 sources = list(pool.map(self.fetch, urls))
         else:
             sources = [self.fetch(url) for url in urls]
-        all_text = " ".join(s.excerpt for s in sources if not s.error).lower()
+        # Excerpts keep newlines (table rows are separate lines), so
+        # matching normalizes whitespace instead of assuming spaces.
+        def _flat(text: str) -> str:
+            return " ".join(text.split()).lower()
+
+        all_text = " ".join(_flat(s.excerpt) for s in sources if not s.error)
         verified: list[dict] = []
         unverified: list[str] = []
         for claim in claims or []:
             if claim.lower() in all_text:
-                source = next((s for s in sources if claim.lower() in s.excerpt.lower()), sources[0] if sources else None)
+                source = next((s for s in sources if claim.lower() in _flat(s.excerpt)), sources[0] if sources else None)
                 verified.append({"fact": claim, "source": source.url if source else "",
                                  "excerpt": (source.excerpt[:300] if source else "")})
             else:
