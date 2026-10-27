@@ -103,6 +103,20 @@ th{background:#e6ecf2}
 #nodes>div{background:#fff;border:1px solid #dde2e8;border-radius:10px;padding:12px;margin:0.8em 0}
 #factory{max-width:100%}
 #vrm-view{max-width:100%}
+#layout{display:flex;gap:20px;align-items:flex-start}
+#sidecol{width:280px;flex-shrink:0}
+#sidecol #avatar{width:auto;margin-bottom:20px}
+#sidebar{background:#fff;border:1px solid #dde2e8;border-radius:10px;padding:16px}
+#sidebar h2{font-size:1em;margin:1em 0 0.3em}
+#sidebar h2:first-child{margin-top:0}
+#sidebar a{display:block;margin:0.2em 0}
+#chat{flex:1;margin-top:0;display:flex;flex-direction:column;min-height:60vh}
+#messages{flex:1;overflow-y:auto}
+#form{margin-top:12px}
+#approval>div{background:#fff7e6;border:1px solid #e6c87a;border-radius:10px;padding:12px;margin:0.8em 0}
+#approval>div button{margin-right:8px}
+body.chat-page{max-width:1200px}
+@media (max-width:700px){#layout{display:block}#sidecol{width:auto;margin-bottom:20px}}
 """
 
 
@@ -136,8 +150,10 @@ CHAT_HTML = """<!doctype html>
 .karaoke-word { background: #ffeb3b; }
 .karaoke-done { background: transparent; }
 </style></head>
-<body>
+<body class="chat-page">
 <h1>Aidon</h1>
+<div id="layout">
+<div id="sidecol">
 <div id="avatar" aria-label="Aidon avatar, robot, default, VRM is the fallback">
 <svg id="robot-avatar" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="Aidon robot">
 <g id="robot">
@@ -173,11 +189,13 @@ CHAT_HTML = """<!doctype html>
 <h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a> <a href="/replay">Replay</a> <a href="/avatar-vrm">VRM avatar, fallback</a> <a href="/capabilities">Capabilities</a> <a href="/memory">Memory</a> <a href="/knowledge">Knowledge</a> <a href="/reports">Reports</a>
 <div id="stage-pills"><p>Stages: recall, interpret, research, plan, sandbox, verify, approval, live, learn</p><div id="pills"></div></div>
 </div>
+</div>
 <div id="chat">
 <div id="messages"></div>
 <form id="form"><input id="msg" name="message" placeholder="Type a goal, in plain language, or use the mic">
 <button type="submit">Send</button></form>
 <div id="approval"></div>
+</div>
 </div>
 <script>
 function setAvatarStatus(status) {
