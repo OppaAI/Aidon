@@ -2364,6 +2364,11 @@ loadSettings();
                     self._send_json(200, server.handle_entities(entity))
                 elif parsed.path == "/api/tools":
                     self._send_json(200, server.handle_tools())
+                elif parsed.path.startswith("/api/runs/") and "/" not in parsed.path[len("/api/runs/"):]:
+                    run_id = parsed.path[len("/api/runs/"):]
+                    data = server.run_snapshot(run_id)
+                    self._send_json(200 if data is not None else 404,
+                                    data or {"error": "run not found"})
                 elif parsed.path == "/api/conversations":
                     self._send_json(200, server.handle_conversations_list())
                 elif parsed.path.startswith("/api/conversations/"):
@@ -2503,6 +2508,28 @@ loadSettings();
                         self._send_json(200, result)
                     except Exception as exc:
                         self._send_json(500, {"error": str(exc)})
+                elif parsed.path == "/api/goals":
+                    result = server.start_goal(body)
+                    self._send_json(200 if "run_id" in result else 400, result)
+                elif parsed.path.startswith("/api/runs/") and parsed.path.endswith("/approval"):
+                    run_id = parsed.path[len("/api/runs/"):-len("/approval")].strip("/")
+                    pending = server.webui_gate.pending_cards()
+                    if not pending:
+                        self._send_json(409, {"error": "no pending approval"})
+                    else:
+                        decision = str(body.get("decision", body.get("verdict", "rejected")))
+                        if decision == "edited":
+                            decision = "approved"
+                        ok = server.webui_gate.approve(pending[0]["id"], decision)
+                        self._send_json(200 if ok else 409, {"ok": ok, "run_id": run_id})
+                elif parsed.path.startswith("/api/runs/") and parsed.path.endswith("/steer"):
+                    run_id = parsed.path[len("/api/runs/"):-len("/steer")].strip("/")
+                    ok = server.run_control.steer(run_id, str(body.get("note", ""))) if server.run_control else False
+                    self._send_json(200 if ok else 404, {"ok": ok})
+                elif parsed.path.startswith("/api/runs/") and parsed.path.endswith("/cancel"):
+                    run_id = parsed.path[len("/api/runs/"):-len("/cancel")].strip("/")
+                    ok = server.run_control.cancel(run_id, gate=server.webui_gate) if server.run_control else False
+                    self._send_json(200 if ok else 404, {"ok": ok})
                 elif parsed.path == "/api/chat":
                     self._send_json(200, server.handle_chat(body))
                 elif parsed.path == "/api/dags":
