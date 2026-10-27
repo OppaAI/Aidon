@@ -44,6 +44,7 @@ ASK = "ask"
 ACTION_STAKES: dict[str, str] = {
     "skill": STAKES_MEDIUM,
     "skill_privileged": STAKES_HIGH,
+    "plugin": STAKES_MEDIUM,
 }
 
 
