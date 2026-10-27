@@ -5,7 +5,7 @@
 [![Repo](https://img.shields.io/badge/Repo-OppaAI%2FAidon-D9578C)](https://github.com/OppaAI/Aidon)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/Status-experimental-orange.svg)
-[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu&logoColor=white)](https://ubuntu.com/)
 [![NVIDIA](https://img.shields.io/badge/NVIDIA-accelerated-76B900?logo=nvidia&logoColor=white)](https://www.nvidia.com/)<br>
 [![Sandbox](https://img.shields.io/badge/Sandbox-bubblewrap%20%7C%20Docker-2496ED?logo=docker&logoColor=white)](https://github.com/containers/bubblewrap)
@@ -15,7 +15,7 @@
 
 ---
 
-![Author](https://img.shields.io/badge/Author-OppaAI-D9578C)
+[![Author](https://img.shields.io/badge/Author-OppaAI-D9578C)](https://github.com/OppaAI)
 ![Contributors](https://img.shields.io/badge/Contributors-1-3776AB)
 ![Commits](https://img.shields.io/badge/Commits-131-76B900)
 ![Start date](https://img.shields.io/badge/Start%20date-October%2026%2C%202026-E95420)
