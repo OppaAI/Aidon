@@ -40,8 +40,11 @@ finds similar words, entity recall finds the same thing.
 
 from __future__ import annotations
 
+import atexit
 import json
 import re
+import time
+import weakref
 from pathlib import Path
 
 _CAPITALISED = re.compile(r"\b[A-Z][A-Za-z0-9]+(?:[ -][A-Z][A-Za-z0-9]+)+\b|\b[A-Z][a-z]{2,}\b")
@@ -69,37 +72,72 @@ def extract_entities(text: str, payload: dict | None = None) -> list[str]:
 
 
 class EntityGraph:
-    def __init__(self, home: Path):
+    def __init__(self, home: Path, save_interval: float = 1.0):
         self.path = Path(home) / "entity_graph.json"
         self.index: dict[str, list[list[str]]] = {}
+        # Reverse index, (collection, point_id) -> entities. Without it
+        # every entities_for_point() call scanned the whole graph, and
+        # recall calls it once per hit, so recall got slower as memory
+        # grew.
+        self._by_point: dict[tuple[str, str], set[str]] = {}
+        self._dirty = False
+        self._last_save = 0.0
+        # Writes are debounced. Saving on every point rewrites the whole
+        # file, so ingesting n points costs O(n^2) bytes. The graph is
+        # rebuilt by re-indexing points, so losing the last second on a
+        # hard kill is acceptable; a clean exit flushes it.
+        self._save_interval = save_interval
         if self.path.is_file():
             try:
                 self.index = json.loads(self.path.read_text())
             except (json.JSONDecodeError, OSError):
                 self.index = {}
+        for entity, pairs in self.index.items():
+            for pair in pairs:
+                if isinstance(pair, list) and len(pair) == 2:
+                    self._by_point.setdefault(
+                        (str(pair[0]), str(pair[1])), set()).add(entity)
+        _GRAPHS.add(self)
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.index, indent=2, sort_keys=True))
+        # Compact JSON, no indent: pretty-printing a growing graph costs
+        # more than the data itself on every save.
+        self.path.write_text(
+            json.dumps(self.index, separators=(",", ":")),
+            encoding="utf-8")
+        self._dirty = False
+        self._last_save = time.monotonic()
+
+    def flush(self) -> None:
+        """Write pending changes now, used at shutdown and by callers."""
+        if self._dirty:
+            self.save()
+
+    def _maybe_save(self) -> None:
+        if time.monotonic() - self._last_save >= self._save_interval:
+            self.save()
+        else:
+            self._dirty = True
 
     def index_point(self, collection: str, point_id: str, text: str, payload: dict | None = None) -> list[str]:
         entities = extract_entities(text, payload)
+        key = (collection, point_id)
+        known = self._by_point.setdefault(key, set())
         for entity in entities:
-            pairs = self.index.setdefault(entity, [])
-            pair = [collection, point_id]
-            if pair not in pairs:
-                pairs.append(pair)
-                pairs.sort()
+            if entity in known:
+                continue
+            known.add(entity)
+            self.index.setdefault(entity, []).append([collection, point_id])
         if entities:
-            self.save()
+            self._maybe_save()
         return entities
 
     def points_for(self, entity: str) -> list[list[str]]:
-        return list(self.index.get(entity.lower(), []))
+        return [list(pair) for pair in self.index.get(entity.lower(), [])]
 
     def entities_for_point(self, collection: str, point_id: str) -> list[str]:
-        return sorted(entity for entity, pairs in self.index.items()
-                      if [collection, point_id] in pairs)
+        return sorted(self._by_point.get((collection, point_id), set()))
 
     def related(self, collection: str, point_id: str, limit: int = 5) -> list[dict]:
         """Points sharing entities with the given point, by shared count."""
@@ -110,6 +148,22 @@ class EntityGraph:
                 if key == (collection, point_id):
                     continue
                 counts[key] = counts.get(key, 0) + 1
-        ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+        # Deterministic tie-break, so the same graph always ranks the same.
+        ranked = sorted(counts.items(),
+                        key=lambda kv: (-kv[1], kv[0][0], kv[0][1]))
         return [{"collection": coll, "point_id": pid, "shared_entities": count}
                 for (coll, pid), count in ranked[:limit]]
+
+
+_GRAPHS: "weakref.WeakSet[EntityGraph]" = weakref.WeakSet()
+
+
+def _flush_all() -> None:
+    for graph in list(_GRAPHS):
+        try:
+            graph.flush()
+        except Exception:
+            pass
+
+
+atexit.register(_flush_all)

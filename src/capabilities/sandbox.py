@@ -55,20 +55,7 @@ class Sandbox:
         if not command:
             raise ValueError("command must not be empty")
         if self.bwrap:
-            full = [
-                self.bwrap,
-                "--unshare-net", "--unshare-pid",
-                "--ro-bind", "/usr", "/usr",
-                "--ro-bind", "/lib", "/lib",
-                "--ro-bind", "/etc", "/etc",
-                "--dev", "/dev",
-                "--bind", str(self.workdir), str(self.workdir),
-                "--chdir", str(self.workdir),
-                "--clearenv",
-                "--setenv", "PATH", "/usr/bin:/bin",
-                "--",
-                *command,
-            ]
+            full = self._bwrap_argv(command)
             isolated = True
         else:
             full = list(command)
@@ -81,3 +68,69 @@ class Sandbox:
                                  isolated)
         except subprocess.TimeoutExpired as exc:
             return SandboxResult(124, exc.stdout or "", "timeout", isolated)
+
+    def _bwrap_argv(self, command: list[str]) -> list[str]:
+        """Build the bubblewrap invocation for one command.
+
+        Mounts are applied in order. The system directories are
+        recreated exactly as the host has them: on a merged-usr
+        distro ``/bin``, ``/sbin``, ``/lib`` and ``/lib64`` are
+        symlinks into ``/usr``. Binding only ``/usr`` leaves the
+        ELF interpreter (``/lib64/ld-linux-*.so``) missing, and
+        then *every* command dies with ``execvp: No such file or
+        directory`` even though the binary is present.
+        """
+        import os
+        import sys
+        from pathlib import Path
+
+        wd = str(self.workdir.resolve())
+        argv = [
+            self.bwrap,
+            "--unshare-net", "--unshare-pid", "--die-with-parent",
+            "--clearenv",
+            "--setenv", "PATH", f"{sys.prefix}/bin:/usr/local/bin:/usr/bin:/bin",
+            "--setenv", "HOME", wd,
+            "--setenv", "TMPDIR", "/tmp",
+            "--setenv", "LANG", "C.UTF-8",
+            "--setenv", "TERM", "dumb",
+            "--ro-bind-try", "/usr", "/usr",
+        ]
+        # Recreate symlinked system dirs as symlinks (merged-usr),
+        # and bind real ones read-only.
+        for sysdir in ("/bin", "/sbin", "/lib", "/lib64", "/etc"):
+            path = Path(sysdir)
+            if path.is_symlink():
+                argv += ["--symlink", os.readlink(path), sysdir]
+            else:
+                argv += ["--ro-bind-try", sysdir, sysdir]
+        argv += ["--proc", "/proc", "--dev", "/dev"]
+        # The interpreter may live outside /usr (a uv-managed venv
+        # points into ~/.local/share/uv/python/...), so bind its tree
+        # read-only, or `python3` inside the sandbox is a dangling
+        # symlink and every generated script fails to start.
+        for extra in self._interpreter_exposes():
+            argv += ["--ro-bind-try", extra, extra]
+        argv += ["--bind", wd, wd, "--chdir", wd, "--", *command]
+        return argv
+
+    @staticmethod
+    def _interpreter_exposes() -> list[str]:
+        """Directories the running interpreter needs, outside /usr."""
+        import sys
+        from pathlib import Path
+
+        seen: list[str] = []
+        candidates = [Path(sys.prefix), Path(sys.executable).resolve().parent]
+        for candidate in candidates:
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                continue
+            if not resolved.is_dir():
+                continue
+            if str(resolved) in ("/", "/usr", "/usr/local"):
+                continue
+            if str(resolved) not in seen:
+                seen.append(str(resolved))
+        return seen

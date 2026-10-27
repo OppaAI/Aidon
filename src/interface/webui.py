@@ -596,6 +596,14 @@ class WebUIServer:
         self.run_control = run_control
         self.webui_token = webui_token
         self.transcribe_key = transcribe_key
+        # Default chat handler: echo, for the server core. A real
+        # goal handler is registered by the caller, with GoalRunner,
+        # interview, or a trigger handler. This used to sit after an
+        # unconditional return in _resolve_decision, so it never ran
+        # and a bare server answered every chat with "no handler".
+        if "webui" not in self.dispatcher.handlers:
+            self.dispatcher.register(
+                "webui", lambda e: e.send_reply(f"Received: {e.goal}"))
 
     def _resolve_decision(self, text: str) -> str | None:
         decision = parse_decision(text)
@@ -607,11 +615,6 @@ class WebUIServer:
         if ok:
             return f"{verdict.capitalize()} {card_id}"
         return f"No such approval {card_id}"
-        # Default chat handler: echo, for the server core.
-        # A real goal handler is registered by the caller,
-        # with GoalRunner, interview, or a trigger handler.
-        if "webui" not in self.dispatcher.handlers:
-            self.dispatcher.register("webui", lambda e: e.send_reply(f"Received: {e.goal}"))
 
     def _resolve_control(self, text: str) -> str | None:
         """Steer and cancel, from chat or a message, while a run is running.
@@ -840,11 +843,11 @@ class WebUIServer:
         return events
 
     def projects_history(self) -> list[dict]:
-        out = []
-        for project in self._projects():
-            trace_count = len([p for p in (self.home / "trace").glob("*.jsonl")]) if (self.home / "trace").exists() else 0
-            out.append({"project": project, "trace_files": trace_count})
-        return out
+        trace_dir = self.home / "trace"
+        trace_count = len(list(trace_dir.glob("*.jsonl"))) \
+            if trace_dir.exists() else 0
+        return [{"project": project, "trace_files": trace_count}
+                for project in self._projects()]
 
     def settings_get(self) -> dict:
         path = self.home / "settings.json"
@@ -1109,10 +1112,7 @@ class WebUIServer:
                         elif action == "prune":
                             self._send_json(200, server.memory.prune(collection))
                         elif action == "promote":
-                            point = None
-                            for candidate in server.memory.list_points(collection, limit=1000):
-                                if candidate.id == point_id:
-                                    point = candidate; break
+                            point = server.memory.store.get(collection, point_id)
                             if point is None:
                                 self._send_json(404, {"error": "point not found"})
                             else:

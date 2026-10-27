@@ -125,6 +125,101 @@ def handle_webhook(name: str, payload: dict, project_id: str = "default") -> Tri
                         project_id=project_id, payload=dict(payload or {}))
 
 
+def _cron_field(text: str, low: int, high: int,
+                *, dow: bool = False) -> set[int]:
+    """Parse one cron field: ``*``, ``5``, ``1-5``, ``*/15``, ``1,3,5``.
+
+    Raises ValueError on anything outside the field's range, so a
+    typo fails at creation instead of silently never firing.
+    """
+    values: set[int] = set()
+    for part in str(text).split(","):
+        part = part.strip()
+        if not part:
+            raise ValueError("empty cron field")
+        step = 1
+        if "/" in part:
+            part, step_text = part.split("/", 1)
+            step = int(step_text)
+            if step <= 0:
+                raise ValueError("cron step must be positive")
+        if part == "*":
+            start, end = low, high
+        elif "-" in part:
+            start_text, end_text = part.split("-", 1)
+            start, end = int(start_text), int(end_text)
+        else:
+            start = end = int(part)
+        if start < low or end > high or start > end:
+            raise ValueError(
+                f"cron field {text!r} outside {low}-{high}")
+        values.update(range(start, end + 1, step))
+    if dow:
+        # cron accepts both 0 and 7 for Sunday.
+        values = {0 if value == 7 else value for value in values}
+    if not values:
+        raise ValueError(f"empty cron field {text!r}")
+    return values
+
+
+def _next_cron(expr: str, after: datetime) -> datetime | None:
+    """Next datetime strictly after ``after`` for a 5-field cron.
+
+    Accepts both ``M H DOM MON DOW`` and the older
+    ``cron M H DOM MON DOW`` spelling. Day-of-month and
+    day-of-week follow cron: when both are restricted, either
+    may match. Month is always AND. The old implementation
+    ignored month, used Python's Monday=0 weekday for a cron
+    Sunday=0 field, and only accepted single numbers, so
+    ``0 9 * * *`` (the CLI default) never fired at all.
+    """
+    parts = expr.strip().split()
+    if len(parts) == 6 and parts[0].lower() == "cron":
+        parts = parts[1:]
+    if len(parts) != 5:
+        raise ValueError(
+            "cron needs 5 fields (minute hour dom month dow)")
+    minutes = _cron_field(parts[0], 0, 59)
+    hours = _cron_field(parts[1], 0, 23)
+    days = _cron_field(parts[2], 1, 31)
+    months = _cron_field(parts[3], 1, 12)
+    weekdays = _cron_field(parts[4], 0, 7, dow=True)
+    dom_any = parts[2].strip() == "*"
+    dow_any = parts[4].strip() == "*"
+
+    candidate = (after + timedelta(minutes=1)).replace(
+        second=0, microsecond=0)
+    limit = candidate + timedelta(days=366)
+    while candidate <= limit:
+        if candidate.month not in months:
+            year, month = (candidate.year + 1, 1) \
+                if candidate.month == 12 else (candidate.year,
+                                               candidate.month + 1)
+            candidate = datetime(year, month, 1)
+            continue
+        weekday = (candidate.weekday() + 1) % 7  # cron: Sunday = 0
+        if dom_any and dow_any:
+            day_ok = True
+        elif dom_any:
+            day_ok = weekday in weekdays
+        elif dow_any:
+            day_ok = candidate.day in days
+        else:
+            day_ok = candidate.day in days or weekday in weekdays
+        if not day_ok:
+            candidate = (candidate + timedelta(days=1)).replace(
+                hour=0, minute=0)
+            continue
+        if candidate.hour not in hours:
+            candidate = (candidate + timedelta(hours=1)).replace(minute=0)
+            continue
+        if candidate.minute not in minutes:
+            candidate += timedelta(minutes=1)
+            continue
+        return candidate
+    return None
+
+
 @dataclass
 class SchedulerJob:
     name: str
@@ -134,9 +229,17 @@ class SchedulerJob:
     last_run: str = ""
 
     def next_due(self, after: datetime) -> datetime | None:
-        parts = self.schedule.strip().split()
-        if not parts:
+        schedule = self.schedule.strip()
+        if not schedule:
             return None
+        if schedule.startswith("at:"):
+            # One-shot: fire once at the given ISO time, never again.
+            try:
+                when = datetime.fromisoformat(schedule[3:].strip())
+            except ValueError:
+                return None
+            return when if when > after else None
+        parts = schedule.split()
         try:
             if parts[0] == "daily" and len(parts) == 2:
                 hour, minute = (int(v) for v in parts[1].split(":"))
@@ -179,23 +282,9 @@ class SchedulerJob:
                     if candidate > after:
                         return candidate
                 return None
-            if parts[0] == "cron" and len(parts) == 6:
-                _, minute_s, hour_s, dom_s, _mon_s, dow_s = parts
-                # Simple cron: * or a single number per field.
-                # Search forward, at most 366 days, minute by minute
-                # is too slow in tests, so step by day then hour then minute.
-                candidate = after.replace(second=0, microsecond=0) + timedelta(minutes=1)
-                for _ in range(366 * 24 * 60):
-                    if (minute_s == "*" or int(minute_s) == candidate.minute) and \
-                       (hour_s == "*" or int(hour_s) == candidate.hour) and \
-                       (dom_s == "*" or int(dom_s) == candidate.day) and \
-                       (dow_s == "*" or int(dow_s) == candidate.weekday()):
-                        return candidate
-                    candidate += timedelta(minutes=1)
-                return None
-        except (ValueError, KeyError):
+            return _next_cron(schedule, after)
+        except (ValueError, KeyError, TypeError):
             return None
-        return None
 
 
 class Scheduler:

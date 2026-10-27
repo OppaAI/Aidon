@@ -25,12 +25,13 @@ real embedder, not on the fallback.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from ..interface.approval import ApprovalGate, Decision
 from .config import Config
 from ..agentic.loop import GoalRunner
-from .model_client import FakeClient, HttpModelClient
+from .model_client import FakeClient
 from ..capabilities.sandbox import Sandbox
 
 
@@ -53,7 +54,7 @@ def _promotion_ask(point) -> bool:
 def _make_memory(config: Config):
     """Memory with the real embedder if available, else Hash, with warning."""
     try:
-        from ..memory.embedder import HashEmbedder, make_embedder_cached
+        from ..memory.embedder import make_embedder_cached
         from ..memory.entity_graph import EntityGraph
         from ..memory.memory import Memory
         embedder = make_embedder_cached()
@@ -61,9 +62,44 @@ def _make_memory(config: Config):
     except Exception as exc:
         print(f"warning: real embedder unavailable ({exc}), "
               "using HashEmbedder for this run", file=sys.stderr)
+    try:
         from ..memory.embedder import HashEmbedder
         from ..memory.memory import Memory
         return Memory(config.home, embedder=HashEmbedder())
+    except Exception as exc:
+        # A broken Qdrant install must not make every command fail.
+        # The in-process store keeps the run working for this process,
+        # and says so, rather than pretending it persisted anything.
+        print(f"warning: Qdrant unavailable ({exc}), using in-process "
+              "memory for this run, nothing persists", file=sys.stderr)
+        from ..memory.embedder import HashEmbedder
+        from ..memory.memory import InMemoryStore, Memory
+        return Memory(config.home, embedder=HashEmbedder(),
+                      store=InMemoryStore())
+
+
+class _LazyMemory:
+    """Build memory on first use, not at CLI start.
+
+    Opening Qdrant and loading the 440M embedder costs seconds and
+    hundreds of megabytes. Commands such as ``tools list``,
+    ``schedule list``, and ``sandbox check`` never touch memory, so
+    paying that cost before dispatch is pure startup latency. This
+    proxy defers construction until a memory attribute is actually
+    read.
+    """
+
+    def __init__(self, config: Config):
+        self._config = config
+        self._memory = None
+
+    def _get(self):
+        if self._memory is None:
+            self._memory = _make_memory(self._config)
+        return self._memory
+
+    def __getattr__(self, name):
+        return getattr(self._get(), name)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -221,23 +257,31 @@ def main(argv: list[str] | None = None) -> int:
 
     config = Config.load()
     config.ensure_home()
-    if config.api_base:
-        client = HttpModelClient(config.api_base, config.api_key,
-                                 config.model)
-    else:
-        client = FakeClient("")
-    # Fast model, same generic client, different model name, same endpoint.
-    # This is how a local small model works too: set the endpoint to a
-    # local OpenAI-compatible endpoint, AIDON_MODEL to the strong model,
-    # and AIDON_FAST_MODEL to the small local model. No Ollama-specific
-    # code, no think flag, just endpoint plus model name, as decided.
-    if config.fast_model:
+    from .model_client import client_for_config
+    try:
+        client = client_for_config(config)
+    except ValueError as exc:
+        print(f"model backend error: {exc}", file=sys.stderr)
+        return 2
+    if isinstance(client, FakeClient):
+        print("warning: no model backend configured, using FakeClient; "
+              "set AIDON_BACKEND and AIDON_API_ENDPOINT (or "
+              "AIDON_META_API_KEY) in .env for a real run", file=sys.stderr)
+    # Fast model, same backend, different model name. This is how a
+    # local small model works too: set the endpoint to a local
+    # Ollama, AIDON_MODEL to the strong model, and AIDON_FAST_MODEL
+    # to the small local model. No Ollama-specific branch in the loop.
+    if config.fast_model and config.fast_model != config.model:
+        from dataclasses import replace
         from ..agentic.router import RoutedClient
-        fast_client = HttpModelClient(config.api_base, config.api_key, config.fast_model) if config.api_base else FakeClient("")
+        fast_config = replace(
+            config, model=config.fast_model,
+            ollama_num_ctx=config.fast_num_ctx or config.ollama_num_ctx)
+        fast_client = client_for_config(fast_config)
         fast_phases = {s.strip() for s in config.router_fast_phases.split(",") if s.strip()}
         client = RoutedClient(fast_client, client, fast_phases=fast_phases)
     sandbox = Sandbox(config.workdir, config.sandbox_timeout_seconds)
-    memory = _make_memory(config)
+    memory = _LazyMemory(config)
 
     if args.command == "memory":
         from ..memory.kb import KnowledgeBase
@@ -420,7 +464,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "chain":
         from ..capabilities.chain import load_chain_spec, run_chain, validate_chain_spec
         from ..capabilities.tools import ToolRegistry
-        spec = load_chain_spec(args.path)
+        try:
+            spec = load_chain_spec(args.path)
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+            print(f"Chain spec error: {exc}")
+            return 2
         if args.action == "validate":
             failures = validate_chain_spec(spec)
             print(f"Chain valid: {not failures}, failures: {failures}")
@@ -449,7 +497,8 @@ def main(argv: list[str] | None = None) -> int:
             print(result)
             return 0 if result.get("ok") else 2
         if args.action == "run":
-            actions = _json.loads(pathlib.Path(args.path).read_text(encoding="utf-8"))
+            from pathlib import Path
+            actions = _json.loads(Path(args.path).read_text(encoding="utf-8"))
             if not isinstance(actions, list):
                 actions = actions.get("actions", [])
             result = run_computer_use(actions, approve=lambda kind, detail: args.approve)

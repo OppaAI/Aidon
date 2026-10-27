@@ -93,6 +93,7 @@ one shared client per path or URL per process.
 
 from __future__ import annotations
 
+import atexit
 import math
 import os
 import threading
@@ -225,15 +226,28 @@ class InMemoryStore:
     def delete(self, collection: str, point_id: str) -> bool:
         return self._data[collection].pop(point_id, None) is not None
 
+    def set_payload(self, collection: str, point_id: str,
+                    payload: dict) -> None:
+        point = self._data[collection].get(point_id)
+        if point is not None:
+            point.payload.update(payload)
+
     def delete_by_project(self, collection: str, project_id: str) -> int:
+        return self.delete_where(collection, {"project_id": project_id})
+
+    def delete_where(self, collection: str, filters: dict) -> int:
         doomed = [pid for pid, p in self._data[collection].items()
-                  if p.payload.get("project_id") == project_id]
+                  if all(p.payload.get(k) == v for k, v in filters.items())]
         for pid in doomed:
             del self._data[collection][pid]
         return len(doomed)
 
     def list_points(self, collection: str, limit: int = 50) -> list[Point]:
         return list(self._data[collection].values())[:limit]
+
+    def iter_points(self, collection: str):
+        """Every point, not just the first page, for prune and export."""
+        yield from list(self._data[collection].values())
 
     def list_filtered(self, collection: str, filters: dict,
                       limit: int = 1000) -> list[Point]:
@@ -281,6 +295,29 @@ def _sparse_from_text(text: str):
 
 _CLIENTS: dict[str, object] = {}
 _CLIENTS_LOCK = threading.Lock()
+
+
+def _close_clients() -> None:
+    """Close shared Qdrant clients before interpreter shutdown.
+
+    qdrant-client's local mode imports ``portalocker`` lazily inside
+    ``close()``. When ``close()`` first runs from ``__del__`` during
+    shutdown, ``sys.meta_path`` is already gone and Python prints an
+    ImportError traceback on every command that touched memory. Closing
+    once here, while imports still work, makes the later ``__del__`` a
+    no-op (the lock file is already closed) and keeps exit quiet.
+    """
+    with _CLIENTS_LOCK:
+        clients = list(_CLIENTS.values())
+        _CLIENTS.clear()
+    for client in clients:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
+atexit.register(_close_clients)
 
 
 def _shared_client(url: str, path: str):
@@ -332,23 +369,56 @@ class QdrantStore:
         self._embedder_dim = dim
         for name in COLLECTIONS:
             if not self._client.collection_exists(name):
+                # Sparse vectors are a separate config in Qdrant.
+                # Putting SparseVectorParams inside vectors_config makes
+                # local mode read ``.size`` off it and fail with
+                # AttributeError, so every collection creation dies.
                 self._client.create_collection(
                     name, vectors_config={
                         "dense": models.VectorParams(
                             size=self._embedder_dim,
                             distance=models.Distance.COSINE),
+                    },
+                    sparse_vectors_config={
                         "sparse": models.SparseVectorParams(),
                     })
+                continue
+            # An existing collection has a fixed dense size. Running
+            # with a different embedder (real 768 -> Hash 128 after a
+            # broken install) would otherwise fail on the first upsert,
+            # deep inside a run. Fail here, with the fix in the message.
+            try:
+                params = self._client.get_collection(name).config.params.vectors
+                dense = params["dense"] if isinstance(params, dict) else params
+                existing = int(getattr(dense, "size", 0) or 0)
+            except Exception:
+                existing = 0
+            if existing and existing != self._embedder_dim:
+                raise ValueError(
+                    f"collection {name!r} stores {existing}-dim vectors but "
+                    f"the embedder produces {self._embedder_dim}; use a "
+                    "fresh AIDON_HOME or recreate the collection")
 
     def _to_point(self, raw) -> Point:
         payload = dict(raw.payload or {})
         text = payload.get("text", "")
         vector = []
+        sparse: tuple[list[int], list[float]] = ([], [])
         if isinstance(raw.vector, dict):
             vector = list(raw.vector.get("dense") or [])
+            # Keep the sparse vector. Dropping it here meant the next
+            # upsert of this point (record_access does one on every
+            # recall) rewrote it empty, so hybrid recall quietly
+            # degraded to dense-only for every point that was ever
+            # recalled.
+            raw_sparse = raw.vector.get("sparse")
+            if raw_sparse is not None:
+                sparse = (list(getattr(raw_sparse, "indices", []) or []),
+                          list(getattr(raw_sparse, "values", []) or []))
         elif raw.vector is not None:
             vector = list(raw.vector)
-        return Point(id=str(raw.id), text=text, vector=vector, payload=payload)
+        return Point(id=str(raw.id), text=text, vector=vector,
+                     payload=payload, sparse=sparse)
 
     def _vectors(self, point: Point):
         idx, val = point.sparse if point.sparse else ([], [])
@@ -379,6 +449,12 @@ class QdrantStore:
         except Exception:
             return False
 
+    def set_payload(self, collection: str, point_id: str,
+                    payload: dict) -> None:
+        """Update payload only, vectors untouched."""
+        self._client.set_payload(collection_name=collection,
+                                 payload=payload, points=[point_id])
+
     def _scroll_filtered(self, collection: str, filters: dict, limit: int):
         conditions = [self._models.FieldCondition(
             key=k, match=self._models.MatchValue(value=v))
@@ -390,15 +466,44 @@ class QdrantStore:
         return [self._to_point(p) for p in points]
 
     def delete_by_project(self, collection: str, project_id: str) -> int:
-        points = self._scroll_filtered(collection, {"project_id": project_id}, 1000)
-        if not points:
-            return 0
-        self._client.delete(collection, points_selector=[p.id for p in points])
-        return len(points)
+        return self.delete_where(collection, {"project_id": project_id})
+
+    def delete_where(self, collection: str, filters: dict) -> int:
+        """Delete every point matching all filters, not just the first page."""
+        conditions = [self._models.FieldCondition(
+            key=k, match=self._models.MatchValue(value=v))
+            for k, v in filters.items()]
+        query_filter = self._models.Filter(must=conditions)
+        try:
+            count = self._client.count(
+                collection_name=collection,
+                count_filter=query_filter, exact=True).count
+        except Exception:
+            count = 0
+        self._client.delete(
+            collection_name=collection,
+            points_selector=self._models.FilterSelector(
+                filter=query_filter))
+        return int(count)
 
     def list_points(self, collection: str, limit: int = 50) -> list[Point]:
         points, _ = self._client.scroll(collection, limit=limit, with_vectors=True)
         return [self._to_point(p) for p in points]
+
+    def iter_points(self, collection: str):
+        """Every point, paged with scroll, for prune and export.
+
+        ``list_points`` is capped by its limit, so using it for prune
+        or project discovery silently skipped everything past the cap.
+        """
+        offset = None
+        while True:
+            points, offset = self._client.scroll(
+                collection, limit=256, offset=offset, with_vectors=True)
+            for point in points:
+                yield self._to_point(point)
+            if offset is None:
+                break
 
     def list_filtered(self, collection: str, filters: dict, limit: int = 1000) -> list[Point]:
         points = self._scroll_filtered(collection, filters, limit)
@@ -448,8 +553,10 @@ class Memory:
         self.stm: deque = deque(maxlen=20)
 
     def _point_id(self, text: str) -> str:
-        return uuid.uuid5(uuid.NAMESPACE_URL,
-                          text + str(time.time_ns())).hex[:12]
+        # Qdrant accepts a UUID or an unsigned int, nothing else.
+        # A truncated hex string (uuid.hex[:12]) is neither, and every
+        # upsert fails with "Point id ... is not a valid UUID".
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, text + str(time.time_ns())))
 
     def _access_payload(self) -> dict:
         now = _now_iso()
@@ -540,10 +647,16 @@ class Memory:
             data["attachments"] = list(attachments)
         return self.record("episodic", text, data)
 
-    def record_access(self, collection: str, point_id: str) -> None:
-        """A recall is an access, best-effort, never failing recall."""
+    def record_access(self, collection: str, point_id) -> None:
+        """A recall is an access, best-effort, never failing recall.
+
+        Takes a ``Point`` when the caller already has one, which avoids
+        a retrieve round trip per hit. Updates payload only, so the
+        vectors are never rewritten on a read.
+        """
         try:
-            point = self.store.get(collection, point_id)
+            point = point_id if isinstance(point_id, Point) \
+                else self.store.get(collection, str(point_id))
             if point is None:
                 return
             today = _today_iso()
@@ -552,7 +665,13 @@ class Memory:
                 point.payload["access_day_count"] = int(point.payload.get("access_day_count", 0)) + 1
                 point.payload["last_access_day"] = today
             point.payload["last_accessed"] = _now_iso()
-            self.store.upsert(collection, point)
+            changed = {key: point.payload[key] for key in
+                       ("access_count", "access_day_count",
+                        "last_access_day", "last_accessed")}
+            if hasattr(self.store, "set_payload"):
+                self.store.set_payload(collection, point.id, changed)
+            else:
+                self.store.upsert(collection, point)
         except Exception:
             pass
 
@@ -562,7 +681,7 @@ class Memory:
         sparse = self.embedder.embed_sparse(query)
         hits = self.store.search(collection, vector, query, limit, sparse=sparse)
         for hit in hits:
-            self.record_access(collection, hit.point.id)
+            self.record_access(collection, hit.point)
         if not graph:
             return hits
         seen = {h.point.id for h in hits}
@@ -594,9 +713,9 @@ class Memory:
         episodes = self.store.search("episodic", vector, query, episode_limit, sparse=sparse)
         knowledge = self.store.search("knowledge", vector, query, knowledge_limit, sparse=sparse)
         for hit in episodes:
-            self.record_access("episodic", hit.point.id)
+            self.record_access("episodic", hit.point)
         for hit in knowledge:
-            self.record_access("knowledge", hit.point.id)
+            self.record_access("knowledge", hit.point)
         return episodes, knowledge
 
     def forget_search(self, query: str, limit: int = 10) -> dict:
@@ -615,7 +734,7 @@ class Memory:
               threshold: float = 0.02, grace_days: int = 35) -> list[str]:
         """Explicit prune only: returns removed point ids, never auto."""
         removed = []
-        for point in self.store.list_points(collection, limit=1000):
+        for point in self.store.iter_points(collection):
             if should_prune(point.payload, half_life_days=half_life_days,
                              threshold=threshold, grace_days=grace_days):
                 if self.store.delete(collection, point.id):
@@ -632,7 +751,11 @@ class Memory:
                               "promoted_from": episodic_point.id,
                               "kind": kind})
         episodic_point.payload["promoted"] = True
-        self.store.upsert("episodic", episodic_point)
+        if hasattr(self.store, "set_payload"):
+            self.store.set_payload("episodic", episodic_point.id,
+                                   {"promoted": True})
+        else:
+            self.store.upsert("episodic", episodic_point)
         return target
 
     def promote_with_ask(self, episodic_point: Point, ask,
@@ -658,6 +781,12 @@ class Memory:
 
     def list_points(self, collection: str, limit: int = 50) -> list[Point]:
         return self.store.list_points(collection, limit)
+
+    def iter_points(self, collection: str):
+        """Every point in a collection, paged, for export and prune."""
+        if hasattr(self.store, "iter_points"):
+            return self.store.iter_points(collection)
+        return iter(self.store.list_points(collection, limit=100000))
 
     def conversation_history(self, conversation_id: str,
                              limit: int = 100) -> list[Point]:
@@ -692,7 +821,7 @@ class Memory:
         """Distinct project_ids across working, episodic, and library scope."""
         ids = set()
         for collection in ("working", "episodic"):
-            for point in self.store.list_points(collection, limit=1000):
+            for point in self.store.iter_points(collection):
                 pid = point.payload.get("project_id")
                 if pid:
                     ids.add(pid)

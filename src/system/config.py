@@ -13,8 +13,39 @@ carries another user's data.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an int, warn and use the default on a typo.
+
+    A bad value in .env used to raise ValueError inside Config.load,
+    which meant every command, including `tools list`, died with a
+    traceback because of one stray character in an unrelated key.
+    """
+    raw = os.environ.get(name, "")
+    if not str(raw).strip():
+        return default
+    try:
+        return int(str(raw).strip())
+    except ValueError:
+        print(f"warning: {name}={raw!r} is not an integer, "
+              f"using {default}", file=sys.stderr)
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, "")
+    if not str(raw).strip():
+        return default
+    try:
+        return float(str(raw).strip())
+    except ValueError:
+        print(f"warning: {name}={raw!r} is not a number, "
+              f"using {default}", file=sys.stderr)
+        return default
 
 
 def default_home() -> Path:
@@ -113,6 +144,17 @@ class Config:
     corrected_subject: bool = True
     # Old routing / kernel keys, only, no new duplicates.
     fast_model: str = ""
+    # Backend selection, old Aidon keys: AIDON_BACKEND decides
+    # between a local Ollama, the Meta Model API, a plain
+    # OpenAI-compatible endpoint, and the offline fake client.
+    backend: str = ""
+    ollama_endpoint: str = "http://localhost:11434"
+    ollama_think: bool = False
+    ollama_num_ctx: int = 0
+    fast_num_ctx: int = 0
+    meta_api_key: str = ""
+    meta_model: str = ""
+    meta_endpoint: str = ""
     webui_token: str = ""
     image_model: str = "muse-image-1.0"
     sam_model: str = "meta-sam"
@@ -133,11 +175,11 @@ class Config:
             api_key=os.environ.get("AIDON_API_KEY", ""),
             embed_model=os.environ.get("AIDON_EMBED_MODEL",
                                        "google/embeddinggemma-2"),
-            sandbox_timeout_seconds=int(os.environ.get(
-                "AIDON_MAX_SANDBOX_SECONDS", "120") or 120),
-            max_steps=int(os.environ.get("AIDON_MAX_STEPS", "50")),
-            approval_timeout_seconds=int(os.environ.get(
-                "AIDON_APPROVAL_TIMEOUT_S", "180") or 180),
+            sandbox_timeout_seconds=_env_int(
+                "AIDON_MAX_SANDBOX_SECONDS", 120),
+            max_steps=_env_int("AIDON_MAX_STEPS", 50),
+            approval_timeout_seconds=_env_int(
+                "AIDON_APPROVAL_TIMEOUT_S", 180),
             execution_backend=os.environ.get("AIDON_EXECUTION_BACKEND",
                                              "bubblewrap"),
             docker_image=os.environ.get("AIDON_DOCKER_IMAGE",
@@ -146,19 +188,19 @@ class Config:
                                           "0") == "1",
             ingest_dir=(Path(os.environ["AIDON_INGEST_DIR"]).expanduser()
                         if os.environ.get("AIDON_INGEST_DIR") else None),
-            budget_tokens=int(os.environ.get(
-                "AIDON_MAX_TOKENS_PER_RUN", "200000") or 200000),
-            budget_seconds=int(float(os.environ.get(
-                "AIDON_MAX_WALLCLOCK_MIN", "60") or 60)) * 60,
-            model_timeout_seconds=float(os.environ.get(
-                "AIDON_MODEL_TIMEOUT_S", "120") or 120),
+            budget_tokens=_env_int(
+                "AIDON_MAX_TOKENS_PER_RUN", 200000),
+            budget_seconds=int(_env_float(
+                "AIDON_MAX_WALLCLOCK_MIN", 60) * 60),
+            model_timeout_seconds=_env_float(
+                "AIDON_MODEL_TIMEOUT_S", 120),
             timezone=os.environ.get("AIDON_TIMEZONE", "UTC"),
-            forget_half_life_days=float(os.environ.get(
-                "AIDON_FORGET_HALF_LIFE_DAYS", "21") or 21),
-            forget_cleanup_threshold=float(os.environ.get(
-                "AIDON_FORGET_CLEANUP_THRESHOLD", "0.02") or 0.02),
-            forget_grace_days=int(os.environ.get(
-                "AIDON_FORGET_GRACE_DAYS", "35") or 35),
+            forget_half_life_days=_env_float(
+                "AIDON_FORGET_HALF_LIFE_DAYS", 21),
+            forget_cleanup_threshold=_env_float(
+                "AIDON_FORGET_CLEANUP_THRESHOLD", 0.02),
+            forget_grace_days=_env_int(
+                "AIDON_FORGET_GRACE_DAYS", 35),
             whatsapp_token=os.environ.get("AIDON_WHATSAPP_TOKEN", ""),
             whatsapp_phone_id=os.environ.get("AIDON_WHATSAPP_PHONE_ID", ""),
             whatsapp_verify_token=os.environ.get(
@@ -180,14 +222,24 @@ class Config:
             ig_access_token=os.environ.get("AIDON_IG_ACCESS_TOKEN", ""),
             github_token=os.environ.get("GITHUB_TOKEN", ""),
             daily_report_time=os.environ.get("AIDON_DAILY_REPORT_TIME", ""),
-            approval_nudge_minutes=int(os.environ.get("AIDON_APPROVAL_NUDGE_MIN", "15") or 15),
+            approval_nudge_minutes=_env_int("AIDON_APPROVAL_NUDGE_MIN", 15),
             approval_nudge_channel=os.environ.get("AIDON_APPROVAL_NUDGE_CHANNEL", ""),
             autonomy_enabled=os.environ.get("AIDON_AUTONOMY_ENABLED", "1") not in ("0", "false", "no"),
-            autonomy_threshold=int(os.environ.get("AIDON_AUTONOMY_THRESHOLD", "5") or 5),
-            autonomy_decay_days=float(os.environ.get("AIDON_AUTONOMY_DECAY_DAYS", "14") or 14),
+            autonomy_threshold=_env_int("AIDON_AUTONOMY_THRESHOLD", 5),
+            autonomy_decay_days=_env_float("AIDON_AUTONOMY_DECAY_DAYS", 14),
             owner_email=os.environ.get("AIDON_OWNER_EMAIL", ""),
             corrected_subject=os.environ.get("AIDON_CORRECTED_SUBJECT", "1") not in ("0", "false", "no"),
             fast_model=os.environ.get("AIDON_FAST_MODEL", ""),
+            backend=os.environ.get("AIDON_BACKEND", "").strip().lower(),
+            ollama_endpoint=os.environ.get(
+                "AIDON_OLLAMA_ENDPOINT", "http://localhost:11434"),
+            ollama_think=os.environ.get("AIDON_OLLAMA_THINK", "0") not in
+            ("0", "false", "no", ""),
+            ollama_num_ctx=_env_int("AIDON_OLLAMA_NUM_CTX", 0),
+            fast_num_ctx=_env_int("AIDON_FAST_NUM_CTX", 0),
+            meta_api_key=os.environ.get("AIDON_META_API_KEY", ""),
+            meta_model=os.environ.get("AIDON_META_MODEL", ""),
+            meta_endpoint=os.environ.get("AIDON_META_ENDPOINT", ""),
             webui_token=os.environ.get("AIDON_WEBUI_TOKEN", ""),
             image_model=os.environ.get("AIDON_IMAGE_MODEL", "muse-image-1.0"),
             sam_model=os.environ.get("AIDON_SAM_MODEL", "meta-sam"),

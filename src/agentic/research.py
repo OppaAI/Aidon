@@ -47,7 +47,6 @@ import re
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 
 
 def _strip_html(text: str) -> str:
@@ -102,7 +101,15 @@ class Researcher:
 
     def research(self, question: str, urls: list[str],
                  claims: list[str] | None = None) -> ResearchReport:
-        sources = [self.fetch(url) for url in urls]
+        # Fetch concurrently: with N sources the old loop paid N
+        # timeouts in series on a slow or dead site. Order is kept so
+        # the report reads the same as before.
+        if len(urls) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(8, len(urls))) as pool:
+                sources = list(pool.map(self.fetch, urls))
+        else:
+            sources = [self.fetch(url) for url in urls]
         all_text = " ".join(s.excerpt for s in sources if not s.error).lower()
         verified: list[dict] = []
         unverified: list[str] = []

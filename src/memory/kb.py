@@ -221,6 +221,11 @@ class KnowledgeBase:
         return len(chunks)
 
     def _delete_chunks_for_file(self, file_name: str) -> None:
+        # One filtered delete, every chunk, not a 1000-point scan and
+        # a delete call per point.
+        if hasattr(self.memory.store, "delete_where"):
+            self.memory.store.delete_where("knowledge", {"file": file_name})
+            return
         for point in self.memory.list_points("knowledge", limit=1000):
             if point.payload.get("file") == file_name:
                 self.memory.forget("knowledge", point.id)

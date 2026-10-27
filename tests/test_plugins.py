@@ -87,6 +87,32 @@ def test_adopt_without_approval_does_not_copy(tmp_path):
     assert not (home / "plugins" / "upper").exists()
 
 
+def test_adoption_never_executes_plugin_code_before_approval(tmp_path):
+    """Validation before the gate must be static.
+
+    Importing a plugin module runs its top-level code. If that happens
+    while building the approval card, an unreviewed plugin has already
+    run on the host before the owner said yes. The marker file proves
+    the module was not imported on the rejected path.
+    """
+    home = tmp_path / "home"
+    registry = PluginRegistry(home)
+    marker = tmp_path / "executed.txt"
+    code = (
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('ran')\n"
+        "def upper(args):\n    return str(args.get('text', '')).upper()\n")
+    directory = _plugin_dir(tmp_path, code=code)
+    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: False)
+    assert ok is False
+    assert not marker.exists()
+    # After approval the copy is loaded for real and still works.
+    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: True)
+    assert ok is True
+    assert marker.exists()
+    assert registry.call("upper", {"text": "hi"}) == "HI"
+
+
 def test_loop_dispatches_to_plugin_tool(tmp_path):
     home = tmp_path / "home"
     registry = PluginRegistry(home)

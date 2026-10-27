@@ -171,7 +171,7 @@ def store_experience(memory: Memory, experience: Experience) -> Point:
         # Delete the old point by matching its text, then
         # record the merged one. Points are found by recall,
         # so we locate the exact point id first.
-        for point in memory.list_points("experience", limit=1000):
+        for point in memory.iter_points("experience"):
             if point.payload.get("goal") == candidate.goal and \
                     point.payload.get("goal_shape") == candidate.goal_shape:
                 memory.forget("experience", point.id)

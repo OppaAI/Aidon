@@ -74,7 +74,7 @@ def export_points(memory, dest: Path) -> int:
     with Path(dest).open("w", encoding="utf-8") as handle:
         for collection in ("working", "episodic", "semantic", "experience", "knowledge"):
             try:
-                points = memory.list_points(collection, limit=1000)
+                points = memory.iter_points(collection)
             except Exception:
                 continue
             for point in points:

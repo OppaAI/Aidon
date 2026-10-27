@@ -44,7 +44,7 @@ class SchedulerLoop:
         self._stop.set()
 
     def run_once(self) -> list:
-        due = self.scheduler.check_due()
+        due = self.scheduler.check_due(datetime.now())
         for event in due:
             self.dispatcher.dispatch(event)
         return due

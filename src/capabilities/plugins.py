@@ -164,8 +164,16 @@ def scan_plugin(directory: Path) -> list[ScanFinding]:
     return findings
 
 
-def load_plugin(directory: Path) -> Plugin:
-    """Load and validate a plugin directory, without executing tools."""
+def load_plugin(directory: Path, execute: bool = True) -> Plugin:
+    """Load and validate a plugin directory.
+
+    ``execute=False`` validates the manifest and that each named
+    function is defined at module top level, using the AST only. That
+    is the pre-approval path: importing a module runs its top-level
+    code, so importing before the owner approves would execute
+    unreviewed code on the host. After approval, ``execute=True``
+    imports it and binds the real callables.
+    """
     directory = Path(directory)
     manifest_path = directory / "plugin.json"
     if not manifest_path.exists():
@@ -191,6 +199,21 @@ def load_plugin(directory: Path) -> Plugin:
         module_path = directory / module_name
         if not module_path.exists():
             raise ValueError(f"plugin module missing: {module_name}")
+        if not execute:
+            # Static check only: no import, no top-level code runs.
+            try:
+                tree = ast.parse(module_path.read_text(encoding="utf-8"))
+            except (SyntaxError, UnicodeDecodeError) as exc:
+                raise ValueError(
+                    f"plugin module does not parse: {module_name}: {exc}")
+            defined = {node.name for node in tree.body
+                       if isinstance(node, (ast.FunctionDef,
+                                            ast.AsyncFunctionDef,
+                                            ast.ClassDef))}
+            if func_name not in defined:
+                raise ValueError(
+                    f"plugin function is not defined: {func_name}")
+            continue
         spec = importlib.util.spec_from_file_location(
             f"aidon_plugin_{name}_{tool_name}", module_path)
         module = importlib.util.module_from_spec(spec)
@@ -261,7 +284,10 @@ class PluginRegistry:
         if blocking:
             return False, findings, "Adoption rejected: blocking scan findings"
         try:
-            plugin = load_plugin(source_dir)
+            # Static validation only. Importing the module here would
+            # run its top-level code on the host before the owner has
+            # seen the scan report or approved anything.
+            plugin = load_plugin(source_dir, execute=False)
         except Exception as exc:
             return False, findings, f"Adoption rejected: invalid plugin: {exc}"
         # Approval card: scan report as body, path/line/type only.
