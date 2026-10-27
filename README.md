@@ -37,12 +37,14 @@ Give Aidon a goal in plain language, in chat, on WhatsApp or Slack, or on the co
 
 ## ✨ What is new here
 
-The idea was validated with an earlier prototype, and all code
-in this repository was written during the Meta Global AI
-Developer Hackathon, Oct 26 - Nov 4, 2026. Nothing in this
-repository was copied from that prototype: the design was read,
-and the code was written fresh, part by part, and tested as it
-was written.
+Aidon was created to address a simple problem: many people want to use AI to accomplish complex tasks but don't know 
+how to write effective prompts or guide an AI through the necessary steps. So I say, why not let AI itself figure out 
+the workflow on how to complete its user's goal, while utilizing as little time and tokens as possible.
+Aidon aims to bridge that gap by enabling users to express their goals in natural language while the agent plans, builds 
+the capabilities it needs, and validates its work.
+
+All code in this repo was written from scratch during the Meta Global AI Developer Hackathon (October 26–November 4, 2026). 
+The implementation is still under development, with components continue to be tested as more features are added and deployed.
 
 The demo runs on Meta models through the Meta Model API. That
 is a real part of what Aidon runs, not just a build-time choice.
@@ -88,7 +90,7 @@ Code lives in `src/`, grouped, not flat:
 
 Run it with `python -m src.system.main goal "..."`, or `./launch.sh goal "..."`. `src/` itself has no modules at the top level, only `__init__.py` and the groups.
 
-## 🔮 Future — post-hackathon (NOT built, NOT demoed)
+## 🔮 Future — post-hackathon (to be implemented in the near future)
 
 The items below are ideas only, for direction. None of them is
 in this repository, none is in the hackathon demo, and none was
@@ -104,3 +106,11 @@ built during Oct 26 - Nov 4.
 4. **Deterministic plan validation.** A canonical plan format
    plus a cross-file validator, so plan, ledger, and
    deliverables must agree by code before approval.
+5. **Biological Simulation Layer with Fruit fly connectome:**
+   Explore bio-inspired neural circuits, reinforcement learning
+   with reward signals, adaptive neural processes, and emergent
+   decision-making, investigating whether increasingly integrated
+   learning, memory, motivation, and self-regulation could give
+   rise to more complex agent behaviors—and, as a long-term open
+   research question, whether any form of machine sentience could
+   emerge.
