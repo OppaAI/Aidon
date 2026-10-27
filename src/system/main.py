@@ -735,8 +735,11 @@ def main(argv: list[str] | None = None) -> int:
                 _gate = server.webui_gate.gate
             def _web_researcher(goal_text):
                 try:
+                    from ..agentic.research_allow import DomainGrants, load_allowlist
                     from ..capabilities.search import search as _s
-                    _r = _s(goal_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url)
+                    _r = _s(goal_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url,
+                            allowlist=load_allowlist(config.home, config.research_allowlist),
+                            grants=DomainGrants(config.home))
                     return [f"{x.get('title', '')}: {x.get('snippet', '')}" for x in _r.get("results", [])]
                 except Exception:
                     return []
@@ -1279,8 +1282,11 @@ def main(argv: list[str] | None = None) -> int:
         _cli_router = None
     def _researcher(goal_text):
         try:
+            from ..agentic.research_allow import DomainGrants, load_allowlist
             from ..capabilities.search import search as _search
-            result = _search(goal_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url)
+            result = _search(goal_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url,
+                             allowlist=load_allowlist(config.home, config.research_allowlist),
+                             grants=DomainGrants(config.home))
             return [f"{r.get('title', '')}: {r.get('snippet', '')}" for r in result.get("results", [])]
         except Exception:
             return []
