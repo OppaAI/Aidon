@@ -286,7 +286,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
             return False, "no approval gate configured"
         try:
             decision = gate.ask(kind, title, body)
-            return decision.verdict == "approved", decision.verdict
+            return decision.verdict in ("approved", "auto_approved"), decision.verdict
         except Exception as exc:
             return False, f"approval failed: {exc}"
 
