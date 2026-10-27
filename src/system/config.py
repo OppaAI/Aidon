@@ -102,6 +102,9 @@ class Config:
     sandbox_nproc: int = 256
     sandbox_fsize_mb: int = 512
     sandbox_cpu_seconds: int = 0
+    sandbox_backend: str = "auto"
+    sandbox_network: bool = False
+    sandbox_require_isolation: bool = False
     max_steps: int = 50
     approval_timeout_seconds: int = 180
     execution_backend: str = "bubblewrap"
@@ -194,6 +197,10 @@ class Config:
             sandbox_nproc=_env_int("AIDON_SANDBOX_NPROC", 256),
             sandbox_fsize_mb=_env_int("AIDON_SANDBOX_FSIZE_MB", 512),
             sandbox_cpu_seconds=_env_int("AIDON_SANDBOX_CPU_S", 0),
+            sandbox_backend=os.environ.get("AIDON_SANDBOX_BACKEND", "auto"),
+            sandbox_network=os.environ.get("AIDON_SANDBOX_NETWORK", "0") == "1",
+            sandbox_require_isolation=os.environ.get(
+                "AIDON_SANDBOX_REQUIRE_ISOLATION", "0") == "1",
             max_steps=_env_int("AIDON_MAX_STEPS", 50),
             approval_timeout_seconds=_env_int(
                 "AIDON_APPROVAL_TIMEOUT_S", 180),

@@ -1271,6 +1271,9 @@ class WebUIServer:
             {"key": "AIDON_SANDBOX_NPROC", "label": "Sandbox process limit", "type": "int", "default": "256", "desc": "Maximum processes for a sandbox child; 0 disables this limit.", "secret": False},
             {"key": "AIDON_SANDBOX_FSIZE_MB", "label": "Sandbox file-size MB", "type": "int", "default": "512", "desc": "Maximum file size created by a sandbox child; 0 disables this limit.", "secret": False},
             {"key": "AIDON_SANDBOX_CPU_S", "label": "Sandbox CPU seconds", "type": "int", "default": "0", "desc": "CPU limit for a sandbox child; 0 disables this limit.", "secret": False},
+            {"key": "AIDON_SANDBOX_BACKEND", "label": "Sandbox backend", "type": "enum", "default": "auto", "desc": "Isolation backend selection.", "secret": False, "options": ["auto", "bubblewrap", "subprocess"]},
+            {"key": "AIDON_SANDBOX_NETWORK", "label": "Sandbox network", "type": "bool", "default": "0", "desc": "Allow network access inside sandbox commands.", "secret": False},
+            {"key": "AIDON_SANDBOX_REQUIRE_ISOLATION", "label": "Require isolation", "type": "bool", "default": "0", "desc": "Refuse sandbox commands when bubblewrap isolation is unavailable.", "secret": False},
             {"key": "AIDON_KERNEL", "label": "Kernel mode", "type": "bool", "default": "0", "desc": "Kernel mode: write/read/list/shell only, no calculate, no plugins.", "secret": False},
         ]},
         {"group": "Memory", "settings": [

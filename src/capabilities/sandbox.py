@@ -42,7 +42,9 @@ class SandboxResult:
 class Sandbox:
     def __init__(self, workdir: Path, timeout_seconds: int = 120,
                  mem_mb: int = 1024, nproc: int = 256,
-                 fsize_mb: int = 512, cpu_seconds: int = 0):
+                 fsize_mb: int = 512, cpu_seconds: int = 0,
+                 backend: str = "auto", allow_network: bool = False,
+                 require_isolation: bool = False):
         self.workdir = Path(workdir)
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.timeout_seconds = timeout_seconds
@@ -50,7 +52,11 @@ class Sandbox:
         self.nproc = max(0, int(nproc))
         self.fsize_mb = max(0, int(fsize_mb))
         self.cpu_seconds = max(0, int(cpu_seconds))
-        self.bwrap = shutil.which("bwrap")
+        self.backend = str(backend or "auto").lower()
+        self.allow_network = bool(allow_network)
+        self.require_isolation = bool(require_isolation)
+        self.bwrap = (shutil.which("bwrap")
+                      if self.backend in ("auto", "bubblewrap") else None)
 
     @property
     def isolated(self) -> bool:
@@ -60,6 +66,10 @@ class Sandbox:
         """Run command inside the workdir. command is a list, never a shell string."""
         if not command:
             raise ValueError("command must not be empty")
+        if self.require_isolation and not self.bwrap:
+            return SandboxResult(
+                126, "", "REFUSED: isolation is required but bubblewrap "
+                "is unavailable or disabled", False)
         if self.bwrap:
             # Merge fix: run() used to inline a simpler argv here while
             # _bwrap_argv (the merged-usr version, with /bin, /sbin,
@@ -122,7 +132,7 @@ class Sandbox:
         wd = str(self.workdir.resolve())
         argv = [
             self.bwrap,
-            "--unshare-net", "--unshare-pid", "--die-with-parent",
+            "--unshare-pid", "--die-with-parent",
             "--clearenv",
             "--setenv", "PATH", f"{sys.prefix}/bin:/usr/local/bin:/usr/bin:/bin",
             "--setenv", "HOME", wd,
@@ -131,6 +141,8 @@ class Sandbox:
             "--setenv", "TERM", "dumb",
             "--ro-bind-try", "/usr", "/usr",
         ]
+        if not self.allow_network:
+            argv.insert(1, "--unshare-net")
         # Recreate symlinked system dirs as symlinks (merged-usr),
         # and bind real ones read-only.
         for sysdir in ("/bin", "/sbin", "/lib", "/lib64", "/etc"):

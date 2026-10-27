@@ -936,7 +936,10 @@ def main(argv: list[str] | None = None) -> int:
         config.workdir, config.sandbox_timeout_seconds,
         mem_mb=config.sandbox_mem_mb, nproc=config.sandbox_nproc,
         fsize_mb=config.sandbox_fsize_mb,
-        cpu_seconds=config.sandbox_cpu_seconds)
+        cpu_seconds=config.sandbox_cpu_seconds,
+        backend=config.sandbox_backend,
+        allow_network=config.sandbox_network,
+        require_isolation=config.sandbox_require_isolation)
     memory = _LazyMemory(config)
 
     if args.command == "learn":
