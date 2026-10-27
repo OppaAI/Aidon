@@ -225,12 +225,145 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         tools["record_system_audio"] = record_audio
     except Exception:
         pass
+
+    # Compatibility names from old Aidon.
+    if "threads_publish" in tools:
+        tools["threads_post"] = tools["threads_publish"]
+    if "instagram_publish" in tools:
+        tools["instagram_post"] = tools["instagram_publish"]
+
+    def read_file(name):
+        path = _confined(name)
+        if not path.is_file():
+            return f"file not found: {name}"
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    def write_file(name, text):
+        path = _confined(name)
+        path.write_text(str(text), encoding="utf-8")
+        return f"wrote {path}"
+
+    tools["read_file"] = read_file
+    tools["write_file"] = write_file
+
+    try:
+        from urllib.parse import parse_qs, urlparse
+        from ..social.youtube import youtube_learn as _youtube_learn
+
+        def youtube_learn(query_or_url, max_chars=12000, visual=False):
+            value = str(query_or_url).strip()
+            video_id = ""
+            if "youtube.com" in value or "youtu.be" in value:
+                parsed = urlparse(value)
+                video_id = parse_qs(parsed.query).get("v", [""])[0]
+                if not video_id and parsed.hostname == "youtu.be":
+                    video_id = parsed.path.strip("/").split("/", 1)[0]
+            result = _youtube_learn(
+                video_id=video_id, query="" if video_id else value,
+                api_key=getattr(config, "youtube_api_key", ""),
+                visual_request=bool(visual))
+            return json.dumps(result, ensure_ascii=False)[:int(max_chars)]
+
+        tools["youtube_learn"] = youtube_learn
+    except Exception:
+        pass
+
+    def _approval(kind, title, body):
+        if gate is None:
+            return False, "no approval gate configured"
+        try:
+            decision = gate.ask(kind, title, body)
+            return decision.verdict == "approved", decision.verdict
+        except Exception as exc:
+            return False, f"approval failed: {exc}"
+
+    try:
+        from ..capabilities.install import (apt_install as _apt_install,
+            install_python_package as _install_python_package,
+            validate_apt, validate_pypi, uv_venv as _uv_venv)
+
+        def uv_venv(path=""):
+            target = _confined(path or ".venv")
+            ok, why = _approval("install", "Create Python virtual environment",
+                                f"Run on host: uv venv {target}")
+            if not ok:
+                return f"install rejected: {why}"
+            success, output = _uv_venv(target)
+            return f"VENV_CREATED {target}" if success else f"VENV_FAILED: {output}"
+
+        def install_python_package(packages, venv=""):
+            names = [str(packages)] if isinstance(packages, str) else [str(x) for x in packages]
+            names = [x.strip() for x in names for x in x.split(",") if x.strip()]
+            error = validate_pypi(names)
+            if error:
+                return f"INSTALL_REFUSED: {error}"
+            target = _confined(venv or ".venv")
+            ok, why = _approval("install", "Install Python packages",
+                                f"Run on host: uv pip install --python {target}/bin/python {' '.join(names)}")
+            if not ok:
+                return f"install rejected: {why}"
+            success, output = _install_python_package(names, target)
+            return f"INSTALLED {' '.join(names)} -> {target}" if success else f"INSTALL_FAILED: {output}"
+
+        def apt_install(packages):
+            names = [str(packages)] if isinstance(packages, str) else [str(x) for x in packages]
+            names = [x.strip() for x in names for x in x.split(",") if x.strip()]
+            error = validate_apt(names)
+            if error:
+                return f"INSTALL_REFUSED: {error}"
+            ok, why = _approval("install", "Install system packages",
+                                f"Run on host: sudo apt-get install -y {' '.join(names)}")
+            if not ok:
+                return f"install rejected: {why}"
+            success, output = _apt_install(names)
+            return f"APT_INSTALLED {' '.join(names)}" if success else f"APT_FAILED: {output}"
+
+        tools.update(uv_venv=uv_venv, install_python_package=install_python_package,
+                     apt_install=apt_install)
+    except Exception:
+        pass
     try:
         from ..agentic.file_versions import write_versioned
         def write_versioned_tool(name, text, expected_hash=""):
             result = write_versioned(workdir, name, text, expected_hash=expected_hash or None)
             return str(result)
         tools["write_versioned"] = write_versioned_tool
+    except Exception:
+        pass
+
+    try:
+        from ..capabilities.sam import sam_segment as _sam_segment
+
+        def sam_segment(image_paths, prompt):
+            paths = [image_paths] if isinstance(image_paths, str) else list(image_paths)
+            confined = [str(_confined(path)) for path in paths]
+            result = _sam_segment(confined, str(prompt), getattr(config, "api_key", ""),
+                                  getattr(config, "api_base", ""), getattr(config, "sam_model", "meta-sam"))
+            return json.dumps(result, ensure_ascii=False)
+
+        tools["sam_segment"] = sam_segment
+    except Exception:
+        pass
+
+    def notify(title, body="", recipient="owner"):
+        from ..capabilities.outbox import Outbox
+        item = Outbox(config.home).queue(str(recipient), str(title), str(body))
+        return f"notification queued: {item.get('id')}"
+
+    tools["notify"] = notify
+
+    try:
+        from ..capabilities.plugins import PluginRegistry
+
+        def adopt_tool_plugin(path):
+            source = _confined(path)
+            if not source.is_dir():
+                return f"adoption refused: plugin directory not found: {path}"
+            registry = PluginRegistry(config.home)
+            approved, _findings, message = registry.adopt(source, gate=gate)
+            return message if approved else f"adoption refused: {message}"
+
+        tools["adopt_tool_plugin"] = adopt_tool_plugin
     except Exception:
         pass
 
