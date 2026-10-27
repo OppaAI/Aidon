@@ -1186,7 +1186,9 @@ class GoalRunner:
             self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"),
             force_ask=True,
         )
-        approved = decision.verdict in ("approved", "edited")
+        # edited means "change the proposal" — not approve the original.
+        # Live card has no apply-edit path; require a clean approved.
+        approved = decision.verdict in ("approved", "auto_approved")
         self._mission_approval(approved)
         if not approved:
             return RunReport("rejected", goal, current_plan, True, False,
