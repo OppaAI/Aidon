@@ -98,6 +98,65 @@ def is_fetchable(url: str, allowlist: list[str] | None = None,
     return is_allowed(url, allowlist) or bool(grants and grants.is_granted(url))
 
 
+def ssrf_blocked(url: str) -> str | None:
+    """SSRF guard: a reason string when the URL's host resolves to a
+    non-public address, else None.
+
+    The allowlist matches host STRINGS; an allowlisted host can still
+    302 (or DNS-resolve) to 127.0.0.1 / the LAN / cloud metadata, so
+    the check runs on the resolved addresses, on the original URL and
+    on every redirect hop. IP-literal hosts skip DNS. A host that
+    cannot be resolved here is left to the fetch itself (which will
+    fail the same way); a host that resolves to ANY non-public
+    address blocks. Grants never bypass this guard: a grant widens
+    the allowlist, it never widens the network.
+    """
+    import ipaddress
+    import socket
+    host = urlparse(url).hostname
+    if not host:
+        return "URL has no host"
+    try:
+        literal = ipaddress.ip_address(host)
+        addrs = [literal]
+    except ValueError:
+        try:
+            infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+        except (socket.gaierror, UnicodeError, OSError):
+            return None
+        addrs = []
+        for info in infos:
+            try:
+                addrs.append(ipaddress.ip_address(info[4][0]))
+            except ValueError:
+                continue
+    for addr in addrs:
+        if (addr.is_private or addr.is_loopback or addr.is_link_local
+                or addr.is_reserved or addr.is_multicast
+                or addr.is_unspecified):
+            return f"host {host} resolves to non-public address {addr}"
+    return None
+
+
+def guard_reason(url: str, allowlist: list[str] | None = None,
+                 grants: DomainGrants | None = None,
+                 allow_local: bool = False) -> str | None:
+    """One check for one hop: SSRF first, then allowlist. None = may fetch.
+
+    allow_local=True is the explicit local-server exception, for
+    tests and local development only. Production callers do not
+    pass it, so a local address is blocked even if it is
+    allowlisted — the allowlist is a host rule, not an SSRF waiver.
+    """
+    if not allow_local:
+        blocked = ssrf_blocked(url)
+        if blocked:
+            return f"{blocked} (SSRF guard)"
+    if allowlist and not is_fetchable(url, allowlist, grants):
+        return "host not on research allowlist"
+    return None
+
+
 class StuckDetector:
     """Stuck-iteration watchdog: the same result N times in a row stops a loop.
 

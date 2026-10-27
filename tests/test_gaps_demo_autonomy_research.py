@@ -190,3 +190,101 @@ def test_config_research_caps(tmp_path, monkeypatch):
     assert cfg.max_stuck_iterations == 3
     assert cfg.parallel_tools == 2
     assert cfg.research_allowlist == "example.com"
+
+
+# ── redirect hop + SSRF gap ──
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+from src.agentic.research_allow import guard_reason, ssrf_blocked
+from src.capabilities.documents import read_document
+
+
+def _redirect_server(target_url):
+    class _H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/redir":
+                self.send_response(302)
+                self.send_header("Location", target_url)
+                self.end_headers()
+            else:
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"<html><body><p>final page text</p></body></html>")
+
+        def log_message(self, *args):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), _H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def test_ssrf_guard_blocks_non_public_hosts():
+    assert ssrf_blocked("http://127.0.0.1/") is not None
+    assert ssrf_blocked("http://10.0.0.5/") is not None
+    assert ssrf_blocked("http://169.254.169.254/latest/meta-data/") is not None
+    assert ssrf_blocked("http://[::1]/") is not None
+    # A grant never bypasses SSRF: even an allowlisted loopback is blocked.
+    grants = DomainGrants("/tmp")
+    grants.grant_run("127.0.0.1")
+    assert guard_reason("http://127.0.0.1/", ["127.0.0.1"], grants) is not None
+    # The local exception is explicit, not silent.
+    assert guard_reason("http://127.0.0.1/", ["127.0.0.1"], grants,
+                        allow_local=True) is None
+
+
+def test_researcher_redirect_to_blocked_host_is_not_followed():
+    srv = _redirect_server("https://elsewhere.invalid/final")
+    try:
+        start = f"http://127.0.0.1:{srv.server_port}/redir"
+        researcher = Researcher(allowlist=["127.0.0.1"], allow_local=True)
+        source = researcher.fetch(start)
+        assert source.error.startswith("blocked:")
+        assert "allowlist" in source.error
+        assert source.excerpt == ""
+    finally:
+        srv.shutdown()
+
+
+def test_researcher_redirect_to_ssrf_host_is_not_followed():
+    # Redirect target is a loopback host on another port: SSRF, not
+    # allowlist, blocks it even though the start host was allowed.
+    srv = _redirect_server("http://127.0.0.1:9/final")
+    try:
+        start = f"http://127.0.0.1:{srv.server_port}/redir"
+        researcher = Researcher(allowlist=["127.0.0.1"], allow_local=False)
+        # Start host itself is loopback, so the first hop blocks first;
+        # that still proves no unchecked fetch happens.
+        source = researcher.fetch(start)
+        assert source.error.startswith("blocked:")
+    finally:
+        srv.shutdown()
+
+
+def test_documents_redirect_to_blocked_host_is_not_followed():
+    srv = _redirect_server("https://elsewhere.invalid/final")
+    try:
+        start = f"http://127.0.0.1:{srv.server_port}/redir"
+        out = read_document(start, allowlist=["127.0.0.1"], allow_local=True)
+        assert out.startswith("READ_BLOCKED:")
+        assert "allowlist" in out
+    finally:
+        srv.shutdown()
+
+
+def test_researcher_follows_allowed_redirect():
+    final_srv = _redirect_server("x")
+    try:
+        target = f"http://127.0.0.1:{final_srv.server_port}/final"
+        redir_srv = _redirect_server(target)
+        try:
+            researcher = Researcher(allowlist=["127.0.0.1"], allow_local=True)
+            source = researcher.fetch(
+                f"http://127.0.0.1:{redir_srv.server_port}/redir")
+            assert source.error == ""
+            assert "final page text" in source.excerpt
+        finally:
+            redir_srv.shutdown()
+    finally:
+        final_srv.shutdown()

@@ -83,34 +83,68 @@ class ResearchReport:
                 "unverified_claims": self.unverified_claims}
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Do not follow redirects inside urllib: it would follow them
+    unchecked. Returning None makes urlopen raise HTTPError for the
+    redirect status, and fetch() reads Location from that error
+    and re-validates the next hop before fetching it."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class Researcher:
     def __init__(self, timeout_seconds: int = 15, allowlist=None,
-                 grants=None, parallel_tools: int = 4):
+                 grants=None, parallel_tools: int = 4,
+                 allow_local: bool = False):
         self.timeout_seconds = timeout_seconds
         # Wired, not just defined: when an allowlist is set, a URL
         # outside it (and outside any explicit grant) is never
         # fetched. It is recorded as a blocked source, not silently
-        # widened and not fetched anyway.
+        # widened and not fetched anyway. Every redirect hop is
+        # re-validated the same way, and the SSRF guard applies on
+        # every hop too, grants or not.
         self.allowlist = list(allowlist) if allowlist else []
         self.grants = grants
         self.parallel_tools = max(1, int(parallel_tools))
+        # allow_local=True is the explicit local-server exception,
+        # for tests and local development only. Production callers
+        # do not pass it.
+        self.allow_local = allow_local
 
     def fetch(self, url: str) -> Source:
+        from .research_allow import guard_reason
         fetched_at = datetime.now().isoformat(timespec="seconds")
-        if self.allowlist:
-            from .research_allow import is_fetchable
-            if not is_fetchable(url, self.allowlist, self.grants):
+        opener = urllib.request.build_opener(_NoRedirect)
+        current = url
+        for _hop in range(6):
+            reason = guard_reason(current, self.allowlist, self.grants,
+                                  self.allow_local)
+            if reason:
                 return Source(url=url, fetched_at=fetched_at,
-                              error="blocked: host not on research allowlist")
-        try:
-            request = urllib.request.Request(
-                url, headers={"User-Agent": "Aidon/1.0 research"})
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                raw = response.read().decode("utf-8", errors="ignore")
-            text = _strip_html(raw)
-            return Source(url=url, fetched_at=fetched_at, excerpt=text[:2000])
-        except Exception as exc:
-            return Source(url=url, fetched_at=fetched_at, error=str(exc)[:200])
+                              error=f"blocked: {reason}")
+            try:
+                request = urllib.request.Request(
+                    current, headers={"User-Agent": "Aidon/1.0 research"})
+                with opener.open(request, timeout=self.timeout_seconds) as response:
+                    raw = response.read().decode("utf-8", errors="ignore")
+                text = _strip_html(raw)
+                return Source(url=url, fetched_at=fetched_at, excerpt=text[:2000])
+            except urllib.error.HTTPError as exc:
+                if exc.code in (301, 302, 303, 307, 308):
+                    loc = exc.headers.get("location") if exc.headers else None
+                    if not loc:
+                        return Source(url=url, fetched_at=fetched_at,
+                                      error="redirect without Location")
+                    from urllib.parse import urljoin
+                    current = urljoin(current, loc)
+                    continue
+                return Source(url=url, fetched_at=fetched_at,
+                              error=f"HTTP {exc.code}")
+            except Exception as exc:
+                return Source(url=url, fetched_at=fetched_at, error=str(exc)[:200])
+        return Source(url=url, fetched_at=fetched_at,
+                      error="too many redirects")
 
     def research(self, question: str, urls: list[str],
                  claims: list[str] | None = None) -> ResearchReport:

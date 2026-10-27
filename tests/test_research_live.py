@@ -39,7 +39,9 @@ def test_research_verifies_only_sourced_facts():
     server = _server()
     try:
         url = f"http://127.0.0.1:{server.server_port}/"
-        report = Researcher().research(
+        # Local test server: the SSRF guard is explicitly off here,
+        # production Researcher() blocks loopback by default.
+        report = Researcher(allow_local=True).research(
             "What is the main dish?", [url],
             claims=["Roast beef is the main dish.", "Turkey is the main dish."])
         assert len(report.verified_facts) == 1

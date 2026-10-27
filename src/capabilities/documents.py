@@ -58,23 +58,42 @@ def _resolve_local(path_or_url: str, sandbox) -> Path | None:
     return target
 
 
-def _resolve_url(path_or_url: str) -> Path | None:
-    """Download a URL to a temp file, stdlib only, 50MB cap, 5 hops."""
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Do not follow redirects inside urllib: it would follow them
+    unchecked, and the hop loop below would never see them. Returning
+    None makes urlopen raise HTTPError for the redirect status, and
+    the loop below reads Location from that error and re-validates
+    the next hop before fetching it."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _resolve_url(path_or_url: str, allowlist=None, grants=None,
+                 allow_local: bool = False) -> tuple[Path | None, str]:
+    """Download a URL to a temp file, stdlib only, 50MB cap, 5 hops.
+
+    Returns (path, error): path is None on failure, and error is
+    "" on success, a READ_BLOCKED message when a hop is blocked by
+    the allowlist or the SSRF guard, or a READ_FAILED message
+    otherwise. Every hop is re-validated before it is fetched, so
+    an allowlisted page cannot 302 into a blocked host, loopback,
+    LAN, or cloud metadata. Grants never bypass the SSRF guard.
+    """
+    from ..agentic.research_allow import guard_reason
+    opener = urllib.request.build_opener(_NoRedirect)
     current = path_or_url
     for _hop in range(6):
         parsed = urllib.parse.urlparse(current)
         if parsed.scheme not in ("http", "https"):
-            return None
+            return None, "READ_FAILED: not an http(s) URL"
+        reason = guard_reason(current, allowlist, grants, allow_local)
+        if reason:
+            return None, f"READ_BLOCKED: {reason}"
         req = urllib.request.Request(
             current, headers={"User-Agent": "Aidon/1.0 document-reader"})
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                if resp.status in (301, 302, 303, 307, 308):
-                    loc = resp.headers.get("location")
-                    if not loc:
-                        return None
-                    current = urllib.parse.urljoin(current, loc)
-                    continue
+            with opener.open(req, timeout=30) as resp:
                 suffix = Path(urllib.parse.urlparse(current).path).suffix or ".bin"
                 tmp = Path(tempfile.mkdtemp(prefix="aidon-doc-")) / f"doc{suffix}"
                 size = 0
@@ -87,12 +106,21 @@ def _resolve_url(path_or_url: str) -> Path | None:
                         if size > MAX_DOWNLOAD_BYTES:
                             tmp.unlink(missing_ok=True)
                             tmp.parent.rmdir(missing_ok=True)
-                            return None
+                            return None, "READ_FAILED: download over 50MB cap"
                         f.write(chunk)
-                return tmp
-        except (urllib.error.URLError, OSError, ValueError):
-            return None
-    return None
+                return tmp, ""
+        except urllib.error.HTTPError as exc:
+            if exc.code in (301, 302, 303, 307, 308):
+                loc = exc.headers.get("location") if exc.headers else None
+                if not loc:
+                    return None, (f"READ_FAILED: redirect without Location "
+                                  f"from {current}")
+                current = urllib.parse.urljoin(current, loc)
+                continue
+            return None, f"READ_FAILED: HTTP {exc.code}"
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            return None, f"READ_FAILED: {type(exc).__name__}: {exc}"
+    return None, "READ_FAILED: too many redirects"
 
 
 def _ocr_image(path: Path) -> str:
@@ -110,25 +138,24 @@ def _ocr_image(path: Path) -> str:
 
 def read_document(path_or_url: str, sandbox=None,
                   max_chars: int = MAX_CHARS, allowlist=None,
-                  grants=None) -> str:
+                  grants=None, allow_local: bool = False) -> str:
     """Convert a document (local path or URL) to Markdown.
 
-    allowlist wiring: a URL outside the list (and outside any
-    explicit grant) is READ_BLOCKED, never fetched. Local paths
+    allowlist + SSRF wiring: a URL outside the list (and outside
+    any explicit grant) is READ_BLOCKED, never fetched, and every
+    redirect hop is re-validated before it is fetched. Local paths
     are unaffected — the allowlist is a network rule, not a file rule.
+    allow_local=True is the explicit local-server exception, for
+    tests and local development only.
     """
-    if _is_url(path_or_url) and allowlist:
-        from ..agentic.research_allow import is_fetchable
-        if not is_fetchable(path_or_url, allowlist, grants):
-            return "READ_BLOCKED: URL host not on research allowlist"
     if not _MARKITDOWN_AVAILABLE:
         # Fall back to the KB extractors for common formats.
         from ..memory.kb import extract_text, parser_needed_for
         p = Path(path_or_url)
         if _is_url(path_or_url):
-            local = _resolve_url(path_or_url)
+            local, err = _resolve_url(path_or_url, allowlist, grants, allow_local)
             if local is None:
-                return "READ_FAILED: could not download URL"
+                return err
             p = local
         elif sandbox is not None:
             local = _resolve_local(path_or_url, sandbox)
@@ -157,9 +184,9 @@ def read_document(path_or_url: str, sandbox=None,
 
     local, err_path = None, None
     if _is_url(path_or_url):
-        local = _resolve_url(path_or_url)
+        local, err = _resolve_url(path_or_url, allowlist, grants, allow_local)
         if local is None:
-            return "READ_FAILED: could not download URL"
+            return err
     elif sandbox is not None:
         local = _resolve_local(path_or_url, sandbox)
         if local is None:
