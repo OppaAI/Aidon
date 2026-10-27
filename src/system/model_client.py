@@ -75,7 +75,7 @@ def image_file_message(text: str, paths: list) -> Message:
 class ModelClient:
     """Base interface. Subclasses implement one chat call."""
 
-    def chat(self, messages: list[Message]) -> str:
+    def chat(self, messages: list[Message], sampling=None) -> str:
         raise NotImplementedError
 
 
@@ -86,8 +86,9 @@ class FakeClient(ModelClient):
         self.reply = reply
         self.calls: list[list[Message]] = []
 
-    def chat(self, messages: list[Message]) -> str:
+    def chat(self, messages: list[Message], sampling=None) -> str:
         self.calls.append(list(messages))
+        self.last_sampling = sampling
         return self.reply
 
 
@@ -108,12 +109,17 @@ class HttpModelClient(ModelClient):
         self.model = model
         self.timeout = timeout
 
-    def chat(self, messages: list[Message]) -> str:
+    def chat(self, messages: list[Message], sampling=None) -> str:
         payload = {
             "model": self.model,
             "messages": [{"role": m.role, "content": m.content}
                          for m in messages],
         }
+        if sampling:
+            if sampling.get("temperature") is not None:
+                payload["temperature"] = sampling["temperature"]
+            if sampling.get("top_p") is not None:
+                payload["top_p"] = sampling["top_p"]
         # A list content is sent as-is, so image parts reach
         # the model, not just the text part. A string content
         # is unchanged, so old text-only calls keep working.
@@ -186,8 +192,14 @@ class OllamaClient(ModelClient):
             body["options"] = {"num_ctx": self.num_ctx}
         return body
 
-    def chat(self, messages: list[Message]) -> str:
+    def chat(self, messages: list[Message], sampling=None) -> str:
         body = self._body(messages)
+        if sampling:
+            body.setdefault("options", {})
+            if sampling.get("temperature") is not None:
+                body["options"]["temperature"] = sampling["temperature"]
+            if sampling.get("top_p") is not None:
+                body["options"]["top_p"] = sampling["top_p"]
         req = urllib.request.Request(
             f"{self.base}/api/chat",
             data=json.dumps(body).encode("utf-8"),

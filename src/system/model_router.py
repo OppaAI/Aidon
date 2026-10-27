@@ -69,13 +69,16 @@ class RouterClient(ModelClient):
             return self.chat_phase("", phase_or_messages)
         return self.chat_phase(str(phase_or_messages), messages)
 
-    def chat_phase(self, phase: str, messages) -> str:
+    def chat_phase(self, phase: str, messages, sampling=None) -> str:
         key = str(phase or "").lower()
         self.calls_by_phase[key] = self.calls_by_phase.get(key, 0) + 1
         client = self.route(phase)
         if client is None:
             raise ValueError("RouterClient has no default client")
-        return client.chat(messages)
+        try:
+            return client.chat(messages, sampling=sampling)
+        except TypeError:
+            return client.chat(messages)
 
     def stats(self) -> dict:
         return dict(self.calls_by_phase)

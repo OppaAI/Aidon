@@ -67,10 +67,11 @@ class Tool:
 
 
 class ToolRegistry:
-    def __init__(self, workdir: Path, sandbox=None):
+    def __init__(self, workdir: Path, sandbox=None, versioned_writes: bool = False):
         self.workdir = Path(workdir)
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.sandbox = sandbox
+        self.versioned_writes = versioned_writes
         self.tools = {
             "write": Tool("write", "Write text to a file in the workdir."),
             "read": Tool("read", "Read a file in the workdir."),
@@ -82,6 +83,15 @@ class ToolRegistry:
     def call(self, name: str, args: dict) -> str:
         """Execute one tool, return text output, raise on failure."""
         if name == "write":
+            if self.versioned_writes:
+                from ..agentic.file_versions import write_versioned
+                result = write_versioned(
+                    self.workdir, str(args["file"]), str(args.get("text", "")),
+                    expected_hash=args.get("expected_hash") or None)
+                if isinstance(result, dict) and result.get("conflict"):
+                    raise ValueError(
+                        f"write conflict on {args['file']}: file changed since it was read")
+                return f"wrote {args['file']} (version {result})"
             target = _confined(self.workdir, str(args["file"]))
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(str(args.get("text", "")), encoding="utf-8")

@@ -147,6 +147,28 @@ class ConversationStoreDB:
             (project_id,)).fetchall()
         return [dict(row) for row in rows]
 
+    def list_all_conversations(self) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT id, project_id, created_at FROM conversations"
+            " ORDER BY created_at").fetchall()
+        return [dict(row) for row in rows]
+
+    def import_conversation(self, conversation_id: str, project_id: str,
+                            turns: list | None = None) -> dict:
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO conversations (id, project_id, created_at)"
+                " VALUES (?, ?, ?)", (conversation_id, project_id, _now()))
+            self._conn.commit()
+        for turn in turns or []:
+            if isinstance(turn, dict):
+                self.record_exchange(conversation_id,
+                                     str(turn.get("role", "user")),
+                                     str(turn.get("text", "")))
+            else:
+                self.record_exchange(conversation_id, "user", str(turn))
+        return {"id": conversation_id, "project_id": project_id}
+
     def delete_conversation(self, conversation_id: str) -> bool:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")

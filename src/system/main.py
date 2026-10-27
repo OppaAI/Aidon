@@ -458,6 +458,7 @@ def main(argv: list[str] | None = None) -> int:
     docstore_parser = sub.add_parser("docstore", help="Per-document vector store: ingest a file, search ingested documents, drop a collection")
     docstore_parser.add_argument("action", choices=["ingest", "search", "drop", "list"], help="ingest = index a file, search = search ingested documents, drop = forget a collection, list = list collections")
     docstore_parser.add_argument("arg", nargs="?", default="", help="File path for ingest, query for search, collection for drop")
+    docstore_parser.add_argument("--qdrant", action="store_true", help="Use the Qdrant-backed store instead of the JSON index")
     intake_parser = sub.add_parser("intake", help="Intake schema: missing slots and summary for a goal text")
     intake_parser.add_argument("--schema", default="generic", help="Schema name: generic or dinner")
     intake_parser.add_argument("text", nargs="?", default="", help="Goal text to check against the schema")
@@ -594,6 +595,20 @@ def main(argv: list[str] | None = None) -> int:
         store = ConversationStoreDB(config.home)
         if args.action == "list":
             print(store.list_conversations("default")); return 0
+        if args.action == "import":
+            import json as _json
+            from pathlib import Path as _P
+            count = 0
+            for path in sorted((_P(config.home) / "conversations").glob("*.json")):
+                try:
+                    data = _json.loads(path.read_text())
+                except Exception:
+                    continue
+                store.import_conversation(str(data.get("id", path.stem)),
+                                          str(data.get("project_id", "default")),
+                                          list(data.get("turns", [])))
+                count += 1
+            print(f"Imported {count} legacy conversations"); return 0
         if not args.id:
             print("conversations history/record/delete need an id"); return 2
         if args.action == "history":
@@ -649,7 +664,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "docstore":
         from ..memory.docstore import DocStore
         from pathlib import Path as _P
-        store = DocStore(home=config.home)
+        store = DocStore.from_qdrant(config.home) if getattr(args, "qdrant", False) else DocStore(home=config.home)
         if args.action == "ingest":
             path = _P(args.arg)
             print(store.ingest(path.name, path.read_text(encoding="utf-8", errors="replace"))); return 0
@@ -1143,7 +1158,7 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools={})
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_gate), router=model_router, versioned_writes=True)
             # Swarm, Aidon decides: if the goal genuinely splits,
             # run the subgoals in parallel and merge, else single run.
             try:
@@ -1155,7 +1170,7 @@ def main(argv: list[str] | None = None) -> int:
                                             budget=budget, trace=trace,
                                             model_verifier=ModelVerifier(client),
                                             kernel_mode=config.kernel_mode,
-                                            run_id=run_id, run_control=run_control)
+                                            run_id=run_id, run_control=run_control, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=server.webui_gate.gate), router=model_router, versioned_writes=True)
                     sub_report = sub_runner.run(subgoal)
                     return f"[{sub_report.status}] {', '.join(sub_report.files)} {sub_report.error}".strip()
                 swarm_result = run_swarm(event.goal, client, _swarm_runner)
@@ -1645,7 +1660,7 @@ def main(argv: list[str] | None = None) -> int:
         plugins.load_all()
         goal_runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
                                  memory=memory, promotion_ask=_promotion_ask,
-                                 project_id=args.project, plugins=plugins, execution_backend=execution_backend)
+                                 project_id=args.project, plugins=plugins, execution_backend=execution_backend, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate()), router=model_router, versioned_writes=True)
         report = goal_runner.run(args.text, spec=result.spec)
         print(f"status: {report.status}")
         print(f"verified: {report.verified}")
@@ -1689,7 +1704,7 @@ def main(argv: list[str] | None = None) -> int:
                         kernel_mode=config.kernel_mode, semantic_router=_cli_router,
                         use_semantic_router_skip=True, researcher=_researcher,
                         extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate()),
-                        router=model_router,
+                        router=model_router, versioned_writes=True,
                         run_id=_uuid.uuid4().hex[:12])
     spec = None
     if getattr(args, "spec", None):

@@ -904,6 +904,9 @@ class WebUIServer:
         "image_model": "AIDON_IMAGE_MODEL",
         "sam_model": "AIDON_SAM_MODEL",
         "owner_email": "AIDON_OWNER_EMAIL",
+        "model": "AIDON_MODEL",
+        "fast_model": "AIDON_FAST_MODEL",
+        "tts_voice_id": "AIDON_TTS_VOICE_ID",
     }
     _ENV_SECRET_MARKERS = ("TOKEN", "KEY", "SECRET", "PASSWORD", "CLIENT")
 
@@ -1088,31 +1091,68 @@ class WebUIServer:
         return {"sandbox_tools": ["write", "read", "list", "shell", "calculate"],
                 "plugin_tools": registry.tool_names()}
 
+    def _conversations_db(self):
+        from ..memory.conversations_db import ConversationStoreDB
+        return ConversationStoreDB(self.home)
+
     def handle_conversations_list(self) -> dict:
+        # Single write path is the SQLite store; legacy JSON
+        # records are still listed (read-only) until imported.
+        try:
+            db = self._conversations_db()
+            records = db.list_all_conversations()
+            seen = {r["id"] for r in records}
+        except Exception:
+            records, seen = [], set()
         directory = self._json_dir("conversations")
-        records = []
         for path in sorted(directory.glob("*.json")):
             data = self._read_json_file(path)
-            if data is not None:
+            if data is not None and data.get("id") not in seen:
                 records.append(data)
         return {"conversations": records}
 
     def handle_conversation_create(self, body: dict) -> dict:
-        import uuid
-        conversation_id = str(body.get("id", "")) or uuid.uuid4().hex[:12]
-        record = {"id": conversation_id,
-                  "project_id": str(body.get("project_id", "default")),
-                  "turns": list(body.get("turns", []))}
-        self._write_json_file(
-            self._json_dir("conversations") / f"{self._safe_name(conversation_id)}.json",
-            record)
-        return record
+        try:
+            db = self._conversations_db()
+            record = db.create_conversation(str(body.get("project_id", "default")))
+            for turn in body.get("turns", []):
+                if isinstance(turn, dict):
+                    db.record_exchange(record["id"], str(turn.get("role", "user")),
+                                       str(turn.get("text", "")))
+                else:
+                    db.record_exchange(record["id"], "user", str(turn))
+            record["turns"] = db.history(record["id"])
+            return record
+        except Exception:
+            import uuid
+            conversation_id = str(body.get("id", "")) or uuid.uuid4().hex[:12]
+            record = {"id": conversation_id,
+                      "project_id": str(body.get("project_id", "default")),
+                      "turns": list(body.get("turns", []))}
+            self._write_json_file(
+                self._json_dir("conversations") / f"{self._safe_name(conversation_id)}.json",
+                record)
+            return record
 
     def handle_conversation_get(self, conversation_id: str):
+        try:
+            db = self._conversations_db()
+            history = db.history(conversation_id)
+            ids = {r["id"] for r in db.list_all_conversations()}
+            if conversation_id in ids:
+                return {"id": conversation_id, "turns": history}
+        except Exception:
+            pass
         return self._read_json_file(
             self.home / "conversations" / f"{self._safe_name(conversation_id)}.json")
 
     def handle_conversation_delete(self, conversation_id: str) -> dict:
+        try:
+            db = self._conversations_db()
+            if db.delete_conversation(conversation_id):
+                return {"ok": True}
+        except Exception:
+            pass
         path = self.home / "conversations" / f"{self._safe_name(conversation_id)}.json"
         if not path.is_file():
             return {"ok": False}
@@ -1316,7 +1356,7 @@ class WebUIServer:
                             pass
                     for item in server._library_files():
                         html += f"<p>Library: {item['path']}</p>"
-                    html += "<h2>Knowledge studio</h2><p>Recall knowledge, or record a knowledge text, via POST /api/studio/knowledge with JSON {action: recall|ingest, query, text}.</p>"
+                    html += "<h2>Knowledge studio</h2><p>Recall, record, edit, or delete knowledge, via POST /api/studio/knowledge with JSON {action: recall|ingest|edit|delete, query, text, point_id}.</p>"
                     html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('kb_action').value,query:document.getElementById('kb_query').value,text:document.getElementById('kb_text').value})}).then(r=>r.json()).then(d=>document.getElementById('kb_result').textContent=JSON.stringify(d));\"><select id=\"kb_action\"><option>recall</option><option>ingest</option></select> <input id=\"kb_query\" placeholder=\"query\"> <input id=\"kb_text\" placeholder=\"text to ingest\"> <button>Run</button></form><pre id=\"kb_result\"></pre>"
                     self._send_html(200, html)
                 elif parsed.path == "/reports":
@@ -1499,6 +1539,18 @@ class WebUIServer:
                         elif action == "ingest":
                             server.memory.record("knowledge", str(body.get("text", "")))
                             self._send_json(200, {"ok": True})
+                        elif action == "delete":
+                            point_id = str(body.get("point_id", ""))
+                            self._send_json(200, {"ok": server.memory.forget("knowledge", point_id)})
+                        elif action == "edit":
+                            point_id = str(body.get("point_id", ""))
+                            text = str(body.get("text", ""))
+                            if not point_id or not text:
+                                self._send_json(400, {"error": "edit needs point_id and text"})
+                            else:
+                                ok = server.memory.forget("knowledge", point_id)
+                                server.memory.record("knowledge", text)
+                                self._send_json(200, {"ok": ok, "edited": True})
                         else:
                             self._send_json(400, {"error": "unknown knowledge studio action"})
                 elif parsed.path == "/api/studio/capabilities":

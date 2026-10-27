@@ -48,15 +48,21 @@ class RoutedClient(ModelClient):
         self.fast_calls = 0
         self.strong_calls = 0
 
-    def chat(self, messages: list[Message]) -> str:
-        return self.chat_phase("", messages)
+    def chat(self, messages: list[Message], sampling=None) -> str:
+        return self.chat_phase("", messages, sampling=sampling)
 
-    def chat_phase(self, phase: str, messages: list[Message]) -> str:
+    def chat_phase(self, phase: str, messages: list[Message], sampling=None) -> str:
         if phase.lower() in self.fast_phases:
             self.fast_calls += 1
-            return self.fast_client.chat(messages)
+            try:
+                return self.fast_client.chat(messages, sampling=sampling)
+            except TypeError:
+                return self.fast_client.chat(messages)
         self.strong_calls += 1
-        return self.strong_client.chat(messages)
+        try:
+            return self.strong_client.chat(messages, sampling=sampling)
+        except TypeError:
+            return self.strong_client.chat(messages)
 
     def stats(self) -> dict:
         return {"fast_calls": self.fast_calls, "strong_calls": self.strong_calls}

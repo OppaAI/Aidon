@@ -97,6 +97,9 @@ class RunReport:
     adapted_from: str = ""
     chat_reply: str = ""
     dag_summary: dict = field(default_factory=dict)
+    step_lines: list[str] = field(default_factory=list)
+    narration: str = ""
+    delivery_summary: str = ""
 
 
 class GoalRunner:
@@ -108,7 +111,8 @@ class GoalRunner:
                  kernel_mode: bool = False, semantic_router=None,
                  use_semantic_router_skip: bool = False,
                  run_id: str | None = None, run_control=None,
-                 researcher=None, extra_tools=None, router=None):
+                 researcher=None, extra_tools=None, router=None,
+                 versioned_writes: bool = False):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -121,7 +125,8 @@ class GoalRunner:
         self.memory = memory
         self.promotion_ask = promotion_ask
         self.project_id = project_id
-        self.tools = ToolRegistry(sandbox.workdir, sandbox=sandbox)
+        self.tools = ToolRegistry(sandbox.workdir, sandbox=sandbox,
+                              versioned_writes=versioned_writes)
         self.plugins = plugins
         self.execution_backend = execution_backend
         self.budget = budget
@@ -155,10 +160,34 @@ class GoalRunner:
         hard-required, so a plain client passed as router
         still works.
         """
+        # Think effort/sampling for this phase, and the image
+        # guard: a fast-phase call carrying image parts goes to
+        # the strong client instead, because fast tiers are
+        # text-only.
+        try:
+            from .think_effort import sampling_for
+            sampling = sampling_for(phase)
+        except Exception:
+            sampling = None
+        has_image = False
+        for message in messages or []:
+            content = getattr(message, "content", "")
+            if isinstance(content, list) and any(
+                    isinstance(part, dict) and part.get("type") in ("image_url", "image")
+                    for part in content):
+                has_image = True
+        if has_image and str(phase) in ("interpret", "learn", "respond"):
+            try:
+                return self.client.chat(messages, sampling=sampling)
+            except TypeError:
+                return self.client.chat(messages)
         if self.router is not None and str(phase) in ("interpret", "learn", "respond"):
             chat_phase = getattr(self.router, "chat_phase", None)
             if callable(chat_phase):
-                return chat_phase(phase, messages)
+                try:
+                    return chat_phase(phase, messages, sampling=sampling)
+                except TypeError:
+                    return chat_phase(phase, messages)
             chat = getattr(self.router, "chat", None)
             if callable(chat):
                 try:
@@ -166,8 +195,14 @@ class GoalRunner:
                 except TypeError:
                     return chat(messages)
         if hasattr(self.client, "chat_phase"):
-            return self.client.chat_phase(phase, messages)
-        return self.client.chat(messages)
+            try:
+                return self.client.chat_phase(phase, messages, sampling=sampling)
+            except TypeError:
+                return self.client.chat_phase(phase, messages)
+        try:
+            return self.client.chat(messages, sampling=sampling)
+        except TypeError:
+            return self.client.chat(messages)
 
     def _backend_name(self) -> str:
         if self.execution_backend is not None:
@@ -395,6 +430,23 @@ class GoalRunner:
         report.adapted = bool(self._adapted)
         report.adapted_from = str(self._adapted_from)
         report.dag_summary = dict(self._dag_summary)
+        try:
+            from .step_lines import render_step_lines
+            report.step_lines = render_step_lines(getattr(self, "_step_lines", [])).splitlines()
+        except Exception:
+            pass
+        try:
+            from .delivery_summary import delivery_summary, problem_narration
+            report.delivery_summary = delivery_summary({
+                "goal": report.goal,
+                "deliverables": {f: (f in report.files) for f in report.plan.deliverables},
+                "files": list(report.files),
+                "elapsed": 0, "repairs": max(0, report.attempts - 1)})
+            if report.error:
+                report.narration = problem_narration(
+                    report.error, {"goal": report.goal, "attempts": report.attempts})
+        except Exception:
+            pass
         # Save the run state so `resume` can list and show it:
         # goal, steps, completed files, status. Best effort only;
         # a failed save must never fail the run itself.
@@ -432,6 +484,25 @@ class GoalRunner:
         if plan_failures:
             return RunReport("failed", goal, plan, False, False,
                              error="; ".join(plan_failures)[:500])
+        # Plan guard, cycle check only: loop steps carry no ids,
+        # so the full guard (which requires ids and args) is a
+        # CLI/file check, but a depends_on cycle in a raw dict
+        # plan must still fail here, not loop forever.
+        try:
+            from .plan_guard import validate_plan as _guard_validate
+            _raw = [st for st in plan.steps if isinstance(st, dict) and st.get("depends_on")]
+            if _raw:
+                _guard_plan = {"steps": [
+                    {"id": f"step-{i}", "tool": st.get("tool", "write"),
+                     "args": st.get("args", {}), "deliverable": st.get("deliverable", ""),
+                     "depends_on": st.get("depends_on", [])}
+                    for i, st in enumerate(_raw)]}
+                _cycle = [f for f in _guard_validate(_guard_plan, list(_allowed)) if "cycle" in f]
+                if _cycle:
+                    return RunReport("failed", goal, plan, False, False,
+                                     error="; ".join(_cycle)[:500])
+        except Exception:
+            pass
         if not plan.deliverables:
             return RunReport("failed", goal, plan, False, False,
                              error="plan has no deliverables")
@@ -457,14 +528,25 @@ class GoalRunner:
                 try:
                     if self.budget is not None:
                         self.budget.add_step()
+                    if not hasattr(self, "_step_lines"):
+                        self._step_lines = []
+                    from .step_lines import record_attempt
+                    record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "started")
                     self._trace("sandbox", "started", step.tool)
                     if step.tool == "write" and not step.args:
                         step.args = {"file": step.deliverable,
                                      "text": f"Goal: {goal}\n"}
                     self._call_tool(step.tool, step.args)
+                    from .step_lines import record_attempt
+                    record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "done")
                     self._trace("sandbox", "done", step.tool)
                 except Exception as exc:
                     failures.append(f"step {step.tool} failed: {exc}")
+                    try:
+                        from .step_lines import record_attempt
+                        record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "failed", str(exc)[:100])
+                    except Exception:
+                        pass
                     self._trace("sandbox", "failed", str(exc)[:100])
             # Verify: deliverables + plan criteria + step criteria.
             criteria = list(current_plan.criteria)

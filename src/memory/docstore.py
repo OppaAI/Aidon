@@ -97,6 +97,17 @@ def _qdrant_available() -> bool:
         return False
 
 
+def _sparse_vector(text: str) -> tuple[list[int], list[float]]:
+    """Keyword sparse vector: token hashes into 4096 buckets, tf values."""
+    import hashlib
+    counts: dict[int, float] = {}
+    for token in _tokens(text):
+        bucket = int(hashlib.sha256(token.encode()).hexdigest()[:8], 16) % 4096
+        counts[bucket] = counts.get(bucket, 0.0) + 1.0
+    indices = sorted(counts)
+    return indices, [counts[i] for i in indices]
+
+
 class DocStore:
     """Document indexes, in memory by default, Qdrant when given one."""
 
@@ -129,6 +140,37 @@ class DocStore:
                 and hasattr(store, "upsert"):
             self.store = store
             self.backend = "qdrant"
+
+    @classmethod
+    def from_qdrant(cls, home, url: str = ""):
+        """DocStore backed by a real local Qdrant client.
+
+        Collections live under <home>/docstore_qdrant (or the
+        given URL), one per document, with a sparse keyword
+        vector config. If qdrant_client is missing, this
+        raises ImportError instead of silently falling back.
+        """
+        from pathlib import Path
+        from qdrant_client import QdrantClient
+        obj = cls(home=home)
+        if url:
+            obj.store = QdrantClient(url=url)
+        else:
+            obj.store = QdrantClient(path=str(Path(home) / "docstore_qdrant"))
+        obj.backend = "qdrant"
+        return obj
+
+    def _ensure_qdrant_collection(self, name: str) -> None:
+        from qdrant_client import models
+        try:
+            if self.store.collection_exists(name):
+                return
+        except Exception:
+            pass
+        self.store.create_collection(
+            name,
+            vectors_config={},
+            sparse_vectors_config={"sparse": models.SparseVectorParams()})
 
     def ingest(self, source_name: str, text: str) -> dict:
         """Chunk + index one document. Idempotent per content hash:
@@ -165,14 +207,16 @@ class DocStore:
     def _upsert_qdrant(self, name: str, records: list[dict]) -> None:
         from qdrant_client import models
         import uuid
+        self._ensure_qdrant_collection(name)
         points = []
         for record in records:
+            indices, values = _sparse_vector(record["text"])
             points.append(models.PointStruct(
                 id=str(uuid.uuid5(uuid.NAMESPACE_URL,
                                   f"{record['doc_hash']}:{record['chunk']}")),
-                vector=[0.0] * 8,
+                vector={"sparse": models.SparseVector(indices=indices, values=values)},
                 payload=record))
-        self.store.upsert(collection_name=name, points=points)
+        self.store.upsert(collection_name=name, points=points, wait=True)
 
     def collections(self) -> list[str]:
         return sorted(self._memory)
@@ -188,6 +232,26 @@ class DocStore:
         tokens = [t for t in _tokens(query)] if query else []
         if not tokens:
             return []
+        if self.backend == "qdrant" and self.store is not None:
+            try:
+                from qdrant_client import models
+                indices, values = _sparse_vector(query)
+                out = []
+                for collection in self.collections():
+                    hits = self.store.query_points(
+                        collection_name=collection,
+                        query=models.SparseVector(indices=indices, values=values),
+                        using="sparse", limit=k).points
+                    for hit in hits:
+                        payload = hit.payload or {}
+                        out.append({"collection": collection, "chunk": payload.get("chunk", 0),
+                                    "text": payload.get("text", ""), "source": payload.get("source", ""),
+                                    "score": float(hit.score)})
+                if out:
+                    out.sort(key=lambda item: -item["score"])
+                    return out[:k]
+            except Exception:
+                pass
         phrase = query.lower()
         scored = []
         for collection, records in self._memory.items():
