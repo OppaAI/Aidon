@@ -304,7 +304,9 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
             target = _confined(output)
             ok, why = _approval(
                 "record", "Record system audio",
-                f"Capture {seconds} seconds of host audio to {target}")
+                f"Capture {seconds} seconds of host audio to {target}",
+                force_ask=True,
+            )
             if not ok:
                 return f"recording rejected: {why}"
             try:
@@ -322,7 +324,9 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         def uv_venv(path=""):
             target = _confined(path or ".venv")
             ok, why = _approval("install", "Create Python virtual environment",
-                                f"Run on host: uv venv {target}")
+                                f"Run on host: uv venv {target}",
+                                force_ask=True,
+                          )
             if not ok:
                 return f"install rejected: {why}"
             success, output = _uv_venv(target)
@@ -336,7 +340,9 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
                 return f"INSTALL_REFUSED: {error}"
             target = _confined(venv or ".venv")
             ok, why = _approval("install", "Install Python packages",
-                                f"Run on host: uv pip install --python {target}/bin/python {' '.join(names)}")
+                                f"Run on host: uv pip install --python {target}/bin/python {' '.join(names)}",
+                                force_ask=True,
+                            )
             if not ok:
                 return f"install rejected: {why}"
             success, output = _install_python_package(names, target)
@@ -349,7 +355,9 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
             if error:
                 return f"INSTALL_REFUSED: {error}"
             ok, why = _approval("install", "Install system packages",
-                                f"Run on host: sudo apt-get install -y {' '.join(names)}")
+                                f"Run on host: sudo apt-get install -y {' '.join(names)}",
+                                force_ask=True,
+                            )
             if not ok:
                 return f"install rejected: {why}"
             success, output = _apt_install(names)
@@ -419,7 +427,9 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         else:
             return f"MCP_REFUSED: unsupported transport {transport!r}"
         ok, why = _approval("install", "Connect MCP server",
-                            f"Start/connect to MCP server {server_name!r}: {description}")
+                            f"Start/connect to MCP server {server_name!r}: {description}",
+                            force_ask=True,
+                        )
         if not ok:
             return f"MCP_REFUSED: {why}"
         try:
