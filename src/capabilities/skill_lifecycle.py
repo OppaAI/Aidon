@@ -24,6 +24,7 @@ per-date learn counts. No secrets are stored here.
 from __future__ import annotations
 
 import json
+import os
 from datetime import date
 from pathlib import Path
 
@@ -86,7 +87,13 @@ class LifecycleStore:
             self._save()
             return "retired"
         entry["failures"] += 1
-        if entry["failures"] >= _RETIRED_AFTER:
+        try:
+            retire_after = max(1, int(os.environ.get(
+                "AIDON_SKILL_MAX_FAILURES", str(_RETIRED_AFTER)) or
+                str(_RETIRED_AFTER)))
+        except ValueError:
+            retire_after = _RETIRED_AFTER
+        if entry["failures"] >= retire_after:
             entry["state"] = "retired"
         self._save()
         return entry["state"]

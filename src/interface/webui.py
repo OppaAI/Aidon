@@ -1276,6 +1276,8 @@ class WebUIServer:
             {"key": "AIDON_EPISODE_RECALL_LIMIT", "label": "Episode recall limit", "type": "int", "default": "1", "desc": "Number of prior experiences considered before a fresh plan.", "secret": False},
             {"key": "AIDON_KNOWLEDGE_RECALL_LIMIT", "label": "Knowledge recall limit", "type": "int", "default": "3", "desc": "Number of knowledge points considered before planning.", "secret": False},
             {"key": "AIDON_RECALL_MAX_TOKENS", "label": "Recall token budget", "type": "int", "default": "2000", "desc": "Maximum memory context included in a plan.", "secret": False},
+            {"key": "AIDON_LEARN_MAX_SKILLS_PER_DAY", "label": "Learning skills per day", "type": "int", "default": "5", "desc": "Maximum candidate skills promoted by one learn cycle per day.", "secret": False},
+            {"key": "AIDON_SKILL_MAX_FAILURES", "label": "Skill failure limit", "type": "int", "default": "3", "desc": "Failures before a skill is retired.", "secret": False},
             {"key": "AIDON_INGEST_DIR", "label": "Ingest directory", "type": "string", "default": "", "desc": "Folder watched for ingest triggers.", "secret": False},
             {"key": "AIDON_QDRANT_URL", "label": "Qdrant URL", "type": "string", "default": "", "desc": "Qdrant server URL, empty = local mode.", "secret": False},
         ]},

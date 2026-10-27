@@ -148,6 +148,8 @@ class Config:
     voice_announce: bool = False
     sam_base_url: str = "https://api.meta.ai/v1"
     sam_api_key: str = ""
+    learn_max_skills_per_day: int = 5
+    skill_max_failures: int = 3
     # Backend selection, old Aidon keys: AIDON_BACKEND decides
     # between a local Ollama, the Meta Model API, a plain
     # OpenAI-compatible endpoint, and the offline fake client.
@@ -241,6 +243,9 @@ class Config:
             voice_announce=os.environ.get("AIDON_VOICE_ANNOUNCE", "0") not in ("0", "false", "no", ""),
             sam_base_url=os.environ.get("AIDON_SAM_BASE_URL", "https://api.meta.ai/v1"),
             sam_api_key=os.environ.get("AIDON_SAM_API_KEY", ""),
+            learn_max_skills_per_day=_env_int(
+                "AIDON_LEARN_MAX_SKILLS_PER_DAY", 5),
+            skill_max_failures=_env_int("AIDON_SKILL_MAX_FAILURES", 3),
             backend=os.environ.get("AIDON_BACKEND", "").strip().lower(),
             ollama_endpoint=os.environ.get(
                 "AIDON_OLLAMA_ENDPOINT", "http://localhost:11434"),

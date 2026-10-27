@@ -937,7 +937,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "learn":
         from ..agentic.learn_cycle import run_learn_cycle
-        summary = run_learn_cycle(config.home, sandbox)
+        summary = run_learn_cycle(
+            config.home, sandbox,
+            max_per_day=max(0, config.learn_max_skills_per_day))
         print(f"Learn cycle: promoted={summary.get('promoted', [])} "
               f"retired={summary.get('retired_duplicates', [])} "
               f"trusted_for_review={summary.get('trusted_duplicates_for_review', [])} "
