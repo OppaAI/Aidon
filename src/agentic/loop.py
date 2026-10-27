@@ -1047,7 +1047,7 @@ class GoalRunner:
                              error="plan has no deliverables")
         passed: set[str] = set()
         verified: list[str] = []
-        resume = self._load_checkpoint(self.sandbox.workdir)
+        resume = self._load_checkpoint(self.sandbox.workdir, goal=goal)
         if resume is not None and resume.phase in ("sandbox", "verified", "approved"):
             passed = set(resume.passed)
             verified = list(resume.verified)
