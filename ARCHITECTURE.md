@@ -6,7 +6,7 @@ a sandbox, verifies, asks approval, executes live on
 approval, and learns from the run, so the next similar
 goal starts from what actually worked.
 
-## Run order
+## 🔁 Run order
 
 ```mermaid
 flowchart LR
@@ -60,7 +60,7 @@ flowchart LR
     on request or by flag, never automatically without
     that flag or that request.
 
-## Components
+## 🧩 Components
 
 ```mermaid
 flowchart TB
@@ -116,7 +116,7 @@ flowchart TB
   filtered by scope. Agent scope cannot approve and
   cannot manage keys, in v1 or in MCP.
 
-## Storage, in the Aidon home, never in the repo
+## 💾 Storage, in the Aidon home, never in the repo
 
 - specs: spec JSON and Markdown sheet, per project.
 - plugins: adopted plugin directories, per name.
@@ -130,7 +130,7 @@ flowchart TB
 - live: live outputs snapshots and notifications.
 - ingest: user files dropped for ingestion, by the user.
 
-## Security boundaries
+## 🛡️ Security boundaries
 
 - Approval is for decisions, chat is for conversation.
   Questions have no clock and no card, decisions have
@@ -145,7 +145,7 @@ flowchart TB
 - A Docker container mounts only the workdir, never
   docker.sock, never host credentials, never a host home.
 
-## Layout, grouped, not flat
+## 🗂️ Layout, grouped, not flat
 
 Code lives in `src/`, grouped by what it does, so a reader can find a system without reading 70 files in one directory. `src/system/main.py` is the entry point, it imports from the groups, it does not contain the systems itself. `src/` itself contains only `__init__.py` and the group directories, no modules at the top level.
 

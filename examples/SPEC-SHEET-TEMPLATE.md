@@ -1,4 +1,4 @@
-# 📝 Spec Sheet
+# Spec Sheet
 
 How to use this sheet: fill it in, save it, and attach it in the chat box.
 Aidon reads it, verifies it, and skips the interview.

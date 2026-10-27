@@ -35,7 +35,7 @@ Give Aidon a goal in plain language, in chat, on WhatsApp or Slack, or on the co
 6. **Live** — execute only what was approved, verify, rollback on failure
 7. **Learn** — persist the DAG and new skills, so the next similar goal reuses and adapts, saving tokens and calls
 
-## What is new here
+## ✨ What is new here
 
 The idea was validated with an earlier prototype, and all code
 in this repository was written during the Meta Global AI
@@ -47,7 +47,7 @@ was written.
 The demo runs on Meta models through the Meta Model API. That
 is a real part of what Aidon runs, not just a build-time choice.
 
-## Quickstart
+## 🚀 Quickstart
 
 ```sh
 ./setup.sh
@@ -56,7 +56,7 @@ is a real part of what Aidon runs, not just a build-time choice.
 ./launch.sh goal "Plan a dinner for two"
 ```
 
-## Guides
+## 📚 Guides
 
 - [Installation](docs/INSTALLATION.md) — prerequisites, setup, and launch.
 - [Configuration](docs/CONFIGURATION.md) — models, `.env`, and the Aidon home.
@@ -65,7 +65,7 @@ is a real part of what Aidon runs, not just a build-time choice.
 - [Architecture](ARCHITECTURE.md) — run order, components, storage, and security boundaries.
 - [Roadmap](ROADMAP.md) — what is built, what is not built yet, and what is post-hackathon, NOT built, NOT demoed.
 
-## Models
+## 🧠 Models
 
 - **Agent, submission and demo:** Muse Spark 1.3, standard.
 - **Agent, tests only:** Muse Spark 1.3 Contributor, same capabilities, much cheaper. Switch by changing `AIDON_MODEL` only. Contributor inputs and outputs are used to train models, so tests must use non-sensitive test data only.
@@ -75,7 +75,7 @@ is a real part of what Aidon runs, not just a build-time choice.
 
 Aidon is self-hosted by design: clone it to your own computer or server, run it there, and use the WebUI or call the API. There is no central Aidon cloud, and your data is not sent to one. Your memory, workdirs, and keys stay on your machine, under your Aidon home, outside this repository.
 
-## Layout
+## 🗂️ Layout
 
 Code lives in `src/`, grouped, not flat:
 
@@ -88,7 +88,7 @@ Code lives in `src/`, grouped, not flat:
 
 Run it with `python -m src.system.main goal "..."`, or `./launch.sh goal "..."`. `src/` itself has no modules at the top level, only `__init__.py` and the groups.
 
-## Future — post-hackathon (NOT built, NOT demoed)
+## 🔮 Future — post-hackathon (NOT built, NOT demoed)
 
 The items below are ideas only, for direction. None of them is
 in this repository, none is in the hackathon demo, and none was

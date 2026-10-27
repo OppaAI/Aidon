@@ -65,7 +65,7 @@ post-hackathon, NOT built, NOT demoed, at the end.
   policy. Not built here: Gmail MCP transport
   (dropped by decision), see below.
 
-## Not built yet, in the repo, for the hackathon
+## 🧪 Not built yet, in the repo, for the hackathon
 
 - Demo capability tools end to end: dinner menu PDF
   plus grocery app, store run, and job search plus
@@ -77,7 +77,7 @@ post-hackathon, NOT built, NOT demoed, at the end.
   real Qdrant run are still owed.
 - Demo video, 3 minutes, required for submission.
 
-## Built since the earlier roadmap, now in the repo
+## 🆕 Built since the earlier roadmap, now in the repo
 
 - Adaptive DAG, steer and cancel across WebUI,
   WhatsApp, Slack, CLI, v1, and MCP, with RunControl.
@@ -180,7 +180,7 @@ post-hackathon, NOT built, NOT demoed, at the end.
   pattern as the ffmpeg skip, instead of failing on a
   missing optional package.
 
-## Post-hackathon, NOT built, NOT demoed
+## 🔮 Post-hackathon, NOT built, NOT demoed
 
 - Full VM backend: disposable VM running Docker
   inside it, for untrusted code and separate-kernel work.

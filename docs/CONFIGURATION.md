@@ -15,7 +15,7 @@ uv sync --extra docs     # EPUB and universal document tooling
 
 `./setup.sh` offers these packages interactively; `./setup.sh --with-optional` installs all of them.
 
-## Models
+## 🧠 Models
 
 - **Agent, submission and demo:** Muse Spark 1.3, standard.
   Built for long-horizon, multi-step agentic work, with native

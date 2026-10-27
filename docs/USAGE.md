@@ -38,7 +38,7 @@
   unauthenticated, use a webhook-only listener in
   front, as old Aidon did.
 
-## Core, in order
+## 🔁 Core, in order
 
 1. **Interpret** — the goal, in chat. Interview questions are
    chat turns, not cards, and they have no clock. The
@@ -54,7 +54,7 @@
    `python -m src.system.main interview "Plan a dinner"`, with
    `--run` to run the goal after the spec is approved.
 
-## Spec sheet
+## 📝 Spec sheet
 
 You do not have to do the interview. Write your own spec
 sheet, attach it in the chat box, and Aidon skips the
@@ -94,7 +94,7 @@ interview.
    workdir, with calculation by AST, never eval, plus any
    adopted plugin tools, and any skills as planner context.
 
-## Tool, skill, and plugin system
+## 🧰 Tool, skill, and plugin system
 
 Aidon builds his own capability tools by climbing, this
 module is the arena around that climb, not the tools
@@ -123,7 +123,7 @@ never in the repo.
   `~/.aidon/skills/<name>.md` and are passed to the
   planner as context, never executed as code.
 
-## Triggers: what starts a DAG run
+## ⚡ Triggers: what starts a DAG run
 
 Scheduler, message, WebUI, and the ingest folder are
 all triggers, and they are all the same shape. A
@@ -157,7 +157,7 @@ approval, spec, or verification.
   triggers are not core triggers, they are plugins later,
   if a task needs them.
 
-## Real research, live execution, and incremental improving
+## 🔎 Real research, live execution, and incremental improving
 
 Yes, Aidon can improve incrementally, and it does so
 by recording what actually happened, not by re-planning
@@ -194,7 +194,7 @@ Aidon climbing work, through plugins, not arena code.
 What is built here is the research, live, and
 verification arena they will run in.
 
-## Budgets, trace, v1 API, token auth, and MCP
+## 📊 Budgets, trace, v1 API, token auth, and MCP
 
 - Budgets: 200,000 tokens estimated, 50 steps, 3,600
   seconds per run, by default, in config. A budget
@@ -261,7 +261,7 @@ draft, sandbox-test, and adopt with owner approval, like
 any capability tool. Parsers for CAD, LaTeX, and other
 formats are not preinstalled.
 
-## Memory and KB, Qdrant for all
+## 🧠 Memory and KB, Qdrant for all
 
 One database, Qdrant, no second database. One instance, local
 mode under the Aidon home by default, or a server URL if
@@ -361,7 +361,7 @@ Forget, recall, list, prune, and one-hop knowledge-graph
 expansion (payload `links`) follow the same shape in every
 collection.
 
-## New modules, built since the first roadmap
+## 🆕 New modules, built since the first roadmap
 
 - Adaptive DAG, steer and cancel, 3D factory, run
   replay, 9-stage pills, VRM avatar viewer, DAG
