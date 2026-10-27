@@ -87,4 +87,7 @@ def test_settings_env_model_keys(tmp_path):
     assert server.settings_set_env("model", "muse-spark-1.3")["ok"] is True
     assert server.settings_set_env("fast_model", "muse-spark-1.3")["ok"] is True
     assert server.settings_set_env("tts_voice_id", "v1")["ok"] is True
-    assert server.settings_set_env("AIDON_API_KEY", "x")["ok"] is False
+    # Secrets are writable, old-Aidon behaviour, write-only.
+    written = server.settings_set_env("AIDON_API_KEY", "x")
+    assert written["ok"] is True
+    assert "x" not in str(written)

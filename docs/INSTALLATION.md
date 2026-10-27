@@ -22,10 +22,7 @@ backend: Docker Desktop on macOS or Windows, or
 docker group applies. A VM is post-hackathon, future
 only, not installed by setup, and not needed now.
 `launch.sh` runs setup first if the home is missing,
-then passes its arguments through to the CLI. WebUI
-is not built yet, so launch currently starts the CLI,
-not a server, and will start the WebUI server when
-WebUI is built, with the same home, backend, and
+then starts the WebUI server with the same home, backend, and
 ingest path.
 
 Configuration is just an endpoint, a key, and a model name:

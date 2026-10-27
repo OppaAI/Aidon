@@ -967,11 +967,23 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             try:
                 dag = DAG([DAGNode.from_dict(node) for node in data.get("nodes", [])])
+                dag.validate_strict()
+            except Exception as exc:
+                print(f"dag run {args.id} refused: {exc}")
+                return 2
+            try:
+                # Learned absolute paths are made relative to this
+                # run's workdir first, the same relativize() the
+                # loop applies to adapted DAGs, so a DAG learned
+                # in this workdir passes ToolRegistry confinement
+                # instead of failing on its own absolute paths.
+                dag = dag.relativize(sandbox.workdir)
                 non_tool = [node.id for node in dag.nodes.values() if node.executor != "tool"]
                 if non_tool:
                     print(f"dag run supports tool nodes only, refusing DAG with non-tool nodes: {', '.join(non_tool)}")
                     return 2
-                registry = ToolRegistry(sandbox.workdir, sandbox=sandbox)
+                registry = ToolRegistry(sandbox.workdir, sandbox=sandbox,
+                                        network_available=_network_available(None, sandbox))
                 def _run_node(node):
                     args_dict = node.args if isinstance(node.args, dict) else {}
                     return registry.call(node.tool, args_dict)
@@ -1245,7 +1257,13 @@ def main(argv: list[str] | None = None) -> int:
                 _backend = _mb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _backend = None
-            runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home, memory=memory, project_id=job.project_id, plugins=_plugins, execution_backend=_backend, budget=_B(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T(config.home, project_id=job.project_id), model_verifier=_MV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox))
+            from ..interface.run_control import RunControl as _TickControl
+            import uuid as _tick_uuid
+            _tick_run_id = _tick_uuid.uuid4().hex[:12]
+            _tick_control = _TickControl(config.home)
+            _tick_control.register(_tick_run_id, job.goal, job.project_id)
+            print(f"Tick job {job.name}: run id {_tick_run_id}")
+            runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home, memory=memory, project_id=job.project_id, plugins=_plugins, execution_backend=_backend, budget=_B(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T(config.home, project_id=job.project_id), model_verifier=_MV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), run_id=_tick_run_id, run_control=_tick_control)
             report = runner.run(job.goal)
             print(f"Tick job {job.name}: {report.status}, files: {', '.join(report.files)}")
         return 0
@@ -1805,12 +1823,18 @@ def main(argv: list[str] | None = None) -> int:
                     _router2 = _SR2(memory.embedder, cache_path=config.home / 'semantic_router_vectors.json')
                 except Exception:
                     _router2 = None
+                from ..interface.run_control import RunControl as _ServeControl
+                import uuid as _serve_uuid
+                _serve_run_id = _serve_uuid.uuid4().hex[:12]
+                _serve_control = _ServeControl(config.home)
+                _serve_control.register(_serve_run_id, job.goal, job.project_id)
+                print(f"Job {job.name}: run id {_serve_run_id}")
                 runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home,
                                     memory=memory, project_id=job.project_id, plugins=_plugins,
                                     execution_backend=_backend, budget=_Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
                                     trace=_Trace(config.home, project_id=job.project_id), model_verifier=_MV(client),
                                     kernel_mode=config.kernel_mode, semantic_router=_router2,
-                                    use_semantic_router_skip=True, network_available=_network_available(_backend, sandbox))
+                                    use_semantic_router_skip=True, network_available=_network_available(_backend, sandbox), run_id=_serve_run_id, run_control=_serve_control)
                 report = runner.run(job.goal)
                 print(f"Job {job.name}: {report.status}, files: {', '.join(report.files)}")
             # Tick drain: once per tick, due notifications only,
@@ -2001,6 +2025,11 @@ def main(argv: list[str] | None = None) -> int:
             _i_router = _ISemanticRouter(memory.embedder, cache_path=config.home / 'semantic_router_vectors.json')
         except Exception:
             _i_router = None
+        import uuid as _i_uuid
+        _i_run_id = _i_uuid.uuid4().hex[:12]
+        _i_control = _IRunControl(config.home)
+        _i_control.register(_i_run_id, args.text, args.project)
+        print(f"interview run id: {_i_run_id}")
         goal_runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home,
                                  memory=memory, promotion_ask=_promotion_ask,
                                  project_id=args.project, plugins=plugins, execution_backend=execution_backend, researcher=_interview_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.approval_timeout_seconds), researcher=_interview_researcher), router=model_router, versioned_writes=True,
@@ -2009,7 +2038,7 @@ def main(argv: list[str] | None = None) -> int:
                                  model_verifier=_IModelVerifier(client),
                                  semantic_router=_i_router,
                                  use_semantic_router_skip=True,
-                                 run_control=_IRunControl(config.home), network_available=_network_available(execution_backend, sandbox))
+                                 run_control=_i_control, run_id=_i_run_id, network_available=_network_available(execution_backend, sandbox))
         report = goal_runner.run(args.text, spec=result.spec)
         print(f"status: {report.status}")
         print(f"verified: {report.verified}")
@@ -2046,6 +2075,11 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             return []
     import uuid as _uuid
+    _goal_run_id = _uuid.uuid4().hex[:12]
+    from ..interface.run_control import RunControl as _GoalControl
+    _goal_control = _GoalControl(config.home)
+    _goal_control.register(_goal_run_id, args.text, args.project)
+    print(f"run id: {_goal_run_id}")
     runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home,
                         memory=memory, promotion_ask=_promotion_ask,
                         project_id=args.project, plugins=plugins, execution_backend=execution_backend,
@@ -2054,7 +2088,7 @@ def main(argv: list[str] | None = None) -> int:
                         use_semantic_router_skip=True, researcher=_researcher,
                         extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.approval_timeout_seconds), researcher=_researcher),
                         router=model_router, versioned_writes=True,
-                        run_id=_uuid.uuid4().hex[:12], network_available=_network_available(execution_backend, sandbox))
+                        run_id=_goal_run_id, run_control=_goal_control, network_available=_network_available(execution_backend, sandbox))
     spec = None
     if getattr(args, "spec", None):
         from pathlib import Path
@@ -2070,7 +2104,11 @@ def main(argv: list[str] | None = None) -> int:
             def _swarm_runner(subgoal):
                 # Per-subgoal runner, not the shared main runner: each
                 # sub-run gets its own run_id (never the parent's), and
-                # the research + routing the main runner uses.
+                # the research + routing the main runner uses. Sub-runs
+                # register under their own ids, so control list shows
+                # them and cancel/steer can target a sub-run directly.
+                _sub_id = f"{runner.run_id}-{_uuid.uuid4().hex[:8]}"
+                _goal_control.register(_sub_id, subgoal, args.project)
                 sub_runner = GoalRunner(client, sandbox, runner.gate,
                                         config.home, memory=memory,
                                         promotion_ask=_promotion_ask,
@@ -2084,7 +2122,7 @@ def main(argv: list[str] | None = None) -> int:
                                         researcher=_researcher,
                                         extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=runner.gate, researcher=_researcher),
                                         router=model_router, versioned_writes=True,
-                                        run_id=f"{runner.run_id}-{_uuid.uuid4().hex[:8]}", network_available=_network_available(execution_backend, sandbox))
+                                        run_id=_sub_id, run_control=_goal_control, network_available=_network_available(execution_backend, sandbox))
                 sub_report = sub_runner.run(subgoal, spec=spec)
                 return f"[{sub_report.status}] {', '.join(sub_report.files)} {sub_report.error}".strip()
             swarm_result = run_swarm(args.text, client, _swarm_runner)

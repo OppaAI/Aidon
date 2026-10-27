@@ -77,43 +77,46 @@ from .triggers import TriggerDispatcher, TriggerEvent
 # pages shipped no <head> at all, so they rendered as plain white text.
 # No external assets: everything here is inline, so pages work offline.
 BASE_CSS = """
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#f4f5f7;color:#1d232a;margin:0 auto;padding:24px;max-width:980px;line-height:1.5}
-h1{font-size:1.6em;color:#14213d;margin:0 0 0.5em}
-h2{font-size:1.2em;color:#14213d;margin:1.2em 0 0.4em}
+:root{--bg:#070b16;--surface:#0d1424;--surface2:#141d33;--text:#e9eef8;--muted:#8b96b3;--border:#1e2a45;--accent:#0082fb;--accent2:#7c5cff;--green:#3ecf8e;--amber:#f5a623;--red:#f0564f}
+body.light{--bg:#eef1f7;--surface:#ffffff;--surface2:#e6ebf4;--text:#131a2c;--muted:#5f6b87;--border:#d9e0ee;--accent:#0064e0;--accent2:#6a4dff;--green:#1f9d63;--amber:#c47b12;--red:#d43d36}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0 auto;padding:24px;max-width:980px;line-height:1.5}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:56px 56px;opacity:.14}
+h1{font-family:Rajdhani,"Segoe UI",system-ui,sans-serif;font-size:1.8em;color:var(--text);margin:0 0 0.5em;text-transform:uppercase;letter-spacing:.12em}
+h2{font-size:1.2em;color:var(--text);margin:1.2em 0 0.4em}
 h3{font-size:1em;margin:1em 0 0.3em}
-a{color:#336699}
-button{background:#336699;color:#fff;border:0;border-radius:6px;padding:7px 14px;font-size:1em;cursor:pointer}
-button:hover{background:#264d73}
-input,select,textarea{border:1px solid #c3c9d1;border-radius:6px;padding:7px 9px;font-size:1em;background:#fff;color:#1d232a}
+a{color:var(--accent)}
+button{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:7px 14px;font-size:1em;cursor:pointer}
+button:hover{filter:brightness(1.15)}
+input,select,textarea{border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:1em;background:var(--surface2);color:var(--text)}
 label{margin-right:0.6em}
 form{margin:0.8em 0}
-pre{background:#eef1f4;border-radius:6px;padding:12px;overflow-x:auto;white-space:pre-wrap}
-code{background:#eef1f4;border-radius:4px;padding:1px 5px}
+pre{background:var(--surface2);border-radius:6px;padding:12px;overflow-x:auto;white-space:pre-wrap}
+code{background:var(--surface2);border-radius:4px;padding:1px 5px}
 table{border-collapse:collapse;margin:0.8em 0}
-th,td{border:1px solid #c3c9d1;padding:6px 10px;text-align:left}
-th{background:#e6ecf2}
-#chat{background:#fff;border:1px solid #dde2e8;border-radius:10px;padding:16px;margin-top:16px}
+th,td{border:1px solid var(--border);padding:6px 10px;text-align:left}
+th{background:var(--surface2)}
+#chat{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-top:16px}
 #messages{min-height:120px}
-#messages p{background:#eef3f8;border-radius:10px;padding:10px 12px;margin:0.5em 0}
-#messages table{background:#fff}
+#messages p{background:var(--surface2);border-radius:10px;padding:10px 12px;margin:0.5em 0}
+#messages table{background:var(--surface)}
 #form{display:flex;gap:8px}
 #msg{flex:1}
-#pills span{display:inline-block;background:#dbe7f3;border-radius:12px;padding:2px 10px;margin:2px;font-size:0.9em}
-#avatar{background:#fff;border:1px solid #dde2e8;border-radius:10px;padding:8px;margin-bottom:16px}
-#nodes>div{background:#fff;border:1px solid #dde2e8;border-radius:10px;padding:12px;margin:0.8em 0}
+#pills span{display:inline-block;background:var(--surface2);border-radius:12px;padding:2px 10px;margin:2px;font-size:0.9em}
+#avatar{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px;margin-bottom:16px}
+#nodes>div{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;margin:0.8em 0}
 #factory{max-width:100%}
 #vrm-view{max-width:100%}
 #layout{display:flex;gap:20px;align-items:flex-start}
 #sidecol{width:280px;flex-shrink:0}
 #sidecol #avatar{width:auto;margin-bottom:20px}
-#sidebar{background:#fff;border:1px solid #dde2e8;border-radius:10px;padding:16px}
+#sidebar{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
 #sidebar h2{font-size:1em;margin:1em 0 0.3em}
 #sidebar h2:first-child{margin-top:0}
 #sidebar a{display:block;margin:0.2em 0}
 #chat{flex:1;margin-top:0;display:flex;flex-direction:column;min-height:60vh}
 #messages{flex:1;overflow-y:auto}
 #form{margin-top:12px}
-#approval>div{background:#fff7e6;border:1px solid #e6c87a;border-radius:10px;padding:12px;margin:0.8em 0}
+#approval>div{background:rgba(245,166,35,.12);border:1px solid var(--amber);border-radius:10px;padding:12px;margin:0.8em 0}
 #approval>div button{margin-right:8px}
 body.chat-page{max-width:1200px}
 @media (max-width:700px){#layout{display:block}#sidecol{width:auto;margin-bottom:20px}}
@@ -123,7 +126,7 @@ body.chat-page{max-width:1200px}
 def _page_html(title, body):
     """Wrap a handler-built fragment in a full styled page."""
     return ("<!doctype html><html><head><meta charset=\"utf-8\"><title>" + title +
-            "</title><style>" + BASE_CSS + "</style></head><body>" + body + "</body></html>")
+            "</title><style>" + BASE_CSS + "</style></head><body><script>try{if(localStorage.getItem('aidon-theme')==='light'){document.body.classList.add('light')}}catch(e){}</script>" + body + "</body></html>")
 
 
 CHAT_HTML = """<!doctype html>
@@ -144,14 +147,14 @@ CHAT_HTML = """<!doctype html>
 #avatar.speaking #mouth-smile { opacity: 0; }
 #avatar.speaking #mouth-open { opacity: 1; animation: robot-mouth-wave 0.28s ease-in-out infinite alternate; transform-origin: center; transform-box: fill-box; }
 @keyframes robot-mouth-wave { from { transform: scaleY(0.4); } to { transform: scaleY(1.4); } }
-#wave-bars span { display: inline-block; width: 6px; background: #336699; margin-right: 2px; vertical-align: bottom; height: 4px; }
+#wave-bars span { display: inline-block; width: 6px; background: #0082fb; margin-right: 2px; vertical-align: bottom; height: 4px; }
 #avatar.speaking #wave-bars span { animation: robot-wave 0.3s ease-in-out infinite alternate; }
 @keyframes robot-wave { from { height: 4px; } to { height: 18px; } }
 .karaoke-word { background: #ffeb3b; }
 .karaoke-done { background: transparent; }
 </style></head>
 <body class="chat-page">
-<h1>Aidon</h1>
+<h1>Aidon</h1><button id="theme-toggle" title="Toggle dark / light theme">&#9684;</button>
 <div id="layout">
 <div id="sidecol">
 <div id="avatar" aria-label="Aidon avatar, robot, default, VRM is the fallback">
@@ -358,6 +361,13 @@ async function refreshApprovals() {
   } catch (e) {}
 }
 setInterval(refreshApprovals, 2000); refreshApprovals();
+try {
+  if (localStorage.getItem('aidon-theme') === 'light') { document.body.classList.add('light'); }
+  document.getElementById('theme-toggle').addEventListener('click', function() {
+    var light = document.body.classList.toggle('light');
+    try { localStorage.setItem('aidon-theme', light ? 'light' : 'dark'); } catch (e) {}
+  });
+} catch (e) {}
 </script>
 </body></html>
 """
@@ -942,13 +952,16 @@ class WebUIServer:
                 if self.slack_sender is not None:
                     self.slack_sender(channel, decision_reply, thread_ts)
                 return 200, {"replies": [decision_reply]}
+            caption = text
             replies: list[str] = []
             # Image intake, same shape as parse_slack_event: image
-            # files ride with the goal text as [image ...] markers
-            # (downloaded bytes need a bot token the inbound path
-            # does not carry, so markers + metadata only). Decision
-            # replies above already ran on the raw text, so replacing
-            # the goal text here cannot change an approval verdict.
+            # files ride with the goal text as [image ...] markers.
+            # Decision replies above already ran on the raw text, so
+            # replacing the goal text here cannot change an approval
+            # verdict. When the server's messaging config carries a
+            # Slack bot token, the file bytes are downloaded here
+            # (mirroring the WhatsApp path: library save + vision
+            # message); without a token, markers + metadata only.
             payload: dict = {}
             try:
                 from .slack_inbound import parse_slack_event as _parse_slack
@@ -958,6 +971,39 @@ class WebUIServer:
                     payload = _parsed.payload
             except Exception:
                 pass
+            if payload.get("images") and self.messaging_config.slack_bot_token:
+                from .messaging import download_slack_file as _dl_slack
+                for image in payload["images"]:
+                    url = image.get("url_private", "")
+                    if not url:
+                        continue
+                    try:
+                        data = _dl_slack(self.messaging_config.slack_bot_token, url)
+                    except Exception:
+                        continue
+                    try:
+                        from ..memory.library import Library
+                        ext = {"image/png": "png", "image/jpeg": "jpg",
+                               "image/gif": "gif", "image/webp": "webp"}.get(
+                            image.get("mimetype", ""), "png")
+                        tmp = self.home / "library" / f"slack-{image['id']}.{ext}"
+                        tmp.parent.mkdir(parents=True, exist_ok=True)
+                        tmp.write_bytes(data)
+                        library = Library(self.home)
+                        saved = library.add_file(tmp, kind="image", description="Slack image")
+                        marker = (f"[image slack_file_id={image['id']} "
+                                  f"mimetype={image['mimetype']} name={image['name']}]")
+                        try:
+                            from ..capabilities.whatsapp_vision import prepare_vision_message
+                            vision = prepare_vision_message(str(tmp), caption)
+                            replacement = (f"[image library_id={saved['id']} "
+                                           f"vision_image={vision['image_path']}]")
+                        except Exception:
+                            replacement = f"[image library_id={saved['id']}]"
+                        text = text.replace(marker, replacement)
+                        image["downloaded"] = True
+                    except Exception:
+                        continue
             event = TriggerEvent(source="slack", kind="message", goal=text,
                                  payload=payload,
                                  reply=replies.append)
@@ -1262,34 +1308,32 @@ class WebUIServer:
         return {"env_file": str(self.home / ".env"), "groups": groups}
 
     def settings_set_env(self, key: str, value) -> dict:
-        """Write one safe setting to <home>/.env, never a secret.
+        """Write one setting to <home>/.env, secrets included.
 
-        Accepts the friendly settings name (e.g. "timezone") or the
-        env var name itself (e.g. "AIDON_TIMEZONE"), for every
-        non-secret catalog key plus the original 19 friendly
-        names. Type validation: int must parse as int, bool must
-        be one of 0/1/true/false/yes/no (stored as 1/0), enum
-        must be in options, float-valued keys must parse as a
+        Old-Aidon behaviour: the settings page can enter
+        everything, keys included. Accepts the friendly settings
+        name (e.g. "timezone") or the env var name itself (e.g.
+        "AIDON_TIMEZONE"), for every catalog key plus the original
+        19 friendly names. Type validation: int must parse as int,
+        bool must be one of 0/1/true/false/yes/no (stored as 1/0),
+        enum must be in options, float-valued keys must parse as a
         number. A secret key with an empty value is a no-op
         ("don't change") and must never clear the key; a secret
-        with a value is refused. Unknown keys and newline
-        values are refused. The value is never printed or
+        with a value is written, write-only — the catalog never
+        returns it back (value "" plus is_set). Unknown keys and
+        newline values are refused. The value is never printed or
         returned: the result carries only the key name.
         The .env file is created if missing and kept owner-only.
         """
         raw_key = str(key or "").strip()
         env_key = self._ENV_SETTING_MAP.get(raw_key) or raw_key
         entry = self._catalog_entry(env_key)
-        if entry is not None and entry.get("secret"):
-            if str(value) == "":
-                return {"ok": True, "key": env_key, "unchanged": True}
-            return {"ok": False, "error": f"secret keys are never writable via settings: {raw_key}"}
         if entry is None and env_key not in self._ENV_SETTING_MAP.values():
             return {"ok": False, "error": f"setting not writable to .env: {raw_key}"}
-        if any(marker in env_key for marker in self._ENV_SECRET_MARKERS):
-            if str(value) == "":
-                return {"ok": True, "key": env_key, "unchanged": True}
-            return {"ok": False, "error": f"secret keys are never writable via settings: {raw_key}"}
+        is_secret = bool(entry is not None and entry.get("secret")) or any(
+            marker in env_key for marker in self._ENV_SECRET_MARKERS)
+        if is_secret and str(value) == "":
+            return {"ok": True, "key": env_key, "unchanged": True}
         text = str(value).strip() if not isinstance(value, str) else value.strip()
         if "\n" in text or "\r" in text:
             return {"ok": False, "error": "value must not contain a newline"}
@@ -2044,10 +2088,56 @@ class WebUIServer:
                     self._send_html(200, CHAT_HTML)
                 elif parsed.path == "/settings":
                     keys = server.auth_store.list_keys() if server.auth_store else []
-                    html = "<h1>Settings</h1><p>Backend and ingest path are in config.</p>"
-                    html += "<h2>Keys, hash prefixes only, never real keys</h2>"
+                    html = """<h1>Settings</h1>
+<p>Every knob, one page. Changes are written to <span id="env-path"></span>.
+Secret keys (API keys) are shown only as set or unset, never shown back —
+type a new value to set one, leave it empty to keep the current one.
+Restart the server for changes to take effect.</p>
+<div id="settings-groups"></div>
+<p><button id="settings-save">Save settings</button> <span id="settings-status"></span></p>
+<h2>Keys, hash prefixes only, never real keys</h2>"""
                     for key in keys:
                         html += f"<p>{key['name']} {key['scope']} {key['key_hash_prefix']}</p>"
+                    html += """<script>
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+async function loadSettings(){
+  const r = await fetch('/api/settings/catalog'); const data = await r.json();
+  document.getElementById('env-path').textContent = data.env_file || '';
+  let out = '';
+  (data.groups || []).forEach(function(g){
+    out += '<h2>' + esc(g.group) + '</h2>';
+    g.settings.forEach(function(s){
+      out += '<p><label>' + esc(s.label) + ' (' + esc(s.key) + ')</label><br>';
+      if (s.type === 'bool') {
+        out += '<input type="checkbox" data-key="' + esc(s.key) + '"' + ((s.value === '1' || s.value === 'true') ? ' checked' : '') + '>';
+      } else if (s.type === 'enum') {
+        out += '<select data-key="' + esc(s.key) + '">' + (s.options || []).map(function(o){ return '<option' + (o === s.value ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>';
+      } else if (s.secret) {
+        out += '<input type="password" data-key="' + esc(s.key) + '" placeholder="' + (s.is_set ? 'set - leave empty to keep, type to replace' : 'not set - type a value to set') + '">';
+      } else {
+        out += '<input type="text" data-key="' + esc(s.key) + '" value="' + esc(s.value) + '">';
+      }
+      if (s.desc) { out += '<br><small>' + esc(s.desc) + '</small>'; }
+      out += '</p>';
+    });
+  });
+  document.getElementById('settings-groups').innerHTML = out;
+}
+async function saveSettings(){
+  const status = document.getElementById('settings-status'); status.textContent = 'Saving...';
+  const fields = document.querySelectorAll('[data-key]'); let failed = 0;
+  for (const f of fields) {
+    let v = (f.type === 'checkbox') ? (f.checked ? '1' : '0') : f.value;
+    if (f.type === 'password' && !v) { continue; }
+    const r = await fetch('/api/settings/env', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: f.getAttribute('data-key'), value: v})});
+    const d = await r.json();
+    if (!d.ok) { failed++; status.textContent = 'Failed: ' + (d.error || 'unknown'); }
+  }
+  if (!failed) { status.textContent = 'Saved. Restart the server for changes to take effect.'; }
+}
+document.getElementById('settings-save').addEventListener('click', saveSettings);
+loadSettings();
+</script>"""
                     self._send_html(200, _page_html("Settings", html))
                 elif parsed.path == "/library":
                     files = server._library_files()

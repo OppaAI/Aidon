@@ -91,16 +91,18 @@ def test_settings_set_env_validates_types(tmp_path):
         assert server.settings_set_env(key, value)["ok"] is True, key
 
 
-def test_settings_set_env_refuses_secrets_unknown_and_newlines(tmp_path):
+def test_settings_set_env_writes_secrets_unknown_and_newlines(tmp_path):
     server = _server(tmp_path)
     (tmp_path / "home" / ".env").write_text("AIDON_API_KEY=keep-me\n", encoding="utf-8")
     for secret in ("AIDON_API_KEY", "AIDON_WHATSAPP_TOKEN",
                    "AIDON_THREADS_ACCESS_TOKEN", "AIDON_WEBUI_TOKEN"):
-        assert server.settings_set_env(secret, "new-value")["ok"] is False
+        written = server.settings_set_env(secret, "new-value")
+        assert written["ok"] is True
+        assert "new-value" not in str(written)
     # Empty secret value is a no-op: it must not clear the key.
     result = server.settings_set_env("AIDON_API_KEY", "")
     assert result["ok"] is True and result.get("unchanged") is True
-    assert "AIDON_API_KEY=keep-me" in (tmp_path / "home" / ".env").read_text()
+    assert "AIDON_API_KEY=new-value" in (tmp_path / "home" / ".env").read_text()
     assert server.settings_set_env("AIDON_NO_SUCH_KEY", "x")["ok"] is False
     assert server.settings_set_env("timezone", "a\nb")["ok"] is False
     assert "a\nb" not in (tmp_path / "home" / ".env").read_text()
@@ -178,9 +180,11 @@ def test_http_catalog_and_project_delete_routes(tmp_path):
                                 {"key": "AIDON_MAX_STEPS", "value": "33"})
         assert status == 200 and data["ok"] is True
         assert "AIDON_MAX_STEPS=33" in (tmp_path / "home" / ".env").read_text()
-        status, _ = _request(base, "POST", "/api/settings",
+        status, data = _request(base, "POST", "/api/settings",
                              {"key": "AIDON_API_KEY", "value": "nope"})
-        assert status == 400
+        assert status == 200 and data["ok"] is True
+        assert "nope" not in str(data)
+        assert "AIDON_API_KEY=nope" in (tmp_path / "home" / ".env").read_text()
         # Project delete route.
         conv = server.handle_conversation_create({"project_id": "proj-x"})
         status, data = _request(base, "DELETE", "/api/projects/proj-x")

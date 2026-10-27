@@ -3,7 +3,9 @@
 ## WebUI and messaging
 
 - WebUI: `./launch.sh` starts the WebUI server on
-  `http://127.0.0.1:8002/`, localhost only, with a chat
+  `http://127.0.0.1:8765/` by default (`AIDON_WEBUI_PORT`
+  overrides it; `webui serve` on its own defaults to
+  port 8002), localhost only, with a chat
   thread, a left sidebar for projects and library, a
   Library tab, a settings and keys page showing hash
   prefixes only, never real keys, and approval cards
@@ -139,8 +141,7 @@ approval, spec, or verification.
   starts a run, and the reply goes back on the same
   transport. No Telegram, by owner decision.
 - WebUI: a message, a button, or an upload in the WebUI.
-  WebUI itself is not built yet, its trigger interface
-  is built here, so it can call the same dispatcher.
+  The WebUI is built and calls the same dispatcher,
 - Ingest folder: a new or changed file in the user's
   own ingest path, `~/.aidon/ingest` by default, or
   `AIDON_INGEST_DIR` if set. The watcher reports new
@@ -217,7 +218,8 @@ verification arena they will run in.
 - MCP: `python -m src.system.main v1 mcp`, stdio JSON-RPC,
   token from `AIDON_MCP_TOKEN`, tools filtered by
   scope, wrapping the same v1 store as the v1 API.
-  Streamable HTTP MCP is future, not built here.
+  Streamable HTTP MCP is built: JSON-RPC over HTTP at
+  `/mcp`, localhost only, Bearer token required.
 3. **Sandbox** — the plan is tested in an isolated workdir.
    Bubblewrap, when installed, is the isolated backend. A
    subprocess fallback is labeled as not isolated, never as

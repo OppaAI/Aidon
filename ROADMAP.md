@@ -62,9 +62,8 @@ post-hackathon, NOT built, NOT demoed, at the end.
   GitHub search + fetch, scheduler loop, daily
   report, approval nudges, autonomy graduation,
   and email drafts with the old corrected-subject
-  policy. Not built here: YouTube transcript path,
-  Gmail MCP transport, live model routing, swarm,
-  kernel mode, and semantic routing, see below.
+  policy. Not built here: Gmail MCP transport
+  (dropped by decision), see below.
 
 ## Not built yet, in the repo, for the hackathon
 
@@ -131,8 +130,9 @@ post-hackathon, NOT built, NOT demoed, at the end.
   back to goal for old files, never empty.
 - v1 serve and MCP wired in main: v1 run and MCP
   run_goal now run through the same GoalRunner as
-  a CLI goal, approval asked on the server console,
-  no longer 501 or execution not configured.
+  a CLI goal, approval asked on the server console.
+  A server built without a runner still returns 501
+  "execution not configured", fail-closed.
 
 - Missing old-Aidon things, built now: CLI memory,
   skills, tools, dag, mission, outbox, export,

@@ -48,7 +48,7 @@ is a real part of what Aidon runs, not just a build-time choice.
 - **Agent, tests only:** Muse Spark 1.3 Contributor, same capabilities, much cheaper. Switch by changing `AIDON_MODEL` only. Contributor inputs and outputs are used to train models, so tests must use non-sensitive test data only.
 - **Speech, when voice is on:** Muse Voice Transcribe, speech-to-text only.
 - **Images, optional, only if a workflow requires one:** Muse Image 1.0, as a tool, not as the agent.
-- **Segmentation, for video editing:** SAM 3.1, via the Meta Model API Responses API.
+- **Segmentation, for video editing:** SAM, via the Meta Model API Responses API.
 
 Aidon is self-hosted by design: clone it to your own computer or server, run it there, and use the WebUI or call the API. There is no central Aidon cloud, and your data is not sent to one. Your memory, workdirs, and keys stay on your machine, under your Aidon home, outside this repository.
 

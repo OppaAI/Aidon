@@ -36,7 +36,7 @@ def _plugin_dir(tmp_path, name="upper"):
     return directory
 
 
-def test_settings_set_env_writes_dotenv_and_refuses_secrets(tmp_path):
+def test_settings_set_env_writes_secrets_write_only(tmp_path):
     server = _server(tmp_path)
     result = server.settings_set_env("timezone", "America/Vancouver")
     assert result == {"ok": True, "key": "AIDON_TIMEZONE"}
@@ -50,13 +50,21 @@ def test_settings_set_env_writes_dotenv_and_refuses_secrets(tmp_path):
     assert not any(line.startswith("AIDON_TIMEZONE=America") for line in lines)
     # Owner-only file.
     assert (tmp_path / "home" / ".env").stat().st_mode & 0o777 == 0o600
-    # Secrets are never writable through this method.
+    # Secrets are writable here, old-Aidon behaviour: write-only,
+    # never shown back, empty leaves the current value alone.
     for secret_key in ("AIDON_API_KEY", "AIDON_WHATSAPP_TOKEN",
-                       "SLACK_SIGNING_SECRET", "GMAIL_CLIENT_SECRET",
+                       "AIDON_SLACK_SIGNING_SECRET",
                        "AIDON_TRANSCRIBE_API_KEY"):
-        refused = server.settings_set_env(secret_key, "nope")
-        assert refused["ok"] is False
-        assert "nope" not in (tmp_path / "home" / ".env").read_text(encoding="utf-8")
+        written = server.settings_set_env(secret_key, "test-value")
+        assert written["ok"] is True
+        assert "test-value" not in str(written)
+        assert f"{secret_key}=test-value" in (tmp_path / "home" / ".env").read_text(encoding="utf-8")
+        kept = server.settings_set_env(secret_key, "")
+        assert kept == {"ok": True, "key": secret_key, "unchanged": True}
+        assert f"{secret_key}=test-value" in (tmp_path / "home" / ".env").read_text(encoding="utf-8")
+    # GMAIL_CLIENT_SECRET is not a configured key (Gmail transport was
+    # dropped), so it is still refused as an unknown key.
+    assert server.settings_set_env("GMAIL_CLIENT_SECRET", "x")["ok"] is False
     # Unknown keys and newline values are refused, not written.
     assert server.settings_set_env("not_a_setting", "x")["ok"] is False
     assert server.settings_set_env("timezone", "a\nAIDON_API_KEY=evil")["ok"] is False
@@ -146,7 +154,9 @@ def test_http_routes_for_new_endpoints(tmp_path):
         assert status == 200 and payload["ok"] is True and payload["key"] == "AIDON_TIMEZONE"
         assert "AIDON_TIMEZONE=UTC" in (tmp_path / "home" / ".env").read_text(encoding="utf-8")
         status, payload = post("/api/settings/env", {"key": "AIDON_API_KEY", "value": "x"})
-        assert status == 400 and payload["ok"] is False
+        assert status == 200 and payload["ok"] is True
+        assert "x" not in str(payload)
+        assert "AIDON_API_KEY=x" in (tmp_path / "home" / ".env").read_text(encoding="utf-8")
         status, payload = post("/api/studio/memory", {"action": "edit", "collection": "episodic", "point_id": "p9", "text": "edited"})
         assert status == 200 and payload["via"] == "recorded"
         status, payload = post("/api/studio/capabilities", {"action": "edit", "name": "ghost2", "description": "d"})

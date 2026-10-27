@@ -61,7 +61,7 @@ goal starts from what actually worked.
   after a security scan and an owner decision card.
 - Triggers: scheduler, WhatsApp, Slack, WebUI,
   ingest folder, webhook, and manual, all as
-  TriggerEvents that start a DAG run, never bypassing
+  TriggerEvents that start a goal run, never bypassing
   approval, spec, or verification. No Telegram source.
 - Execution: bubblewrap backend, Docker backend, and
   VM as post-hackathon future only. Docker is

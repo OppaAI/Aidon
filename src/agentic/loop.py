@@ -125,7 +125,8 @@ class GoalRunner:
                  run_id: str | None = None, run_control=None,
                  researcher=None, extra_tools=None, router=None,
                  versioned_writes: bool = False,
-                 network_available: bool | None = None):
+                 network_available: bool | None = None,
+                 guidance: str = ""):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -139,6 +140,10 @@ class GoalRunner:
         self.promotion_ask = promotion_ask
         self.project_id = project_id
         self.network_available = network_available
+        # Optional human guidance, binding on the planner: carried
+        # into the plan prompt as a guidance block (the same block
+        # make_plan uses), never as a separate approval or question.
+        self.guidance = guidance
         # The ToolRegistry gains the same network_available
         # parameter in a sibling change; pass it through only
         # when the registry accepts it, so this runner works
@@ -171,8 +176,14 @@ class GoalRunner:
         self.extra_tools = extra_tools or {}
 
     def _trace(self, kind: str, status: str, detail: str = "") -> None:
+        # Attribute to this runner's own run id: sub-runners share
+        # their parent's recorder, and without the override their
+        # events would land in the parent's trace file. A runner
+        # with no run id passes None, and record() falls back to
+        # the recorder's own run id, so unregistered runs behave
+        # exactly as before.
         if self.trace is not None:
-            self.trace.record(kind, status, detail)
+            self.trace.record(kind, status, detail, run_id=self.run_id)
 
     def _approval_body(self, body: str) -> str:
         """Approval-card body, with the network-on line when
@@ -356,6 +367,12 @@ class GoalRunner:
                            "open questions, use them to fill those gaps, "
                            "do not change unrelated steps:\n"
                            f"{research_context}")
+        if (self.guidance or "").strip():
+            # Binding human guidance, via the same guidance block
+            # make_plan uses. _plan builds its prompt inline rather
+            # than calling make_plan, so the block is appended here.
+            from .prompts import guidance_block
+            user = user + f"\n\n{guidance_block(self.guidance)}"
         self._trace("plan", "started", goal[:100])
         if self.budget is not None:
             self.budget.add_tokens(user)
@@ -437,6 +454,13 @@ class GoalRunner:
         # nothing.
         if self.network_available is True:
             print("Sandbox network: on", file=sys.stderr)
+        # Kernel notice, same channel: kernel mode restricts the
+        # run to seed tools, so the owner sees that up front.
+        if self.kernel_mode:
+            from .kernel import kernel_system_note
+            _kernel_note = kernel_system_note(True)
+            if _kernel_note:
+                print(_kernel_note, file=sys.stderr)
         # A frozen spec binds the planner: if one is given,
         # plan from it, do not plan fresh from the goal alone.
         # Experience reuse still applies, but only if its
@@ -473,7 +497,16 @@ class GoalRunner:
             return self._finalize(report)
         if spec is not None:
             spec_deliverables = spec.deliverables if hasattr(spec, "deliverables") else spec.get("deliverables", [])
-            plan = self._plan(goal, spec=spec)
+            try:
+                plan = self._plan(goal, spec=spec)
+            except Exception as exc:
+                # A budget breach (or any plan failure) on the
+                # initial plan call is a failed run, not a crash
+                # out of the loop — same rule as the repair wrap.
+                return self._finalize(RunReport("failed", goal,
+                                                Plan(steps=[], deliverables=[str(d) for d in spec_deliverables], criteria=[]),
+                                                False, False, error=str(exc)[:500],
+                                                backend=self._backend_name()))
             if not plan.deliverables and spec_deliverables:
                 plan.deliverables = list(spec_deliverables)
             plan = self._research_and_replan(plan, goal, spec=spec)
@@ -538,7 +571,16 @@ class GoalRunner:
                             return self._finalize(self._execute_plan(goal, plan))
             except Exception:
                 pass
-        plan = self._plan(goal)
+        try:
+            plan = self._plan(goal)
+        except Exception as exc:
+            # Same rule as the spec branch above: an initial
+            # plan failure (including a budget breach) fails
+            # the run instead of crashing out of the loop.
+            return self._finalize(RunReport("failed", goal,
+                                            Plan(steps=[], deliverables=[], criteria=[]),
+                                            False, False, error=str(exc)[:500],
+                                            backend=self._backend_name()))
         plan = self._research_and_replan(plan, goal)
         return self._finalize(self._execute_plan(goal, plan))
 

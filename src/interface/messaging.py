@@ -272,3 +272,50 @@ def download_whatsapp_media(config, media_id: str, get=None) -> bytes:
     if isinstance(data, dict):
         raise ValueError("WhatsApp media download did not return bytes")
     return data
+
+
+def download_slack_file(token: str, file_url_or_id: str, get=None,
+                        timeout_seconds: int = 15) -> bytes:
+    """Download a Slack shared file's bytes, via its private URL.
+
+    file_url_or_id is either the file's url_private (as carried in
+    an event payload) or a bare file id, resolved first through
+    files.info. The token travels only in the Authorization
+    header, never in a URL, a log line, or an error message;
+    only https URLs are fetched, and every request is
+    timeout-bounded. get is injectable for tests, taking
+    (url, token) and returning bytes or a dict. Returns the file
+    bytes; raises ValueError on any refusal or failed lookup or
+    download. This helper is not wired into any handler: a caller
+    that holds a bot token uses it explicitly.
+    """
+    if not token or not file_url_or_id:
+        raise ValueError("Slack file download needs a token and a file URL or id")
+    if get is None:
+        import urllib.request, json as _json
+        def get(url, token, _timeout=timeout_seconds):
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+            with urllib.request.urlopen(req, timeout=_timeout) as response:
+                raw = response.read()
+            try:
+                return _json.loads(raw.decode())
+            except Exception:
+                return raw
+    url = str(file_url_or_id)
+    if "://" not in url:
+        # Bare file id: resolve through files.info, Bearer header
+        # only, never a token query parameter.
+        info = get(f"https://slack.com/api/files.info?file={url}", token)
+        if not isinstance(info, dict):
+            raise ValueError("Slack files.info did not return file metadata")
+        file_info = info.get("file", {}) if isinstance(info.get("file"), dict) else {}
+        url = file_info.get("url_private", "") or ""
+        if not url:
+            raise ValueError("Slack files.info did not return a private URL")
+    from urllib.parse import urlparse
+    if urlparse(url).scheme != "https":
+        raise ValueError("Slack file download refuses non-https URLs")
+    data = get(url, token)
+    if isinstance(data, dict):
+        raise ValueError("Slack file download did not return bytes")
+    return data

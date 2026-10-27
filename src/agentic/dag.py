@@ -172,7 +172,17 @@ class DAGNode:
 class DAG:
     def __init__(self, nodes: list[DAGNode] | None = None):
         self.nodes: dict[str, DAGNode] = {}
+        # Duplicate ids are NOT silently dropped from validation:
+        # __init__ still keeps the last node per id (existing
+        # callers rely on that dict), but every id seen more
+        # than once is recorded here so validate() can report
+        # it instead of executing a subset in silence. A load
+        # path that must refuse (e.g. `dag run`) uses
+        # validate_strict(), which raises on any failure.
+        self.duplicate_ids: list[str] = []
         for node in nodes or []:
+            if node.id in self.nodes and node.id not in self.duplicate_ids:
+                self.duplicate_ids.append(node.id)
             self.nodes[node.id] = node
 
     def snapshot(self) -> "DAG":
@@ -242,6 +252,8 @@ class DAG:
 
     def validate(self) -> list[str]:
         failures = []
+        for node_id in self.duplicate_ids:
+            failures.append(f"duplicate node id: {node_id}")
         seen_deliverables: dict[str, str] = {}
         for node in self.nodes.values():
             # Defensive only: from_dict already falls back to
@@ -264,6 +276,18 @@ class DAG:
         except ValueError as exc:
             failures.append(str(exc))
         return failures
+
+    def validate_strict(self) -> None:
+        """Strict validation for load paths that must refuse,
+        not just report: raises ValueError on any failure —
+        duplicate node ids, missing or self dependencies,
+        duplicate deliverables, unknown executors, or cycles.
+        Existing validate() callers that check the returned
+        list are unaffected; this is the entry point a
+        `dag run`-style caller uses before executing."""
+        failures = self.validate()
+        if failures:
+            raise ValueError(f"invalid DAG: {'; '.join(failures)}")
 
     def topological_order(self) -> list[DAGNode]:
         order: list[DAGNode] = []

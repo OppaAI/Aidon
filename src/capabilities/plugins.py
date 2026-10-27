@@ -311,7 +311,17 @@ class PluginRegistry:
 
     def adopt(self, source_dir: Path, gate=None, approve=None, memory=None,
               project_id: str = "default") -> tuple[bool, list[ScanFinding], str]:
-        """Adopt a plugin: scan, approve, then copy. Returns (ok, findings, message)."""
+        """Adopt a plugin: scan, approve, then copy. Returns (ok, findings, message).
+
+        The approve callback, when given, receives (plugin, findings,
+        tree_hash, body): the same approved tree hash and card body
+        the gate.ask path shows, so a callback approver sees exactly
+        what it approved. Older two-argument callbacks
+        (plugin, findings) still work via a TypeError fallback.
+        No caller in the repo passes a callback today (the WebUI
+        route passes approve=None, the CLI passes a gate only);
+        the callback path exists for tests and out-of-tree callers.
+        """
         source_dir = Path(source_dir)
         findings = scan_plugin(source_dir)
         blocking = [f for f in findings if f.type in BLOCKING_TYPES]
@@ -375,7 +385,14 @@ class PluginRegistry:
         body = "\n".join(body_lines)
         approved = False
         if approve is not None:
-            approved = bool(approve(plugin, findings))
+            # Callback approvers see exactly what the gate.ask path
+            # shows: the approved tree hash and the card body, so
+            # the approval binds to the same bytes. Older
+            # two-argument callbacks keep working via fallback.
+            try:
+                approved = bool(approve(plugin, findings, approved_hash, body))
+            except TypeError:
+                approved = bool(approve(plugin, findings))
         elif gate is not None:
             decision = gate.ask("plugin", "Adopt this plugin?", body)
             approved = decision.verdict == "approved"

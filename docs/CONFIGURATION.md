@@ -21,7 +21,9 @@ Aidon reads runtime settings from a local `.env` file. Keep secrets local and ne
   No image tool is used by default, and no core workflow
   requires an image to succeed.
 
-Layout: the code lives in `src/` only, no sub-directory, so
+Layout: the code lives in `src/` in six groups
+  (agentic, capabilities, interface, memory, social,
+  system), so
 `pip install -e .` installs it and
 `python -m src.system.main goal "..."` runs it.
 
