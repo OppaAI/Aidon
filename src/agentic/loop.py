@@ -1098,9 +1098,10 @@ class GoalRunner:
         self._trace("approval", "started", "live approval requested")
         decision: Decision = self._ask_for_approval(
             "live", "Approve live execution?",
-            self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"))
-        self._trace("approval", decision.verdict, "live approval")
-        approved = decision.verdict == "approved"
+            self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"),
+            force_ask=True,
+        )
+        approved = decision.verdict in ("approved", "edited")
         self._mission_approval(approved)
         if not approved:
             return RunReport("rejected", goal, current_plan, True, False,
