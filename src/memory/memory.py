@@ -332,13 +332,36 @@ class QdrantStore:
         self._embedder_dim = dim
         for name in COLLECTIONS:
             if not self._client.collection_exists(name):
-                self._client.create_collection(
-                    name, vectors_config={
-                        "dense": models.VectorParams(
-                            size=self._embedder_dim,
-                            distance=models.Distance.COSINE),
-                        "sparse": models.SparseVectorParams(),
-                    })
+                # Sparse vectors are NOT dense vectors: they belong in
+                # sparse_vectors_config, not vectors_config. Putting a
+                # SparseVectorParams in vectors_config makes newer
+                # qdrant-client local mode fail with
+                # AttributeError: 'SparseVectorParams' object has no
+                # attribute 'size', because it validates every dense
+                # vector size. This is the bug seen on a PC with a
+                # newer qdrant-client, where Megumi's VM fell back
+                # to InMemoryStore and never hit it.
+                try:
+                    self._client.create_collection(
+                        name,
+                        vectors_config={
+                            "dense": models.VectorParams(
+                                size=self._embedder_dim,
+                                distance=models.Distance.COSINE),
+                        },
+                        sparse_vectors_config={
+                            "sparse": models.SparseVectorParams(),
+                        })
+                except TypeError:
+                    # Very old qdrant-client without sparse_vectors_config:
+                    # fall back to the old form, which that client accepted.
+                    self._client.create_collection(
+                        name, vectors_config={
+                            "dense": models.VectorParams(
+                                size=self._embedder_dim,
+                                distance=models.Distance.COSINE),
+                            "sparse": models.SparseVectorParams(),
+                        })
 
     def _to_point(self, raw) -> Point:
         payload = dict(raw.payload or {})
@@ -448,8 +471,14 @@ class Memory:
         self.stm: deque = deque(maxlen=20)
 
     def _point_id(self, text: str) -> str:
-        return uuid.uuid5(uuid.NAMESPACE_URL,
-                          text + str(time.time_ns())).hex[:12]
+        # Full canonical UUID, not a 12-char hex slice. Newer
+        # qdrant-client local mode validates point ids strictly
+        # and rejects a 12-char hex id with
+        # ValueError: Point id ... is not a valid UUID.
+        # InMemoryStore and entity graph accept any string id,
+        # so a full UUID is safe for both stores.
+        return str(uuid.uuid5(uuid.NAMESPACE_URL,
+                              text + str(time.time_ns())))
 
     def _access_payload(self) -> dict:
         now = _now_iso()

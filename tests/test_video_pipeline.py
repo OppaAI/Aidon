@@ -26,6 +26,10 @@ def test_daily_report_fix(tmp_path):
 def test_video_pipeline_real_ffmpeg(tmp_path):
     if not ffmpeg_available():
         return
+    try:
+        import PIL  # noqa: F401
+    except ImportError:
+        return
     import subprocess
     src = tmp_path / "input.mp4"
     subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=2:size=160x120:rate=1",
@@ -48,7 +52,10 @@ def test_video_pipeline_missing_ffmpeg():
 
 
 def test_annotate_frames(tmp_path):
-    from PIL import Image
+    try:
+        from PIL import Image
+    except ImportError:
+        return
     frame = tmp_path / "frame0001.jpg"
     Image.new("RGB", (100, 100), "white").save(frame)
     out = annotate_frames([frame], {0: [{"object_id": "0", "confidence": 0.92, "box": {"x1": 10, "y1": 10, "right": 50, "bottom": 50}}]}, tmp_path / "out")
