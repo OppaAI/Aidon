@@ -650,58 +650,42 @@ class WebUIGate:
     """
 
     def __init__(self, timeout_seconds: int = 180, nudge_tracker=None,
-                 autonomy_tracker=None, slack_sender=None):
+                 autonomy_tracker=None, slack_sender=None, policy=None):
         self.timeout_seconds = timeout_seconds
         self.nudge_tracker = nudge_tracker
-        self.autonomy_tracker = autonomy_tracker
+        self.autonomy_tracker = autonomy_tracker  # optional legacy
         self.slack_sender = slack_sender
         self.cards: dict[str, dict] = {}
         self._events: dict[str, threading.Event] = {}
         self._counter = 0
-        self.gate = ApprovalGate(self._decide)
+        # Prefer shared AutonomyPolicy (same file as CLI)
+        self.gate = ApprovalGate(self._decide, policy=policy)
 
     def _decide(self, kind: str, title: str, body: str) -> Decision:
         import time as _time
-        stake = "high" if kind == "live" else "medium"
-        if self.autonomy_tracker is not None:
-            try:
-                if self.autonomy_tracker.should_auto_approve(stake, _time.time()):
-                    return Decision("approved")
-            except Exception:
-                pass
         self._counter += 1
         card_id = f"card-{self._counter}"
         event = threading.Event()
         self._events[card_id] = event
-        self.cards[card_id] = {"kind": kind, "title": title, "body": body, "verdict": None}
+        self.cards[card_id] = {
+            "kind": kind, "title": title, "body": body, "verdict": None,
+        }
         pending_since = _time.time()
         if self.nudge_tracker is not None:
             def _nudge():
                 _time.sleep(max(0, self.nudge_tracker.nudge_minutes * 60))
                 if not event.is_set():
                     try:
-                        self.nudge_tracker.check(card_id, pending_since, _time.time(),
-                                                 slack_sender=self.slack_sender)
+                        self.nudge_tracker.check(
+                            card_id, pending_since, _time.time(),
+                            slack_sender=self.slack_sender)
                     except Exception:
                         pass
             threading.Thread(target=_nudge, daemon=True).start()
         event.wait(timeout=self.timeout_seconds)
         card = self.cards[card_id]
         verdict = card["verdict"] or "rejected"
-        # Write the verdict back, so a card that timed out stops
-        # being pending: without this, a timed-out card kept
-        # verdict None forever and would never leave the list.
         card["verdict"] = verdict
-        if verdict == "approved" and self.autonomy_tracker is not None:
-            try:
-                self.autonomy_tracker.record_approval(stake, _time.time())
-            except Exception:
-                pass
-        if verdict == "rejected" and self.autonomy_tracker is not None:
-            try:
-                self.autonomy_tracker.record_rejection(stake)
-            except Exception:
-                pass
         return Decision(verdict)
 
     def pending_cards(self) -> list[dict]:
