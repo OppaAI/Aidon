@@ -14,6 +14,15 @@
 
 ---
 
+## 👤 Project provenance
+
+- **Author and only contributor:** [OppaAI](https://github.com/OppaAI)
+- **First development day:** October 26, 2026
+- **Repository history:** 131 commits
+- **Credentials:** none committed; secrets belong in the local, ignored `.env`
+
+---
+
 **Autonomous AI agent. You give it one goal — it does the rest.**
 
 Give Aidon a goal in plain language, in chat, on WhatsApp or Slack, or on the command line. Aidon will:
