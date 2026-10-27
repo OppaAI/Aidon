@@ -315,6 +315,61 @@ class GoalRunner:
             self._mission_lifecycle = None
             self._trace("mission", "failed", f"mission start failed: {exc}")
 
+    def _checkpoint_store(self):
+      if not self.run_id:
+          return None
+      try:
+          from ..capabilities.registry_db import Registry
+          from .checkpoint import CheckpointStore
+          if getattr(self, "_checkpoint_registry", None) is None:
+              self._checkpoint_registry = Registry(self.home)
+          return CheckpointStore(self._checkpoint_registry)
+      except Exception:
+          return None
+
+    def _save_checkpoint(self, phase: str, goal: str, plan, passed, verified=None,
+                         attempt: int = 1) -> None:
+        store = self._checkpoint_store()
+        if store is None:
+            return
+        try:
+            from .checkpoint import RunCheckpoint, plan_to_dict
+            store.save(RunCheckpoint(
+                run_id=str(self.run_id),
+                goal=goal,
+                phase=phase,
+                plan=plan_to_dict(plan),
+                passed=sorted(set(passed or [])),
+                verified=sorted(set(verified or [])),
+                attempt=attempt,
+            ))
+        except Exception as exc:
+            self._trace("checkpoint", "failed", f"save failed: {exc}")
+
+    def _load_checkpoint(self, workdir):
+        store = self._checkpoint_store()
+        if store is None:
+            return None
+        try:
+            from .checkpoint import filter_resumable_passed
+            cp = store.load(str(self.run_id))
+            if cp is None:
+                return None
+            cp.passed = filter_resumable_passed(cp.passed, workdir)
+            return cp
+        except Exception as exc:
+            self._trace("checkpoint", "failed", f"load failed: {exc}")
+            return None
+
+    def _clear_checkpoint(self) -> None:
+        store = self._checkpoint_store()
+        if store is None:
+            return
+        try:
+            store.clear(str(self.run_id))
+        except Exception:
+            pass
+
     def _mission_prepare_review(self, goal: str, plan: Plan,
                                 files: list[str], verified: list[str]) -> None:
         lifecycle = getattr(self, "_mission_lifecycle", None)
