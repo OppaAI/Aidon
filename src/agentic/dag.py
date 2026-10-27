@@ -61,9 +61,73 @@ still needs its approval card.
 from __future__ import annotations
 
 import copy
+import os
 from dataclasses import dataclass, field
 
 from .adapt import _replace_in_args, _replace_word, _word_map, distinctive_words
+
+
+# Executor tiers for DAG nodes: "tool" runs a sandbox tool,
+# "fast" routes an llm node to the fast client, "strong" routes
+# it to the strong client. The loop does the routing later;
+# this module only tags and validates the tier.
+EXECUTORS = {"tool", "fast", "strong"}
+
+
+def route_executor(node) -> str:
+    """Tier a node runs on: its executor, or "tool" when absent or invalid."""
+    if isinstance(node, dict):
+        executor = node.get("executor", "tool")
+    else:
+        executor = getattr(node, "executor", "tool")
+    return executor if executor in EXECUTORS else "tool"
+
+
+def _relativize_value(value, run_dir: str):
+    """Rewrite one args value against run_dir, recursively for containers."""
+    if isinstance(value, str):
+        if not run_dir or value == run_dir:
+            return "." if value == run_dir else value
+        prefix = run_dir + os.sep
+        if value.startswith(prefix):
+            return value[len(prefix):]
+        if prefix in value:
+            # Path embedded in longer content: strip the run-dir
+            # prefix wherever it appears, leaving a relative path.
+            return value.replace(prefix, "")
+        return value
+    if isinstance(value, dict):
+        return {key: _relativize_value(item, run_dir) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_relativize_value(item, run_dir) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_relativize_value(item, run_dir) for item in value)
+    return value
+
+
+def relativize_paths(dag_dict: dict, run_dir: str) -> dict:
+    """Return a copy of a DAG dict with run-dir paths made relative.
+
+    Any absolute path that starts with run_dir, in a node's args
+    values or in string content inside args, becomes relative to
+    run_dir. Paths outside run_dir are untouched, non-string
+    values are untouched, and the input dict is never mutated.
+    """
+    result = copy.deepcopy(dag_dict)
+    if not run_dir:
+        return result
+    root = os.path.normpath(str(run_dir))
+    nodes = result.get("nodes") if isinstance(result, dict) else None
+    if not isinstance(nodes, list):
+        return result
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        args = node.get("args")
+        if isinstance(args, dict):
+            node["args"] = {key: _relativize_value(item, root)
+                            for key, item in args.items()}
+    return result
 
 
 @dataclass
@@ -78,16 +142,20 @@ class DAGNode:
     preconditions: list[str] = field(default_factory=list)
     expected: str = ""
     assumptions: list[str] = field(default_factory=list)
+    executor: str = "tool"
 
     def to_dict(self) -> dict:
         return {"id": self.id, "tool": self.tool, "args": self.args,
                 "deliverable": self.deliverable, "depends_on": list(self.depends_on),
                 "inputs": list(self.inputs), "outputs": list(self.outputs),
                 "preconditions": list(self.preconditions), "expected": self.expected,
-                "assumptions": list(self.assumptions)}
+                "assumptions": list(self.assumptions),
+                "executor": route_executor(self)}
 
     @classmethod
     def from_dict(cls, data: dict) -> "DAGNode":
+        # An invalid executor falls back to "tool", never raises:
+        # a saved graph with a bad tier must still load.
         return cls(id=str(data.get("id", "")),
                    tool=str(data.get("tool", "write")),
                    args=dict(data.get("args", {})),
@@ -97,7 +165,8 @@ class DAGNode:
                    outputs=list(data.get("outputs", [])),
                    preconditions=list(data.get("preconditions", [])),
                    expected=str(data.get("expected", "")),
-                   assumptions=list(data.get("assumptions", [])))
+                   assumptions=list(data.get("assumptions", [])),
+                   executor=route_executor(data))
 
 
 class DAG:
@@ -154,10 +223,32 @@ class DAG:
         if failures:
             raise ValueError(f"reorder would break the graph: {'; '.join(failures)}")
 
+    def relativize(self, run_dir: str) -> "DAG":
+        """Return a new DAG with run-dir paths in node args made relative.
+
+        The original DAG is untouched; each node's args are
+        rewritten the same way relativize_paths rewrites a dict.
+        """
+        if not run_dir:
+            return self.snapshot()
+        root = os.path.normpath(str(run_dir))
+        nodes = []
+        for node in self.nodes.values():
+            new_node = copy.deepcopy(node)
+            new_node.args = {key: _relativize_value(item, root)
+                             for key, item in dict(node.args).items()}
+            nodes.append(new_node)
+        return DAG(nodes)
+
     def validate(self) -> list[str]:
         failures = []
         seen_deliverables: dict[str, str] = {}
         for node in self.nodes.values():
+            # Defensive only: from_dict already falls back to
+            # "tool", so this should not normally fire, but a
+            # node built by hand with a bad tier must be caught.
+            if getattr(node, "executor", "tool") not in EXECUTORS:
+                failures.append(f"node {node.id} has unknown executor {node.executor!r}")
             if node.id in node.depends_on:
                 failures.append(f"node {node.id} depends on itself")
             for dep in node.depends_on:
@@ -194,7 +285,8 @@ class DAG:
         return order
 
     def to_plan_steps(self) -> list[dict]:
-        return [{"tool": node.tool, "args": node.args, "deliverable": node.deliverable}
+        return [{"tool": node.tool, "args": node.args, "deliverable": node.deliverable,
+                 "executor": route_executor(node)}
                 for node in self.topological_order()]
 
 
@@ -208,6 +300,7 @@ def dag_from_experience(experience) -> DAG:
         node = DAGNode(id=node_id, tool=str(step.get("tool", "write")),
                        args=dict(step.get("args", {})),
                        deliverable=str(step.get("deliverable", "")),
+                       executor=route_executor(step),
                        depends_on=[previous] if previous else [],
                        inputs=list(step.get("inputs", [])),
                        outputs=[str(step.get("deliverable", ""))] if step.get("deliverable") else [],

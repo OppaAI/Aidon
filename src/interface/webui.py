@@ -907,29 +907,239 @@ class WebUIServer:
         "model": "AIDON_MODEL",
         "fast_model": "AIDON_FAST_MODEL",
         "tts_voice_id": "AIDON_TTS_VOICE_ID",
+        "backend": "AIDON_BACKEND",
+        "api_endpoint": "AIDON_API_ENDPOINT",
+        "embed_model": "AIDON_EMBED_MODEL",
+        "sandbox_timeout_seconds": "AIDON_MAX_SANDBOX_SECONDS",
+        "approval_timeout_seconds": "AIDON_APPROVAL_TIMEOUT_S",
+        "docker_image": "AIDON_DOCKER_IMAGE",
+        "docker_network": "AIDON_DOCKER_NETWORK",
+        "ingest_dir": "AIDON_INGEST_DIR",
+        "wallclock_minutes": "AIDON_MAX_WALLCLOCK_MIN",
+        "model_timeout_seconds": "AIDON_MODEL_TIMEOUT_S",
+        "forget_half_life_days": "AIDON_FORGET_HALF_LIFE_DAYS",
+        "forget_grace_days": "AIDON_FORGET_GRACE_DAYS",
+        "forget_cleanup_threshold": "AIDON_FORGET_CLEANUP_THRESHOLD",
+        "whatsapp_phone_id": "AIDON_WHATSAPP_PHONE_ID",
+        "whatsapp_owner": "AIDON_WHATSAPP_OWNER",
+        "threads_account_id": "AIDON_THREADS_ACCOUNT_ID",
+        "ig_user_id": "AIDON_IG_USER_ID",
+        "approval_nudge_channel": "AIDON_APPROVAL_NUDGE_CHANNEL",
+        "autonomy_threshold": "AIDON_AUTONOMY_THRESHOLD",
+        "autonomy_decay_days": "AIDON_AUTONOMY_DECAY_DAYS",
+        "corrected_subject": "AIDON_CORRECTED_SUBJECT",
+        "ollama_endpoint": "AIDON_OLLAMA_ENDPOINT",
+        "ollama_think": "AIDON_OLLAMA_THINK",
+        "ollama_num_ctx": "AIDON_OLLAMA_NUM_CTX",
+        "fast_num_ctx": "AIDON_FAST_NUM_CTX",
+        "research_allowlist": "AIDON_RESEARCH_ALLOWLIST",
+        "router_fast_phases": "AIDON_ROUTER_FAST_PHASES",
+        "kernel": "AIDON_KERNEL",
     }
     _ENV_SECRET_MARKERS = ("TOKEN", "KEY", "SECRET", "PASSWORD", "CLIENT")
+
+    # Settings catalog: every live Config key, grouped, with type,
+    # default, and secret flag. Dead old keys are deliberately
+    # absent: no AIDON_META_*, no verifier model, no think phases,
+    # no AIDON_DEPTH. Float-valued keys use type "string" (the
+    # catalog has only string/int/bool/enum) and are validated
+    # as numbers on write. Secrets are listed so the catalog
+    # read can mask them and report is_set, never the value.
+    SETTINGS_CATALOG = [
+        {"group": "Model", "settings": [
+            {"key": "AIDON_MODEL", "label": "Chat model", "type": "string", "default": "muse-spark", "desc": "Model id for the agent loop.", "secret": False},
+            {"key": "AIDON_BACKEND", "label": "Model backend", "type": "enum", "default": "", "desc": "meta, ollama, http, or fake.", "secret": False, "options": ["meta", "ollama", "http", "fake"]},
+            {"key": "AIDON_API_ENDPOINT", "label": "API endpoint", "type": "string", "default": "", "desc": "OpenAI-compatible endpoint, or Ollama when it points at localhost:11434.", "secret": False},
+            {"key": "AIDON_API_KEY", "label": "API key", "type": "string", "default": "", "desc": "Key for the Meta Model API or other endpoint.", "secret": True},
+            {"key": "AIDON_EMBED_MODEL", "label": "Embed model", "type": "string", "default": "google/embeddinggemma-2", "desc": "Embedding model for memory.", "secret": False},
+            {"key": "AIDON_FAST_MODEL", "label": "Fast model", "type": "string", "default": "", "desc": "Small model for fast phases, else the main model.", "secret": False},
+            {"key": "AIDON_FAST_NUM_CTX", "label": "Fast model context", "type": "int", "default": "0", "desc": "Context window for the fast model, 0 = backend default.", "secret": False},
+            {"key": "AIDON_OLLAMA_ENDPOINT", "label": "Ollama endpoint", "type": "string", "default": "http://localhost:11434", "desc": "Local Ollama server.", "secret": False},
+            {"key": "AIDON_OLLAMA_THINK", "label": "Ollama think", "type": "bool", "default": "0", "desc": "Enable Ollama chain-of-thought.", "secret": False},
+            {"key": "AIDON_OLLAMA_NUM_CTX", "label": "Ollama context", "type": "int", "default": "0", "desc": "Context window for Ollama, 0 = backend default.", "secret": False},
+            {"key": "AIDON_MODEL_TIMEOUT_S", "label": "Model timeout seconds", "type": "string", "default": "120", "desc": "Timeout for one model call, in seconds.", "secret": False},
+            {"key": "AIDON_ROUTER_FAST_PHASES", "label": "Router fast phases", "type": "string", "default": "interpret,learn,respond", "desc": "Comma-separated phases routed to the fast model.", "secret": False},
+            {"key": "AIDON_IMAGE_MODEL", "label": "Image model", "type": "string", "default": "muse-image-1.0", "desc": "Image generation model.", "secret": False},
+            {"key": "AIDON_SAM_MODEL", "label": "SAM model", "type": "string", "default": "meta-sam", "desc": "Segmentation model for video editing.", "secret": False},
+            {"key": "AIDON_MAX_TOKENS_PER_RUN", "label": "Max tokens per run", "type": "int", "default": "200000", "desc": "Hard token budget for one goal run.", "secret": False},
+            {"key": "AIDON_MAX_STEPS", "label": "Max steps", "type": "int", "default": "50", "desc": "Hard step budget for one goal run.", "secret": False},
+            {"key": "AIDON_MAX_WALLCLOCK_MIN", "label": "Max wallclock minutes", "type": "int", "default": "60", "desc": "Hard wallclock budget for one goal run, in minutes.", "secret": False},
+            {"key": "AIDON_APPROVAL_TIMEOUT_S", "label": "Approval timeout seconds", "type": "int", "default": "180", "desc": "Seconds an approval card waits before failing closed.", "secret": False},
+        ]},
+        {"group": "Sandbox", "settings": [
+            {"key": "AIDON_EXECUTION_BACKEND", "label": "Execution backend", "type": "enum", "default": "bubblewrap", "desc": "Sandbox backend for shell steps.", "secret": False, "options": ["bubblewrap", "docker", "subprocess"]},
+            {"key": "AIDON_DOCKER_IMAGE", "label": "Docker image", "type": "string", "default": "python:3.12-slim", "desc": "Pinned image for the Docker backend.", "secret": False},
+            {"key": "AIDON_DOCKER_NETWORK", "label": "Docker network", "type": "bool", "default": "0", "desc": "Allow network for the Docker backend.", "secret": False},
+            {"key": "AIDON_MAX_SANDBOX_SECONDS", "label": "Sandbox timeout seconds", "type": "int", "default": "120", "desc": "Timeout for one sandbox command.", "secret": False},
+            {"key": "AIDON_KERNEL", "label": "Kernel mode", "type": "bool", "default": "0", "desc": "Kernel mode: write/read/list/shell only, no calculate, no plugins.", "secret": False},
+        ]},
+        {"group": "Memory", "settings": [
+            {"key": "AIDON_FORGET_HALF_LIFE_DAYS", "label": "Forget half-life days", "type": "string", "default": "21", "desc": "Forgetting-curve half-life, in days.", "secret": False},
+            {"key": "AIDON_FORGET_GRACE_DAYS", "label": "Forget grace days", "type": "int", "default": "35", "desc": "Days before forgetting starts.", "secret": False},
+            {"key": "AIDON_FORGET_CLEANUP_THRESHOLD", "label": "Forget cleanup threshold", "type": "string", "default": "0.02", "desc": "Recall weight below which a point is pruned.", "secret": False},
+            {"key": "AIDON_INGEST_DIR", "label": "Ingest directory", "type": "string", "default": "", "desc": "Folder watched for ingest triggers.", "secret": False},
+            {"key": "AIDON_QDRANT_URL", "label": "Qdrant URL", "type": "string", "default": "", "desc": "Qdrant server URL, empty = local mode.", "secret": False},
+        ]},
+        {"group": "Research", "settings": [
+            {"key": "AIDON_SEARCH_BACKEND", "label": "Search backend", "type": "enum", "default": "tavily", "desc": "Web search backend.", "secret": False, "options": ["tavily", "searxng"]},
+            {"key": "AIDON_SEARXNG_URL", "label": "SearXNG URL", "type": "string", "default": "http://localhost:8888", "desc": "SearXNG server for the searxng backend.", "secret": False},
+            {"key": "AIDON_TAVILY_API_KEY", "label": "Tavily API key", "type": "string", "default": "", "desc": "Key for Tavily search.", "secret": True},
+            {"key": "AIDON_RESEARCH_MAX_ROUNDS", "label": "Research max rounds", "type": "int", "default": "10", "desc": "Max research rounds per run.", "secret": False},
+            {"key": "AIDON_MAX_STUCK_ITERATIONS", "label": "Max stuck iterations", "type": "int", "default": "8", "desc": "Iterations without progress before the run stops.", "secret": False},
+            {"key": "AIDON_PARALLEL_TOOLS", "label": "Parallel tools", "type": "int", "default": "4", "desc": "Parallel research/tool workers.", "secret": False},
+            {"key": "AIDON_RESEARCH_ALLOWLIST", "label": "Research allowlist", "type": "string", "default": "", "desc": "Comma-separated domains research may use, empty = unrestricted.", "secret": False},
+            {"key": "AIDON_YOUTUBE_API_KEY", "label": "YouTube API key", "type": "string", "default": "", "desc": "Key for YouTube search.", "secret": True},
+        ]},
+        {"group": "Messaging", "settings": [
+            {"key": "AIDON_WHATSAPP_TOKEN", "label": "WhatsApp token", "type": "string", "default": "", "desc": "WhatsApp Cloud API token.", "secret": True},
+            {"key": "AIDON_WHATSAPP_PHONE_ID", "label": "WhatsApp phone id", "type": "string", "default": "", "desc": "WhatsApp Cloud phone number id.", "secret": False},
+            {"key": "AIDON_WHATSAPP_VERIFY_TOKEN", "label": "WhatsApp verify token", "type": "string", "default": "", "desc": "Token WhatsApp uses to verify the webhook.", "secret": True},
+            {"key": "AIDON_WHATSAPP_APP_SECRET", "label": "WhatsApp app secret", "type": "string", "default": "", "desc": "App secret for WhatsApp signature checks.", "secret": True},
+            {"key": "AIDON_WHATSAPP_OWNER", "label": "WhatsApp owner", "type": "string", "default": "", "desc": "Owner phone number for the WhatsApp owner gate.", "secret": False},
+            {"key": "AIDON_SLACK_BOT_TOKEN", "label": "Slack bot token", "type": "string", "default": "", "desc": "Slack bot token for inbound/outbound Slack.", "secret": True},
+            {"key": "AIDON_SLACK_SIGNING_SECRET", "label": "Slack signing secret", "type": "string", "default": "", "desc": "Slack signing secret for webhook verification.", "secret": True},
+            {"key": "AIDON_THREADS_ACCOUNT_ID", "label": "Threads account id", "type": "string", "default": "", "desc": "Threads account id for publishing.", "secret": False},
+            {"key": "AIDON_THREADS_ACCESS_TOKEN", "label": "Threads access token", "type": "string", "default": "", "desc": "Threads access token for publishing.", "secret": True},
+            {"key": "AIDON_IG_USER_ID", "label": "Instagram user id", "type": "string", "default": "", "desc": "Instagram user id for publishing.", "secret": False},
+            {"key": "AIDON_IG_ACCESS_TOKEN", "label": "Instagram access token", "type": "string", "default": "", "desc": "Instagram access token for publishing.", "secret": True},
+            {"key": "AIDON_GITHUB_TOKEN", "label": "GitHub token", "type": "string", "default": "", "desc": "GitHub token for repository tools.", "secret": True},
+            {"key": "AIDON_OWNER_EMAIL", "label": "Owner email", "type": "string", "default": "", "desc": "Where drafts and reports to the owner are addressed.", "secret": False},
+            {"key": "AIDON_DAILY_REPORT_TIME", "label": "Daily report time", "type": "string", "default": "", "desc": "Time of day for the daily report.", "secret": False},
+            {"key": "AIDON_APPROVAL_NUDGE_MIN", "label": "Approval nudge minutes", "type": "int", "default": "15", "desc": "Minutes before an approval card is nudged.", "secret": False},
+            {"key": "AIDON_APPROVAL_NUDGE_CHANNEL", "label": "Approval nudge channel", "type": "string", "default": "", "desc": "Channel approval nudges go to.", "secret": False},
+            {"key": "AIDON_CORRECTED_SUBJECT", "label": "Corrected subject", "type": "bool", "default": "1", "desc": "Mark corrected emails with a Corrected subject.", "secret": False},
+            {"key": "AIDON_AUTONOMY_ENABLED", "label": "Autonomy enabled", "type": "bool", "default": "1", "desc": "Trust-based autonomy for repeated skills.", "secret": False},
+            {"key": "AIDON_AUTONOMY_THRESHOLD", "label": "Autonomy threshold", "type": "int", "default": "5", "desc": "Successes before a skill graduates a trust tier.", "secret": False},
+            {"key": "AIDON_AUTONOMY_DECAY_DAYS", "label": "Autonomy decay days", "type": "string", "default": "14", "desc": "Days after which trust decays.", "secret": False},
+        ]},
+        {"group": "WebUI", "settings": [
+            {"key": "AIDON_WEBUI_TOKEN", "label": "WebUI token", "type": "string", "default": "", "desc": "Bearer token for the WebUI API.", "secret": True},
+            {"key": "AIDON_TIMEZONE", "label": "Timezone", "type": "string", "default": "UTC", "desc": "Timezone for schedules and reports.", "secret": False},
+            {"key": "AIDON_TTS_VOICE_ID", "label": "TTS voice id", "type": "string", "default": "", "desc": "Voice id for text-to-speech.", "secret": False},
+            {"key": "AIDON_FISH_API_KEY", "label": "Fish API key", "type": "string", "default": "", "desc": "Key for Fish TTS.", "secret": True},
+            {"key": "AIDON_TRANSCRIBE_API_KEY", "label": "Transcribe API key", "type": "string", "default": "", "desc": "Key for voice transcription.", "secret": True},
+        ]},
+    ]
+    _CATALOG_FLOAT_KEYS = frozenset({
+        "AIDON_MODEL_TIMEOUT_S", "AIDON_FORGET_HALF_LIFE_DAYS",
+        "AIDON_FORGET_CLEANUP_THRESHOLD", "AIDON_AUTONOMY_DECAY_DAYS",
+    })
+
+    def _catalog_entry(self, env_key: str):
+        for group in self.SETTINGS_CATALOG:
+            for entry in group["settings"]:
+                if entry["key"] == env_key:
+                    return entry
+        return None
+
+    def _read_env_file(self) -> dict:
+        """Parse <home>/.env into {key: value}, no env fallback here."""
+        path = self.home / ".env"
+        values: dict[str, str] = {}
+        if not path.is_file():
+            return values
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return values
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            if stripped.startswith("export "):
+                stripped = stripped[7:].strip()
+            key, value = stripped.split("=", 1)
+            key, value = key.strip(), value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            if key:
+                values[key] = value
+        return values
+
+    def settings_catalog(self) -> dict:
+        """Catalog + current values. Secrets come back masked.
+
+        A secret entry returns value "" and is_set, never the
+        value itself. A non-secret returns its .env value, else
+        its process-environment value, else its default, with
+        from_file saying whether .env set it.
+        """
+        import os
+        file_vals = self._read_env_file()
+        groups = []
+        for group in self.SETTINGS_CATALOG:
+            items = []
+            for entry in group["settings"]:
+                item = {k: entry[k] for k in
+                        ("key", "label", "type", "default", "desc", "secret")
+                        if k in entry}
+                if "options" in entry:
+                    item["options"] = list(entry["options"])
+                raw = file_vals.get(entry["key"])
+                if raw is None:
+                    raw = os.environ.get(entry["key"])
+                item["from_file"] = entry["key"] in file_vals
+                if entry.get("secret"):
+                    item["value"] = ""
+                    item["is_set"] = bool(raw)
+                else:
+                    item["value"] = raw if raw is not None else entry.get("default", "")
+                items.append(item)
+            groups.append({"group": group["group"], "settings": items})
+        return {"env_file": str(self.home / ".env"), "groups": groups}
 
     def settings_set_env(self, key: str, value) -> dict:
         """Write one safe setting to <home>/.env, never a secret.
 
         Accepts the friendly settings name (e.g. "timezone") or the
-        env var name itself (e.g. "AIDON_TIMEZONE"). Any key whose
-        name contains a secret marker is refused, as is any unknown
-        key and any value containing a newline (which would let a
-        value smuggle a second .env line in). The value is never
-        printed or returned: the result carries only the key name.
+        env var name itself (e.g. "AIDON_TIMEZONE"), for every
+        non-secret catalog key plus the original 19 friendly
+        names. Type validation: int must parse as int, bool must
+        be one of 0/1/true/false/yes/no (stored as 1/0), enum
+        must be in options, float-valued keys must parse as a
+        number. A secret key with an empty value is a no-op
+        ("don't change") and must never clear the key; a secret
+        with a value is refused. Unknown keys and newline
+        values are refused. The value is never printed or
+        returned: the result carries only the key name.
         The .env file is created if missing and kept owner-only.
         """
         raw_key = str(key or "").strip()
         env_key = self._ENV_SETTING_MAP.get(raw_key) or raw_key
-        if env_key not in self._ENV_SETTING_MAP.values():
+        entry = self._catalog_entry(env_key)
+        if entry is not None and entry.get("secret"):
+            if str(value) == "":
+                return {"ok": True, "key": env_key, "unchanged": True}
+            return {"ok": False, "error": f"secret keys are never writable via settings: {raw_key}"}
+        if entry is None and env_key not in self._ENV_SETTING_MAP.values():
             return {"ok": False, "error": f"setting not writable to .env: {raw_key}"}
         if any(marker in env_key for marker in self._ENV_SECRET_MARKERS):
+            if str(value) == "":
+                return {"ok": True, "key": env_key, "unchanged": True}
             return {"ok": False, "error": f"secret keys are never writable via settings: {raw_key}"}
-        text = str(value)
+        text = str(value).strip() if not isinstance(value, str) else value.strip()
         if "\n" in text or "\r" in text:
             return {"ok": False, "error": "value must not contain a newline"}
+        if entry is not None:
+            kind = entry.get("type", "string")
+            if kind == "int":
+                try:
+                    text = str(int(text))
+                except ValueError:
+                    return {"ok": False, "error": f"{env_key}: not an integer: {value!r}"}
+            elif kind == "bool":
+                lowered = text.lower()
+                if lowered not in ("0", "1", "true", "false", "yes", "no"):
+                    return {"ok": False, "error": f"{env_key}: not a boolean: {value!r}"}
+                text = "1" if lowered in ("1", "true", "yes") else "0"
+            elif kind == "enum":
+                if text not in (entry.get("options") or []):
+                    return {"ok": False, "error": f"{env_key}: must be one of {entry.get('options')}"}
+            elif env_key in self._CATALOG_FLOAT_KEYS:
+                try:
+                    float(text)
+                except ValueError:
+                    return {"ok": False, "error": f"{env_key}: not a number: {value!r}"}
         path = self.home / ".env"
         lines: list[str] = []
         if path.is_file():
@@ -955,6 +1165,100 @@ class WebUIServer:
         except OSError:
             pass
         return {"ok": True, "key": env_key}
+
+    def handle_project_delete(self, project_id: str) -> dict:
+        """Delete a project: memory points, conversations, brief.
+
+        Returns ok True only when the project existed somewhere
+        (memory projects, the SQLite conversation store, legacy
+        JSON conversations, or a saved brief). An unknown project
+        returns ok False. With no memory attached, memory deletion
+        is skipped but conversations/briefs still delete, and ok
+        reflects whether anything was found.
+        """
+        project_id = str(project_id or "").strip()
+        if not project_id:
+            return {"ok": False, "error": "project_id is required"}
+        found = False
+        removed_memory = 0
+        if self.memory is not None:
+            try:
+                projects = self.memory.list_projects()
+            except Exception:
+                projects = []
+            if project_id in projects:
+                found = True
+            # Memory's project-deletion API is forget_project;
+            # store-level objects expose delete_by_project per
+            # collection instead. Use whichever is present.
+            try:
+                if hasattr(self.memory, "forget_project"):
+                    deleted = self.memory.forget_project(project_id) or {}
+                    removed_memory += int(sum(int(v) for v in deleted.values()))
+                elif hasattr(self.memory, "delete_by_project"):
+                    for collection in ("working", "episodic", "semantic", "experience", "knowledge"):
+                        removed_memory += int(self.memory.delete_by_project(collection, project_id) or 0)
+                elif hasattr(getattr(self.memory, "store", None), "delete_by_project"):
+                    for collection in ("working", "episodic", "semantic", "experience", "knowledge"):
+                        removed_memory += int(self.memory.store.delete_by_project(collection, project_id) or 0)
+            except Exception:
+                pass
+            if removed_memory:
+                found = True
+        removed_conversations = 0
+        db_path = self.home / "conversations.db"
+        if db_path.is_file():
+            try:
+                import sqlite3
+                conn = sqlite3.connect(str(db_path), timeout=10.0)
+                try:
+                    rows = conn.execute(
+                        "SELECT id FROM conversations WHERE project_id = ?",
+                        (project_id,)).fetchall()
+                    ids = [row[0] for row in rows]
+                    if ids:
+                        found = True
+                        removed_conversations = len(ids)
+                        placeholders = ",".join("?" for _ in ids)
+                        conn.execute(
+                            f"DELETE FROM exchanges WHERE conversation_id IN ({placeholders})", ids)
+                        conn.execute(
+                            f"DELETE FROM attachments WHERE conversation_id IN ({placeholders})", ids)
+                        try:
+                            conn.execute(
+                                f"DELETE FROM summaries WHERE conversation_id IN ({placeholders})", ids)
+                        except Exception:
+                            pass
+                        conn.execute(
+                            "DELETE FROM conversations WHERE project_id = ?", (project_id,))
+                        conn.commit()
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+        for path in sorted((self.home / "conversations").glob("*.json")) if (self.home / "conversations").is_dir() else []:
+            try:
+                data = self._read_json_file(path)
+            except Exception:
+                data = None
+            if data is not None and str(data.get("project_id", "")) == project_id:
+                found = True
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+        brief_path = self.home / "project_briefs" / f"{self._safe_name(project_id)}.json"
+        if brief_path.is_file():
+            found = True
+            try:
+                brief_path.unlink()
+            except OSError:
+                pass
+        if not found:
+            return {"ok": False, "error": f"unknown project: {project_id}"}
+        return {"ok": True, "project_id": project_id,
+                "removed_memory_points": removed_memory,
+                "removed_conversations": removed_conversations}
 
     def handle_memory_edit(self, collection: str, point_id: str, text: str) -> dict:
         """Edit a memory point's text, or record the edit if the
@@ -1377,6 +1681,8 @@ class WebUIServer:
                         self._send_json(200, {"runs": server.replay_runs()})
                 elif parsed.path == "/api/projects/history":
                     self._send_json(200, {"projects": server.projects_history()})
+                elif parsed.path == "/api/settings/catalog":
+                    self._send_json(200, server.settings_catalog())
                 elif parsed.path == "/api/settings":
                     self._send_json(200, server.settings_get())
                 elif parsed.path == "/api/avatar.vrm":
@@ -1462,8 +1768,12 @@ class WebUIServer:
                     saved = Library(server.home).add_file(tmp, kind="file", description="WebUI upload")
                     self._send_json(200, {"id": saved["id"], "name": safe})
                 elif parsed.path == "/api/settings":
-                    ok = server.settings_set(str(body.get("key", "")), body.get("value"))
-                    self._send_json(200 if ok else 400, {"ok": ok})
+                    key = str(body.get("key", ""))
+                    if server.settings_set(key, body.get("value")):
+                        self._send_json(200, {"ok": True})
+                    else:
+                        result = server.settings_set_env(key, body.get("value", ""))
+                        self._send_json(200 if result.get("ok") else 400, result)
                 elif parsed.path == "/api/settings/env":
                     result = server.settings_set_env(str(body.get("key", "")), body.get("value", ""))
                     self._send_json(200 if result.get("ok") else 400, result)
@@ -1624,6 +1934,13 @@ class WebUIServer:
                     idea_id = parsed.path[len("/api/ideas/"):]
                     result = server.handle_idea_delete(idea_id)
                     self._send_json(200 if result["ok"] else 404, result)
+                elif parsed.path.startswith("/api/projects/"):
+                    project_id = parsed.path[len("/api/projects/"):].strip("/")
+                    if project_id and "/" not in project_id:
+                        result = server.handle_project_delete(project_id)
+                        self._send_json(200 if result["ok"] else 404, result)
+                    else:
+                        self._send_json(404, {"error": "not found"})
                 else:
                     self._send_json(404, {"error": "not found"})
 

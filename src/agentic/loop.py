@@ -54,6 +54,7 @@ class Step:
     args: dict = field(default_factory=dict)
     deliverable: str = ""
     criteria: str = ""
+    executor: str = "tool"
 
 
 @dataclass
@@ -72,7 +73,8 @@ class Plan:
                     tool=str(step.get("tool", "write")),
                     args=dict(step.get("args", {})),
                     deliverable=str(step.get("deliverable", "")),
-                    criteria=str(step.get("criteria", ""))))
+                    criteria=str(step.get("criteria", "")),
+                    executor=str(step.get("executor", "tool"))))
             else:
                 out.append(Step(tool="write", args={"file": "deliverable.md",
                                                     "text": str(step)},
@@ -392,6 +394,10 @@ class GoalRunner:
                     dag_result = adapt_dag(experiences[0], goal, client=self.client)
                     if dag_result is not None:
                         dag, summary, _model_calls = dag_result
+                        try:
+                            dag = dag.relativize(self.sandbox.workdir)
+                        except Exception:
+                            pass
                         steps = dag.to_plan_steps()
                         plan = Plan(
                             steps=steps,
@@ -430,6 +436,14 @@ class GoalRunner:
         report.adapted = bool(self._adapted)
         report.adapted_from = str(self._adapted_from)
         report.dag_summary = dict(self._dag_summary)
+        try:
+            from .autonomy_metrics import AutonomyMetrics
+            AutonomyMetrics(self.home).record(
+                "task_success" if report.status == "done" else "task_failed",
+                run_id=str(getattr(self, "run_id", "") or ""),
+                detail=report.goal[:200])
+        except Exception:
+            pass
         try:
             from .step_lines import render_step_lines
             report.step_lines = render_step_lines(getattr(self, "_step_lines", [])).splitlines()
@@ -474,7 +488,7 @@ class GoalRunner:
         if self.memory is not None:
             self._trace("recall", "done", "experience recall attempted")
         from .validator import validate_plan, ALLOWED_TOOLS
-        _allowed = set(ALLOWED_TOOLS)
+        _allowed = set(ALLOWED_TOOLS) | {"llm"}
         if self.plugins is not None:
             try:
                 _allowed.update(self.plugins.tool_names())
@@ -536,7 +550,18 @@ class GoalRunner:
                     if step.tool == "write" and not step.args:
                         step.args = {"file": step.deliverable,
                                      "text": f"Goal: {goal}\n"}
-                    self._call_tool(step.tool, step.args)
+                    if step.tool == "llm":
+                        # DAG tier routing: an llm node runs on the
+                        # tier it declares — fast via the respond
+                        # phase, strong via the plan phase — and its
+                        # reply becomes the deliverable file.
+                        _prompt = str(step.args.get("prompt", "") or step.args.get("text", ""))
+                        _reply = self._chat("respond" if step.executor == "fast" else "plan",
+                                            [Message("user", _prompt)])
+                        if step.deliverable:
+                            self._call_tool("write", {"file": step.deliverable, "text": _reply})
+                    else:
+                        self._call_tool(step.tool, step.args)
                     from .step_lines import record_attempt
                     record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "done")
                     self._trace("sandbox", "done", step.tool)

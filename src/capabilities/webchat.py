@@ -39,6 +39,123 @@ def _make_message(text: str):
         return _SimpleMessage("user", text)
 
 
+def _local_state_words(goal: str) -> bool:
+    """True when the goal asks about the user's own state."""
+    import re
+
+    words = ("budget", "list", "plan", "notes", "file", "saved", "my")
+    text = str(goal).lower()
+    return any(re.search(r"\b" + word + r"\b", text) for word in words)
+
+
+def _named_file(goal: str):
+    """The first filename-like token in the goal, or None."""
+    import re
+
+    match = re.search(
+        r"[\w./\-]+\.(?:md|txt|csv|json|pdf|html|py|yaml|yml|toml)\b",
+        str(goal))
+    return match.group(0) if match else None
+
+
+def _call_model(client, prompt: str) -> str:
+    message = _make_message(prompt)
+    if hasattr(client, "chat_phase"):
+        try:
+            return str(client.chat_phase("webchat", [message]))
+        except TypeError:
+            return str(client.chat([message]))
+    return str(client.chat([message]))
+
+
+def webchat_reply_with_local(goal: str, researcher, client,
+                             read_file=None, today=None) -> str:
+    """Webchat reply that may also answer from a local file.
+
+    When the goal asks about the user's own state (budget,
+    list, saved plan, notes, file) AND a ``read_file`` callable
+    is given, the prompt carries the question-date note (when
+    a date is implied) and an explicit instruction: answer
+    from the local file and the research facts, never from
+    conversation memory, and the date in the question is the
+    authority over any date in a learned fact. ``read_file``
+    is the caller's confined read tool: confinement to the
+    workdir is the caller's job, this helper never opens a
+    path itself.
+
+    When no local file is in play, this falls back to
+    ``webchat_reply`` exactly, unchanged behaviour.
+    """
+    if not goal or not str(goal).strip():
+        raise ValueError("goal is required")
+    if researcher is None:
+        raise ValueError("researcher is required")
+    if client is None:
+        raise ValueError("client is required")
+    if read_file is None or not _local_state_words(goal):
+        return webchat_reply(goal, researcher, client)
+    facts = researcher(goal)
+    if facts is None:
+        facts = []
+    if not isinstance(facts, (list, tuple)):
+        facts = [str(facts)]
+    facts = [str(fact) for fact in facts if str(fact).strip()]
+    local_text = ""
+    filename = _named_file(goal)
+    if filename is not None:
+        try:
+            local_text = str(read_file(filename) or "")
+        except Exception:
+            local_text = ""
+    if not facts and not local_text:
+        return f"Facts were not found for this goal: {goal}."
+    from ..agentic.question_dates import question_date_note
+
+    parts = [f"Goal: {goal}\n"]
+    if facts:
+        parts.append("Research facts:\n" + "\n".join(f"- {fact}" for fact in facts) + "\n")
+    if local_text:
+        parts.append(f"Local file {filename}:\n{local_text}\n")
+    note = question_date_note(goal, today=today)
+    if note:
+        parts.append(note + "\n")
+    parts.append(
+        "Answer from the local file and the research facts above, "
+        "never from conversation memory. "
+        "The date in the question is the authority over any date "
+        "in a learned fact. "
+        "Do not invent any fact that is not in the facts above.")
+    return _call_model(client, "\n".join(parts))
+
+
+def read_only_tools(workdir) -> dict:
+    """A read-only toolset: a confined "read" tool, nothing else.
+
+    No write, no shell, no calculate. Reads are confined to
+    the workdir: a path outside it raises ValueError, never
+    followed. Uses ToolRegistry when importable, plain Path
+    reads otherwise.
+    """
+    from pathlib import Path
+
+    root = Path(workdir).resolve()
+
+    def read(file: str) -> str:
+        target = (root / str(file)).resolve()
+        if target != root and root not in target.parents:
+            raise ValueError(f"path outside workdir: {file}")
+        try:
+            from ..capabilities.tools import ToolRegistry
+
+            return str(ToolRegistry(root).call("read", {"file": str(file)}))
+        except ValueError:
+            raise
+        except Exception:
+            return target.read_text(encoding="utf-8")
+
+    return {"read": read}
+
+
 def webchat_reply(goal: str, researcher, client) -> str:
     """Return a webchat reply for a goal, from researcher facts only."""
     if not goal or not str(goal).strip():

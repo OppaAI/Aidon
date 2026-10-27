@@ -462,6 +462,15 @@ def main(argv: list[str] | None = None) -> int:
     intake_parser = sub.add_parser("intake", help="Intake schema: missing slots and summary for a goal text")
     intake_parser.add_argument("--schema", default="generic", help="Schema name: generic or dinner")
     intake_parser.add_argument("text", nargs="?", default="", help="Goal text to check against the schema")
+    ingest_parser = sub.add_parser("ingest", help="Folder ingest into knowledge: ingest, remove, dry-run")
+    ingest_parser.add_argument("action", choices=["ingest", "remove", "dry-run"], help="ingest = index a folder, remove = forget a folder, dry-run = count only")
+    ingest_parser.add_argument("folder", help="Folder path")
+    metrics_parser = sub.add_parser("metrics", help="Autonomy metrics: summary or rendered report")
+    metrics_parser.add_argument("--days", type=int, default=30, help="Window in days")
+    metrics_parser.add_argument("--render", action="store_true", help="Render as Markdown instead of a dict")
+    vrm_parser = sub.add_parser("vrm-check", help="Check VRM morph targets against the lip-sync JS")
+    vrm_parser.add_argument("vrm", nargs="?", default="", help="VRM file; default = <home>/avatar.vrm")
+    vrm_parser.add_argument("--js", default="", help="JS file to extract morph names from; default = the lip-sync JS")
     resume_parser = sub.add_parser("resume", help="Resume a saved run: list saved runs, or show one")
     resume_parser.add_argument("run_id", nargs="?", default="", help="Run id to show; empty = list")
     plan_guard_parser = sub.add_parser("plan-guard", help="Validate a plan JSON file against available tools")
@@ -567,6 +576,31 @@ def main(argv: list[str] | None = None) -> int:
         level = resolve_effort(args.phase, requested=args.level or None, escalate=args.escalate)
         print(f"phase={args.phase} effort={level} sampling={sampling_for(args.phase)}")
         return 0
+    if args.command == "ingest":
+        from ..memory.ingest import ingest_folder, remove_folder
+        from pathlib import Path as _P
+        if args.action == "remove":
+            print(f"Removed {remove_folder(config.home, args.folder)} points")
+        else:
+            print(ingest_folder(config.home, args.folder, dry_run=(args.action == "dry-run")))
+        return 0
+    if args.command == "metrics":
+        from ..agentic.autonomy_metrics import AutonomyMetrics
+        metrics = AutonomyMetrics(config.home)
+        print(metrics.render(args.days) if args.render else metrics.summary(args.days))
+        return 0
+    if args.command == "vrm-check":
+        from pathlib import Path as _P
+        from ..capabilities.vrm_check import check_vrm, used_morph_names, used_names_from_audio
+        vrm_path = _P(args.vrm) if args.vrm else config.home / "avatar.vrm"
+        if args.js:
+            js_source = _P(args.js).read_text()
+        else:
+            from ..capabilities.audio import vrm_lip_sync_js
+            js_source = vrm_lip_sync_js()
+        result = check_vrm(vrm_path, js_source)
+        print(result)
+        return 0 if result.get("ok") else 2
     if args.command == "skill-library":
         from ..capabilities.skill_library import SkillLibrary
         lib = SkillLibrary(config.home)
