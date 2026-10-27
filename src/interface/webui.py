@@ -2060,7 +2060,13 @@ class WebUIServer:
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
-                self.wfile.write(data)
+                try:
+                    self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError):
+                    # Browsers and frontend fetches can cancel a request
+                    # while a lazy memory/model operation is finishing.
+                    # The client disconnect is not a server failure.
+                    return
 
             def _send_html(self, status: int, html: str):
                 data = html.encode()
@@ -2068,7 +2074,10 @@ class WebUIServer:
                 self.send_header("Content-Type", "text/html")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
-                self.wfile.write(data)
+                try:
+                    self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError):
+                    return
 
             def _send_bytes(self, status: int, content_type: str, data: bytes):
                 self.send_response(status)
