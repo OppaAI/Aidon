@@ -251,7 +251,12 @@ class GoalRunner:
                 self._trace("interpret", "done", f"semantic route {self.last_route[0]} {self.last_route[1]:.2f}")
             except Exception:
                 self.last_route = None
-        if self.use_semantic_router_skip and self.last_route and self.last_route[0] == "chat" and spec is None:
+        # Write-intent guard, from old Aidon: the router is a hint, not a
+        # safety boundary. A goal that asks for a write, a save, or a file
+        # is never answered by a path with no write tools, even if the
+        # router said chat, because that would silently miss the task.
+        _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
+        if self.use_semantic_router_skip and self.last_route and self.last_route[0] == "chat" and spec is None and not _write_intent:
             reply = self.client.chat([Message("user", goal)])
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
