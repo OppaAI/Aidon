@@ -153,6 +153,73 @@ def format_run_stats(report: RunReport) -> str:
     return f"⏱️ {elapsed_text}{waiting} · {tokens:,} total workflow tokens (estimated)"
 
 
+def run_react(client, messages: list, tools, *, max_rounds: int = 8,
+              phase: str = "live", budgets=None) -> dict:
+    """Optional compatibility ReAct loop for native model tool calls.
+
+    Plan-first execution remains the default. This helper restores the old
+    direct tool-call capability for integrations that provide a
+    ``chat_response`` method returning ``ChatResponse.tool_calls`` (or a
+    compatible response object). A JSON response containing ``tool_calls``
+    is accepted as a fallback for simple model adapters.
+    """
+    history = list(messages or [])
+    total_calls = 0
+    total_rounds = 0
+
+    def _message(role, content):
+        return Message(role, str(content))
+
+    def _call_tool(name, arguments):
+        if hasattr(tools, "call"):
+            return tools.call(name, arguments)
+        if isinstance(tools, dict) and name in tools:
+            return tools[name](**arguments) if isinstance(arguments, dict) else tools[name](arguments)
+        raise ValueError(f"unknown tool: {name}")
+
+    for _ in range(max(1, int(max_rounds))):
+        total_rounds += 1
+        if budgets is not None and hasattr(budgets, "add_step"):
+            budgets.add_step()
+        responder = getattr(client, "chat_response", None)
+        if callable(responder):
+            try:
+                response = responder(history, phase=phase)
+            except TypeError:
+                response = responder(history)
+        else:
+            response = client.chat(history)
+        total_calls += 1
+        text = getattr(response, "text", response)
+        calls = list(getattr(response, "tool_calls", []) or [])
+        if not calls and isinstance(text, str):
+            try:
+                decoded = json.loads(text)
+                if isinstance(decoded, dict) and decoded.get("tool_calls"):
+                    from ..system.model_client import parse_openai_tool_calls
+                    calls = parse_openai_tool_calls(decoded)
+                    text = decoded.get("text", "")
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if not calls:
+            return {"text": str(text or ""), "messages": history,
+                    "tool_calls": total_calls - 1, "rounds": total_rounds}
+        history.append(_message("assistant", text or ""))
+        for call in calls:
+            name = getattr(call, "name", "")
+            if not name and isinstance(call, dict):
+                name = call.get("name", "")
+            arguments = getattr(call, "arguments", None)
+            if arguments is None and isinstance(call, dict):
+                arguments = call.get("arguments", {})
+            result = _call_tool(str(name), arguments or {})
+            if budgets is not None and hasattr(budgets, "add_tokens"):
+                budgets.add_tokens(str(result))
+            history.append(_message("tool", result))
+    return {"text": "", "messages": history, "tool_calls": total_calls,
+            "rounds": total_rounds, "error": "ReAct round limit exceeded"}
+
+
 class GoalRunner:
     def __init__(self, client: ModelClient, sandbox: Sandbox,
                  gate: ApprovalGate, home: Path, memory=None,

@@ -4,7 +4,8 @@ from src.agentic.plan_guard import validate_plan
 from src.agentic.artifact_inventory import inventory_markdown
 from src.agentic.delivery_summary import delivery_summary
 from src.agentic.loop import (Plan, RunReport, format_duration, format_elapsed,
-                              format_run_stats)
+                              format_run_stats, run_react)
+from src.system.model_client import ChatResponse, ToolCall
 
 
 class _Cfg:
@@ -68,3 +69,21 @@ def test_elapsed_helpers_keep_old_human_format():
     assert "2m 4s" in format_elapsed({"elapsed_seconds": 124})
     assert "waiting for you" in format_elapsed({"elapsed_seconds": 40,
                                                 "approval_wait_seconds": 180})
+
+
+def test_optional_react_compatibility_loop_executes_native_tool_calls():
+    class Client:
+        def __init__(self):
+            self.responses = [
+                ChatResponse(tool_calls=[ToolCall("echo", {"text": "hello"})]),
+                ChatResponse(text="finished"),
+            ]
+
+        def chat_response(self, messages, phase=None):
+            return self.responses.pop(0)
+
+    result = run_react(Client(), [], {"echo": lambda text: f"echoed: {text}"})
+    assert result["text"] == "finished"
+    assert result["tool_calls"] == 1
+    assert result["rounds"] == 2
+    assert result["messages"][-1].content == "echoed: hello"
