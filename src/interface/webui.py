@@ -28,7 +28,7 @@ Messaging, WhatsApp and Slack, both two-way, no Telegram:
   to the WhatsApp Cloud API with WHATSAPP_TOKEN.
   In tests it records the reply, no real API call.
 - Slack webhook, at /webhook/slack. POST verifies a
-  Slack signature, HMAC SHA256 with SLACK_SIGNING_SECRET,
+  Slack signature, HMAC SHA256 with AIDON_SLACK_SIGNING_SECRET,
   timestamp within 5 minutes, and the X-Slack-Signature
   header, before parsing any event. A bad signature
   is 401, never parsed, never dispatched. Events
