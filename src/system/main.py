@@ -352,6 +352,85 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
 
     tools["notify"] = notify
 
+    # MCP client tools from old Aidon. Connections live for this goal run;
+    # every new stdio connection is approval-gated before third-party code
+    # is started. Server tools are exposed with a namespaced name so they
+    # cannot collide with Aidon's own tools.
+    mcp_connections = {}
+
+    def mcp_connect(name, transport="stdio", command="", args=None,
+                    env=None, url="", token=""):
+        import shlex
+        server_name = str(name).strip()
+        if not server_name:
+            return "MCP_REFUSED: server name is required"
+        if server_name in mcp_connections:
+            return f"MCP_ALREADY_CONNECTED {server_name!r}"
+        transport = str(transport or "stdio").lower()
+        if transport == "stdio":
+            command_parts = shlex.split(str(command)) + [str(x) for x in (args or [])]
+            if not command_parts:
+                return "MCP_REFUSED: command is required for stdio transport"
+            description = " ".join(command_parts)
+        elif transport in ("http", "streamable-http"):
+            if not url:
+                return "MCP_REFUSED: url is required for HTTP transport"
+            description = str(url)
+        else:
+            return f"MCP_REFUSED: unsupported transport {transport!r}"
+        ok, why = _approval("install", "Connect MCP server",
+                            f"Start/connect to MCP server {server_name!r}: {description}")
+        if not ok:
+            return f"MCP_REFUSED: {why}"
+        try:
+            if transport == "stdio":
+                from ..interface.mcp_client import McpClient
+                client = McpClient(command_parts, env=dict(env or {}))
+                client.start()
+            else:
+                from ..interface.mcp_http import McpHttpClient
+                client = McpHttpClient(str(url), token=str(token or "") or None)
+                client.initialize()
+            offered = client.list_tools()
+            if not offered:
+                client.close()
+                return f"MCP_REFUSED: {server_name!r} offered no tools"
+            mcp_connections[server_name] = client
+            registered = []
+            for info in offered:
+                remote_name = str(info.get("name", "")).strip()
+                if not remote_name or not remote_name.replace("_", "").isalnum():
+                    continue
+                local_name = f"mcp_{server_name}_{remote_name}"
+
+                def call_remote(_args=None, _client=client, _remote=remote_name):
+                    return json.dumps(_client.call_tool(_remote, _args or {}), ensure_ascii=False)
+
+                tools[local_name] = call_remote
+                registered.append(local_name)
+            return f"MCP_CONNECTED {server_name!r}: {', '.join(registered) or 'no safe tools'}"
+        except Exception as exc:
+            try:
+                client.close()
+            except Exception:
+                pass
+            return f"MCP_REFUSED: {type(exc).__name__}: {exc}"
+
+    def mcp_disconnect(name):
+        server_name = str(name).strip()
+        client = mcp_connections.pop(server_name, None)
+        if client is None:
+            return f"MCP: no open connection named {server_name!r}"
+        client.close()
+        prefix = f"mcp_{server_name}_"
+        for tool_name in list(tools):
+            if tool_name.startswith(prefix):
+                tools.pop(tool_name, None)
+        return f"MCP_DISCONNECTED {server_name!r}"
+
+    tools["mcp_connect"] = mcp_connect
+    tools["mcp_disconnect"] = mcp_disconnect
+
     try:
         from ..capabilities.plugins import PluginRegistry
 

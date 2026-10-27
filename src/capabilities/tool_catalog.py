@@ -14,6 +14,7 @@ GOAL_TOOL_NAMES = (
     "instagram_publish", "instagram_post", "write_versioned", "read_file",
     "write_file", "notify", "sam_segment", "uv_venv",
     "install_python_package", "apt_install", "adopt_tool_plugin",
+    "mcp_connect", "mcp_disconnect",
 )
 
 
