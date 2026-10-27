@@ -8,11 +8,6 @@ version = "0.1.0"
 description = "An autonomous agent that works from a plain-language goal."
 requires-python = ">=3.11"
 dependencies = [
-    "pillow>=13.0.0",
-    "qdrant-client>=1.10",
-    "fastembed>=0.3",
-    "sentence-transformers[image]>=6.1",
-    "torchvision>=0.29.1",
 ]
 
 [project.scripts]
@@ -22,10 +17,16 @@ aidon = "src.system.main:main"
 embed = [
     "sentence-transformers>=6.1",
     "transformers",
-    "Pillow",
+    "torchvision>=0.29.1",
+]
+vision = [
+    "Pillow>=13.0.0",
+]
+memory = [
+    "qdrant-client>=1.10",
 ]
 sparse = [
-    "fastembed",
+    "fastembed>=0.3",
 ]
 kb = [
     "pypdf",

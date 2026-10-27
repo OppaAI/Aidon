@@ -343,10 +343,10 @@ echo "Optional packages - each one enables one feature, and each is"
 echo "offered on its own. A package you skip is not installed, and"
 echo "its feature simply stays off until you install it."
 for spec in \
-  "qdrant-client:qdrant_client:Qdrant vector memory:" \
+  "qdrant-client:qdrant_client:Qdrant vector memory:memory" \
   "sentence-transformers:sentence_transformers:real semantic embeddings:embed" \
   "fastembed:fastembed:learned SPLADE sparse recall:sparse" \
-  "Pillow:PIL:image handling and video annotation:embed" \
+  "Pillow:PIL:image handling and video annotation:vision" \
   "pypdf:pypdf:PDF reading:kb" \
   "python-docx:docx:Word reading:kb" \
   "beautifulsoup4:bs4:HTML reading:kb" \
