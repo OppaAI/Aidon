@@ -62,7 +62,7 @@ class PreapprovalGate:
             combined |= set(store_set)
         return combined
 
-    def ask(self, kind: str, title: str, body: str) -> Decision:
+    def ask(self, kind: str, title: str, body: str, **kwargs) -> Decision:
         """Return an approved decision for a pre-approved reversible kind, else ask the real gate."""
         if kind in _EXTERNAL_KINDS or kind in self._irreversible():
             return self.gate.ask(kind, title, body)
@@ -72,4 +72,4 @@ class PreapprovalGate:
             preapproved = False
         if preapproved:
             return Decision("approved")
-        return self.gate.ask(kind, title, body)
+        return self.gate.ask(kind, title, body, **kwargs)
