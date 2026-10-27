@@ -418,16 +418,16 @@ class GoalRunner:
             self._mission_registry = None
 
     def _checkpoint_store(self):
-      if not self.run_id:
-          return None
-      try:
-          from ..capabilities.registry_db import Registry
-          from .checkpoint import CheckpointStore
-          if getattr(self, "_checkpoint_registry", None) is None:
-              self._checkpoint_registry = Registry(self.home)
-          return CheckpointStore(self._checkpoint_registry)
-      except Exception:
-          return None
+        if not self.run_id:
+            return None
+        try:
+            from ..capabilities.registry_db import Registry
+            from .checkpoint import CheckpointStore
+            if getattr(self, "_checkpoint_registry", None) is None:
+                self._checkpoint_registry = Registry(self.home)
+            return CheckpointStore(self._checkpoint_registry)
+        except Exception:
+            return None
   
     def _ask_for_approval(self, kind: str, title: str, body: str, **kwargs) -> Decision:
         """Ask the owner while excluding human wait from active elapsed time."""
@@ -1099,7 +1099,7 @@ class GoalRunner:
                     self._save_checkpoint(
                         "sandbox", goal, current_plan, passed,
                         verified=verified, attempt=attempt)
-                except Exception as exp:
+                except Exception as exc:
                     failures.append(f"step {step.tool} failed: {exc}")
                     try:
                         from .step_lines import record_attempt
@@ -1183,7 +1183,7 @@ class GoalRunner:
             self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"),
             force_ask=True,
         )
-                approved = decision.verdict in ("approved", "edited")
+        approved = decision.verdict in ("approved", "edited")
         self._mission_approval(approved)
         if not approved:
             return RunReport("rejected", goal, current_plan, True, False,
