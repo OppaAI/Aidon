@@ -18,7 +18,7 @@
 [![Author](https://img.shields.io/badge/Author-OppaAI-D9578C)](https://github.com/OppaAI)
 ![Contributors](https://img.shields.io/badge/Contributors-1-3776AB)
 ![Commits](https://img.shields.io/badge/Commits-131-76B900)
-![Start day](https://img.shields.io/badge/Start%20day-October%2026%2C%202026-E95420)
+![Start date](https://img.shields.io/badge/Start%20date-October%2026%2C%202026-E95420)
 ![Credentials](https://img.shields.io/badge/Credentials-none-6C757D)
 
 ---
