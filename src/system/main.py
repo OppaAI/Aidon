@@ -1565,7 +1565,7 @@ def main(argv: list[str] | None = None) -> int:
             from ..capabilities.plugins import PluginRegistry
             from ..agentic.semantic_router import SemanticRouter
             from ..interface.scheduler_loop import AutonomyTracker, NudgeTracker
-            run_id = new_run_id()
+            run_id = str(event.payload.get("run_id", "")) or new_run_id()
             run_control.register(run_id, event.goal, event.project_id)
             # Full runner, same as the CLI goal run, not a thin runner:
             # budget, trace, model verifier, plugins, execution backend,
@@ -1646,6 +1646,7 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 pass
             report = runner.run(event.goal)
+            run_control.set_status(run_id, report.status)
             if report.status == "chat":
                 event.send_reply(f"[{run_id}] {report.chat_reply or 'Received.'}")
             elif report.status == "done":
