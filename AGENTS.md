@@ -66,7 +66,7 @@ approval → live → learn
   - `transcribe_audio` — speech to text (local whisper if available,
     else the Meta transcription API when a key is set).
   - `build_ebook` — markdown sources → EPUB.
-  - `tts_speak`, `slack_send`, `threads_post` — voice, notifications,
+  - `tts_speak`, `slack_send`, `threads_publish` — voice, notifications,
     publishing (publishing always approval-gated).
   - `adopt_tool_plugin` — adopt a tested tool plugin from the workdir
     into `aidon/tool_plugins/` (mandatory human approval, kind
@@ -148,7 +148,7 @@ Two-tier routing (the ClawRouter idea, stolen from OpenClaw/OpenCode):
 when `AIDON_FAST_MODEL` names a different model, cheap phases run on
 the fast tier and hard phases on the strong tier. `AIDON_ROUTER_FAST_PHASES`
 (default `interpret,learn,respond`) picks the fast phases; everything else is
-strong. Trace compaction always uses fast (mechanical summarization).
+strong.
 Per-tier calls + tokens land in `aidon report autonomy`. Routing is
 opt-in — empty `AIDON_FAST_MODEL` means everything runs on the strong
 model, exactly as before. When widening the fast phases, watch quality:
@@ -159,10 +159,10 @@ a cheap model that misclassifies in interpret costs more than it saves.
 Two-way channels need NO approval for outbound messages (standing comms
 policy); one-way social publishing ALWAYS needs human approval.
 
-- **WhatsApp** (primary chat, Meta product): `aidon/whatsapp.py`.
+- **WhatsApp** (primary chat, Meta product): `src/interface/whatsapp.py`.
   Cloud API, Streamable-HTTP style REST + webhook inbound.
-  `POST /webhooks/whatsapp` on the WebUI server receives messages;
-  `GET /webhooks/whatsapp` answers Meta's verify handshake.
+  `POST /webhook/whatsapp` on the WebUI server receives messages;
+  `GET /webhook/whatsapp` answers Meta's verify handshake.
   Security, both fail-closed: X-Hub-Signature-256 HMAC (AIDON_WHATSAPP_APP_SECRET)
   then sender gate (only AIDON_WHATSAPP_OWNER becomes goals).
   Messages from the owner become goals; replies go back over WhatsApp;
@@ -172,19 +172,19 @@ policy); one-way social publishing ALWAYS needs human approval.
   Human setup (one time): Meta dashboard -> app -> WhatsApp product ->
   API setup (phone-number ID), System User with whatsapp_business_messaging
   (permanent token), webhook config: callback URL = public URL +
-  /webhooks/whatsapp (needs a tunnel on AIVA: `cloudflared tunnel --url
-  http://localhost:8765` — the WebUI port), verify token, subscribe to
+  /webhook/whatsapp (needs a tunnel on AIVA: `cloudflared tunnel --url
+  http://localhost:8002` — the WebUI port, which is serve()'s default), verify token, subscribe to
   `messages`.
   SECURITY NOTE: NEVER tunnel the full WebUI — /api/goals and
   /api/settings are unauthenticated (localhost-only by default). Instead
   run a webhook-only listener and tunnel THAT:
       aidon webui --webhook-only --port 8766
       cloudflared tunnel --url http://localhost:8766
-  then point Meta's callback at <tunnel-url>/webhooks/whatsapp. The
+  then point Meta's callback at <tunnel-url>/webhook/whatsapp. The
   webhook-only server exposes nothing but the HMAC-verified webhook.
 - **Slack** stays as-is (`aidon slack listen`, polling). Both can run.
-- **Threads**: `threads_post` tool (approval-gated in code) via threads-cli.
-- **Instagram**: `instagram_post` tool (approval-gated in code) via the
+- **Threads**: `threads_publish` tool (approval-gated in code) via threads-cli.
+- **Instagram**: `instagram_publish` tool (approval-gated in code) via the
   Graph API; photos only in v1 (public image_url required by the API).
 
 ## Email (team inbox)

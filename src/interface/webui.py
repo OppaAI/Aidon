@@ -318,6 +318,28 @@ async function refreshPills() {
   } catch (e) {}
 }
 setInterval(refreshPills, 2000); refreshPills();
+async function refreshApprovals() {
+  try {
+    const r = await fetch('/api/approvals');
+    const data = await r.json();
+    const box = document.getElementById('approval');
+    box.innerHTML = (data.cards || []).map((card) =>
+      '<div><p><strong>' + escapeHtml(card.kind) + '</strong>: ' + escapeHtml(card.title) + '</p>' +
+      '<p>' + escapeHtml(card.body) + '</p>' +
+      '<button data-card="' + escapeHtml(card.id) + '" data-verdict="approved">Approve</button> ' +
+      '<button data-card="' + escapeHtml(card.id) + '" data-verdict="rejected">Reject</button></div>'
+    ).join('');
+    box.querySelectorAll('button').forEach((btn) => {
+      btn.onclick = async () => {
+        try {
+          await fetch('/api/approve', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: btn.dataset.card, verdict: btn.dataset.verdict})});
+        } catch (e) {}
+        refreshApprovals();
+      };
+    });
+  } catch (e) {}
+}
+setInterval(refreshApprovals, 2000); refreshApprovals();
 </script>
 </body></html>
 """
@@ -633,6 +655,10 @@ class WebUIGate:
         event.wait(timeout=self.timeout_seconds)
         card = self.cards[card_id]
         verdict = card["verdict"] or "rejected"
+        # Write the verdict back, so a card that timed out stops
+        # being pending: without this, a timed-out card kept
+        # verdict None forever and would never leave the list.
+        card["verdict"] = verdict
         if verdict == "approved" and self.autonomy_tracker is not None:
             try:
                 self.autonomy_tracker.record_approval(stake, _time.time())
@@ -644,6 +670,18 @@ class WebUIGate:
             except Exception:
                 pass
         return Decision(verdict)
+
+    def pending_cards(self) -> list[dict]:
+        """Cards still awaiting a verdict, in creation order.
+
+        A card leaves this list as soon as it is approved or
+        rejected, or when its wait times out (the timeout path
+        writes the fail-closed verdict back into the card).
+        """
+        return [{"id": card_id, "kind": card["kind"],
+                 "title": card["title"], "body": card["body"]}
+                for card_id, card in self.cards.items()
+                if card["verdict"] is None]
 
     def cancel_all(self) -> None:
         """Resolve every pending card as rejected, for a cancelled run."""
@@ -678,7 +716,7 @@ class WebUIServer:
                  slack_signing_secret: str = "", messaging_config=None,
                  whatsapp_sender=None, slack_sender=None, webhook_only: bool = False,
                  media_downloader=None, run_control=None, webui_token=None, transcribe_key=None,
-                 tts_key=None):
+                 tts_key=None, config=None):
         self.home = Path(home)
         self.dispatcher = dispatcher or TriggerDispatcher()
         self.auth_store = auth_store
@@ -699,7 +737,13 @@ class WebUIServer:
             whatsapp_verify_token or self.messaging_config.whatsapp_verify_token)
         self.slack_signing_secret = (
             slack_signing_secret or self.messaging_config.slack_signing_secret)
-        self.webui_gate = WebUIGate()
+        # Approval timeout comes from config when present, so
+        # AIDON_APPROVAL_TIMEOUT_S actually changes the gate;
+        # without a config the gate keeps its 180s default.
+        timeout_seconds = getattr(config, "approval_timeout_seconds", 180)
+        if timeout_seconds is None:
+            timeout_seconds = 180
+        self.webui_gate = WebUIGate(timeout_seconds=timeout_seconds)
         self.webhook_only = webhook_only
         self.media_downloader = media_downloader
         self.run_control = run_control
@@ -881,7 +925,23 @@ class WebUIServer:
                     self.slack_sender(channel, decision_reply, thread_ts)
                 return 200, {"replies": [decision_reply]}
             replies: list[str] = []
+            # Image intake, same shape as parse_slack_event: image
+            # files ride with the goal text as [image ...] markers
+            # (downloaded bytes need a bot token the inbound path
+            # does not carry, so markers + metadata only). Decision
+            # replies above already ran on the raw text, so replacing
+            # the goal text here cannot change an approval verdict.
+            payload: dict = {}
+            try:
+                from .slack_inbound import parse_slack_event as _parse_slack
+                _parsed = _parse_slack(body)
+                if _parsed is not None and _parsed.payload.get("images"):
+                    text = _parsed.goal
+                    payload = _parsed.payload
+            except Exception:
+                pass
             event = TriggerEvent(source="slack", kind="message", goal=text,
+                                 payload=payload,
                                  reply=replies.append)
             try:
                 self.dispatcher.dispatch(event)
@@ -1981,6 +2041,12 @@ class WebUIServer:
                     self._send_json(200, {"files": server._library_files()})
                 elif parsed.path == "/api/projects":
                     self._send_json(200, {"projects": server._projects()})
+                elif parsed.path == "/api/approvals":
+                    # Auth already checked at the top of do_GET,
+                    # the same is_authorized check every /api/
+                    # route gets. Only still-pending cards: a
+                    # decided or timed-out card is gone here.
+                    self._send_json(200, {"cards": server.webui_gate.pending_cards()})
                 elif parsed.path == "/factory":
                     self._send_html(200, FACTORY_HTML)
                 elif parsed.path == "/api/factory":

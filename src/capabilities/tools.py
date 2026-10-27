@@ -67,11 +67,15 @@ class Tool:
 
 
 class ToolRegistry:
-    def __init__(self, workdir: Path, sandbox=None, versioned_writes: bool = False):
+    def __init__(self, workdir: Path, sandbox=None, versioned_writes: bool = False,
+                 network_available: bool | None = None):
         self.workdir = Path(workdir)
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.sandbox = sandbox
         self.versioned_writes = versioned_writes
+        # None = unknown (message unchanged); False = the sandbox has
+        # no network, so shell failures get an offline hint.
+        self.network_available = network_available
         self.tools = {
             "write": Tool("write", "Write text to a file in the workdir."),
             "read": Tool("read", "Read a file in the workdir."),
@@ -111,7 +115,12 @@ class ToolRegistry:
                 raise ValueError("shell command must be a non-empty list")
             result = self.sandbox.run([str(c) for c in command])
             if not result.ok:
-                raise ValueError(f"shell failed: {result.stderr[:200]}")
+                message = f"shell failed: {result.stderr[:200]}"
+                if self.network_available is False:
+                    message += (" (sandbox has no network: use the "
+                                "web_search / fetch_url tools for network "
+                                "reads instead of shell downloads or installs)")
+                raise ValueError(message)
             return result.stdout
         if name == "calculate":
             if "expression" in args:

@@ -35,7 +35,9 @@ otherwise via promotion_ask, otherwise left to the caller.
 
 from __future__ import annotations
 
+import inspect
 import json
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -105,6 +107,11 @@ class RunReport:
     step_lines: list[str] = field(default_factory=list)
     narration: str = ""
     delivery_summary: str = ""
+    # Sandbox network state for this run: True means the
+    # sandbox had network on (announced on stderr, shown on
+    # approval cards), False means network off, None means
+    # unknown (nothing announced, nothing shown).
+    network: bool | None = None
 
 
 class GoalRunner:
@@ -117,7 +124,8 @@ class GoalRunner:
                  use_semantic_router_skip: bool = False,
                  run_id: str | None = None, run_control=None,
                  researcher=None, extra_tools=None, router=None,
-                 versioned_writes: bool = False):
+                 versioned_writes: bool = False,
+                 network_available: bool | None = None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -130,8 +138,20 @@ class GoalRunner:
         self.memory = memory
         self.promotion_ask = promotion_ask
         self.project_id = project_id
+        self.network_available = network_available
+        # The ToolRegistry gains the same network_available
+        # parameter in a sibling change; pass it through only
+        # when the registry accepts it, so this runner works
+        # before and after that change lands.
+        try:
+            _registry_params = inspect.signature(ToolRegistry.__init__).parameters
+        except (TypeError, ValueError):
+            _registry_params = {}
+        _registry_kwargs = ({"network_available": network_available}
+                            if "network_available" in _registry_params else {})
         self.tools = ToolRegistry(sandbox.workdir, sandbox=sandbox,
-                              versioned_writes=versioned_writes)
+                              versioned_writes=versioned_writes,
+                              **_registry_kwargs)
         self.plugins = plugins
         self.execution_backend = execution_backend
         self.budget = budget
@@ -153,6 +173,14 @@ class GoalRunner:
     def _trace(self, kind: str, status: str, detail: str = "") -> None:
         if self.trace is not None:
             self.trace.record(kind, status, detail)
+
+    def _approval_body(self, body: str) -> str:
+        """Approval-card body, with the network-on line when
+        the sandbox has network. Verdict logic is untouched;
+        this only adds one informational line."""
+        if self.network_available is True:
+            return body + "\nSandbox network: on"
+        return body
 
     def _chat(self, phase: str, messages) -> str:
         """One model call, router-aware.
@@ -237,7 +265,7 @@ class GoalRunner:
             command_text = " ".join(str(c) for c in args.get("command", [])) if isinstance(args.get("command"), list) else str(args.get("command", ""))
             reason = command_needs_mandatory_approval(command_text)
             if reason:
-                decision = self.gate.ask("live", f"Mandatory approval: shell ({reason})", f"Run shell command: {command_text}?")
+                decision = self.gate.ask("live", f"Mandatory approval: shell ({reason})", self._approval_body(f"Run shell command: {command_text}?"))
                 if decision.verdict != "approved":
                     raise ValueError(f"shell command rejected by approval gate ({reason})")
         if name == "shell" and self.execution_backend is not None:
@@ -263,7 +291,7 @@ class GoalRunner:
                 # post or send tool is approval-gated here, before
                 # dispatch, fail-closed on rejection.
                 if any(word in name for word in ("post", "send", "publish")):
-                    decision = self.gate.ask("live", f"Extra tool {name}", f"Run extra tool {name} with {args}?")
+                    decision = self.gate.ask("live", f"Extra tool {name}", self._approval_body(f"Run extra tool {name} with {args}?"))
                     if decision.verdict != "approved":
                         raise ValueError(f"extra tool {name} rejected by approval gate")
                 from ..capabilities.extra_tools import dispatch_extra_tool
@@ -404,6 +432,11 @@ class GoalRunner:
 
     def run(self, goal: str, spec=None, research_report=None,
             live_actions=None) -> RunReport:
+        # Sandbox network-on announcement, one line on
+        # stderr at run start. Unknown (None) or off says
+        # nothing.
+        if self.network_available is True:
+            print("Sandbox network: on", file=sys.stderr)
         # A frozen spec binds the planner: if one is given,
         # plan from it, do not plan fresh from the goal alone.
         # Experience reuse still applies, but only if its
@@ -466,6 +499,17 @@ class GoalRunner:
                             steps=steps,
                             deliverables=[str(s["deliverable"]) for s in steps if s.get("deliverable")],
                             criteria=[])
+                        # Adapted plans get the same plan-first
+                        # research + replan pass as fresh and
+                        # spec-bound plans. Neither adapt output
+                        # carries open questions today, so this
+                        # is usually a no-op; if one ever does,
+                        # its items are preserved onto the Plan
+                        # first instead of being dropped.
+                        plan.needs_research = [str(x) for x in
+                                               ((summary.get("needs_research") or [])
+                                                if isinstance(summary, dict) else [])]
+                        plan = self._research_and_replan(plan, goal)
                         if plan.deliverables:
                             self._adapted = True
                             self._adapted_from = experiences[0].goal
@@ -480,6 +524,14 @@ class GoalRunner:
                             deliverables=[str(n["deliverable"])
                                           for n in nodes if n.get("deliverable")],
                             criteria=[])
+                        # Same replan routing as the DAG branch:
+                        # open questions carried on adapted nodes
+                        # are preserved onto the Plan, then the
+                        # plan goes through research + replan.
+                        plan.needs_research = [str(x) for n in nodes
+                                               if isinstance(n, dict)
+                                               for x in (n.get("needs_research") or [])]
+                        plan = self._research_and_replan(plan, goal)
                         if plan.deliverables:
                             self._adapted = True
                             self._adapted_from = experiences[0].goal
@@ -497,6 +549,7 @@ class GoalRunner:
         if hasattr(client, "calls") and hasattr(client, "tokens_estimated"):
             report.model_calls = int(client.calls)
             report.model_tokens_estimated = int(client.tokens_estimated)
+        report.network = self.network_available
         report.adapted = bool(self._adapted)
         report.adapted_from = str(self._adapted_from)
         report.dag_summary = dict(self._dag_summary)
@@ -730,7 +783,7 @@ class GoalRunner:
         self._trace("approval", "started", "live approval requested")
         decision: Decision = self.gate.ask(
             "live", "Approve live execution?",
-            f"Goal: {goal}\nDeliverables: {', '.join(files)}")
+            self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"))
         self._trace("approval", decision.verdict, "live approval")
         approved = decision.verdict == "approved"
         if not approved:

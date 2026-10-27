@@ -36,13 +36,24 @@ from .model_client import FakeClient
 from ..capabilities.sandbox import Sandbox
 
 
-def _cli_gate() -> ApprovalGate:
+def _cli_gate(timeout_seconds: int = 180) -> ApprovalGate:
     def decide(kind: str, title: str, body: str) -> Decision:
         print(f"\n[{kind}] {title}\n{body}\n")
         answer = input("Approve? [y/N] ").strip().lower()
         return Decision("approved" if answer in ("y", "yes") else "rejected")
 
-    return ApprovalGate(decide)
+    return ApprovalGate(decide, timeout_seconds=timeout_seconds)
+
+
+def _network_available(execution_backend, sandbox) -> bool:
+    """True when shell steps can reach the network, for the loop's
+    network-on announcement and the sandbox offline hint. A Docker
+    backend reports its own flag; a bubblewrap backend is always
+    offline; with no backend, shell runs through Sandbox, which is
+    offline when bwrap is present and on the host network otherwise."""
+    if execution_backend is not None:
+        return bool(getattr(execution_backend, "allow_network", False))
+    return False if getattr(sandbox, "bwrap", None) else True
 
 
 def _promotion_ask(point) -> bool:
@@ -226,7 +237,11 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         return str(question)
 
     def declare_blocked(reason):
-        return f"[blocked] {reason}"
+        # Single shape source: direction.blocked_note is the dict form,
+        # the tool keeps the exact "[blocked] {reason}" string it always
+        # returned, so no caller behaviour changes.
+        from ..agentic.direction import blocked_note
+        return f"[blocked] {blocked_note(reason)['reason']}"
 
     def schedule_job(name, kind="", schedule="", goal=""):
         from ..interface.triggers import Scheduler, SchedulerJob
@@ -516,8 +531,9 @@ def main(argv: list[str] | None = None) -> int:
     tools_parser.add_argument("action", choices=["list", "check"], help="list = list plugin tools, check = check a tool exists")
     tools_parser.add_argument("name", nargs="?", default="", help="Tool name for check")
     dag_parser = sub.add_parser("dag", help="Inspect saved DAG workflows")
-    dag_parser.add_argument("action", choices=["list", "show"], help="list = list saved DAGs, show = show one DAG")
-    dag_parser.add_argument("id", nargs="?", default="", help="DAG id for show")
+    dag_parser.add_argument("action", choices=["list", "show", "run"], help="list = list saved DAGs, show = show one DAG, run = execute one DAG's tool nodes")
+    dag_parser.add_argument("id", nargs="?", default="", help="DAG id for show/run")
+    dag_parser.add_argument("--run-id", default=None, help="Run id for dag run checkpoints; reuse it to resume a killed run")
     mission_parser = sub.add_parser("mission", help="Mission lifecycle records")
     mission_parser.add_argument("action", choices=["list", "show", "discard", "create"], help="list = list missions, show = show one, discard = discard a rejected mission, create = create a draft mission")
     mission_parser.add_argument("id", nargs="?", default="", help="Project id")
@@ -932,6 +948,43 @@ def main(argv: list[str] | None = None) -> int:
             dag = store.get(args.id)
             print(dag if dag else f"No DAG {args.id}")
             return 0 if dag else 2
+        if args.action == "run":
+            # Execute a saved DAG's tool nodes via the DAG executor.
+            # Tool nodes map to the core ToolRegistry (write/read/list/
+            # shell/calculate, confined to the sandbox workdir); fast
+            # and strong nodes have no tool mapping, so a DAG containing
+            # any is refused before anything runs rather than half-run.
+            # Checkpoints live in the Registry under the run id, so a
+            # killed run resumes by re-running with the same --run-id.
+            from ..agentic.dag import DAG, DAGNode
+            from ..agentic.dag_executor import DAGExecutor
+            from ..capabilities.registry_db import Registry
+            from ..capabilities.tools import ToolRegistry
+            import uuid as _dag_uuid
+            data = store.get(args.id)
+            if data is None:
+                print(f"No DAG {args.id}")
+                return 2
+            try:
+                dag = DAG([DAGNode.from_dict(node) for node in data.get("nodes", [])])
+                non_tool = [node.id for node in dag.nodes.values() if node.executor != "tool"]
+                if non_tool:
+                    print(f"dag run supports tool nodes only, refusing DAG with non-tool nodes: {', '.join(non_tool)}")
+                    return 2
+                registry = ToolRegistry(sandbox.workdir, sandbox=sandbox)
+                def _run_node(node):
+                    args_dict = node.args if isinstance(node.args, dict) else {}
+                    return registry.call(node.tool, args_dict)
+                run_id = args.run_id or _dag_uuid.uuid4().hex[:12]
+                executor = DAGExecutor(dag, _run_node, state=Registry(config.home), run_id=run_id)
+                result = executor.execute()
+            except Exception as exc:
+                print(f"dag run {args.id} failed: {exc}")
+                return 1
+            print(f"dag run {args.id}: {result['status']}, completed: {', '.join(result['completed'])}")
+            if result["failed"]:
+                print(f"failed: {result['failed']}")
+            return 0 if result["status"] == "done" else 1
         return 2
     if args.command == "mission":
         from ..capabilities.mission import MissionStore
@@ -1149,7 +1202,7 @@ def main(argv: list[str] | None = None) -> int:
                             _sbackend = _smb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
                         except Exception:
                             _sbackend = None
-                        _srunner = GoalRunner(client, sandbox, _cli_gate(), config.home, memory=memory, project_id="default", plugins=_splugins, execution_backend=_sbackend, budget=_SB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_ST(config.home, project_id="default"), model_verifier=_SMV(client), kernel_mode=config.kernel_mode)
+                        _srunner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_splugins, execution_backend=_sbackend, budget=_SB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_ST(config.home, project_id="default"), model_verifier=_SMV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_sbackend, sandbox))
                         _sreport = _srunner.run(message.get("text", ""))
                         print(f"Slack run: {_sreport.status}, files: {', '.join(_sreport.files)}")
                 if not args.seconds or _time.time() >= end:
@@ -1192,7 +1245,7 @@ def main(argv: list[str] | None = None) -> int:
                 _backend = _mb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _backend = None
-            runner = GoalRunner(client, sandbox, _cli_gate(), config.home, memory=memory, project_id=job.project_id, plugins=_plugins, execution_backend=_backend, budget=_B(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T(config.home, project_id=job.project_id), model_verifier=_MV(client), kernel_mode=config.kernel_mode)
+            runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home, memory=memory, project_id=job.project_id, plugins=_plugins, execution_backend=_backend, budget=_B(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T(config.home, project_id=job.project_id), model_verifier=_MV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox))
             report = runner.run(job.goal)
             print(f"Tick job {job.name}: {report.status}, files: {', '.join(report.files)}")
         return 0
@@ -1209,7 +1262,7 @@ def main(argv: list[str] | None = None) -> int:
                 _backend = _mb2(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _backend = None
-            runner = GoalRunner(client, sandbox, _cli_gate(), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode)
+            runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox))
             report = runner.run(goal)
             if report.status == "chat":
                 return report.chat_reply or "Received."
@@ -1259,7 +1312,8 @@ def main(argv: list[str] | None = None) -> int:
                              media_downloader=lambda media_id: download_whatsapp_media(msg, media_id),
                              run_control=run_control,
                              webui_token=config.webui_token or None,
-                             transcribe_key=config.transcribe_api_key or config.api_key or None)
+                             transcribe_key=config.transcribe_api_key or config.api_key or None,
+                             config=config)
 
         def _goal_handler(event):
             from ..agentic.loop import GoalRunner
@@ -1326,19 +1380,22 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_gate, researcher=_web_researcher), router=model_router, versioned_writes=True)
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_gate, researcher=_web_researcher), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, sandbox))
             # Swarm, Aidon decides: if the goal genuinely splits,
             # run the subgoals in parallel and merge, else single run.
             try:
                 from ..agentic.swarm import run_swarm
                 def _swarm_runner(subgoal):
+                    import uuid as _sw_uuid
                     sub_runner = GoalRunner(client, sandbox, server.webui_gate.gate,
                                             config.home, memory=memory,
                                             project_id=event.project_id, plugins=plugins,
                                             budget=budget, trace=trace,
                                             model_verifier=ModelVerifier(client),
                                             kernel_mode=config.kernel_mode,
-                                            run_id=run_id, run_control=run_control, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=server.webui_gate.gate, researcher=_web_researcher), router=model_router, versioned_writes=True)
+                                            semantic_router=semantic_router,
+                                            use_semantic_router_skip=True,
+                                            run_id=f"{run_id}-{_sw_uuid.uuid4().hex[:8]}", run_control=run_control, researcher=_web_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=server.webui_gate.gate, researcher=_web_researcher), router=model_router, versioned_writes=True, network_available=_network_available(None, sandbox))
                     sub_report = sub_runner.run(subgoal)
                     return f"[{sub_report.status}] {', '.join(sub_report.files)} {sub_report.error}".strip()
                 swarm_result = run_swarm(event.goal, client, _swarm_runner)
@@ -1453,11 +1510,11 @@ def main(argv: list[str] | None = None) -> int:
                 _backend = _vmb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _backend = None
-            _runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
+            _runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home,
                                  memory=memory, project_id=goal_record.project_id, plugins=_plugins,
                                  execution_backend=_backend, budget=_VB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
                                  trace=_VT(config.home, project_id=goal_record.project_id), model_verifier=_VM(client),
-                                 kernel_mode=config.kernel_mode)
+                                 kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox))
             _report = _runner.run(goal_record.goal)
             return {"status": _report.status, "files": _report.files, "error": _report.error}
         auth = AuthStore(config.home)
@@ -1688,7 +1745,7 @@ def main(argv: list[str] | None = None) -> int:
                 _be = _mb2(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _be = None
-            return GoalRunner(client, sandbox, _cli_gate(), config.home, memory=memory, project_id="default", plugins=_pl, execution_backend=_be, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_M2(client), kernel_mode=config.kernel_mode)
+            return GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_pl, execution_backend=_be, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_M2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_be, sandbox))
 
         import os as _os
         _slack_last_ts = ""
@@ -1734,12 +1791,12 @@ def main(argv: list[str] | None = None) -> int:
                     _router2 = _SR2(memory.embedder, cache_path=config.home / 'semantic_router_vectors.json')
                 except Exception:
                     _router2 = None
-                runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
-                                    memory=memory, project_id="default", plugins=_plugins,
+                runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home,
+                                    memory=memory, project_id=job.project_id, plugins=_plugins,
                                     execution_backend=_backend, budget=_Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
-                                    trace=_Trace(config.home, project_id="default"), model_verifier=_MV(client),
+                                    trace=_Trace(config.home, project_id=job.project_id), model_verifier=_MV(client),
                                     kernel_mode=config.kernel_mode, semantic_router=_router2,
-                                    use_semantic_router_skip=True)
+                                    use_semantic_router_skip=True, network_available=_network_available(_backend, sandbox))
                 report = runner.run(job.goal)
                 print(f"Job {job.name}: {report.status}, files: {', '.join(report.files)}")
             # Tick drain: once per tick, due notifications only,
@@ -1860,7 +1917,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"findings: {len(findings)}")
             return 0
         ok, findings, message = registry.adopt(
-            Path(args.path), gate=_cli_gate(), memory=memory,
+            Path(args.path), gate=_cli_gate(config.approval_timeout_seconds), memory=memory,
             project_id=args.project)
         print(message)
         for finding in findings:
@@ -1881,7 +1938,7 @@ def main(argv: list[str] | None = None) -> int:
             pass
         from ..agentic.interview import InterviewRunner
         runner = InterviewRunner(client, config.home, memory=memory,
-                                 gate=_cli_gate(), project_id=args.project)
+                                 gate=_cli_gate(config.approval_timeout_seconds), project_id=args.project)
         print(f"Spec template: {runner.ensure_template()}  "
               f"(copy it, fill it in, attach it to skip the interview; "
               f"docs: README, Spec sheet section)")
@@ -1917,9 +1974,28 @@ def main(argv: list[str] | None = None) -> int:
                 return [f"{r.get('title', '')}: {r.get('snippet', '')}" for r in result.get("results", [])]
             except Exception:
                 return []
-        goal_runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
+        # Full runner, same as the CLI goal run: budget, trace, model
+        # verification, semantic routing, and run control. The interview
+        # branch previously built a thin runner with none of these, so
+        # caps, verification, and steer/cancel silently did not apply.
+        from ..agentic.budgets import Budget as _IBudget
+        from ..agentic.trace import TraceRecorder as _ITrace
+        from ..agentic.verifier_model import ModelVerifier as _IModelVerifier
+        from ..interface.run_control import RunControl as _IRunControl
+        try:
+            from ..agentic.semantic_router import SemanticRouter as _ISemanticRouter
+            _i_router = _ISemanticRouter(memory.embedder, cache_path=config.home / 'semantic_router_vectors.json')
+        except Exception:
+            _i_router = None
+        goal_runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home,
                                  memory=memory, promotion_ask=_promotion_ask,
-                                 project_id=args.project, plugins=plugins, execution_backend=execution_backend, researcher=_interview_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(), researcher=_interview_researcher), router=model_router, versioned_writes=True)
+                                 project_id=args.project, plugins=plugins, execution_backend=execution_backend, researcher=_interview_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.approval_timeout_seconds), researcher=_interview_researcher), router=model_router, versioned_writes=True,
+                                 budget=_IBudget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
+                                 trace=_ITrace(config.home, project_id=args.project),
+                                 model_verifier=_IModelVerifier(client),
+                                 semantic_router=_i_router,
+                                 use_semantic_router_skip=True,
+                                 run_control=_IRunControl(config.home), network_available=_network_available(execution_backend, sandbox))
         report = goal_runner.run(args.text, spec=result.spec)
         print(f"status: {report.status}")
         print(f"verified: {report.verified}")
@@ -1956,15 +2032,15 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             return []
     import uuid as _uuid
-    runner = GoalRunner(client, sandbox, _cli_gate(), config.home,
+    runner = GoalRunner(client, sandbox, _cli_gate(config.approval_timeout_seconds), config.home,
                         memory=memory, promotion_ask=_promotion_ask,
                         project_id=args.project, plugins=plugins, execution_backend=execution_backend,
                         budget=budget, trace=trace, model_verifier=model_verifier,
                         kernel_mode=config.kernel_mode, semantic_router=_cli_router,
                         use_semantic_router_skip=True, researcher=_researcher,
-                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(), researcher=_researcher),
+                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.approval_timeout_seconds), researcher=_researcher),
                         router=model_router, versioned_writes=True,
-                        run_id=_uuid.uuid4().hex[:12])
+                        run_id=_uuid.uuid4().hex[:12], network_available=_network_available(execution_backend, sandbox))
     spec = None
     if getattr(args, "spec", None):
         from pathlib import Path
@@ -1978,7 +2054,24 @@ def main(argv: list[str] | None = None) -> int:
         try:
             from ..agentic.swarm import run_swarm
             def _swarm_runner(subgoal):
-                sub_report = runner.run(subgoal, spec=spec)
+                # Per-subgoal runner, not the shared main runner: each
+                # sub-run gets its own run_id (never the parent's), and
+                # the research + routing the main runner uses.
+                sub_runner = GoalRunner(client, sandbox, runner.gate,
+                                        config.home, memory=memory,
+                                        promotion_ask=_promotion_ask,
+                                        project_id=args.project, plugins=plugins,
+                                        execution_backend=execution_backend,
+                                        budget=budget, trace=trace,
+                                        model_verifier=model_verifier,
+                                        kernel_mode=config.kernel_mode,
+                                        semantic_router=_cli_router,
+                                        use_semantic_router_skip=True,
+                                        researcher=_researcher,
+                                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=runner.gate, researcher=_researcher),
+                                        router=model_router, versioned_writes=True,
+                                        run_id=f"{runner.run_id}-{_uuid.uuid4().hex[:8]}", network_available=_network_available(execution_backend, sandbox))
+                sub_report = sub_runner.run(subgoal, spec=spec)
                 return f"[{sub_report.status}] {', '.join(sub_report.files)} {sub_report.error}".strip()
             swarm_result = run_swarm(args.text, client, _swarm_runner)
             if swarm_result.get("swarmed"):
