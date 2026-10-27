@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./launch.sh
-#     Starts the WebUI server on http://127.0.0.1:8002/,
+#     Starts the WebUI server on http://127.0.0.1:8765/,
 #     with WhatsApp and Slack webhooks at
 #     /webhook/whatsapp and /webhook/slack.
 #   ./launch.sh goal "Plan a dinner for two"
@@ -58,8 +58,10 @@ fi
 cd "$REPO_DIR"
 
 if [ "${1:-}" = "--both" ]; then
-  WEBUI_PORT=${AIDON_WEBUI_PORT:-8002}
-  WEBHOOK_PORT=${AIDON_WEBHOOK_PORT:-8003}
+  # Keep the old Aidon ports so an existing Tailscale Funnel continues to
+  # work: public webhook Funnel -> 8766, tailnet WebUI -> 8765.
+  WEBUI_PORT=${AIDON_WEBUI_PORT:-8765}
+  WEBHOOK_PORT=${AIDON_WEBHOOK_PORT:-8766}
 
   if command -v ss >/dev/null 2>&1; then
     for port in "$WEBUI_PORT" "$WEBHOOK_PORT"; do
@@ -88,7 +90,8 @@ if [ "${1:-}" = "--both" ]; then
 fi
 
 if [ $# -eq 0 ]; then
-  exec "$PYTHON" -m src.system.main webui serve
+  exec "$PYTHON" -m src.system.main webui serve \
+    --port "${AIDON_WEBUI_PORT:-8765}"
 else
   exec "$PYTHON" -m src.system.main "$@"
 fi
