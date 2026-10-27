@@ -219,6 +219,7 @@ def main(argv: list[str] | None = None) -> int:
     export_parser = sub.add_parser("export", help="Render a read-only markdown view of the registry, and export memory points")
     export_parser.add_argument("--dir", default="", help="Output directory, default <home>/export")
     export_parser.add_argument("--registry", action="store_true", help="Export the full registry to Markdown, in addition to memory points")
+    export_parser.add_argument("--full", action="store_true", help="Also export missions, skills, DAGs, and runs as separate Markdown files")
     schedule_parser = sub.add_parser("schedule", help="Cron-like scheduled jobs, old Aidon schedule commands, scheduler serve runs them")
     schedule_parser.add_argument("action", choices=["add", "list", "remove", "show"], help="add = add a job, list = list jobs, remove = remove a job, show = show a job")
     schedule_parser.add_argument("--name", default="", help="Job name")
@@ -254,6 +255,35 @@ def main(argv: list[str] | None = None) -> int:
     tick_parser = sub.add_parser("tick", help="Run due scheduler jobs once, old Aidon tick")
     repl_parser = sub.add_parser("repl", help="Full REPL, old Aidon repl, /help, /history, /quit, or a goal")
     learn_parser = sub.add_parser("learn", help="Idle learn cycle: re-test candidate skills, promote passers, consolidate validated duplicates")
+    skill_lib_parser = sub.add_parser("skill-library", help="Full skill library: list, show, promote, trust, retire, rollback, versions")
+    skill_lib_parser.add_argument("action", choices=["list", "show", "promote", "trust", "retire", "rollback", "versions"], help="list = list skills, show = show one, promote/trust/retire = lifecycle, rollback = restore a version, versions = version history")
+    skill_lib_parser.add_argument("name", nargs="?", default="", help="Skill name")
+    skill_lib_parser.add_argument("--version", type=int, default=0, help="Version for rollback")
+    conversations_parser = sub.add_parser("conversations", help="SQLite conversation store: list, history, record, delete")
+    conversations_parser.add_argument("action", choices=["list", "history", "record", "delete"], help="list = list conversations, history = show turns, record = record a turn, delete = delete a conversation")
+    conversations_parser.add_argument("id", nargs="?", default="", help="Conversation id")
+    conversations_parser.add_argument("--role", default="user", help="Role for record")
+    conversations_parser.add_argument("--text", default="", help="Text for record")
+    registry_parser = sub.add_parser("registry-db", help="SQLite registry: list runs, show a run, list skill versions")
+    registry_parser.add_argument("action", choices=["runs", "show", "skill-versions"], help="runs = list run records, show = show one run, skill-versions = list versions for a skill")
+    registry_parser.add_argument("id", nargs="?", default="", help="Run id or skill name")
+    hub_parser = sub.add_parser("hub", help="Remote hub server and client: serve, list, push, pull")
+    hub_parser.add_argument("action", choices=["serve", "list", "push", "pull"], help="serve = start the hub server, list = list DAGs on a hub, push/pull = push or pull a DAG JSON file")
+    hub_parser.add_argument("--url", default="http://127.0.0.1:8003", help="Hub URL for list/push/pull")
+    hub_parser.add_argument("--port", type=int, default=8003, help="Port for serve")
+    hub_parser.add_argument("--path", default="", help="DAG JSON file for push/pull")
+    hub_parser.add_argument("--token", default="", help="Hub token, or AIDON_HUB_TOKEN")
+    mcp_parser = sub.add_parser("mcp", help="MCP client over HTTP: list tools, call a tool")
+    mcp_parser.add_argument("action", choices=["list", "call"], help="list = list tools on the server, call = call one tool")
+    mcp_parser.add_argument("--url", default="", help="MCP HTTP endpoint, or AIDON_MCP_URL")
+    mcp_parser.add_argument("--name", default="", help="Tool name for call")
+    mcp_parser.add_argument("--args", default="{}", help="Tool arguments JSON for call")
+    docstore_parser = sub.add_parser("docstore", help="Per-document vector store: ingest a file, search ingested documents, drop a collection")
+    docstore_parser.add_argument("action", choices=["ingest", "search", "drop", "list"], help="ingest = index a file, search = search ingested documents, drop = forget a collection, list = list collections")
+    docstore_parser.add_argument("arg", nargs="?", default="", help="File path for ingest, query for search, collection for drop")
+    intake_parser = sub.add_parser("intake", help="Intake schema: missing slots and summary for a goal text")
+    intake_parser.add_argument("--schema", default="generic", help="Schema name: generic or dinner")
+    intake_parser.add_argument("text", nargs="?", default="", help="Goal text to check against the schema")
     args = parser.parse_args(argv)
 
     config = Config.load()
@@ -291,6 +321,111 @@ def main(argv: list[str] | None = None) -> int:
               f"retired={summary.get('retired_duplicates', [])} "
               f"trusted_for_review={summary.get('trusted_duplicates_for_review', [])} "
               f"skipped={summary.get('skipped', [])}")
+        return 0
+    if args.command == "skill-library":
+        from ..capabilities.skill_library import SkillLibrary
+        lib = SkillLibrary(config.home)
+        if args.action == "list":
+            for skill in lib.list():
+                print(f"{skill.name} v{skill.version} {skill.state} privileged={skill.privileged}")
+            return 0
+        if not args.name:
+            print("skill-library show/promote/trust/retire/rollback/versions need a name"); return 2
+        if args.action == "show":
+            skill = lib.get(args.name)
+            print(skill if skill else f"No skill {args.name}"); return 0 if skill else 2
+        if args.action == "promote":
+            print(lib.promote(args.name, {"passed": True, "evidence": "CLI promote"})); return 0
+        if args.action == "trust":
+            print(lib.trust(args.name, approved=True)); return 0
+        if args.action == "retire":
+            print(lib.retire(args.name, "retired from CLI")); return 0
+        if args.action == "rollback":
+            print(lib.rollback(args.name, args.version)); return 0
+        if args.action == "versions":
+            print(lib.version_history(args.name)); return 0
+        return 2
+    if args.command == "conversations":
+        from ..memory.conversations_db import ConversationStoreDB
+        store = ConversationStoreDB(config.home)
+        if args.action == "list":
+            print(store.list_conversations("default")); return 0
+        if not args.id:
+            print("conversations history/record/delete need an id"); return 2
+        if args.action == "history":
+            print(store.history(args.id)); return 0
+        if args.action == "record":
+            print(store.record_exchange(args.id, args.role, args.text)); return 0
+        if args.action == "delete":
+            print(f"Deleted {args.id}: {store.delete_conversation(args.id)}"); return 0
+        return 2
+    if args.command == "registry-db":
+        from ..capabilities.registry_db import Registry
+        reg = Registry(config.home)
+        if args.action == "runs":
+            print(reg.list_runs()); return 0
+        if args.action == "show":
+            print(reg.get_run(args.id) if args.id else "registry-db show needs an id"); return 0
+        if args.action == "skill-versions":
+            print(reg.list_skill_versions(args.id) if args.id else "registry-db skill-versions needs a skill name"); return 0
+        return 2
+    if args.command == "hub":
+        import os as _os
+        from ..capabilities.remote_hub_server import HubClient, HubServer
+        if args.action == "serve":
+            token = args.token or _os.environ.get("AIDON_HUB_TOKEN", "")
+            server = HubServer(config.home, token=token)
+            print(f"Hub serving on 127.0.0.1:{args.port} (token set: {bool(token)})")
+            server.serve(port=args.port)
+            return 0
+        client = HubClient(args.url, token=args.token or _os.environ.get("AIDON_HUB_TOKEN", ""))
+        if args.action == "list":
+            print(client.list_dags()); return 0
+        if args.action == "push":
+            import json as _json
+            from pathlib import Path as _P
+            print(client.push_dag(_json.loads(_P(args.path).read_text()))); return 0
+        if args.action == "pull":
+            print(client.pull_dag(args.id)); return 0
+        return 2
+    if args.command == "mcp":
+        import os as _os, json as _json
+        from ..interface.mcp_http import McpHttpClient
+        url = args.url or _os.environ.get("AIDON_MCP_URL", "")
+        if not url:
+            print("mcp needs --url or AIDON_MCP_URL"); return 2
+        client = McpHttpClient(url, token=_os.environ.get("AIDON_MCP_TOKEN", ""))
+        client.initialize()
+        try:
+            if args.action == "list":
+                print(client.list_tools()); return 0
+            print(client.call_tool(args.name, _json.loads(args.args))); return 0
+        finally:
+            client.close()
+    if args.command == "docstore":
+        from ..memory.docstore import DocStore
+        from pathlib import Path as _P
+        store = DocStore(home=config.home)
+        if args.action == "ingest":
+            path = _P(args.arg)
+            print(store.ingest(path.name, path.read_text(encoding="utf-8", errors="replace"))); return 0
+        if args.action == "search":
+            print(store.search_all(args.arg)); return 0
+        if args.action == "drop":
+            print(f"Dropped {args.arg}: {store.drop(args.arg)}"); return 0
+        if args.action == "list":
+            print(store.collections()); return 0
+        return 2
+    if args.command == "intake":
+        from ..agentic.intake_schema import get_schema, missing_slots, ready, summary_lines
+        schema = get_schema(args.schema)
+        if schema is None:
+            print(f"Unknown intake schema: {args.schema}"); return 2
+        spec = {"goal": args.text}
+        print(f"Ready: {ready(schema, spec)}")
+        print(f"Missing: {missing_slots(schema, spec)}")
+        for line in summary_lines(schema, spec):
+            print(line)
         return 0
     if args.command == "memory":
         from ..memory.kb import KnowledgeBase
@@ -436,6 +571,9 @@ def main(argv: list[str] | None = None) -> int:
             from ..capabilities.registry import export_registry_markdown
             reg_path = export_registry_markdown(config.home, dest / "registry.md")
             print(f"Exported registry to {reg_path}")
+        if args.full:
+            from ..capabilities.export_full import export_markdown
+            print(f"Full export: {export_markdown(config.home, dest / 'full')}")
         return 0
     if args.command == "schedule":
         from ..interface.triggers import Scheduler, SchedulerJob

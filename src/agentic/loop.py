@@ -156,6 +156,18 @@ class GoalRunner:
             from .kernel import kernel_allowed
             if not kernel_allowed(name, True):
                 raise ValueError(f"kernel mode: tool {name} is not a seed tool")
+        if name == "shell":
+            # Mandatory-approval commands always need a human,
+            # even in autonomous mode: recursive delete, piped
+            # download-to-shell, sudo, raw disk writes, and the
+            # rest of the security gate's list.
+            from ..capabilities.security_gate import command_needs_mandatory_approval
+            command_text = " ".join(str(c) for c in args.get("command", [])) if isinstance(args.get("command"), list) else str(args.get("command", ""))
+            reason = command_needs_mandatory_approval(command_text)
+            if reason:
+                decision = self.gate.ask("live", f"Mandatory approval: shell ({reason})", f"Run shell command: {command_text}?")
+                if decision.verdict != "approved":
+                    raise ValueError(f"shell command rejected by approval gate ({reason})")
         if name == "shell" and self.execution_backend is not None:
             command = args["command"]
             if not isinstance(command, list) or not command:

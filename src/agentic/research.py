@@ -96,8 +96,11 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 class Researcher:
     def __init__(self, timeout_seconds: int = 15, allowlist=None,
                  grants=None, parallel_tools: int = 4,
-                 allow_local: bool = False):
+                 allow_local: bool = False, cache=None):
         self.timeout_seconds = timeout_seconds
+        # Optional ResearchCache: a cached page is returned
+        # without a fetch, and a successful fetch is stored.
+        self.cache = cache
         # Wired, not just defined: when an allowlist is set, a URL
         # outside it (and outside any explicit grant) is never
         # fetched. It is recorded as a blocked source, not silently
@@ -115,6 +118,14 @@ class Researcher:
     def fetch(self, url: str) -> Source:
         from .research_allow import guard_reason
         fetched_at = datetime.now().isoformat(timespec="seconds")
+        if self.cache is not None:
+            try:
+                cached = self.cache.fetch(url)
+            except Exception:
+                cached = None
+            if cached:
+                return Source(url=url, fetched_at=fetched_at,
+                              excerpt=_strip_html(cached)[:2000])
         opener = urllib.request.build_opener(_NoRedirect)
         current = url
         for _hop in range(6):
@@ -128,6 +139,11 @@ class Researcher:
                     current, headers={"User-Agent": "Aidon/1.0 research"})
                 with opener.open(request, timeout=self.timeout_seconds) as response:
                     raw = response.read().decode("utf-8", errors="ignore")
+                if self.cache is not None:
+                    try:
+                        self.cache.store(url, raw)
+                    except Exception:
+                        pass
                 text = _strip_html(raw)
                 return Source(url=url, fetched_at=fetched_at, excerpt=text[:2000])
             except urllib.error.HTTPError as exc:

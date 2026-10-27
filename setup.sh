@@ -71,6 +71,8 @@ else
     echo "WARNING: examples/.env.example not found, no .env created." >&2
   fi
 fi
+# Secrets file, owner-only, whether it was just created or already there.
+chmod 600 "$AIDON_HOME/.env" 2>/dev/null || true
 
 dotenv_get() {
   DOTENV_FILE="$AIDON_HOME/.env" DOTENV_KEY="$1" python3 -c "
@@ -150,12 +152,34 @@ ask_yes_no() {
   esac
 }
 install_package() {
+  # uv add first, as requested: the package becomes a project
+  # dependency (in the matching optional group, or the main list
+  # for qdrant-client), pyproject.toml and uv.lock are updated,
+  # and the package is installed into the project environment.
+  # That means setup.sh now modifies pyproject.toml and uv.lock:
+  # commit them if you want other machines to get the same deps.
+  # Fallbacks, in order, when uv add cannot run: uv pip install
+  # (installs into the venv without touching pyproject), then
+  # plain pip install. A failed install is never fatal here:
+  # the feature simply stays off until the package is installed.
+  pkg="$1"
+  extra="$2"
+  if command -v uv >/dev/null 2>&1 && [ -f "$REPO_DIR/pyproject.toml" ]; then
+    if [ -n "$extra" ]; then
+      (cd "$REPO_DIR" && uv add --optional "$extra" "$pkg") && return 0
+    else
+      (cd "$REPO_DIR" && uv add "$pkg") && return 0
+    fi
+    echo "  uv add of $pkg failed, trying uv pip install..."
+  fi
+  if command -v uv >/dev/null 2>&1; then
+    uv pip install "$pkg" && return 0
+    echo "  uv pip install of $pkg failed, trying pip..."
+  fi
   if python3 -m pip --version >/dev/null 2>&1; then
-    python3 -m pip install "$1" || echo "  install of $1 failed"
-  elif command -v uv >/dev/null 2>&1; then
-    uv pip install "$1" || echo "  install of $1 failed"
+    python3 -m pip install "$pkg" || echo "  install of $pkg failed"
   else
-    echo "  no pip and no uv found, install $1 yourself, then rerun ./setup.sh"
+    echo "  no pip and no uv found, install $pkg yourself, then rerun ./setup.sh"
   fi
 }
 
@@ -245,6 +269,36 @@ if [ "$NONINTERACTIVE" = 0 ]; then
   ask_key "GITHUB_TOKEN" "GitHub token"
   ask_key "AIDON_TRANSCRIBE_API_KEY" "Transcribe API key"
   ask_key "AIDON_WEBUI_TOKEN" "WebUI token (empty = localhost only)"
+  echo ""
+  echo "Accounts and addresses - the ids and addresses the keys above"
+  echo "belong to. A token without its account id is half a setup:"
+  echo "Threads and Instagram need the account/user id to publish,"
+  echo "Slack needs a channel to listen in, and owner email is where"
+  echo "drafts and reports to you go."
+  ask_key "AIDON_THREADS_ACCOUNT_ID" "Threads account ID (for publishing)"
+  ask_key "AIDON_IG_USER_ID" "Instagram user ID (for publishing)"
+  ask_key "AIDON_OWNER_EMAIL" "Owner email (you, for drafts and reports to you)"
+  ask_setting "AIDON_SLACK_INBOUND_CHANNEL" "Slack inbound channel ID (empty = webhooks only, no polling)"
+  ask_setting "AIDON_SLACK_POLL_SECONDS" "Slack poll interval in seconds" "30"
+  ask_setting "AIDON_APPROVAL_NUDGE_CHANNEL" "Slack channel for approval nudges (empty = no nudges)"
+  ask_setting "AIDON_DAILY_REPORT_TIME" "Daily report time, HH:MM (empty = no daily report)"
+  ask_setting "AIDON_TIMEZONE" "Timezone" "America/Vancouver"
+  ask_key "AIDON_TTS_VOICE_ID" "Fish Audio TTS voice ID (empty = default voice)"
+  ask_setting "AIDON_SEARCH_BACKEND" "Search backend, tavily or searxng" "tavily"
+  ask_setting "AIDON_SEARXNG_URL" "SearXNG URL (only used when backend is searxng)" "http://localhost:8888"
+  ask_setting "AIDON_QDRANT_URL" "Qdrant server URL (empty = local mode under the Aidon home)"
+  ask_setting "AIDON_EXECUTION_BACKEND" "Execution backend, bubblewrap or docker" "bubblewrap"
+  ask_setting "AIDON_IMAGE_MODEL" "Image model" "muse-image-1.0"
+  ask_setting "AIDON_SAM_MODEL" "SAM model" "meta-sam"
+  ask_key "AIDON_MCP_TOKEN" "MCP server token (required when another app calls Aidon's MCP server)"
+  ask_key "AIDON_HUB_TOKEN" "Remote hub token (for hub serve / hub push)"
+  ask_setting "AIDON_MCP_URL" "MCP HTTP endpoint to call (empty = no external MCP server)"
+  echo ""
+  echo "About Aidon's own email: there is no separate Aidon email"
+  echo "setting, in old or new Aidon. Gmail send uses the Gmail"
+  echo "account that granted the refresh token above, so Aidon"
+  echo "sends from that account. Owner email, asked above, is the"
+  echo "address drafts and reports to you are addressed to."
   echo "keeping secrets in .env only - never in chat, source, or skills."
 fi
 
@@ -276,29 +330,30 @@ echo "Optional packages - each one enables one feature, and each is"
 echo "offered on its own. A package you skip is not installed, and"
 echo "its feature simply stays off until you install it."
 for spec in \
-  "qdrant-client:qdrant_client:Qdrant vector memory" \
-  "sentence-transformers:sentence_transformers:real semantic embeddings" \
-  "fastembed:fastembed:learned SPLADE sparse recall" \
-  "Pillow:PIL:image handling and video annotation" \
-  "pypdf:pypdf:PDF reading" \
-  "python-docx:docx:Word reading" \
-  "beautifulsoup4:bs4:HTML reading" \
-  "ebooklib:ebooklib:EPUB building" \
-  "markdown:markdown:EPUB building" \
-  "markitdown:markitdown:universal document reading" \
+  "qdrant-client:qdrant_client:Qdrant vector memory:" \
+  "sentence-transformers:sentence_transformers:real semantic embeddings:embed" \
+  "fastembed:fastembed:learned SPLADE sparse recall:sparse" \
+  "Pillow:PIL:image handling and video annotation:embed" \
+  "pypdf:pypdf:PDF reading:kb" \
+  "python-docx:docx:Word reading:kb" \
+  "beautifulsoup4:bs4:HTML reading:kb" \
+  "ebooklib:ebooklib:EPUB building:docs" \
+  "markdown:markdown:EPUB building:docs" \
+  "markitdown:markitdown:universal document reading:docs" \
   ; do
   pkg=$(printf '%s' "$spec" | cut -d: -f1)
   mod=$(printf '%s' "$spec" | cut -d: -f2)
   what=$(printf '%s' "$spec" | cut -d: -f3)
+  extra=$(printf '%s' "$spec" | cut -d: -f4)
   if python3 -c "import $mod" 2>/dev/null; then
     echo "optional package $pkg: present ($what)"
   else
     echo "optional package $pkg: missing ($what)"
     if [ "$WITH_OPTIONAL" = 1 ]; then
-      echo "  installing $pkg (--with-optional)..."
-      install_package "$pkg"
+      echo "  installing $pkg with uv add (--with-optional)..."
+      install_package "$pkg" "$extra"
     elif [ "$NONINTERACTIVE" = 0 ] && ask_yes_no "Install $pkg ($what)?"; then
-      install_package "$pkg"
+      install_package "$pkg" "$extra"
     else
       echo "  skipped, $what stays off until $pkg is installed."
     fi

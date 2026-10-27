@@ -100,15 +100,31 @@ def _qdrant_available() -> bool:
 class DocStore:
     """Document indexes, in memory by default, Qdrant when given one."""
 
-    def __init__(self, store=None):
+    def __init__(self, store=None, home=None):
         # store: an optional Qdrant-like client with upsert/search
         # methods. It is used only when the library imports; a
         # missing library or an unsuitable object falls back to
         # memory, so ingestion never fails on the store alone.
+        # home: when given, the in-memory index is also persisted
+        # as JSON under <home>/docstore/, so a later process (the
+        # CLI, a new run) sees what an earlier one ingested.
+        # Without home the index lives only in this process.
+        from pathlib import Path
         self._memory: dict[str, list[dict]] = {}
         self._meta: dict[str, dict] = {}
         self.backend = "memory"
         self.store = None
+        self._dir = Path(home) / "docstore" if home is not None else None
+        if self._dir is not None:
+            self._dir.mkdir(parents=True, exist_ok=True)
+            import json
+            for path in sorted(self._dir.glob("*.json")):
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    self._memory[path.stem] = data.get("records", [])
+                    self._meta[path.stem] = data.get("meta", {})
+                except Exception:
+                    continue
         if store is not None and _qdrant_available() \
                 and hasattr(store, "upsert"):
             self.store = store
@@ -127,6 +143,14 @@ class DocStore:
                     "doc_hash": digest} for i, chunk in enumerate(chunks)]
         self._memory[name] = records
         self._meta[name] = {"source": source_name, "hash": digest}
+        if self._dir is not None:
+            import json
+            try:
+                (self._dir / f"{name}.json").write_text(
+                    json.dumps({"records": records, "meta": self._meta[name]}),
+                    encoding="utf-8")
+            except Exception:
+                pass
         if self.backend == "qdrant":
             try:
                 self._upsert_qdrant(name, records)
@@ -187,6 +211,11 @@ class DocStore:
             return False
         del self._memory[collection]
         self._meta.pop(collection, None)
+        if self._dir is not None:
+            try:
+                (self._dir / f"{collection}.json").unlink(missing_ok=True)
+            except Exception:
+                pass
         if self.store is not None:
             try:
                 delete = getattr(self.store, "delete_collection", None)

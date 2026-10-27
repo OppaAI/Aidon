@@ -283,6 +283,24 @@ class PluginRegistry:
         blocking = [f for f in findings if f.type in BLOCKING_TYPES]
         if blocking:
             return False, findings, "Adoption rejected: blocking scan findings"
+        # Full security gate over the plugin's own code: a fail
+        # verdict (os.system, eval/exec, piped download-to-shell,
+        # secret-like strings) blocks adoption even when the
+        # pattern scan above passed; review verdicts go on the
+        # approval card below.
+        gate_findings = []
+        try:
+            from .security_gate import gate_text
+            for py_path in sorted(source_dir.rglob("*.py")):
+                try:
+                    result = gate_text(str(py_path), py_path.read_text(encoding="utf-8"))
+                except OSError:
+                    continue
+                gate_findings.extend(result.findings)
+                if result.verdict == "fail":
+                    return False, findings, "Adoption rejected: security gate fail"
+        except Exception:
+            gate_findings = []
         try:
             # Static validation only. Importing the module here would
             # run its top-level code on the host before the owner has
@@ -300,6 +318,9 @@ class PluginRegistry:
             body_lines.extend(f"  {f.path}:{f.line} {f.type}" for f in findings)
         else:
             body_lines.append("Scan: no findings")
+        if gate_findings:
+            body_lines.append("Security gate findings:")
+            body_lines.extend(f"  {f.severity} {f.source}: {f.message}" for f in gate_findings)
         body = "\n".join(body_lines)
         approved = False
         if approve is not None:
