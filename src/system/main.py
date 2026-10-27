@@ -682,10 +682,12 @@ class _LazyMemory:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="aidon")
     sub = parser.add_subparsers(dest="command", required=True)
-    goal_parser = sub.add_parser("goal", help="Run a goal")
+    goal_parser = sub.add_parser("goal", aliases=["run"], help="Run a goal")
     goal_parser.add_argument("text", help="Goal in plain language")
     goal_parser.add_argument("--project", default="default",
                              help="Project id for episodic memory")
+    goal_parser.add_argument("--guidance", default="",
+                             help="Binding instructions or hints for the run")
     goal_parser.add_argument("--swarm", action="store_true", help="Attempt swarm split, Aidon decides, fallback to single run")
     goal_parser.add_argument("--spec", default=None,
                              help="Attached spec sheet file, skips interview")
@@ -723,7 +725,9 @@ def main(argv: list[str] | None = None) -> int:
     v1_parser.add_argument("--scope", default="owner", choices=["owner", "agent"],
                            help="Key scope for keygen")
     webui_parser = sub.add_parser("webui", help="WebUI server and messaging webhooks")
-    webui_parser.add_argument("action", choices=["serve"], help="Serve the WebUI, localhost only")
+    webui_parser.add_argument("action", nargs="?", default="serve",
+                              choices=["serve"],
+                              help="Serve the WebUI, localhost only")
     webui_parser.add_argument("--port", type=int, default=8002,
                               help="Port for WebUI serve, default 8002, localhost only")
     webui_parser.add_argument("--webhook-only", action="store_true",
@@ -886,6 +890,10 @@ def main(argv: list[str] | None = None) -> int:
     think_parser.add_argument("--level", default="", help="Requested effort level: off, low, medium, high")
     think_parser.add_argument("--escalate", action="store_true", help="Raise one level (verifier rejection only)")
     args = parser.parse_args(argv)
+    # Old Aidon called this surface `run`; keep the spelling while using
+    # the new goal runner and its current state/control implementation.
+    if args.command == "run":
+        args.command = "goal"
 
     config = Config.load()
     config.ensure_home()
@@ -2350,7 +2358,9 @@ def main(argv: list[str] | None = None) -> int:
                         use_semantic_router_skip=True, researcher=_researcher,
                         extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.approval_timeout_seconds), researcher=_researcher),
                         router=model_router, versioned_writes=True,
-                        run_id=_goal_run_id, run_control=_goal_control, network_available=_network_available(execution_backend, sandbox))
+                        run_id=_goal_run_id, run_control=_goal_control,
+                        network_available=_network_available(execution_backend, sandbox),
+                        guidance=getattr(args, "guidance", ""))
     spec = None
     if getattr(args, "spec", None):
         from pathlib import Path
