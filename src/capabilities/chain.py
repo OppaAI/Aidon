@@ -20,10 +20,13 @@ Two supported shapes (both validated by code, never by the model):
 2. Conditional shape (restored from old Aidon / AAA):
 
     [
-      {"tool": "web_search", "args": {"query": "aurora forecast"}, "as": "wx"},
-      {"if": {"field": "wx", "op": "contains", "value": "storm"},
+      {"tool": "read", "args": {"file": "status.txt"}, "as": "status"},
+      {"if": {"field": "status", "op": "contains", "value": "ready"},
        "then": [
-         {"tool": "slack_send", "args": {"text": "Heads up: {wx}"}}
+         {"tool": "write", "args": {"file": "go.txt", "text": "ok: {status}"}}
+       ],
+       "else": [
+         {"tool": "shell", "args": {"cmd": "echo waiting"}}
        ]}
     ]
 
@@ -297,6 +300,9 @@ def run_conditional_chain(
                     errors.append(
                         f"step {idx}: 'tool' must be a non-empty string; skipped"
                     )
+                    continue
+                if name not in ALLOWED_CHAIN_TOOLS:
+                    errors.append(f"step {idx}: tool not permitted: {name}")
                     continue
                 args = _render_args(step.get("args") or {}, bindings)
                 if not isinstance(args, dict):
