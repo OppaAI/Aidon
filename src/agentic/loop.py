@@ -348,7 +348,7 @@ class GoalRunner:
         if store is None:
             return
         try:
-            from .checkpoint import RunCheckpoint, plan_to_dict
+            from .checkpoint import RunCheckpoint, plan_fingerprint
             store.save(RunCheckpoint(
                 run_id=str(self.run_id),
                 goal=goal,
@@ -357,18 +357,19 @@ class GoalRunner:
                 passed=sorted(set(passed or [])),
                 verified=sorted(set(verified or [])),
                 attempt=attempt,
+                plan_fingerprint=plan_fingerprint(plan),
             ))
         except Exception as exc:
             self._trace("checkpoint", "failed", f"save failed: {exc}")
 
-    def _load_checkpoint(self, workdir, goal: str = ""):
+    def _load_checkpoint(self, workdir, goal: str = "", plan=None):
         store = self._checkpoint_store()
         if store is None:
             return None
         try:
             from .checkpoint import filter_resumable_passed
             if goal:
-                cp = store.load_for_goal(str(self.run_id), goal)
+                cp = store.load_for_goal(str(self.run_id), goal, plan=plan)
             else:
                 cp = store.load(str(self.run_id))
             if cp is None:
@@ -1076,7 +1077,8 @@ class GoalRunner:
                              error="plan has no deliverables")
         passed: set[str] = set()
         verified: list[str] = []
-        resume = self._load_checkpoint(self.sandbox.workdir, goal=goal)
+        resume = self._load_checkpoint(self.sandbox.workdir, goal=goal,
+                                       plan=plan)
         if resume is not None and resume.phase in ("sandbox", "verified", "approved"):
             passed = set(resume.passed)
             verified = list(resume.verified)

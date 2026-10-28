@@ -673,6 +673,7 @@ class WebUIGate:
         self._events[card_id] = event
         self.cards[card_id] = {
             "kind": kind, "title": title, "body": body, "verdict": None,
+            "edited_text": "",
         }
         pending_since = _time.time()
         if self.nudge_tracker is not None:
@@ -690,7 +691,7 @@ class WebUIGate:
         card = self.cards[card_id]
         verdict = card["verdict"] or "rejected"
         card["verdict"] = verdict
-        return Decision(verdict)
+        return Decision(verdict, edited_text=card.get("edited_text", ""))
 
     def pending_cards(self) -> list[dict]:
         """Cards still awaiting a verdict, in creation order.
@@ -711,10 +712,13 @@ class WebUIGate:
                 self.cards[card_id]["verdict"] = "rejected"
                 event.set()
 
-    def approve(self, card_id: str, verdict: str) -> bool:
+    def approve(self, card_id: str, verdict: str, edited_text: str = "") -> bool:
         if card_id not in self.cards:
             return False
+        if verdict not in ("approved", "rejected", "edited"):
+            return False
         self.cards[card_id]["verdict"] = verdict
+        self.cards[card_id]["edited_text"] = str(edited_text or "")
         self._events[card_id].set()
         return True
 
@@ -1756,7 +1760,7 @@ class WebUIServer:
             return {"entity": entity, "related": []}
         return {"entity": entity, "related": graph.points_for(entity)}
 
-    # -- Group D additions: tools, conversations, briefs, ideas, hub runs,
+    # -- Additional WebUI surfaces: tools, conversations, briefs, ideas, hub runs,
     #    reports, TTS, and goals with images. These are new routes only;
     #    they do not change any existing route or page above. ----------
     @staticmethod
@@ -2700,9 +2704,9 @@ class WebUIServer:
                         self._send_json(409, {"error": "no pending approval"})
                     else:
                         decision = str(body.get("decision", body.get("verdict", "rejected")))
-                        if decision == "edited":
-                            decision = "approved"
-                        ok = server.webui_gate.approve(pending[0]["id"], decision)
+                        ok = server.webui_gate.approve(
+                            pending[0]["id"], decision,
+                            str(body.get("edited_text", "")))
                         self._send_json(200 if ok else 409, {"ok": ok, "run_id": run_id})
                 elif parsed.path.startswith("/api/runs/") and parsed.path.endswith("/steer"):
                     run_id = parsed.path[len("/api/runs/"):-len("/steer")].strip("/")
@@ -2742,7 +2746,8 @@ class WebUIServer:
                 elif parsed.path == "/api/approve":
                     card_id = str(body.get("id", ""))
                     verdict = str(body.get("verdict", "rejected"))
-                    ok = server.webui_gate.approve(card_id, verdict)
+                    ok = server.webui_gate.approve(
+                        card_id, verdict, str(body.get("edited_text", "")))
                     self._send_json(200 if ok else 404, {"ok": ok})
                 elif parsed.path == "/api/preapprovals":
                     status, payload = server.handle_preapproval_grant(body)

@@ -202,6 +202,16 @@ def _render_args(args: Any, bindings: dict[str, Any]) -> Any:
     return args
 
 
+def _has_unresolved_template(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(_TEMPLATE_RE.search(value))
+    if isinstance(value, dict):
+        return any(_has_unresolved_template(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_unresolved_template(item) for item in value)
+    return False
+
+
 def validate_conditional_chain(
     chain: Any,
     allowed_tools: tuple[str, ...] | list[str] | set[str] | None = None,
@@ -321,6 +331,10 @@ def run_conditional_chain(
                     errors.append(f"step {idx}: tool not permitted: {name}")
                     continue
                 args = _render_args(step.get("args") or {}, bindings)
+                if _has_unresolved_template(args):
+                    errors.append(f"{name}: unresolved template; prerequisite output missing")
+                    skipped.append(name)
+                    continue
                 if not isinstance(args, dict):
                     args = {}
                 try:

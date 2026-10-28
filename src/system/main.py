@@ -2237,6 +2237,8 @@ def main(argv: list[str] | None = None) -> int:
                     from ..capabilities.chain import (
                         run_chain as _run_chain,
                         run_conditional_chain as _run_cond,
+                        validate_chain_spec as _validate_chain,
+                        validate_conditional_chain as _validate_cond,
                     )
                     from ..capabilities.tools import ToolRegistry as _ChainTools
                     import json as _chain_json
@@ -2244,10 +2246,29 @@ def main(argv: list[str] | None = None) -> int:
                     _tools = _ChainTools(
                         sandbox.workdir, sandbox=sandbox,
                         network_available=_network_available(_backend, sandbox))
+                    _chain_failures = (
+                        _validate_cond(_chain, allowed_tools=tuple(_tools.names()))
+                        if isinstance(_chain, list)
+                        else _validate_chain(_chain))
+                    if _chain_failures:
+                        print(f"Job {job.name}: chain rejected: {_chain_failures}")
+                        _handled = True
+                        continue
+                    _chain_decision = _cli_gate(
+                        config.home, config.approval_timeout_seconds,
+                        job.project_id).ask(
+                            "live", f"Approve scheduled chain {job.name}?",
+                            json.dumps(_chain, sort_keys=True), force_ask=True)
+                    if _chain_decision.verdict not in ("approved", "auto_approved"):
+                        print(f"Job {job.name}: chain rejected by approval")
+                        _handled = True
+                        continue
                     if isinstance(_chain, list):
                         def _invoke(name, args):
                             return _tools.call(name, args)
-                        _chain_result = _run_cond(_chain, _invoke)
+                        _chain_result = _run_cond(
+                            _chain, _invoke,
+                            allowed_tools=tuple(_tools.names()))
                     else:
                         _chain_result = _run_chain(_chain, _tools)
                     print(f"Job {job.name}: chain {_chain_result}")

@@ -146,7 +146,7 @@ post-hackathon, NOT built, NOT demoed, at the end.
   live desktop tool are still post-hackathon below,
   this is the tool layer, not a live GUI driver.
 
-- Feature parity, built now: separate modules
+- Feature coverage, built now: separate modules
   conversations, project_brief, docgen/docstore/
   ebook, mail_rules, patterns, prompts,
   recall_budget, registry with Markdown export,
