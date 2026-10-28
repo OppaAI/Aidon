@@ -260,7 +260,7 @@ class GoalRunner:
                  researcher=None, extra_tools=None, router=None,
                  versioned_writes: bool = False,
                  network_available: bool | None = None,
-                 guidance: str = "", image_paths=None):
+                 guidance: str = "", image_paths=None, force_web: bool = False):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -312,6 +312,7 @@ class GoalRunner:
         self.last_route = None
         self.researcher = researcher
         self.extra_tools = extra_tools or {}
+        self.force_web = bool(force_web)
 
     def _trace(self, kind: str, status: str, detail: str = "") -> None:
         # Attribute to this runner's own run id: sub-runners share
@@ -860,6 +861,12 @@ class GoalRunner:
         # is never answered by a path with no write tools, even if the
         # router said chat, because that would silently miss the task.
         _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
+        if self.force_web and self.researcher is not None and spec is None and not _write_intent:
+            from ..capabilities.webchat import webchat_reply
+            reply = webchat_reply(goal, self.researcher, self.client)
+            report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                               False, False, chat_reply=reply)
+            return self._finalize(report)
         if self.use_semantic_router_skip and self.last_route and self.last_route[0] == "chat" and spec is None and not _write_intent:
             reply = self._chat("respond", [self._attachment_message(goal)])
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
