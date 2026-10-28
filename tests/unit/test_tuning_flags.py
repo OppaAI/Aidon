@@ -71,6 +71,10 @@ def test_settings_catalog_has_tuning_flags():
 
 def test_max_attempts_env(tmp_path, monkeypatch):
     monkeypatch.delenv("AIDON_MAX_ATTEMPTS", raising=False)
+    # The critic is a separate axis: it adds one model call per
+    # valid plan, which would consume this test's scripted queue.
+    # Disable it so the test measures attempts, not critic calls.
+    monkeypatch.setenv("AIDON_CRITIC_ENABLED", "0")
     client = _QueueClient([json.dumps(FAIL_PLAN), json.dumps(GOOD_PLAN)])
     report = _runner(client, tmp_path).run("Do the thing")
     assert report.status == "done" and report.attempts == 2
