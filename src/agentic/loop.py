@@ -1312,7 +1312,24 @@ class GoalRunner:
                         if step.deliverable:
                             self._call_tool("write", {"file": step.deliverable, "text": _reply})
                     else:
-                        self._call_tool(step.tool, step.args)
+                        tool_result = self._call_tool(step.tool, step.args)
+                        # File-producing extra tools return their actual
+                        # path. Bind that path to the step when the model
+                        # supplied a prose deliverable such as
+                        # "Aidon introduction PDF" instead of a filename.
+                        if step.tool in {"generate_document", "write_file"}:
+                            candidate = Path(str(tool_result).strip())
+                            if candidate.is_file():
+                                try:
+                                    actual = candidate.resolve().relative_to(
+                                        self.sandbox.workdir.resolve())
+                                    old = step.deliverable
+                                    step.deliverable = str(actual)
+                                    current_plan.deliverables = [
+                                        str(actual) if item == old else item
+                                        for item in current_plan.deliverables]
+                                except ValueError:
+                                    pass
                     from .step_lines import record_attempt
                     record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "done")
                     self._trace("sandbox", "done", step.tool)
