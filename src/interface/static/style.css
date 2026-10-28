@@ -14,7 +14,7 @@
   --text: #e9eef8; --muted: #8b96b3; --border: #1e2a45;
   --accent: #0082fb; --accent2: #7c5cff;
   --accent-glow: rgba(0, 130, 251, .35);
-  --green: #3ecf8e; --amber: #f5a623; --red: #f0564f;
+  --green: #3ecf8e; --cyan: #67e8f9; --toggle-off: #52617b; --amber: #f5a623; --red: #f0564f;
   --font-display: "Rajdhani", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -23,7 +23,7 @@ html[data-theme="light"] {
   --text: #131a2c; --muted: #5f6b87; --border: #d9e0ee;
   --accent: #0064e0; --accent2: #6a4dff;
   --accent-glow: rgba(0, 100, 224, .22);
-  --green: #1f9d63; --amber: #c47b12; --red: #d43d36;
+  --green: #1f9d63; --cyan: #0891b2; --toggle-off: #74839a; --amber: #c47b12; --red: #d43d36;
   --font-display: "Rajdhani", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -295,11 +295,11 @@ html[data-theme="light"] .msg.user { background: #c7dcf4; color: #102343; }
   color: var(--muted); font-size: 18px; cursor: pointer; display: inline-flex;
   align-items: center; justify-content: center; }
 .composer-icon:hover { color: var(--accent); border-color: var(--accent); }
-#preapprove-btn { color: var(--green); font-weight: 700; }
+#preapprove-btn { color: var(--toggle-off); font-weight: 700; }
 #preapprove-btn.preapprove-control { width: auto; min-width: 132px; padding: 0 11px;
   gap: 6px; font-family: var(--font-display); font-size: 12px; font-weight: 600; }
 .preapprove-icon { font-size: 18px; line-height: 1; }
-#preapprove-btn.active { background: var(--green); color: #fff; border-color: var(--green); }
+#preapprove-btn.active { background: transparent; color: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 12px color-mix(in srgb, var(--cyan) 35%, transparent); }
 #composer-inputs { width: 100%; display: flex; flex-direction: column; gap: 6px; }
 #goal-input { width: 100%; min-height: 92px; resize: vertical; overflow-wrap: anywhere;
   padding: 12px 14px; border-radius: 16px;
@@ -616,7 +616,9 @@ body:has(.settings-app) { overflow: auto; }
   box-shadow: none;
 }
 #camera-btn[aria-disabled="true"] { color: var(--muted); }
-#web-btn.active { color: var(--accent); border-color: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
+#web-btn { color: var(--toggle-off); }
+#web-btn .globe-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+#web-btn.active { color: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 12px color-mix(in srgb, var(--cyan) 35%, transparent); }
 
 /* Webcam capture modal (colours follow the same theme variables) */
 #cam-overlay {

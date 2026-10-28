@@ -1382,6 +1382,9 @@
     const active = webBtn.classList.toggle("active");
     webBtn.title = active ? "Web search forced (click to turn off)" : "Force web search";
     webBtn.setAttribute("aria-pressed", active ? "true" : "false");
+    showMiddleStatus(active
+      ? "Web search enforced for this request."
+      : "Web search automatic — Aidon decides when needed.");
   });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !(e.ctrlKey || e.metaKey)) {
