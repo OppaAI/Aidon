@@ -1733,19 +1733,148 @@
     setTheme(rootEl.dataset.theme === "dark" ? "light" : "dark");
   });
 
-  // ── mic: browser MediaRecorder → /api/transcribe (Muse Voice
-  // Transcribe) → text lands in the goal box. 503 = no key configured.
+  // ── mic: streaming Muse Voice Transcribe → live partials land
+  // in the goal box for review; nothing is sent until you press ➤.
+  // AudioWorklet captures raw PCM, resampled to 24 kHz int16 and
+  // posted in ~0.5 s chunks to /api/transcribe_stream/*; the server
+  // holds the Meta realtime session (the key never reaches the
+  // browser). Partials are CUMULATIVE: each one replaces the last,
+  // never appends. If the streaming session cannot start, the old
+  // whole-blob flow runs instead, and its transcript also lands in
+  // the goal box unsent. While a mic session owns the goal box, a
+  // new partial replaces the mic portion; text already in the box
+  // when you press mic is kept as a prefix.
   const micBtn = document.getElementById("mic");
-  let recorder = null;
-  micBtn.addEventListener("click", async () => {
-    if (recorder) { recorder.stop(); return; } // second click = stop
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (e) {
-      showMiddleStatus("Mic unavailable: " + (e.message || e), "error");
-      return;
+  let micLive = null; // streaming session state, while recording
+  let micFallback = null; // MediaRecorder state, fallback path only
+  function micBaseText() { return input.value; }
+  function micSetBox(base, text) {
+    input.value = base ? (text ? base + " " + text : base) : (text || "");
+  }
+  function micB64(bytes) {
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
     }
+    return btoa(s);
+  }
+  function micStopTracks(stream, ctx) {
+    try { stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
+    if (ctx) ctx.close().catch(() => {});
+    micCtx = null; micAnalyser = null; micAnalyserData = null;
+    micBtn.classList.remove("recording");
+  }
+  async function micPost(path, payload) {
+    const r = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+    return data;
+  }
+  async function micStartStreaming(stream, base) {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    await ctx.audioWorklet.addModule("/static/pcm-worklet.js");
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    micCtx = ctx; micAnalyser = analyser;
+    micAnalyserData = new Uint8Array(analyser.fftSize);
+    const node = new AudioWorkletNode(ctx, "pcm-capture");
+    source.connect(node);
+    node.connect(ctx.destination); // silent output keeps the worklet running
+    const started = await micPost("/api/transcribe_stream/start", {});
+    if (!started.session_id) throw new Error("no stream session");
+    const rate = ctx.sampleRate;
+    const step = rate / 24000;
+    let pos = 0; // fractional resample position across messages
+    let carry = new Float32Array(0);
+    let pcm = []; // int16 samples waiting to be posted
+    let posting = Promise.resolve();
+    function pcmBytes(chunk) {
+      const bytes = new Uint8Array(chunk.length * 2);
+      const view = new DataView(bytes.buffer);
+      chunk.forEach((s, j) => view.setInt16(j * 2, s, true));
+      return bytes;
+    }
+    async function flushPcm() {
+      // Runs after stop, when micLive is already null: only send the
+      // trailing audio, never touch the box. The end call below
+      // overwrites the box with the final transcript anyway.
+      await posting;
+      if (!pcm.length) return;
+      const chunk = pcm; pcm = [];
+      await micPost("/api/transcribe_stream/audio",
+        { session_id: started.session_id, audio_b64: micB64(pcmBytes(chunk)) });
+    }
+    micLive = { session: started.session_id, base: base, partial: "",
+                stream: stream, ctx: ctx, node: node, stopped: false,
+                flush: flushPcm };
+    node.port.onmessage = (e) => {
+      if (!micLive || micLive.stopped) return;
+      const floats = e.data;
+      const joined = new Float32Array(carry.length + floats.length);
+      joined.set(carry); joined.set(floats, carry.length);
+      // Linear-interpolate resample to 24 kHz, then int16 little-endian.
+      const out = [];
+      let i = pos;
+      for (; i + 1 < joined.length; i += step) {
+        const lo = Math.floor(i), frac = i - lo;
+        const v = joined[lo] * (1 - frac) + joined[lo + 1] * frac;
+        const c = Math.max(-1, Math.min(1, v));
+        out.push(c < 0 ? Math.round(c * 32768) : Math.round(c * 32767));
+      }
+      pos = i - (joined.length - 1);
+      carry = joined.slice(Math.max(0, joined.length - 2));
+      if (pos < 0) pos = 0;
+      pcm = pcm.concat(out);
+      if (pcm.length >= 12000) {
+        const chunk = pcm.slice(0, 12000);
+        pcm = pcm.slice(12000);
+        const bytes = pcmBytes(chunk);
+        const session = micLive.session;
+        posting = posting.then(async () => {
+          if (!micLive || micLive.session !== session) return;
+          try {
+            const data = await micPost("/api/transcribe_stream/audio",
+              { session_id: session, audio_b64: micB64(bytes) });
+            if (micLive && micLive.session === session && typeof data.transcript === "string") {
+              micLive.partial = data.transcript;
+              micSetBox(micLive.base, micLive.partial);
+            }
+          } catch (err) {
+            showMiddleStatus("Streaming transcription failed: " + err.message, "error");
+          }
+        });
+      }
+    };
+    micBtn.classList.add("recording");
+    drawWave();
+  }
+  async function micStopStreaming() {
+    const s = micLive; micLive = null;
+    if (!s) return;
+    s.stopped = true;
+    try { s.node.disconnect(); } catch (e) {}
+    micStopTracks(s.stream, s.ctx);
+    // Flush the trailing partial chunk first: the final transcript
+    // only covers audio the session actually received.
+    try { await s.flush(); } catch (e) {}
+    try {
+      const data = await micPost("/api/transcribe_stream/end", { session_id: s.session });
+      micSetBox(s.base, data.transcript || s.partial);
+      input.focus();
+      if (data.error) showMiddleStatus("Transcription ended with: " + data.error, "error");
+    } catch (e) {
+      micSetBox(s.base, s.partial);
+      input.focus();
+      showMiddleStatus("Transcription end failed: " + e.message, "error");
+    }
+  }
+  function micStartFallback(stream, base) {
     const chunks = [];
     const mimeTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
     const mimeType = mimeTypes.find((m) => window.MediaRecorder.isTypeSupported(m)) || "";
@@ -1759,14 +1888,12 @@
     } catch (e) {
       micCtx = null; micAnalyser = null; micAnalyserData = null;
     }
-    recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    micFallback = { recorder: recorder };
     recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
     recorder.onstop = async () => {
-      micBtn.classList.remove("recording");
-      stream.getTracks().forEach((t) => t.stop());
-      if (micCtx) micCtx.close().catch(() => {});
-      micCtx = null; micAnalyser = null; micAnalyserData = null;
-      recorder = null;
+      micFallback = null;
+      micStopTracks(stream, micCtx);
       const audioType = mimeType || "audio/webm";
       const blob = new Blob(chunks, { type: audioType });
       try {
@@ -1780,9 +1907,8 @@
         if (!r.ok) throw new Error(data.error || data.detail || ("HTTP " + r.status));
         const transcript = data.text || data.transcript || "";
         if (transcript) {
-          // Voice input is a complete goal: send it directly. It is
-          // rendered in the user chat bubble, not copied into the composer.
-          startRun(transcript);
+          micSetBox(base, transcript);
+          input.focus();
         } else {
           showMiddleStatus(data.error || data.detail || "Transcription failed", "error");
         }
@@ -1793,6 +1919,29 @@
     recorder.start();
     micBtn.classList.add("recording");
     drawWave();
+  }
+  micBtn.addEventListener("click", async () => {
+    if (micLive) { await micStopStreaming(); return; } // second click = stop
+    if (micFallback) { micFallback.recorder.stop(); return; }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      showMiddleStatus("Mic unavailable: " + (e.message || e), "error");
+      return;
+    }
+    const base = micBaseText();
+    try {
+      await micStartStreaming(stream, base);
+    } catch (e) {
+      // No key, no worklet, or session failure: whole-blob fallback.
+      // The transcript still lands in the goal box unsent.
+      try { micStartFallback(stream, base); }
+      catch (err) {
+        micStopTracks(stream, null);
+        showMiddleStatus("Mic failed: " + err.message, "error");
+      }
+    }
   });
 
   drawWave(); // idle waveform frame on load

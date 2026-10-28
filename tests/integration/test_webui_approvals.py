@@ -293,3 +293,25 @@ def test_config_approval_timeout_defaults_to_900(tmp_path):
     """The tunable approval timeout defaults to 900 seconds."""
     from src.system.config import Config
     assert Config(tmp_path / "home").approval_timeout_seconds == 900
+
+
+def test_transcribe_stream_routes_without_key(live_server):
+    """Stream endpoints are wired and fail safe without a key.
+
+    Start with no transcribe key returns 501 (no Meta call is
+    made); audio/end for an unknown session return 404.
+    """
+    import urllib.error
+    base, server = live_server
+    assert server.transcribe_key is None
+    for path, payload, code in [
+            ("/api/transcribe_stream/start", {}, 501),
+            ("/api/transcribe_stream/audio",
+             {"session_id": "nope", "audio_b64": ""}, 404),
+            ("/api/transcribe_stream/end", {"session_id": "nope"}, 404)]:
+        try:
+            _post(base, path, payload)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == code, (path, exc.code)
+        else:
+            raise AssertionError(f"expected HTTP {code} for {path}")

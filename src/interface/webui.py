@@ -878,6 +878,10 @@ class WebUIServer:
         self._question_lock = threading.Lock()
         self.webui_token = webui_token
         self.transcribe_key = transcribe_key
+        # Live realtime transcription sessions, by id: the browser
+        # sends PCM chunks and reads partials over HTTP, while the
+        # server holds the Meta realtime WebSocket (and the key).
+        self.realtime_sessions: dict = {}
         self.tts_key = tts_key
         self.tts_voice_id = str(getattr(config, "tts_voice_id", "") or "")
         # Default chat handler: echo, for the server core. A real
@@ -3658,6 +3662,46 @@ loadSettings();
                 elif parsed.path == "/api/settings/env":
                     result = server.settings_set_env(str(body.get("key", "")), body.get("value", ""))
                     self._send_json(200 if result.get("ok") else 400, result)
+                elif parsed.path == "/api/transcribe_stream/start":
+                    if not server.transcribe_key:
+                        self._send_json(501, {"error": "transcribe key not configured"})
+                        return
+                    try:
+                        import uuid as _uuidt
+                        from ..capabilities.voice import RealtimeTranscriber as _RT
+                        sid = _uuidt.uuid4().hex
+                        rt = _RT(server.transcribe_key, session_id=sid)
+                        rt.connect()
+                        server.realtime_sessions[sid] = rt
+                        self._send_json(200, {"session_id": sid})
+                    except Exception as exc:
+                        self._send_json(502, {"error": str(exc)})
+                elif parsed.path == "/api/transcribe_stream/audio":
+                    import base64 as _b64a
+                    rt = server.realtime_sessions.get(str(body.get("session_id", "")))
+                    if rt is None:
+                        self._send_json(404, {"error": "unknown session"})
+                        return
+                    try:
+                        audio = _b64a.b64decode(str(body.get("audio_b64", "")))
+                    except Exception:
+                        self._send_json(400, {"error": "bad base64"})
+                        return
+                    if audio and not rt.send_audio(audio):
+                        self._send_json(410, {"error": "session closed"})
+                        return
+                    self._send_json(200, {"transcript": rt.transcript,
+                                          "final": rt.final})
+                elif parsed.path == "/api/transcribe_stream/end":
+                    rt = server.realtime_sessions.pop(str(body.get("session_id", "")), None)
+                    if rt is None:
+                        self._send_json(404, {"error": "unknown session"})
+                        return
+                    try:
+                        result = rt.end()
+                    finally:
+                        rt.close()
+                    self._send_json(200, result)
                 elif parsed.path == "/api/transcribe":
                     if not server.transcribe_key:
                         self._send_json(501, {"error": "transcribe key not configured"})
