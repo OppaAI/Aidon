@@ -1482,7 +1482,7 @@ class GoalRunner:
             model_failed = False
             if ok and self.model_verifier is not None:
                 try:
-                    mv = self.model_verifier.verify(goal, current_plan.deliverables, self.sandbox.workdir)
+                    mv = self.model_verifier.verify(goal, current_plan.deliverables, self.sandbox.workdir, criteria)
                     self._trace("verify", mv["verdict"], f"model verifier {mv['reason'][:100]}")
                     if mv["verdict"] == "no":
                         model_failed = True

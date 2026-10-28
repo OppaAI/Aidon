@@ -9,6 +9,15 @@ model as the planner, not a different model, by owner
 decision. A different model would reduce self-grading
 bias, but it is not required, and it would cost a
 second model setup for a check that code already does.
+The model pass now receives the same criteria the code
+pass used, plus a definition of complete, so it judges
+correctness and completeness instead of a loose goal
+match: every criterion met by the shown content, no
+placeholders, substantive content rather than a
+restatement of the goal, figures consistent with the
+goal. Truncation is disclosed to the model, and a
+criterion that cannot be confirmed from the shown
+content is a NO, not an assumed pass.
 Verdict: "yes" means the model says the deliverables
 match the goal, "no" means it says they do not, with
 a reason, "unknown" means the model reply was empty
@@ -30,26 +39,49 @@ class ModelVerifier:
         self.client = client
         self.effort_escalated = False
 
-    def verify(self, goal: str, deliverables: list[str], workdir: Path) -> dict:
+    def verify(self, goal: str, deliverables: list[str], workdir: Path,
+               criteria: list[str] | None = None) -> dict:
         workdir = Path(workdir)
         files_text = []
         for name in deliverables:
             path = workdir / name
             if path.is_file():
                 try:
-                    files_text.append(f"--- {name} ---\n{path.read_text()[:2000]}")
+                    size = path.stat().st_size
+                    full = path.read_text()
+                    shown = full[:2000]
+                    if len(full) > 2000:
+                        shown += "\n[content truncated to 2000 chars]"
+                    files_text.append(f"--- {name} ({size} bytes) ---\n{shown}")
                 except Exception:
                     files_text.append(f"--- {name} ---\n(unreadable)")
             else:
                 files_text.append(f"--- {name} ---\n(missing)")
-        prompt = (f"Goal: {goal}\nDeliverables: {', '.join(deliverables)}\n\n"
+        if criteria:
+            criteria_text = "Criteria (every one must be met by the shown content):\n" + "\n".join(
+                f"- {c}" for c in criteria)
+        else:
+            criteria_text = ("Criteria: none stated; judge against the goal.")
+        prompt = (f"Goal: {goal}\n{criteria_text}\n\n"
                   + "\n\n".join(files_text)
-                  + "\n\nAnswer YES if every deliverable is complete and "
-                    "matches the goal, otherwise NO, with one line reason. "
-                    "Start your answer with YES or NO.")
+                  + "\n\nComplete means: every criterion is met by the "
+                    "shown content; no placeholders (TODO, TBD, lorem "
+                    "ipsum, empty sections, \"to be added\"); content is "
+                    "substantive, not a restatement of the goal; figures, "
+                    "where present, are consistent with the goal. For "
+                    "binary or formatted files, judge from structure and "
+                    "visible text. If a file is truncated and a criterion "
+                    "cannot be confirmed from the shown content, answer NO "
+                    "and name that criterion."
+                    "\n\nAnswer YES if every deliverable is complete and "
+                    "matches the goal and criteria, otherwise NO, with one "
+                    "line reason. Start your answer with YES or NO.")
         from .think_effort import sampling_for
         sampling = sampling_for("verify", escalate=self.effort_escalated)
-        messages = [Message("system", "You verify deliverables, strictly."),
+        messages = [Message("system", "You verify deliverables against "
+                                      "explicit criteria, strictly. Judge "
+                                      "only what is shown; never assume "
+                                      "unseen content is fine."),
                     Message("user", prompt)]
         if hasattr(self.client, "chat_phase"):
             try:
