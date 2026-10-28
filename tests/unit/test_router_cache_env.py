@@ -64,6 +64,23 @@ def test_greeting_does_not_route_to_webchat():
     assert router.classify("Hey Aiden, how are you doing today?")[0] == "chat"
 
 
+def test_qualification_and_rules_questions_route_to_webchat():
+    router = SemanticRouter(HashEmbedder())
+    assert router.classify("Am I qualified for the Meta Global AI Hackathon?")[0] == "webchat"
+    assert router.classify("What are the rules for this hackathon?")[0] == "webchat"
+
+
+def test_compliance_and_regulatory_questions_route_to_webchat():
+    router = SemanticRouter(HashEmbedder())
+    for question in (
+        "Does this comply with the law?",
+        "What regulations apply to this?",
+        "Does this meet the required standard?",
+        "Is this compliant with the regulations?",
+    ):
+        assert router.classify(question)[0] == "webchat"
+
+
 def test_image_model_env_default_and_override(monkeypatch, tmp_path):
     monkeypatch.setenv("AIDON_HOME", str(tmp_path))
     monkeypatch.delenv("AIDON_IMAGE_MODEL", raising=False)
