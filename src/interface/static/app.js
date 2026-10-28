@@ -957,8 +957,8 @@
   }
 
   // ---- attachments (upload button + camera) ---------------------------
-  // One import batch holds at most 3 files (images + documents
-  // combined); the server keeps at most 5 active per conversation.
+  // One import batch holds at most 3 files (images + documents combined),
+  // each no larger than 25 MiB. The server is authoritative too.
   let pendingImages = [];  // image File objects
   let pendingFiles = [];  // document File objects
   const imgPreview = document.getElementById("img-preview");
@@ -1011,10 +1011,16 @@
     inp.addEventListener("change", () => {
       for (const f of inp.files) {
         if (pendingImages.length + pendingFiles.length >= 3) break;
+        if (f.size > 25 * 1024 * 1024) {
+          showMiddleStatus(f.name + " is larger than the 25 MiB attachment limit", "error");
+          continue;
+        }
         if (f.type.startsWith("image/")) {
           pendingImages.push(f);
-        } else if (f.size <= 25 * 1024 * 1024) {
+        } else if (!f.type.startsWith("video/")) {
           pendingFiles.push(f);
+        } else {
+          showMiddleStatus("Video attachments are not supported in chat", "error");
         }
       }
       refreshPreview();

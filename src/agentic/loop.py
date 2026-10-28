@@ -260,7 +260,7 @@ class GoalRunner:
                  researcher=None, extra_tools=None, router=None,
                  versioned_writes: bool = False,
                  network_available: bool | None = None,
-                 guidance: str = ""):
+                 guidance: str = "", image_paths=None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -278,6 +278,7 @@ class GoalRunner:
         # into the plan prompt as a guidance block (the same block
         # make_plan uses), never as a separate approval or question.
         self.guidance = guidance
+        self.image_paths = [Path(path) for path in (image_paths or [])]
         # The ToolRegistry gains the same network_available
         # parameter in a sibling change; pass it through only
         # when the registry accepts it, so this runner works
@@ -731,7 +732,8 @@ class GoalRunner:
         if self.budget is not None:
             self.budget.add_tokens(user)
         _phase = "repair" if failure_context else "plan"
-        reply = self._chat(_phase, [Message("system", system), Message("user", user)])
+        user_message = self._attachment_message(user)
+        reply = self._chat(_phase, [Message("system", system), user_message])
         if self.budget is not None:
             self.budget.add_tokens(reply)
         self._trace("plan", "done", "plan proposed")
@@ -753,6 +755,13 @@ class GoalRunner:
                             deliverable="deliverable.md")],
                 deliverables=["deliverable.md"],
                 criteria=["deliverable.md exists"])
+
+    def _attachment_message(self, text: str) -> Message:
+        """Preserve the user text and attach WebUI images when present."""
+        if not self.image_paths:
+            return Message("user", text)
+        from ..system.model_client import image_file_message
+        return image_file_message(text, self.image_paths)
 
     def _research_and_replan(self, plan: Plan, goal: str,
                              spec=None) -> Plan:
@@ -847,7 +856,7 @@ class GoalRunner:
         # router said chat, because that would silently miss the task.
         _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
         if self.use_semantic_router_skip and self.last_route and self.last_route[0] == "chat" and spec is None and not _write_intent:
-            reply = self._chat("respond", [Message("user", goal)])
+            reply = self._chat("respond", [self._attachment_message(goal)])
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)

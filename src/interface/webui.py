@@ -65,6 +65,8 @@ import mimetypes
 import os
 import threading
 import time
+from email.parser import BytesParser
+from email.policy import default as email_default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -76,6 +78,13 @@ from .result_delivery import extract_result_delivery
 from .triggers import TriggerDispatcher, TriggerEvent
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Attachment limits are deliberately shared by the browser contract and the
+# server enforcement.  The server is authoritative because clients can be
+# replaced or bypassed.
+MAX_ATTACHMENT_FILES = 3
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+MAX_ATTACHMENT_TOTAL_BYTES = MAX_ATTACHMENT_FILES * MAX_ATTACHMENT_BYTES
 
 
 def _app_version() -> str:
@@ -992,12 +1001,16 @@ class WebUIServer:
         def reply(text):
             record["events"].append({"kind": "aidon-final", "text": str(text)})
 
+        payload = {"run_id": run_id,
+                   "guidance": str(body.get("guidance", "")),
+                   "result_delivery": delivery.__dict__ if delivery else {}}
+        image_paths = [str(path) for path in (body.get("image_paths") or [])
+                       if str(path).strip()]
+        if image_paths:
+            payload["image_paths"] = image_paths
         event = TriggerEvent(source="webui", kind="goal", goal=goal,
                              project_id=project_id,
-                             payload={"run_id": run_id,
-                                      "guidance": str(body.get("guidance", "")),
-                                      "result_delivery": delivery.__dict__
-                                      if delivery else {}},
+                             payload=payload,
                              reply=reply)
 
         def dispatch():
@@ -1011,7 +1024,8 @@ class WebUIServer:
 
         threading.Thread(target=dispatch, daemon=True,
                          name=f"aidon-run-{run_id}").start()
-        return {"run_id": run_id, "conversation_id": body.get("conversation_id", "")}
+        return {"run_id": run_id, "conversation_id": body.get("conversation_id", ""),
+                "goal": goal}
 
     def run_snapshot(self, run_id: str) -> dict | None:
         record = self._web_runs.get(run_id)
@@ -2113,22 +2127,80 @@ class WebUIServer:
         return _open_tts_stream(text, self.tts_key,
                                 str(body.get("voice_id", "") or self.tts_voice_id))
 
-    def handle_goal_with_images(self, body: dict) -> dict:
-        import base64 as _b64
-        goal = str(body.get("goal", ""))
-        library_dir = self._json_dir("library")
-        saved = []
-        for image in body.get("images", []) or []:
-            name = self._safe_name(image.get("name", "image.png"))
-            try:
-                data = _b64.b64decode(str(image.get("data_b64", "")))
-            except Exception:
+    @staticmethod
+    def parse_goal_multipart(raw: bytes, content_type: str) -> tuple[dict, list[dict]]:
+        """Parse a goal form without decoding the binary file parts as JSON."""
+        if not content_type.lower().startswith("multipart/form-data"):
+            raise ValueError("expected multipart/form-data")
+        header = (b"Content-Type: " + content_type.encode("ascii", "ignore") +
+                  b"\r\nMIME-Version: 1.0\r\n\r\n")
+        message = BytesParser(policy=email_default).parsebytes(header + raw)
+        fields: dict[str, str] = {}
+        files: list[dict] = []
+        for part in message.iter_parts():
+            if part.get_content_disposition() != "form-data":
                 continue
-            (library_dir / name).write_bytes(data)
-            saved.append(name)
-        return {"goal": goal, "images": saved,
-                "note": "JSON variant of the multipart goals-with-images endpoint; "
-                        "no run is started by this route."}
+            name = part.get_param("name", header="content-disposition")
+            if not name:
+                continue
+            data = part.get_payload(decode=True) or b""
+            filename = part.get_filename()
+            if filename is not None:
+                files.append({"name": filename, "data": data,
+                              "mime": part.get_content_type()})
+            else:
+                fields[str(name)] = data.decode("utf-8", "replace")
+        return fields, files
+
+    def handle_goal_with_files(self, body: dict, files: list[dict]) -> dict:
+        """Store attachments, start the goal, and attach images to inference."""
+        if len(files) > MAX_ATTACHMENT_FILES:
+            return {"error": f"at most {MAX_ATTACHMENT_FILES} files per request"}
+        total = sum(len(item.get("data", b"")) for item in files)
+        if total > MAX_ATTACHMENT_TOTAL_BYTES:
+            return {"error": f"attachments exceed the {MAX_ATTACHMENT_TOTAL_BYTES // (1024 * 1024)} MiB total limit"}
+        upload_dir = self.home / "library" / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        image_paths: list[str] = []
+        document_paths: list[str] = []
+        for item in files:
+            data = item.get("data", b"")
+            if len(data) > MAX_ATTACHMENT_BYTES:
+                return {"error": f"{item.get('name', 'attachment')} exceeds the {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MiB per-file limit"}
+            name = self._safe_name(item.get("name", "attachment"))
+            mime = str(item.get("mime", "application/octet-stream")).lower()
+            if mime.startswith("video/"):
+                return {"error": "video attachments are not supported in chat; use the video workflow instead"}
+            digest = hashlib.sha256(data).hexdigest()[:12]
+            destination = upload_dir / f"{digest}-{name}"
+            destination.write_bytes(data)
+            if mime.startswith("image/") or name.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
+                image_paths.append(str(destination))
+            else:
+                document_paths.append(str(destination))
+        goal = str(body.get("goal", "")).strip()
+        if not goal:
+            return {"error": "goal is required"}
+        if document_paths:
+            goal += "\n\nAttached document paths (use the document reader when needed):\n" + "\n".join(document_paths)
+        result = self.start_goal({**body, "goal": goal, "image_paths": image_paths})
+        result.update({"images": [Path(path).name for path in image_paths],
+                      "documents": [Path(path).name for path in document_paths]})
+        return result
+
+    def handle_goal_with_images(self, body: dict) -> dict:
+        """Compatibility JSON form for API callers that already have base64."""
+        import base64 as _b64
+        files = []
+        for image in body.get("images", []) or []:
+            try:
+                data = _b64.b64decode(str(image.get("data_b64", "")), validate=True)
+            except Exception:
+                return {"error": "bad base64 attachment"}
+            files.append({"name": image.get("name", "image.png"),
+                          "data": data, "mime": mimetypes.guess_type(
+                              str(image.get("name", "image.png")))[0] or "image/png"})
+        return self.handle_goal_with_files(body, files)
 
     # -- WebUI routes -----------------------------------------------------
     # Each handler below is pure server logic (no socket), so tests
@@ -2838,6 +2910,14 @@ loadSettings();
                         body = json.loads(raw) if raw else {}
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         body = {}
+                if parsed.path == "/api/goals/with-images" and content_type.startswith("multipart/form-data"):
+                    try:
+                        fields, files = server.parse_goal_multipart(raw, content_type)
+                        result = server.handle_goal_with_files(fields, files)
+                        self._send_json(200 if "run_id" in result else 400, result)
+                    except (ValueError, OSError) as exc:
+                        self._send_json(400, {"error": str(exc)})
+                    return
                 if parsed.path == "/api/library/upload":
                     import base64 as _b64
                     name = str(body.get("name", "upload.bin"))

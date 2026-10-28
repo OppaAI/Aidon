@@ -301,8 +301,8 @@ def test_webui_tts_501_without_key_and_goals_with_images(tmp_path):
         assert status == 200
         assert data["goal"] == "make a poster"
         assert data["images"] == ["poster.png"]
-        assert "no run" in data["note"]
-        assert (tmp_path / "home" / "library" / "poster.png").read_bytes() == b"fake-png-bytes"
+        assert data["run_id"]
+        assert list((tmp_path / "home" / "library" / "uploads").glob("*-poster.png"))
     finally:
         httpd.shutdown()
 

@@ -95,13 +95,13 @@ shows, and a CLI run or a scheduled job honours it too.
 
 ## 📎 Attachments
 
-- The WebUI currently accepts up to three combined image/document
-  selections per import. Document selection is intended for files up to
-  25 MiB each. The browser does not enforce an image-size limit yet.
-- Image/document upload storage is available through the JSON API, but
-  the browser multipart path and model-aware image inference are not yet
-  complete. Do not treat an uploaded file as evidence that a goal has
-  used or understood it.
+- The WebUI accepts up to three combined image/document files per goal.
+  Each file is limited to 25 MiB and the complete request is limited to
+  75 MiB. Images are passed to the selected vision-capable model during
+  interpretation/planning; documents are stored in the library uploads
+  area and their paths are made available to the document-reading tools.
+- Video is not a general chat attachment. Use the separate CLI video
+  workflow for video editing and analysis.
 - Video is supported by the separate CLI video-editing pipeline, not as
   a general chat attachment or model-inference input.
 
