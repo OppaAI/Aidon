@@ -588,18 +588,20 @@ def run_practice_session(schedule: dict, run_goal, end: datetime,
     and the attempt record keeps the name, so the gap shows.
     on_report(report_text, goal, result) is called for each
     successful run — in practice the session ends at the
-    first success, so that is one report per session.
-    on_progress(live) is called before each attempt with
-    {"goal", "attempt", "started"}, and with None when the
-    session ends, so the Practice page can show live
-    progress; results still go through on_report and the
-    session record, never through progress alone.
+    first success, so that is one report per session. The
+    report text is also kept in the returned summary under
+    "report", so the Practice page can show it without the
+    session ever touching the chat area: practice reports
+    live on the Practice page (plus Slack and WhatsApp when
+    configured), never in a chat conversation, so a practice
+    run cannot be confused with a real run.
     """
     rng = rng or random
     goals = schedule.get("goals", [])
     attempts: list[dict] = []
     started = now_fn().isoformat(timespec="seconds")
     success = None
+    report_text = ""
     while now_fn() < end and goals:
         pick = rng.choice(goals)
         spec_name = str(pick.get("spec", "") or "")
@@ -618,11 +620,11 @@ def run_practice_session(schedule: dict, run_goal, end: datetime,
         if record["status"] == "done":
             success = record
             ended = now_fn().isoformat(timespec="seconds")
+            report_text = practice_report_text(
+                schedule["name"], record["goal"], result, started, ended,
+                preapprove=preapprove)
             if on_report is not None:
-                on_report(practice_report_text(
-                    schedule["name"], record["goal"], result, started, ended,
-                    preapprove=preapprove),
-                    record["goal"], result)
+                on_report(report_text, record["goal"], result)
             break
     ended = now_fn().isoformat(timespec="seconds")
     if on_progress is not None:
@@ -635,6 +637,7 @@ def run_practice_session(schedule: dict, run_goal, end: datetime,
         "goal": success["goal"] if success else "",
         "attempts": attempts,
         "run_id": success["run_id"] if success else "",
+        "report": report_text,
     }
 
 

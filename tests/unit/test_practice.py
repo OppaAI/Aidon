@@ -94,6 +94,9 @@ def test_session_ends_at_first_success(tmp_path):
     assert summary["passed"] is True and summary["goal"] == "Pass second"
     assert len(summary["attempts"]) == 2 and len(reports) == 1
     assert "evening" in reports[0] and "Pass second" in reports[0]
+    # The report text also rides in the session record, so the
+    # Practice page can show it without any chat conversation.
+    assert summary["report"] == reports[0]
 
 
 def test_session_stops_at_window_end():
@@ -109,6 +112,7 @@ def test_session_stops_at_window_end():
         on_report=lambda text, goal, result: reports.append(text))
     assert summary["passed"] is False and len(summary["attempts"]) == 1
     assert reports == []
+    assert summary["report"] == ""
 
 
 def test_session_loads_specs(tmp_path):

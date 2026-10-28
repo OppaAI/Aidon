@@ -106,7 +106,7 @@ class Config:
     sandbox_network: bool = False
     sandbox_require_isolation: bool = False
     max_steps: int = 50
-    approval_timeout_seconds: int = 180
+    approval_timeout_seconds: int = 900
     execution_backend: str = "bubblewrap"
     docker_image: str = "python:3.12-slim"
     docker_network: bool = False
@@ -206,7 +206,7 @@ class Config:
                 "AIDON_SANDBOX_REQUIRE_ISOLATION", "0") == "1",
             max_steps=_env_int("AIDON_MAX_STEPS", 50),
             approval_timeout_seconds=_env_int(
-                "AIDON_APPROVAL_TIMEOUT_S", 180),
+                "AIDON_APPROVAL_TIMEOUT_S", 900),
             execution_backend=os.environ.get("AIDON_EXECUTION_BACKEND",
                                              "bubblewrap"),
             docker_image=os.environ.get("AIDON_DOCKER_IMAGE",

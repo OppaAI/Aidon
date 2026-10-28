@@ -1239,8 +1239,8 @@ def _tools(tmp_path, **kw):
     return _goal_extra_tools(cfg, tmp_path / "work", **kw)
 
 
-def test_cli_gate_default_timeout_is_180(tmp_path):
-    assert _cli_gate(tmp_path).timeout_seconds == 180
+def test_cli_gate_default_timeout_is_900(tmp_path):
+    assert _cli_gate(tmp_path).timeout_seconds == 900
 
 
 def test_cli_gate_accepts_configured_timeout(tmp_path):

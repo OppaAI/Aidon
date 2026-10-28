@@ -55,7 +55,7 @@ def _startup_style(kind: str, text: str) -> None:
         print(text, file=sys.stderr)
 
 
-def _cli_gate(home, timeout_seconds: int = 180,
+def _cli_gate(home, timeout_seconds: int = 900,
               project_id: str = "default") -> ApprovalGate:
     from ..interface.autonomy import policy_for
 
@@ -1833,6 +1833,10 @@ def main(argv: list[str] | None = None) -> int:
                                            if live else None,
                                            preapprove=coerce_preapprove(
                                                schedule.get("preapprove", True)))
+            if not summary["passed"]:
+                summary["report"] = (
+                    f"Practice session {schedule['name']}: no pass in this window "
+                    f"({len(summary['attempts'])} attempts).")
             record_session(config.home, schedule["name"], summary)
             print(f"Practice session {schedule['name']}: "
                   f"{'passed: ' + summary['goal'] if summary['passed'] else 'no pass'} "
@@ -2887,10 +2891,11 @@ def main(argv: list[str] | None = None) -> int:
                               allowed_side_effect_tools=set(PRACTICE_TOOL_NAMES))
 
         def _practice_deliver(text, goal, result):
-            try:
-                server._conversations_db().record_exchange("practice", "assistant", text)
-            except Exception:
-                pass
+            # Practice reports are isolated to the Practice
+            # page (the session record) plus the owner's
+            # specified surfaces below. They are deliberately
+            # NOT recorded into any chat conversation, so a
+            # practice run never shows up among real runs.
             try:
                 if msg.slack_outbound_channel:
                     slack_sender(msg.slack_outbound_channel, text)
@@ -2929,17 +2934,15 @@ def main(argv: list[str] | None = None) -> int:
             summary = _rps(schedule, _run_goal, end, home=config.home,
                            on_report=_practice_deliver, on_progress=_on_progress,
                            preapprove=coerce_preapprove(schedule.get("preapprove", True)))
-            _rec(config.home, schedule["name"], summary)
             if not summary["passed"]:
-                # Window closed with no pass: WebUI-only summary,
-                # so a silent failure never looks like a pass.
-                try:
-                    server._conversations_db().record_exchange(
-                        "practice", "assistant",
-                        f"Practice session {schedule['name']}: no pass in this window "
-                        f"({len(summary['attempts'])} attempts).")
-                except Exception:
-                    pass
+                # Window closed with no pass: the no-pass note
+                # lives in the session record on the Practice
+                # page, so a silent failure never looks like
+                # a pass — and never lands in a chat conversation.
+                summary["report"] = (
+                    f"Practice session {schedule['name']}: no pass in this window "
+                    f"({len(summary['attempts'])} attempts).")
+            _rec(config.home, schedule["name"], summary)
             print(f"Practice session {schedule['name']}: "
                   f"{'passed' if summary['passed'] else 'no pass'}")
         server.practice_session_runner = _practice_session_sync

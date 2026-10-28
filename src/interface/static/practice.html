@@ -18,12 +18,12 @@
   <section style="max-width:760px;padding:16px">
     <p>While a window is open, Aidon picks your goals at random and runs each one
     like a usual run, until the first successful pass or the window closes.
-    Every pass gets a practice report in the WebUI, on Slack, and on WhatsApp;
-    a window that closes with no pass gets a WebUI-only summary.
-    Live progress shows below; results live in the practice conversation,
-    on Slack and WhatsApp, and in each schedule's session list. Each run works
-    in its own practice folder in the sandbox, so deletes and installs stay
-    there; messages go only to you (your email, WhatsApp, Slack).</p>
+    Every pass gets a practice report here on the Practice page, on Slack,
+    and on WhatsApp; a window that closes with no pass gets a page-only
+    summary. Practice reports never go to a chat conversation, so a practice
+    run cannot be confused with a real run. Live progress shows below; each
+    run works in its own practice folder in the sandbox, so deletes and
+    installs stay there; messages go only to you (your email, WhatsApp, Slack).</p>
 
     <h2>New schedule</h2>
     <form id="form">
@@ -63,7 +63,9 @@ async function load(){
   list.innerHTML = data.schedules.map(function(s){
     const sessions = (s.sessions || []).slice(-5).reverse().map(function(x){
       return '<li>' + esc(x.date) + ' — ' + (x.passed ? 'passed: ' + esc(x.goal) : 'no pass')
-        + ' (' + x.attempts.length + ' attempts)</li>';
+        + ' (' + x.attempts.length + ' attempts)'
+        + (x.report ? '<details><summary>Report</summary><pre>' + esc(x.report) + '</pre></details>' : '')
+        + '</li>';
     }).join('');
     return '<div class="dag-card"><h3>' + esc(s.name) + '</h3>'
       + '<p>' + (s.date ? esc(s.date) : (s.days && s.days.length ? 'days ' + s.days.map(function(d){return ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d];}).join(',') : 'every day'))

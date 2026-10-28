@@ -119,9 +119,9 @@ class _Config:
         self.approval_timeout_seconds = timeout
 
 
-def test_server_gate_timeout_defaults_to_180(tmp_path):
+def test_server_gate_timeout_defaults_to_900(tmp_path):
     server = WebUIServer(tmp_path / "home")
-    assert server.webui_gate.timeout_seconds == 180
+    assert server.webui_gate.timeout_seconds == 900
 
 
 def test_server_gate_timeout_comes_from_config(tmp_path):
@@ -129,9 +129,9 @@ def test_server_gate_timeout_comes_from_config(tmp_path):
     assert server.webui_gate.timeout_seconds == 42
 
 
-def test_server_gate_timeout_none_config_falls_back_to_180(tmp_path):
+def test_server_gate_timeout_none_config_falls_back_to_900(tmp_path):
     server = WebUIServer(tmp_path / "home", config=_Config(None))
-    assert server.webui_gate.timeout_seconds == 180
+    assert server.webui_gate.timeout_seconds == 900
 
 
 @pytest.fixture
@@ -287,3 +287,9 @@ def test_gate_context_forwarded_only_when_decide_accepts_it():
     plain = ApprovalGate(lambda kind, title, body: Decision("approved"))
     assert plain.ask("live", "t", "b",
                      context={"run_id": "r1"}).verdict == "approved"
+
+
+def test_config_approval_timeout_defaults_to_900(tmp_path):
+    """The tunable approval timeout defaults to 900 seconds."""
+    from src.system.config import Config
+    assert Config(tmp_path / "home").approval_timeout_seconds == 900

@@ -6,7 +6,7 @@ WebUI, built now, after triggers, after v1 and MCP:
   chat box that sends a message to /api/chat.
 - Approval cards, in the UI, not only in the CLI.
   When the loop asks for approval, a WebUIGate creates
-  a card, waits up to 180 seconds, fail-closed, and
+  a card, waits up to 900 seconds, fail-closed, and
   /api/approve sets the decision. A card is a decision,
   chat is conversation, same rule as everywhere else.
 - Settings APIs expose configuration and key metadata without exposing secrets.
@@ -715,7 +715,7 @@ class WebUIGate:
     - A nudge still goes to Slack via NudgeTracker, once per
       card, but it now fires before the card times out (the
       earlier of the configured nudge minutes and half the
-      card timeout — a 15-minute nudge for a 180-second card
+      card timeout — a 15-minute nudge for a 900-second card
       could only ever arrive for an already-rejected card),
       carries the card title instead of a bare id, and is
       skipped when the card already has a verdict.
@@ -728,7 +728,7 @@ class WebUIGate:
       double-recorded.
     """
 
-    def __init__(self, timeout_seconds: int = 180, nudge_tracker=None,
+    def __init__(self, timeout_seconds: int = 900, nudge_tracker=None,
                  autonomy_tracker=None, slack_sender=None, policy=None,
                  whatsapp_sender=None):
         self.timeout_seconds = timeout_seconds
@@ -857,10 +857,10 @@ class WebUIServer:
             slack_signing_secret or self.messaging_config.slack_signing_secret)
         # Approval timeout comes from config when present, so
         # AIDON_APPROVAL_TIMEOUT_S actually changes the gate;
-        # without a config the gate keeps its 180s default.
-        timeout_seconds = getattr(config, "approval_timeout_seconds", 180)
+        # without a config the gate keeps its 900s default.
+        timeout_seconds = getattr(config, "approval_timeout_seconds", 900)
         if timeout_seconds is None:
-            timeout_seconds = 180
+            timeout_seconds = 900
         self.webui_gate = WebUIGate(timeout_seconds=timeout_seconds)
         self.webhook_only = webhook_only
         self.media_downloader = media_downloader
@@ -1132,7 +1132,7 @@ class WebUIServer:
 
         The question is posted as a chat event so the owner sees it,
         and run_snapshot reports it as waiting_question so the
-        composer stays usable. Questions carry no 180s clock (chat
+        composer stays usable. Questions carry no 900s clock (chat
         is for conversation, cards are for decisions); the wait ends
         on an answer or on run cancellation. also_keys registers
         the same waiter under linked surfaces, so an answer from
@@ -1915,7 +1915,7 @@ class WebUIServer:
             {"key": "AIDON_MAX_TOKENS_PER_RUN", "label": "Max tokens per run", "type": "int", "default": "200000", "desc": "Hard token budget for one goal run.", "secret": False},
             {"key": "AIDON_MAX_STEPS", "label": "Max steps", "type": "int", "default": "50", "desc": "Hard step budget for one goal run.", "secret": False},
             {"key": "AIDON_MAX_WALLCLOCK_MIN", "label": "Max wallclock minutes", "type": "int", "default": "60", "desc": "Hard wallclock budget for one goal run, in minutes.", "secret": False},
-            {"key": "AIDON_APPROVAL_TIMEOUT_S", "label": "Approval timeout seconds", "type": "int", "default": "180", "desc": "Seconds an approval card waits before failing closed.", "secret": False},
+            {"key": "AIDON_APPROVAL_TIMEOUT_S", "label": "Approval timeout seconds", "type": "int", "default": "900", "desc": "Seconds an approval card waits before failing closed.", "secret": False},
         ]},
         {"group": "Sandbox", "settings": [
             {"key": "AIDON_EXECUTION_BACKEND", "label": "Execution backend", "type": "enum", "default": "bubblewrap", "desc": "Sandbox backend for shell steps.", "secret": False, "options": ["bubblewrap", "docker", "subprocess"]},

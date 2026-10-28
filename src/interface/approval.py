@@ -62,7 +62,7 @@ class ApprovalGate:
     def __init__(
         self,
         decide,
-        timeout_seconds: int = 180,
+        timeout_seconds: int = 900,
         policy: "AutonomyPolicy | None" = None,
     ):
         self._decide = decide
