@@ -145,7 +145,13 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
     tools: dict = {}
 
     def _confined(name: str) -> Path:
-        target = (workdir / str(name)).resolve()
+        relative = str(name).replace("\\", "/")
+        # ``workdir/`` is a prompt label, not a real child directory.
+        if relative == "workdir":
+            relative = ""
+        elif relative.startswith("workdir/"):
+            relative = relative[len("workdir/"):]
+        target = (workdir / relative).resolve()
         root = workdir.resolve()
         if target != root and root not in target.parents:
             raise ValueError(f"path outside workdir: {name}")

@@ -402,6 +402,8 @@ html[data-theme="light"] [data-status="model"] { color: #193353; }
 .think-item.tool { border-left: 2px solid var(--green); }
 .think-item.llm { border-left: 2px solid var(--accent); }
 .think-item.note { border-left: 2px solid var(--muted); }
+.think-item.think-failed { border-color: var(--red); }
+.think-item.think-failed .think-meta { color: var(--red); }
 .think-head-row { display: flex; gap: 8px; align-items: center; padding: 7px 9px;
   cursor: pointer; user-select: none; }
 .think-head-row:hover { background: rgba(255,255,255,.02); }

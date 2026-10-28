@@ -761,6 +761,10 @@ class GoalRunner:
                            "FILE_EXISTS, ask the human to approve replacement "
                            "or choose a new filename; do not retry the same "
                            "path indefinitely.")
+                system += (" Do not invent a filename or the literal "
+                           "workdir/ prefix. If the user did not specify a "
+                           "filename, omit the output path and let Aidon "
+                           "derive a contextual timestamped filename.")
             if "install_python_package" in self.extra_tools:
                 system += (" If a genuinely required optional Python package "
                            "is unavailable and no built-in capability can "

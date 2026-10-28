@@ -866,25 +866,25 @@
         list.appendChild(h);
       }
       const item = document.createElement("div");
-      item.className = "think-item " + (e.kind || "note");
-      const meta = e.status || ((e.seconds || 0) + "s");
-      // Expandable: whole header row toggles; title + token count always visible
+      const failed = String(e.status || "").toLowerCase() === "failed";
+      item.className = "think-item " + (e.kind || "note") +
+        (failed ? " think-failed" : "");
+      const meta = (e.tokens_in || e.tokens_out)
+        ? ((e.tokens_in || 0) + " in · " + (e.tokens_out || 0) + " out")
+        : (e.status || ((e.seconds || 0) + "s"));
+      // Every trace item with a detail, especially failures, is expandable.
+      const detail = e.detail || e.title || e.error || "";
       item.innerHTML =
-        '<div class="think-head-row" title="' + (e.thinking ? "expand thinking" : "") + '">' +
-        (e.thinking
-          ? '<button class="think-toggle" title="expand">›</button>'
-          : '<span class="think-toggle" style="visibility:hidden">›</span>') +
+        '<div class="think-head-row" title="click to expand details">' +
+        '<button class="think-toggle" title="expand">›</button>' +
         '<div class="think-title">' + esc(e.title || e.detail || e.status || phase) + "</div>" +
         '<div class="think-meta">' + esc(meta) + "</div></div>" +
-        (e.thinking
-          ? '<div class="think-body"><div class="think-detail">' + esc(e.title) +
-            '</div><pre class="think-thinking">' + esc(e.thinking) + "</pre></div>"
-          : "");
-      if (e.thinking) {
-        item.querySelector(".think-head-row").addEventListener("click", () => {
-          item.classList.toggle("open");
-        });
-      }
+        '<div class="think-body"><div class="think-detail">' + esc(detail) +
+        (e.thinking ? '</div><pre class="think-thinking">' + esc(e.thinking) + "</pre>" : "</div>") +
+        "</div>";
+      item.querySelector(".think-head-row").addEventListener("click", () => {
+        item.classList.toggle("open");
+      });
       list.appendChild(item);
     });
     const count = document.getElementById("thinking-count");
