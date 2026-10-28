@@ -6,6 +6,7 @@
 
   const thread = document.getElementById("thread");
   const input = document.getElementById("goal-input");
+  const defaultGoalPlaceholder = "Start with a goal…\n\nPlan something, research a question, or ask Aidon to build a result for you. Your run stages and deliverables will appear here.";
   const guidanceInput = document.getElementById("guidance-input");
   const sendBtn = document.getElementById("send");
   const steerRow = document.getElementById("steer-row");
@@ -13,16 +14,69 @@
   const steerBtn = document.getElementById("steer-send");
   const cancelBtn = document.getElementById("cancel-run");
   const stagesEl = document.getElementById("stages");
+  const middleStatus = document.getElementById("middle-status");
   const approvalSlot = document.getElementById("approval-slot");
   const statusDot = document.getElementById("status-dot");
   const statusText = document.getElementById("status-text");
+
+  // Bind the primary action immediately.  The rest of this file wires
+  // optional camera/voice/history features; a failure in one of those must
+  // never make the main send control inert.
+  if (sendBtn) {
+    sendBtn.disabled = false;
+    sendBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (window.aidonStartRun) window.aidonStartRun();
+    });
+  }
+
+  function scrollThreadToLatest() {
+    if (!thread) return;
+    // The composer and streamed markdown can change layout after the first
+    // scroll. Two animation frames make the newest exchange reliably land
+    // above the composer instead of leaving the viewport at the old offset.
+    const move = () => { thread.scrollTop = thread.scrollHeight; };
+    requestAnimationFrame(() => {
+      move();
+      requestAnimationFrame(move);
+    });
+  }
+  window.aidonScrollThread = scrollThreadToLatest;
+
+  let middleStatusTimer = null;
+  function showMiddleStatus(text, kind = "info") {
+    if (!middleStatus) return;
+    middleStatus.textContent = text;
+    middleStatus.className = kind;
+    middleStatus.hidden = false;
+    if (middleStatusTimer) clearTimeout(middleStatusTimer);
+    middleStatusTimer = setTimeout(() => { middleStatus.hidden = true; }, 7000);
+  }
+  function loadDashboardStatus() {
+    fetch("/api/status").then((r) => r.json()).then((data) => {
+      document.querySelectorAll("[data-status]").forEach((node) => {
+        const key = node.getAttribute("data-status");
+        let value = data[key] || "Unavailable";
+        if (key === "model" && data.backend) value += " · " + data.backend;
+        node.textContent = value;
+        node.classList.toggle("status-ready", ["Online", "Ready", "bubblewrap", "docker", "Semantic memory (on demand)", "EmbeddingGemma2Embedder"].includes(value));
+      });
+    }).catch(() => {
+      document.querySelectorAll("[data-status]").forEach((node) => { node.textContent = "Unavailable"; });
+    });
+  }
+  loadDashboardStatus();
 
   let currentRun = null;
   let pollTimer = null;
   let lastEventCount = 0;
   let lastTraceCount = 0;
   let lastTracePhase = null;
+  let routeShownFor = null;
+  let lastRoute = null;
+  let runTraceHistory = [];
   let cardShownFor = null;
+  const streamMessages = {};
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) =>
@@ -109,13 +163,48 @@
     d.className = "msg " + kind;
     d.innerHTML = (t ? '<div class="t">' + esc(t) + "</div>" : "") + md(text);
     thread.appendChild(d);
-    thread.scrollTop = thread.scrollHeight;
+    scrollThreadToLatest();
     return d;
+  }
+
+  function finalMessageParts(text) {
+    const value = String(text || "");
+    const lines = value.split("\n");
+    const index = lines.findIndex((line) => /^\s*⏱️?\s/.test(line));
+    if (index < 0) return { body: value, stats: "" };
+    return {
+      body: lines.slice(0, index).join("\n").replace(/\s+$/, ""),
+      stats: lines.slice(index).join(" ").replace(/^\s*⏱️?\s*/, "").trim(),
+    };
+  }
+
+  function renderFinalMessage(text, route) {
+    const parts = finalMessageParts(text);
+    let html = md(parts.body);
+    let routeChip = "";
+    if (route && route.group) {
+      const icons = { chat: "💬", webchat: "🌐", agentic: "⚙️", artifact: "📄" };
+      const labels = { chat: "Local chat", webchat: "Web chat",
+                       agentic: "Agentic", artifact: "Artifact" };
+      const confidence = Math.round(
+        Math.max(0, Math.min(1, Number(route.confidence) || 0)) * 100);
+      routeChip = '<span>' + (icons[route.group] || "◆") + " " +
+        esc(labels[route.group] || route.group) + " · " + confidence +
+        "%</span><span> · </span>";
+    }
+    if (parts.stats || routeChip) {
+      html += '<div class="run-stats">' + routeChip +
+        (parts.stats
+          ? '<span class="run-stats-icon" aria-hidden="true">◷</span>' +
+            '<span>' + esc(parts.stats) + "</span>"
+          : "") + "</div>";
+    }
+    return html;
   }
 
   // Typewriter reveal: streams text into the message char-by-char,
   // karaoke style. Returns the element; callers can append buttons after.
-  function addMsgTyped(kind, text, t) {
+  function addMsgTyped(kind, text, t, final = false, route = null) {
     const d = document.createElement("div");
     d.className = "msg " + kind;
     if (t) {
@@ -141,9 +230,12 @@
         // markdown as it streams: unfinished fences/asterisks are harmless
         // (they simply render literally until the closing token arrives)
         body.innerHTML = md(full.slice(0, i));
-        thread.scrollTop = thread.scrollHeight;
+        scrollThreadToLatest();
         if (i < full.length) requestAnimationFrame(tick);
-        else resolve();
+        else {
+          body.innerHTML = final ? renderFinalMessage(full, route) : md(full);
+          resolve();
+        }
       })();
     });
     return d;
@@ -159,7 +251,10 @@
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     const nodes = [];
     let n;
-    while ((n = walker.nextNode())) nodes.push(n);
+    while ((n = walker.nextNode())) {
+      if (n.parentElement && n.parentElement.closest(".run-stats")) continue;
+      nodes.push(n);
+    }
     let offset = 0;
     let pastClock = false;   // the clock line is never spoken
     for (const node of nodes) {
@@ -246,7 +341,7 @@
     img.alt = "attached image";
     d.appendChild(img);
     thread.appendChild(d);
-    thread.scrollTop = thread.scrollHeight;
+    scrollThreadToLatest();
     return d;
   }
   function renderMaybeImage(kind, text, t) {
@@ -268,16 +363,19 @@
   // ---- TTS playback: play button toggles to stop while playing --------
   // Audio routes through a Web Audio analyser that drives the avatar's
   // lip sync (mouth open from RMS level) and the waveform bars under
-  // the avatar circle — same pattern as Aiko's WebUI.
+  // the avatar circle — same pattern as the rest of this WebUI.
   let currentAudio = null;
   let currentBtn = null;
   let voiceAnnounce = false;
   let ttsAvailable = false;
   let ttsCtx = null, ttsAnalyser = null, ttsAnalyserData = null;
   let ttsMouthLevel = 0, ttsMouthLoop = false, ttsPlaying = false;
+  let micCtx = null, micAnalyser = null, micAnalyserData = null;
   const waveCvs = document.getElementById("voice-wave");
+  const avatarWaveCvs = document.getElementById("avatar-wave");
   const WAVE_BARS = 26;
-  const waveLevels = new Array(WAVE_BARS).fill(0);
+  const micWaveLevels = new Array(WAVE_BARS).fill(0);
+  const avatarWaveLevels = new Array(WAVE_BARS).fill(0);
   let waveFreq = null;
 
   function getTtsAnalyser() {
@@ -293,35 +391,54 @@
   }
 
   function drawWave() {
-    if (!waveCvs) return;
-    const ctx = waveCvs.getContext("2d");
-    const W = waveCvs.width, H = waveCvs.height;
-    ctx.clearRect(0, 0, W, H);
+    if (!waveCvs && !avatarWaveCvs) return;
     let freq = null;
-    if (ttsPlaying && ttsAnalyser) {
+    let micTime = null;
+    if (recorder && micAnalyser) {
+      if (!micAnalyserData || micAnalyserData.length !== micAnalyser.fftSize)
+        micAnalyserData = new Uint8Array(micAnalyser.fftSize);
+      micAnalyser.getByteTimeDomainData(micAnalyserData);
+      micTime = micAnalyserData;
+    } else if (ttsPlaying && ttsAnalyser) {
       if (!waveFreq || waveFreq.length !== ttsAnalyser.frequencyBinCount)
         waveFreq = new Uint8Array(ttsAnalyser.frequencyBinCount);
       ttsAnalyser.getByteFrequencyData(waveFreq);
       freq = waveFreq;
     }
-    const mid = H / 2, bw = W / WAVE_BARS;
     const lt = document.documentElement.dataset.theme === "light";
-    for (let i = 0; i < WAVE_BARS; i++) {
-      let target = 0.06; // idle floor
-      if (freq) {
-        const b0 = 2 + Math.floor(i * 44 / WAVE_BARS);
-        const v = ((freq[b0] || 0) + (freq[b0 + 1] || 0)) / 2 / 255;
-        target = 0.06 + Math.min(1, v * 1.7);
+    function paint(canvas, signal, isMic) {
+      if (!canvas) return;
+      const levels = isMic ? micWaveLevels : avatarWaveLevels;
+      const ctx = canvas.getContext("2d");
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+      const mid = H / 2, bw = W / WAVE_BARS;
+      for (let i = 0; i < WAVE_BARS; i++) {
+        let target = 0.06;
+        if (signal && isMic) {
+          const stride = Math.max(1, Math.floor(signal.length / WAVE_BARS));
+          let peak = 0;
+          for (let j = i * stride; j < Math.min(signal.length, (i + 1) * stride); j++)
+            peak = Math.max(peak, Math.abs(signal[j] - 128) / 128);
+          target = 0.08 + Math.min(1, peak * 2.4);
+        } else if (signal && !isMic) {
+          const b0 = 2 + Math.floor(i * 44 / WAVE_BARS);
+          const v = ((signal[b0] || 0) + (signal[b0 + 1] || 0)) / 2 / 255;
+          target = 0.06 + Math.min(1, v * 1.7);
+        }
+        const lv = levels[i];
+        levels[i] = lv + (target - lv) * (target > lv ? 0.55 : 0.3);
+        const h = signal ? Math.max(1.5, levels[i] * (H - 2)) : 0;
+        const grad = ctx.createLinearGradient(0, mid - h / 2, 0, mid + h / 2);
+        grad.addColorStop(0, lt ? "#4d9fff" : "#7de9ff");
+        grad.addColorStop(1, lt ? "#0064e0" : "#1a9ec4");
+        ctx.fillStyle = grad;
+        ctx.fillRect(i * bw + bw * 0.22, mid - h / 2, Math.max(1, bw * 0.56), h);
       }
-      const lv = waveLevels[i];
-      waveLevels[i] = lv + (target - lv) * (target > lv ? 0.55 : 0.3);
-      const h = Math.max(1.5, waveLevels[i] * (H - 2));
-      const grad = ctx.createLinearGradient(0, mid - h / 2, 0, mid + h / 2);
-      grad.addColorStop(0, lt ? "#4d9fff" : "#7de9ff");
-      grad.addColorStop(1, lt ? "#0064e0" : "#1a9ec4");
-      ctx.fillStyle = grad;
-      ctx.fillRect(i * bw + bw * 0.22, mid - h / 2, Math.max(1, bw * 0.56), h);
     }
+    paint(waveCvs, micTime, true);       // your microphone input
+    paint(avatarWaveCvs, freq, false);   // Aidon's voice output
+    if (recorder || ttsPlaying) requestAnimationFrame(drawWave);
   }
 
   function mouthLoop() {
@@ -363,6 +480,7 @@
 
   let stopKaraokeActive = null;  // cancels the rAF loop of the current voice
   let currentAudioUrl = null;    // blob URL to revoke when playback ends
+  let currentAudioCancel = null;
   function resetSpeakBtn() {
     // Every stop path (ended, error, toggled off, replaced by a newer
     // message) must land here: pause() fires no "ended", so the rAF
@@ -375,6 +493,10 @@
       try { URL.revokeObjectURL(currentAudioUrl); } catch (e) { /* noop */ }
       currentAudioUrl = null;
     }
+    if (currentAudioCancel) {
+      try { currentAudioCancel(); } catch (e) { /* noop */ }
+      currentAudioCancel = null;
+    }
     if (currentBtn) {
       currentBtn.textContent = "▶";
       currentBtn.classList.remove("playing");
@@ -386,8 +508,196 @@
   }
 
   let speakGen = 0;   // playback generation: only the newest wins
+
+  // Streaming answers are spoken sentence-by-sentence. The LLM stream can
+  // split anywhere, so keep an incomplete tail and send only complete
+  // sentences to Fish. This starts voice output before the final answer
+  // event arrives and keeps sentence audio in order.
+  const streamSpeech = new Map();
+  let streamSpeechGeneration = 0;
+
+  function completeSpeechSentences(buffer, flush = false) {
+    const found = [];
+    let rest = String(buffer || "");
+    const sentence = /^\s*(.+?[.!?](?:["'»”\])}]*)?)(?=\s|$)/s;
+    while (true) {
+      const match = rest.match(sentence);
+      if (!match) break;
+      const text = match[1].trim();
+      if (text) found.push(text);
+      rest = rest.slice(match[0].length);
+    }
+    if (flush && rest.trim()) {
+      found.push(rest.trim());
+      rest = "";
+    }
+    return { found, rest };
+  }
+
+  async function fetchSpeechAudio(text) {
+    const request = {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: spokenText(text).slice(0, 2000) }),
+    };
+    const response = await fetch("/api/tts/stream", request);
+    if (!response.ok) throw new Error("tts " + response.status);
+    const progressive = await progressiveAudio(response);
+    if (progressive) return progressive;
+    const fallback = await fetch("/api/tts", request);
+    if (!fallback.ok) throw new Error("tts " + fallback.status);
+    const url = URL.createObjectURL(await fallback.blob());
+    return { audio: new Audio(url), url, cancel: null };
+  }
+
+  async function pumpStreamSpeech(state) {
+    if (state.playing || !state.queue.length) return;
+    state.playing = true;
+    // The next Fish request is started when the sentence enters the queue,
+    // not after the previous audio ends. Awaiting this promise preserves
+    // sentence order while removing network/request latency from playback.
+    const item = state.queue.shift();
+    try {
+      const progressive = await item.audio;
+      if (progressive && progressive.error) throw progressive.error;
+      if (state.generation !== streamSpeechGeneration) {
+        if (progressive.cancel) progressive.cancel();
+        if (progressive.url) URL.revokeObjectURL(progressive.url);
+        return;
+      }
+      const audio = progressive.audio;
+      currentAudio = audio;
+      currentAudioUrl = progressive.url;
+      currentAudioCancel = progressive.cancel;
+      ttsPlaying = true;
+      startMouthLoop();
+      try {
+        const analyser = getTtsAnalyser();
+        const source = ttsCtx.createMediaElementSource(audio);
+        source.connect(analyser);
+      } catch (e) { /* plain playback remains valid */ }
+      await audio.play();
+      await new Promise((resolve) => {
+        audio.addEventListener("ended", resolve, { once: true });
+        audio.addEventListener("error", resolve, { once: true });
+      });
+      if (progressive.url) URL.revokeObjectURL(progressive.url);
+      currentAudio = null;
+      currentAudioUrl = null;
+      currentAudioCancel = null;
+      ttsPlaying = false;
+    } catch (e) {
+      ttsPlaying = false;
+    } finally {
+      state.playing = false;
+      if (state.done && !state.queue.length) streamSpeech.delete(state.id);
+      else pumpStreamSpeech(state);
+    }
+  }
+
+  function feedStreamSpeech(id, delta, done = false) {
+    if (!ttsAvailable) return false;
+    let state = streamSpeech.get(id);
+    if (!state) {
+      state = { id, buffer: "", queue: [], playing: false, done: false,
+                generation: ++streamSpeechGeneration };
+      streamSpeech.set(id, state);
+    }
+    state.buffer += String(delta || "");
+    const split = completeSpeechSentences(state.buffer, done);
+    state.buffer = split.rest;
+    for (const part of split.found.map((value) => value.trim()).filter(Boolean)) {
+      // Attach the rejection immediately so a cancelled/failed prefetch does
+      // not become an unhandled browser promise before the queue reaches it.
+      const audio = fetchSpeechAudio(part).catch((error) => ({ error }));
+      state.queue.push({ text: part, audio });
+    }
+    if (done) state.done = true;
+    pumpStreamSpeech(state);
+    return true;
+  }
+
+  function stopStreamSpeech() {
+    streamSpeechGeneration++;
+    streamSpeech.clear();
+  }
+
+  // Fish can send MP3 bytes progressively. MediaSource lets the browser
+  // start playback after the first audio chunk while the rest is arriving;
+  // unsupported browsers use the buffered endpoint below.
+  async function progressiveAudio(response) {
+    const mime = "audio/mpeg";
+    if (!window.MediaSource || !response.body ||
+        !MediaSource.isTypeSupported(mime)) {
+      try { if (response.body) await response.body.cancel(); } catch (e) {}
+      return null;
+    }
+    const mediaSource = new MediaSource();
+    const url = URL.createObjectURL(mediaSource);
+    const audio = new Audio(url);
+    const reader = response.body.getReader();
+    const queue = [];
+    let sourceBuffer = null;
+    let ended = false;
+    let firstChunk = null;
+    const firstAudio = new Promise((resolve, reject) => {
+      firstChunk = { resolve, reject };
+    });
+    const pump = () => {
+      if (!sourceBuffer || sourceBuffer.updating || !queue.length) {
+        if (ended && sourceBuffer && !sourceBuffer.updating && !queue.length &&
+            mediaSource.readyState === "open") {
+          try { mediaSource.endOfStream(); } catch (e) {}
+        }
+        return;
+      }
+      try { sourceBuffer.appendBuffer(queue.shift()); }
+      catch (e) { if (firstChunk) firstChunk.reject(e); }
+    };
+    mediaSource.addEventListener("sourceopen", () => {
+      try {
+        sourceBuffer = mediaSource.addSourceBuffer(mime);
+        sourceBuffer.addEventListener("updateend", () => {
+          if (firstChunk) {
+            firstChunk.resolve({ audio, url, cancel: () => reader.cancel() });
+            firstChunk = null;
+          }
+          pump();
+        });
+        pump();
+      } catch (e) { if (firstChunk) firstChunk.reject(e); }
+    }, { once: true });
+    (async () => {
+      try {
+        while (true) {
+          const item = await reader.read();
+          if (item.done) break;
+          if (item.value && item.value.byteLength) {
+            queue.push(item.value.slice().buffer);
+            pump();
+          }
+        }
+        ended = true;
+        pump();
+        if (firstChunk && !queue.length) {
+          firstChunk.reject(new Error("empty TTS stream"));
+          firstChunk = null;
+        }
+      } catch (e) {
+        if (firstChunk) firstChunk.reject(e);
+      }
+    })();
+    try { return await firstAudio; }
+    catch (e) {
+      try { reader.cancel(); } catch (ignored) {}
+      URL.revokeObjectURL(url);
+      return null;
+    }
+  }
+
   async function speak(el, text, btn) {
     const gen = ++speakGen;
+    stopStreamSpeech();
     if (currentBtn === btn && currentAudio) {  // toggle: stop
       currentAudio.pause();
       resetSpeakBtn();
@@ -399,27 +709,50 @@
     }
     btn.textContent = "…";
     try {
-      // Wait for the typewriter to finish before touching the DOM: it
-      // re-renders the body every frame, which would wipe the karaoke
-      // spans. The voice then starts exactly when the text is complete.
+      // Start the network request immediately. Waiting for the typewriter
+      // first made TTS feel several seconds late on long answers.
       const body = (el && el._body) || null;
-      if (el && el._typing) { try { await el._typing; } catch (e) {} }
-      if (gen !== speakGen) return;
-      // Speak what is ON SCREEN, not the markdown source: no "**" and
-      // no link syntax, and the words match the highlight exactly.
-      // The clock line is stripped - it is for the eye.
-      const spoken = spokenText(body ? body.textContent : (text || ""));
-      const r = await fetch("/api/tts", {
+      const spoken = spokenText(text || (body ? body.textContent : ""));
+      const request = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: spoken }),
-      });
-      if (!r.ok) throw new Error("tts " + r.status);
-      const url = URL.createObjectURL(await r.blob());
+      };
+      const streamRequest = fetch("/api/tts/stream", request);
+      const streamResponse = await streamRequest;
+      if (!streamResponse.ok) throw new Error("tts " + streamResponse.status);
+      // Start consuming Fish while the message is still typewriting. The
+      // old order waited for the complete visual animation before reading
+      // the first audio chunk, which made long answers feel silent.
+      const progressivePromise = progressiveAudio(streamResponse);
+      if (el && el._typing) { try { await el._typing; } catch (e) {} }
+      if (gen !== speakGen) return;
+      const progressive = await progressivePromise;
+      let audio;
+      let url;
+      if (progressive) {
+        audio = progressive.audio;
+        url = progressive.url;
+        currentAudioCancel = progressive.cancel;
+      } else {
+        // Safari, older browsers, and unusual MP3 implementations use the
+        // complete-response path without changing user behavior.
+        const r = await fetch("/api/tts", request);
+        if (!r.ok) throw new Error("tts " + r.status);
+        url = URL.createObjectURL(await r.blob());
+        audio = new Audio(url);
+        currentAudioCancel = null;
+      }
       // A newer playback started while this one was downloading: drop
       // it, or the two voices talk over each other.
-      if (gen !== speakGen) { URL.revokeObjectURL(url); return; }
-      const audio = new Audio(url);
+      if (gen !== speakGen) {
+        if (currentAudioCancel) {
+          try { currentAudioCancel(); } catch (e) { /* noop */ }
+          currentAudioCancel = null;
+        }
+        URL.revokeObjectURL(url);
+        return;
+      }
       // Route through the analyser for lip sync + waveform (no-op if
       // Web Audio is unavailable — falls back to plain playback).
       try {
@@ -476,12 +809,13 @@
   }
 
   function spokenText(text) {
-    // The clock line is always the LAST line ("⏱️ 2m 4s", optionally
+    // The metrics line is always the LAST line ("⏱️ 2m 4s" or the
+    // compact WebUI "◷ 2m 4s", optionally
     // with "(plus 3s waiting for you)"), so cut from the marker to the
     // end of that line.
-    return String(text || "")
-      .replace(/\n*[^\n]*\u23f1\ufe0f?[^\n]*$/i, "")
-      .trim();
+    const value = String(text || "");
+    const clock = Math.max(value.lastIndexOf("⏱"), value.lastIndexOf("◷"));
+    return (clock >= 0 ? value.slice(0, clock) : value).trim();
   }
 
   // Speak the two moments that MATTER: a decision is waiting for you,
@@ -496,10 +830,18 @@
   function renderStages(stage) {
     stagesEl.innerHTML = "";
     const idx = STAGES.indexOf(stage);
+    const icons = {
+      interpret: "⌁", research: "⌕", recall: "◈", plan: "◇",
+      sandbox: "□", approval: "◌", live: "▶", learn: "✦", done: "✓",
+    };
     STAGES.forEach((s, i) => {
       const p = document.createElement("span");
       p.className = "stage" + (i === idx ? " active" : "") + (i < idx ? " done" : "");
-      p.textContent = s;
+      const icon = document.createElement("span");
+      icon.className = "stage-ico";
+      icon.textContent = icons[s] || "·";
+      p.appendChild(icon);
+      p.appendChild(document.createTextNode(s));
       stagesEl.appendChild(p);
     });
   }
@@ -530,38 +872,59 @@
     if (!items || !items.length) return;
     const list = document.getElementById("thinking-list");
     items.forEach((e) => {
-      if (e.phase !== lastTracePhase) {
-        lastTracePhase = e.phase;
+      const phase = e.phase || e.kind || "thinking";
+      if (phase !== lastTracePhase) {
+        lastTracePhase = phase;
         const h = document.createElement("div");
         h.className = "think-phase";
-        h.textContent = e.phase;
+        h.textContent = phase;
         list.appendChild(h);
       }
       const item = document.createElement("div");
-      item.className = "think-item " + (e.kind || "note");
-      const meta = e.seconds + "s · " + e.tokens_in + "→" + e.tokens_out + " tok";
-      // Expandable: whole header row toggles; title + token count always visible
-      item.innerHTML =
-        '<div class="think-head-row" title="' + (e.thinking ? "expand thinking" : "") + '">' +
-        (e.thinking
-          ? '<button class="think-toggle" title="expand">›</button>'
-          : '<span class="think-toggle" style="visibility:hidden">›</span>') +
-        '<div class="think-title">' + esc(e.title) + "</div>" +
-        '<div class="think-meta">' + esc(meta) + "</div></div>" +
-        (e.thinking
-          ? '<div class="think-body"><div class="think-detail">' + esc(e.title) +
-            '</div><pre class="think-thinking">' + esc(e.thinking) + "</pre></div>"
+      const failed = String(e.status || "").toLowerCase() === "failed";
+      item.className = "think-item " + (e.kind || "note") +
+        (failed ? " think-failed" : "");
+      const meta = (e.tokens_in || e.tokens_out)
+        ? ((e.tokens_in || 0) + " in · " + (e.tokens_out || 0) + " out")
+        : (e.status || ((e.seconds || 0) + "s"));
+      const detail = e.detail || e.title || e.error || "";
+      const usefulDetail = detail && detail !== (e.title || "");
+      // Token accounting alone is not expandable content. Only a trace
+      // event carrying actual thinking text gets the arrow and click
+      // handler; statuses, tool names, and errors stay static.
+      const expandable = !!(e.thinking && String(e.thinking).trim());
+      const detailMarkup = failed
+        ? (usefulDetail ? '<div class="think-error-detail">' + esc(detail) + "</div>" : "")
+        : (expandable && (usefulDetail || e.thinking)
+          ? '<div class="think-body"><div class="think-detail">' + esc(detail) +
+            (e.thinking ? '</div><pre class="think-thinking">' + esc(e.thinking) + "</pre>" : "</div>") +
+            "</div>"
           : "");
-      if (e.thinking) {
-        item.querySelector(".think-head-row").addEventListener("click", () => {
-          item.classList.toggle("open");
-        });
-      }
+      item.innerHTML =
+        '<div class="think-head-row"' + (expandable ? ' title="click to expand details"' : '') + '>' +
+        (expandable ? '<button class="think-toggle" title="expand">›</button>' :
+          '<span class="think-toggle" style="visibility:hidden">›</span>') +
+        '<div class="think-title">' + esc(e.title || e.detail || e.status || phase) + "</div>" +
+        '<div class="think-meta">' + esc(meta) + "</div></div>" +
+        detailMarkup;
+      if (expandable) item.querySelector(".think-head-row").addEventListener("click", () => {
+        item.classList.toggle("open");
+      });
       list.appendChild(item);
     });
     const count = document.getElementById("thinking-count");
     if (count) count.textContent = "(" + (lastTraceCount + items.length) + ")";
     list.scrollTop = list.scrollHeight;
+  }
+
+  function renderRoute(route) {
+    // The route no longer gets its own item in the thinking list:
+    // that list scrolls, so the item scrolled out of view. The route
+    // rides on the finished message's stats line instead
+    // (renderFinalMessage), so this only remembers the latest route
+    // for the current run.
+    if (!route || !route.group || routeShownFor === "__history__") return;
+    lastRoute = route;
   }
 
   document.getElementById("thinking-toggle-all").addEventListener("click", () => {
@@ -646,8 +1009,7 @@
       });
       if (!r.ok) {
         const data = await r.json().catch(() => ({}));
-        addMsg("stage-line",
-          "approval failed: " + (data.detail || data.error || r.status));
+        showMiddleStatus("Approval failed: " + (data.detail || data.error || r.status), "error");
         if (r.status === 409) {
           // Server has no pending approval: this card is dead (the gate
           // failed closed on timeout, or it was already decided). Remove
@@ -658,7 +1020,7 @@
         return;
       }
     } catch (e) {
-      addMsg("stage-line", "approval failed: " + e.message);
+      showMiddleStatus("Approval failed: " + e.message, "error");
       return;
     }
     // Decision accepted — drop the card and reset the shown-card tracking so
@@ -674,6 +1036,7 @@
         "?since=" + lastEventCount + "&trace_since=" + lastTraceCount);
       if (!r.ok) return;
       const run = await r.json();
+      renderRoute(run.route);
       renderStages(run.stage);
       setStatus(run.status === "running" ? "busy" : "ok",
                 run.status === "running" ? stageLabel(run.stage) : run.status);
@@ -685,9 +1048,44 @@
           if (!renderMaybeImage("user", e.text, e.t))
             addMsg("user", e.text, e.t);
         }
-        else if (e.kind === "aidon" || e.kind === "aidon-final") {
-          const m = addMsgTyped("aidon", e.text, e.t);
-          const btn = playButton(e.text || "", m);
+        else if (e.kind === "aidon-stream" || e.kind === "aidon" || e.kind === "aidon-final") {
+          const sid = e.stream_id || "";
+          let m = sid ? streamMessages[sid] : null;
+          if (e.kind === "aidon-stream") {
+            if (!m) {
+              m = addMsg("aidon", "", e.t);
+              m._streamText = "";
+              m.innerHTML = "";
+              m._body = document.createElement("div");
+              m.appendChild(m._body);
+              streamMessages[sid] = m;
+            }
+            m._streamText += String(e.delta || "");
+            feedStreamSpeech(sid, e.delta, false);
+            m._body.innerHTML = md(m._streamText);
+            scrollThreadToLatest();
+            return;
+          }
+          if (m) {
+            if (e.kind === "aidon-final" && m._streamText && e.text &&
+                String(e.text).trim() !== String(m._streamText).trim()) {
+              // Streamed intermediate prose differs from the final
+              // summary (agentic runs stream fast-node prose, then
+              // finish with an assembled summary): keep the streamed
+              // bubble and show the final as its own message, instead
+              // of discarding the prose by replacing it.
+              delete streamMessages[sid];
+              m = addMsgTyped("aidon", e.text, e.t, true, lastRoute);
+            } else {
+              m._streamText = String(e.text || m._streamText || "");
+              m.innerHTML = e.kind === "aidon-final"
+                ? renderFinalMessage(m._streamText, lastRoute) : md(m._streamText);
+              if (e.kind === "aidon-final") delete streamMessages[sid];
+            }
+          } else {
+            m = addMsgTyped("aidon", e.text, e.t, e.kind === "aidon-final", lastRoute);
+          }
+          const btn = playButton(e.text || m._streamText || "", m);
           m.appendChild(btn);
           if (e.kind === "aidon-final") {
             // The run is over: the avatar smiles, the answer is read
@@ -695,7 +1093,9 @@
             // words lighting up as they are spoken.
             setAvatarMood("happy");
             setTimeout(() => setAvatarMood("idle"), 7000);
-            announceImportant(m, e.text, btn);
+            const hadStreamedVoice = streamSpeech.has(sid);
+            const streamedVoice = hadStreamedVoice && feedStreamSpeech(sid, "", true);
+            if (!streamedVoice) announceImportant(m, e.text, btn);
           } else if (e.text) {
             // Running commentary: only when AIDON_VOICE_ANNOUNCE=1.
             maybeAnnounce(e.text, btn);
@@ -716,6 +1116,7 @@
       lastEventCount = (typeof run.event_total === "number")
         ? run.event_total : lastEventCount + run.events.length;
       if (run.trace && run.trace.length) {
+        runTraceHistory = runTraceHistory.concat(run.trace);
         // Skip interpret/respond phases in the thinking panel — that's
         // routing noise for casual chat, not real thinking. Pipeline runs
         // (research, plan, ...) still show their trace.
@@ -738,8 +1139,7 @@
         cardShownFor = null;
         approvalSlot.innerHTML = "";
         if (!sawDecision) {
-          addMsg("stage-line",
-            "approval timed out, treated as rejected — card removed");
+          showMiddleStatus("Approval timed out, treated as rejected — card removed", "warning");
         }
       }
       if (run.status === "running") {
@@ -758,15 +1158,23 @@
         guidanceInput.disabled = true;
         input.placeholder = waiting
           ? "Answer Aidon's question…"
-          : "Chat or give Aidon a goal…";
+          : defaultGoalPlaceholder;
       }
       if (run.status !== "running") {
+        try {
+          const key = currentConversationId
+            ? "aidon-run-state-" + currentConversationId : "";
+          if (key) localStorage.setItem(key, JSON.stringify({
+            status: run.status, stage: run.stage || "done",
+            route: run.route || null, trace: runTraceHistory,
+          }));
+        } catch (e) {}
         clearInterval(pollTimer);
         pollTimer = null;
         sendBtn.disabled = false;
         input.disabled = false;
         guidanceInput.disabled = false;
-        input.placeholder = "Chat or give Aidon a goal…";
+        input.placeholder = defaultGoalPlaceholder;
         steerRow.hidden = true;
         approvalSlot.innerHTML = ""; // no stale card survives completion
         // loadHistory lives in the sidebar IIFE below (exposed on window)
@@ -779,8 +1187,8 @@
   }
 
   // ---- attachments (upload button + camera) ---------------------------
-  // One import batch holds at most 3 files (images + documents
-  // combined); the server keeps at most 5 active per conversation.
+  // One import batch holds at most 3 files (images + documents combined),
+  // each no larger than 25 MiB. The server is authoritative too.
   let pendingImages = [];  // image File objects
   let pendingFiles = [];  // document File objects
   const imgPreview = document.getElementById("img-preview");
@@ -833,9 +1241,13 @@
     inp.addEventListener("change", () => {
       for (const f of inp.files) {
         if (pendingImages.length + pendingFiles.length >= 3) break;
+        if (f.size > 25 * 1024 * 1024) {
+          showMiddleStatus(f.name + " is larger than the 25 MiB attachment limit", "error");
+          continue;
+        }
         if (f.type.startsWith("image/")) {
           pendingImages.push(f);
-        } else if (f.size <= 25 * 1024 * 1024) {
+        } else {
           pendingFiles.push(f);
         }
       }
@@ -853,6 +1265,10 @@
   const camBtn = document.getElementById("camera-btn");
   let camStream = null;
   let camVideo = null;
+  let camRecorder = null;
+  let camChunks = [];
+  let camRecordTimer = null;
+  const MAX_CAPTURE_MS = 30 * 1000;
 
   function stopCam() {
     if (camStream) {
@@ -891,16 +1307,20 @@
     overlay.hidden = true;
     overlay.innerHTML =
       '<div class="cam-panel" role="dialog" aria-label="Take a photo">' +
-      '<div class="cam-title">Take a photo</div>' +
+      '<div class="cam-title">Camera</div>' +
       '<video id="cam-video" autoplay playsinline muted></video>' +
       '<div class="cam-actions">' +
       '<button id="cam-cancel" type="button">Cancel</button>' +
-      '<button id="cam-capture" type="button">Capture</button>' +
+      '<button id="cam-photo" type="button">Photo</button>' +
+      '<button id="cam-video-toggle" type="button">Record video</button>' +
+      '<button id="cam-capture" type="button" hidden>Stop recording</button>' +
       "</div></div>";
     document.body.appendChild(overlay);
     camVideo = overlay.querySelector("#cam-video");
     overlay.querySelector("#cam-cancel").addEventListener("click", closeCam);
-    overlay.querySelector("#cam-capture").addEventListener("click", shootCam);
+    overlay.querySelector("#cam-photo").addEventListener("click", shootCam);
+    overlay.querySelector("#cam-video-toggle").addEventListener("click", startCamRecording);
+    overlay.querySelector("#cam-capture").addEventListener("click", stopCamRecording);
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) closeCam();
     });
@@ -908,6 +1328,8 @@
   }
 
   function closeCam() {
+    if (camRecorder && camRecorder.state === "recording") stopCamRecording();
+    if (camRecordTimer) clearTimeout(camRecordTimer);
     stopCam();
     const o = document.getElementById("cam-overlay");
     if (o) o.hidden = true;
@@ -928,27 +1350,71 @@
     try {
       // rear camera first (phones), then any camera (desktops)
       camStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" }, audio: false,
+        video: { facingMode: "environment" }, audio: true,
       });
     } catch (first) {
       try {
         camStream = await navigator.mediaDevices.getUserMedia({
-          video: true, audio: false,
+          video: true, audio: true,
         });
       } catch (err) {
-        stopCam();
-        const reasons = {
-          NotAllowedError: "Camera blocked - allow access, then reload",
-          NotFoundError: "No webcam detected",
-          NotReadableError: "Webcam busy (another app is using it)",
-          SecurityError: "Camera needs https or localhost",
-        };
-        cameraUnavailable(reasons[err.name] || "Camera unavailable");
-        return;
+        // A webcam is still useful when microphone permission is denied;
+        // video recording simply has no audio track in that case.
+        try {
+          camStream = await navigator.mediaDevices.getUserMedia({
+            video: true, audio: false,
+          });
+        } catch (finalErr) {
+          stopCam();
+          const reasons = {
+            NotAllowedError: "Camera blocked - allow access, then reload",
+            NotFoundError: "No webcam detected",
+            NotReadableError: "Webcam busy (another app is using it)",
+            SecurityError: "Camera needs https or localhost",
+          };
+          cameraUnavailable(reasons[finalErr.name] || "Camera unavailable");
+          return;
+        }
       }
     }
     camVideo.srcObject = camStream;
     overlay.hidden = false;
+  }
+
+  function startCamRecording() {
+    if (!camStream || !window.MediaRecorder ||
+        pendingImages.length + pendingFiles.length >= 3) return;
+    const mime = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
+      .find((type) => MediaRecorder.isTypeSupported(type)) || "";
+    try {
+      camChunks = [];
+      camRecorder = new MediaRecorder(camStream, mime ? { mimeType: mime } : undefined);
+      camRecorder.ondataavailable = (event) => { if (event.data.size) camChunks.push(event.data); };
+      camRecorder.onstop = () => {
+        const blob = new Blob(camChunks, { type: camRecorder.mimeType || "video/webm" });
+        if (blob.size > 25 * 1024 * 1024) {
+          showMiddleStatus("The recording is larger than the 25 MiB attachment limit", "error");
+        } else if (blob.size) {
+          pendingFiles.push(new File([blob], "camera-" + Date.now() + ".webm",
+            { type: blob.type || "video/webm" }));
+          refreshPreview();
+        }
+        camRecorder = null;
+        closeCam();
+      };
+      camRecorder.start();
+      document.getElementById("cam-photo").hidden = true;
+      document.getElementById("cam-video-toggle").hidden = true;
+      document.getElementById("cam-capture").hidden = false;
+      camRecordTimer = setTimeout(stopCamRecording, MAX_CAPTURE_MS);
+    } catch (err) {
+      showMiddleStatus("Video recording is unavailable in this browser", "error");
+    }
+  }
+
+  function stopCamRecording() {
+    if (camRecordTimer) { clearTimeout(camRecordTimer); camRecordTimer = null; }
+    if (camRecorder && camRecorder.state === "recording") camRecorder.stop();
   }
 
   function shootCam() {
@@ -974,11 +1440,14 @@
     if (state === "no-device") cameraUnavailable("No webcam detected");
   });
 
-  async function startRun() {
-    const goal = input.value.trim();
-    if (!goal || sendBtn.disabled) return;
+  async function startRun(goalOverride = "") {
+    const goal = (goalOverride || input.value).trim();
+    // A restored conversation can leave the button's visual disabled flag
+    // stale even though no run is active. Only block a real active run.
+    if (!goal || (sendBtn.disabled && currentRun)) return;
     const previousRun = currentRun;
     const guidance = guidanceInput.value.trim();
+    const forceWeb = document.getElementById("web-btn")?.classList.contains("active") || false;
     const imgs = pendingImages.slice();
     const fls = pendingFiles.slice();
     const files = imgs.concat(fls);
@@ -1005,6 +1474,7 @@
         const fd = new FormData();
         fd.append("goal", goal);
         fd.append("guidance", guidance);
+        if (forceWeb) fd.append("force_web", "true");
         if (convCtx.conversation_id)
           fd.append("conversation_id", convCtx.conversation_id);
         if (convCtx.project_id) fd.append("project_id", convCtx.project_id);
@@ -1020,7 +1490,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            goal, guidance,
+            goal, guidance, force_web: forceWeb,
             conversation_id: convCtx.conversation_id || "",
             project_id: convCtx.project_id || "",
           }),
@@ -1034,8 +1504,8 @@
       // No failure path used to exist: the composer stayed disabled and
       // poll() bailed on the missing run id, so the page was dead until
       // a reload. Restore everything the user had.
-      addMsg("stage-line", "could not start the run: " +
-             (err && err.message ? err.message : err));
+      showMiddleStatus("Could not start the run: " +
+                       (err && err.message ? err.message : err), "error");
       pendingImages = imgs;
       pendingFiles = fls;
       refreshPreview();
@@ -1056,6 +1526,10 @@
       steerRow.hidden = true;
       return;
     }
+    // Show the user's message immediately; the server may not emit an
+    // event until the runner has begun, which otherwise leaves the chat
+    // visually empty after the composer clears.
+    addMsg("user", goal);
     if (data.conversation_id && window.aidonSetConversation)
       window.aidonSetConversation(data.conversation_id);
     if (previousRun && data.run_id === previousRun) {
@@ -1073,6 +1547,9 @@
     lastEventCount = 0;
     lastTraceCount = 0;
     lastTracePhase = null;
+    runTraceHistory = [];
+    routeShownFor = null;
+    lastRoute = null;
     // keep previous messages in the thread — just scroll to the latest
     document.getElementById("thinking-list").innerHTML = "";
     document.getElementById("thinking-count").textContent = "";
@@ -1087,6 +1564,14 @@
     pollTimer = setInterval(poll, 2000);
     poll();
   }
+  // Also expose the primary action for the markup fallback and diagnostics.
+  window.aidonStartRun = (...args) => {
+    if (window.aidonSendInProgress) return;
+    window.aidonSendInProgress = true;
+    return Promise.resolve(startRun(...args)).finally(() => {
+      window.aidonSendInProgress = false;
+    });
+  };
 
   async function sendSteer() {
     const text = steerInput.value.trim();
@@ -1101,10 +1586,10 @@
       });
       if (!r.ok) {
         const data = await r.json().catch(() => ({}));
-        addMsg("stage-line", "steer rejected: " + (data.detail || r.status));
+        showMiddleStatus("Steer rejected: " + (data.detail || r.status), "error");
       }
     } catch (e) {
-      addMsg("stage-line", "steer failed: " + e.message);
+      showMiddleStatus("Steer failed: " + e.message, "error");
     }
     steerBtn.disabled = false;
     steerInput.focus();
@@ -1119,23 +1604,60 @@
       });
       if (!r.ok) {
         const data = await r.json().catch(() => ({}));
-        addMsg("stage-line", "cancel rejected: " +
-               (data.detail || r.status));
+        showMiddleStatus("Cancel rejected: " + (data.detail || r.status), "error");
       } else {
         // The next poll sees status "cancelled" (not "running") and
         // re-enables the composer itself; this line is the immediate
         // acknowledgement, not the re-enable.
-        addMsg("stage-line", "Run cancelled — chat re-enabled");
+        showMiddleStatus("Run cancelled — chat re-enabled");
       }
     } catch (e) {
-      addMsg("stage-line", "cancel failed: " + e.message);
+      showMiddleStatus("Cancel failed: " + e.message, "error");
     }
     cancelBtn.disabled = false;
   }
 
-  sendBtn.addEventListener("click", startRun);
+  const webBtn = document.getElementById("web-btn");
+  if (webBtn) webBtn.addEventListener("click", () => {
+    const active = webBtn.classList.toggle("active");
+    webBtn.title = active ? "Web search forced (click to turn off)" : "Force web search";
+    webBtn.setAttribute("aria-pressed", active ? "true" : "false");
+    showMiddleStatus(active
+      ? "Web search enforced for this request."
+      : "Web search automatic — Aidon decides when needed.");
+  });
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") startRun();
+    if (e.key === "Enter" && !(e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      startRun();
+    }
+  });
+  const preapproveBtn = document.getElementById("preapprove-btn");
+  if (preapproveBtn) preapproveBtn.addEventListener("click", async () => {
+    const project = window.aidonConversation ? window.aidonConversation() : {};
+    const specId = project.project_id || "default";
+    const active = preapproveBtn.classList.contains("active");
+    if (!active && !window.confirm("Approve reversible live actions for " + specId + " for 8 hours?")) return;
+    preapproveBtn.disabled = true;
+    try {
+      const r = await fetch(active
+        ? "/api/preapprovals/" + encodeURIComponent(specId) + "/live"
+        : "/api/preapprovals", active ? { method: "DELETE" } : {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ spec_id: specId, kind: "live", hours: 8 }),
+        });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) throw new Error(data.error || ("HTTP " + r.status));
+      preapproveBtn.classList.toggle("active", !active);
+      preapproveBtn.title = active ? "Approve for me" : "Live actions approved for 8 hours; click to deactivate";
+      showMiddleStatus(active
+        ? "Approve for me deactivated for " + specId + "."
+        : "Reversible live actions approved for " + specId + " for 8 hours.");
+    } catch (e) {
+      showMiddleStatus("Preapproval failed: " + e.message, "error");
+    } finally {
+      preapproveBtn.disabled = false;
+    }
   });
   steerBtn.addEventListener("click", sendSteer);
   if (cancelBtn) cancelBtn.addEventListener("click", sendCancel);
@@ -1175,6 +1697,29 @@
 
   renderStages("interpret");
 
+  // Restore the last terminal phase when a stored conversation is opened.
+  // Otherwise the global stage bar resets to Interpret after a refresh.
+  window.aidonRestoreRunState = (conversationId) => {
+    try {
+      const raw = localStorage.getItem("aidon-run-state-" + conversationId);
+      if (!raw) return;
+      const state = JSON.parse(raw);
+      renderStages(state.stage || "done");
+      setStatus(state.status === "failed" ? "error" : "ok",
+                state.status === "failed" ? "failed" : (state.status || "done"));
+      if (state.route) {
+        routeShownFor = "__history__";
+        renderRoute(state.route);
+      }
+      const list = document.getElementById("thinking-list");
+      list.innerHTML = "";
+      lastTracePhase = null;
+      const trace = (state.trace || []).filter((e) =>
+        e.phase !== "interpret" && e.phase !== "respond");
+      if (trace.length) renderTrace(trace);
+    } catch (e) {}
+  };
+
   // ── theme: dark / light chooser, persisted ──────────────────────────
   const rootEl = document.documentElement;
   function setTheme(t) {
@@ -1198,36 +1743,56 @@
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
-      addMsg("stage-line", "mic unavailable: " + (e.message || e));
+      showMiddleStatus("Mic unavailable: " + (e.message || e), "error");
       return;
     }
     const chunks = [];
-    recorder = new MediaRecorder(stream);
+    const mimeTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+    const mimeType = mimeTypes.find((m) => window.MediaRecorder.isTypeSupported(m)) || "";
+    try {
+      micCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = micCtx.createMediaStreamSource(stream);
+      micAnalyser = micCtx.createAnalyser();
+      micAnalyser.fftSize = 256;
+      source.connect(micAnalyser);
+      micAnalyserData = new Uint8Array(micAnalyser.fftSize);
+    } catch (e) {
+      micCtx = null; micAnalyser = null; micAnalyserData = null;
+    }
+    recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
     recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
     recorder.onstop = async () => {
       micBtn.classList.remove("recording");
       stream.getTracks().forEach((t) => t.stop());
+      if (micCtx) micCtx.close().catch(() => {});
+      micCtx = null; micAnalyser = null; micAnalyserData = null;
       recorder = null;
-      const blob = new Blob(chunks, { type: "audio/webm" });
+      const audioType = mimeType || "audio/webm";
+      const blob = new Blob(chunks, { type: audioType });
       try {
         const r = await fetch("/api/transcribe", {
           method: "POST",
-          headers: { "X-Audio-Name": "mic.webm" },
+          headers: { "X-Audio-Name": audioType.includes("mp4") ? "mic.mp4" : "mic.webm",
+                     "Content-Type": audioType },
           body: blob,
         });
-        const data = await r.json();
-        if (data.text) {
-          input.value = (input.value ? input.value + " " : "") + data.text;
-          input.focus();
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || data.detail || ("HTTP " + r.status));
+        const transcript = data.text || data.transcript || "";
+        if (transcript) {
+          // Voice input is a complete goal: send it directly. It is
+          // rendered in the user chat bubble, not copied into the composer.
+          startRun(transcript);
         } else {
-          addMsg("stage-line", data.error || data.detail || "transcription failed");
+          showMiddleStatus(data.error || data.detail || "Transcription failed", "error");
         }
       } catch (e) {
-        addMsg("stage-line", "transcription request failed: " + e.message);
+        showMiddleStatus("Transcription request failed: " + e.message, "error");
       }
     };
     recorder.start();
     micBtn.classList.add("recording");
+    drawWave();
   });
 
   drawWave(); // idle waveform frame on load
@@ -1249,13 +1814,15 @@
   const input = document.getElementById("goal-input");
 
   let currentProjectId = localStorage.getItem("aidon-project") || "";
-  let currentConversationId = "";
+  let currentConversationId = localStorage.getItem("aidon-conversation") || "";
   window.aidonConversation = () => ({
     conversation_id: currentConversationId,
     project_id: currentProjectId,
   });
   window.aidonSetConversation = (id) => {
     currentConversationId = id || "";
+    if (currentConversationId) localStorage.setItem("aidon-conversation", currentConversationId);
+    else localStorage.removeItem("aidon-conversation");
     markActiveConversation();
   };
 
@@ -1479,7 +2046,7 @@
       if (!r.ok) return;
     } catch (e) { return; }
     if (id === currentConversationId) {
-      currentConversationId = "";
+      window.aidonSetConversation("");
       thread.innerHTML = "";
     }
     loadHistory();
@@ -1519,6 +2086,7 @@
       conv = await r.json();
     } catch (e) { return; }
     currentConversationId = conv.id;
+    localStorage.setItem("aidon-conversation", currentConversationId);
     if (window.aidonStopPolling) window.aidonStopPolling();
     if (conv.project_id) {
       currentProjectId = conv.project_id;
@@ -1555,23 +2123,42 @@
       }
       thread.appendChild(d);
     };
-    (conv.exchanges || []).forEach((ex) => {
-      if (ex.user_text) {
+    const turns = conv.turns || [];
+    if (turns.length) {
+      turns.forEach((turn) => {
+        const role = turn.role || "user";
+        if (role === "user") {
         const u = document.createElement("div");
         u.className = "msg user";
-        u.textContent = ex.user_text;
-        thread.appendChild(u);
-      }
-      (byImport[ex.exchange_no] || []).forEach(renderAtt);
-      if (ex.assistant_text) {
-        const a = document.createElement("div");
-        a.className = "msg aidon";
-        a.textContent = ex.assistant_text;
-        thread.appendChild(a);
-      }
-      (outputsByRun[ex.run_id] || []).forEach(renderAtt);
-    });
-    thread.scrollTop = thread.scrollHeight;
+          u.textContent = turn.text || "";
+          thread.appendChild(u);
+        } else if (role === "assistant") {
+          const a = document.createElement("div");
+          a.className = "msg aidon";
+          a.textContent = turn.text || "";
+          thread.appendChild(a);
+        }
+      });
+    } else {
+      (conv.exchanges || []).forEach((ex) => {
+        if (ex.user_text) {
+          const u = document.createElement("div");
+          u.className = "msg user";
+          u.textContent = ex.user_text;
+          thread.appendChild(u);
+        }
+        (byImport[ex.exchange_no] || []).forEach(renderAtt);
+        if (ex.assistant_text) {
+          const a = document.createElement("div");
+          a.className = "msg aidon";
+          a.textContent = ex.assistant_text;
+          thread.appendChild(a);
+        }
+        (outputsByRun[ex.run_id] || []).forEach(renderAtt);
+      });
+    }
+    if (window.aidonScrollThread) window.aidonScrollThread();
+    if (window.aidonRestoreRunState) window.aidonRestoreRunState(conv.id);
     input.disabled = false;
     input.focus();
   }
@@ -1754,5 +2341,6 @@
     loadHistory();
     loadIdeas();
     loadLibrary();
+    if (currentConversationId) openConversation(currentConversationId);
   });
 })();

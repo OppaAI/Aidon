@@ -106,19 +106,19 @@ class ConversationStoreDB:
     # -- projects ------------------------------------------------------
 
     def ensure_default_project(self) -> dict:
-        row = self._conn.execute(
-            "SELECT id, name, created_at FROM projects WHERE id = 'default'"
-        ).fetchone()
-        if row:
-            return dict(row)
         with self._lock:
+            row = self._conn.execute(
+                "SELECT id, name, created_at FROM projects WHERE id = 'default'"
+            ).fetchone()
+            if row:
+                return dict(row)
             self._conn.execute(
                 "INSERT OR IGNORE INTO projects (id, name, created_at)"
                 " VALUES ('default', 'default', ?)", (_now(),))
             self._conn.commit()
-        return dict(self._conn.execute(
-            "SELECT id, name, created_at FROM projects WHERE id = 'default'"
-        ).fetchone())
+            return dict(self._conn.execute(
+                "SELECT id, name, created_at FROM projects WHERE id = 'default'"
+            ).fetchone())
 
     def create_project(self, name: str) -> dict:
         project_id = _new_id()
@@ -128,6 +128,20 @@ class ConversationStoreDB:
                 (project_id, name, _now()))
             self._conn.commit()
         return {"id": project_id, "name": name}
+
+    def list_projects(self) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, name, created_at FROM projects ORDER BY created_at"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_project(self, project_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM projects WHERE id = ?", (str(project_id),))
+            self._conn.commit()
+        return cur.rowcount > 0
 
     # -- conversations -------------------------------------------------
 
@@ -141,16 +155,18 @@ class ConversationStoreDB:
         return {"id": conversation_id, "project_id": project_id}
 
     def list_conversations(self, project_id: str) -> list[dict]:
-        rows = self._conn.execute(
-            "SELECT id, project_id, created_at FROM conversations"
-            " WHERE project_id = ? ORDER BY created_at",
-            (project_id,)).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, project_id, created_at FROM conversations"
+                " WHERE project_id = ? ORDER BY created_at",
+                (project_id,)).fetchall()
         return [dict(row) for row in rows]
 
     def list_all_conversations(self) -> list[dict]:
-        rows = self._conn.execute(
-            "SELECT id, project_id, created_at FROM conversations"
-            " ORDER BY created_at").fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, project_id, created_at FROM conversations"
+                " ORDER BY created_at").fetchall()
         return [dict(row) for row in rows]
 
     def import_conversation(self, conversation_id: str, project_id: str,
@@ -218,22 +234,30 @@ class ConversationStoreDB:
                 "role": role, "text": text}
 
     def history(self, conversation_id: str, limit: int = 50) -> list[dict]:
-        rows = self._conn.execute(
-            "SELECT exchange_no, role, text, created_at FROM exchanges"
-            " WHERE conversation_id = ? ORDER BY exchange_no DESC LIMIT ?",
-            (conversation_id, limit)).fetchall()
+        # Reads take the same lock as writes: one sqlite3 connection is
+        # shared by every thread, and a read that runs while another
+        # thread is inside BEGIN IMMEDIATE raises InterfaceError
+        # ("bad parameter or other API misuse") on the connection.
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT exchange_no, role, text, created_at FROM exchanges"
+                " WHERE conversation_id = ? ORDER BY exchange_no DESC LIMIT ?",
+                (conversation_id, limit)).fetchall()
         return [dict(row) for row in reversed(rows)]
 
     # -- summary -------------------------------------------------------
 
     def _refresh_summary(self, conversation_id: str) -> None:
-        recent = self.history(conversation_id, limit=_SUMMARY_EXCHANGES)
-        if not recent:
-            return
-        parts = [f"{row['role']}: {_first_sentence(row['text'])}"
-                 for row in recent]
-        summary = " ".join(parts)
+        # One critical section for the read and the write, so the
+        # summary always matches the exchange that triggered it and
+        # never races another writer on the shared connection.
         with self._lock:
+            recent = self.history(conversation_id, limit=_SUMMARY_EXCHANGES)
+            if not recent:
+                return
+            parts = [f"{row['role']}: {_first_sentence(row['text'])}"
+                     for row in recent]
+            summary = " ".join(parts)
             self._conn.execute(
                 "INSERT INTO summaries (conversation_id, text, updated_at)"
                 " VALUES (?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE"
@@ -242,9 +266,10 @@ class ConversationStoreDB:
             self._conn.commit()
 
     def rolling_summary(self, conversation_id: str) -> str:
-        row = self._conn.execute(
-            "SELECT text FROM summaries WHERE conversation_id = ?",
-            (conversation_id,)).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT text FROM summaries WHERE conversation_id = ?",
+                (conversation_id,)).fetchone()
         return row["text"] if row else ""
 
     # -- attachments and ideas -----------------------------------------
@@ -271,10 +296,11 @@ class ConversationStoreDB:
         return {"id": idea_id, "project_id": project_id, "text": text}
 
     def list_ideas(self, project_id: str) -> list[dict]:
-        rows = self._conn.execute(
-            "SELECT id, project_id, text, created_at FROM ideas"
-            " WHERE project_id = ? ORDER BY created_at",
-            (project_id,)).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, project_id, text, created_at FROM ideas"
+                " WHERE project_id = ? ORDER BY created_at",
+                (project_id,)).fetchall()
         return [dict(row) for row in rows]
 
     def close(self) -> None:

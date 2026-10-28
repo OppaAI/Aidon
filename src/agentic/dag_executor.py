@@ -32,6 +32,9 @@ Failures:
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 
 def _is_transient(exc: BaseException) -> bool:
     return "transient" in str(exc).lower()
@@ -52,6 +55,37 @@ class DAGExecutor:
     def _checkpoint_key(self, node_id: str) -> str:
         return f"node:{node_id}"
 
+    def _dag_fingerprint(self) -> str:
+        nodes = []
+        for node in self.dag.topological_order():
+            nodes.append({
+                "id": node.id,
+                "tool": node.tool,
+                "args": node.args,
+                "deliverable": node.deliverable,
+                "depends_on": list(node.depends_on or []),
+            })
+        canonical = json.dumps(nodes, sort_keys=True,
+                               ensure_ascii=False, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _ensure_identity(self) -> None:
+        key = "__dag_fingerprint__"
+        expected = self._dag_fingerprint()
+        stored = (self.state.get_state(self.run_id, key)
+                  if self.state is not None else self._memory.get(key))
+        if stored and stored != expected:
+            self._clear_all_checkpoints()
+        elif not stored and any(
+                self._get_checkpoint(node.id) is not None
+                for node in self.dag.topological_order()):
+            # Checkpoints without an identity cannot be trusted.
+            self._clear_all_checkpoints()
+        if self.state is not None:
+            self.state.save_state(self.run_id, key, expected)
+        else:
+            self._memory[key] = expected
+
     def _get_checkpoint(self, node_id: str) -> str | None:
         key = self._checkpoint_key(node_id)
         if self.state is not None:
@@ -60,11 +94,36 @@ class DAGExecutor:
         return self._memory.get(key)
 
     def _set_checkpoint(self, node_id: str, result: str) -> None:
+        identity_key = "__dag_fingerprint__"
+        if self.state is not None:
+            if not self.state.get_state(self.run_id, identity_key):
+                self.state.save_state(self.run_id, identity_key,
+                                      self._dag_fingerprint())
+        elif identity_key not in self._memory:
+            self._memory[identity_key] = self._dag_fingerprint()
         key = self._checkpoint_key(node_id)
         if self.state is not None:
             self.state.save_state(self.run_id, key, result)
         else:
             self._memory[key] = result
+
+    def _clear_checkpoint(self, node_id: str) -> None:
+        key = self._checkpoint_key(node_id)
+        if self.state is not None:
+            self.state.save_state(self.run_id, key, "")
+        else:
+            self._memory.pop(key, None)
+
+    def _clear_all_checkpoints(self) -> None:
+        if self.state is not None and hasattr(self.state, "clear_state_prefix"):
+            self.state.clear_state_prefix(self.run_id, "node:")
+        elif self.state is not None:
+            for node in self.dag.topological_order():
+                self._clear_checkpoint(node.id)
+        else:
+            for key in list(self._memory):
+                if key.startswith("node:"):
+                    self._memory.pop(key, None)
 
     def partial_results(self) -> dict[str, str]:
         """Checkpointed results so far, in topological order."""
@@ -85,6 +144,7 @@ class DAGExecutor:
         "results" and "completed" still carry everything that finished
         before the failing node, in topological order.
         """
+        self._ensure_identity()
         results = self.partial_results()
         completed = list(results)
         failed = None

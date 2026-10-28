@@ -1,4 +1,4 @@
-"""YouTube, old Aidon: search and metadata, via the Data API v3.
+"""YouTube, Aidon: search and metadata, via the Data API v3.
 
 Old key, only: AIDON_YOUTUBE_API_KEY. No new duplicate.
 Search costs quota, 100 units per search, metadata 1 unit,

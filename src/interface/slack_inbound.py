@@ -1,4 +1,4 @@
-"""Slack inbound, old Aidon slack_inbound concept, rebuilt as a separate module.
+"""Slack inbound, Aidon slack_inbound concept, rebuilt as a separate module.
 
 Slack inbound is signature verification plus event parsing, nothing else: verify_slack_event
 checks the HMAC signature and the 5-minute timestamp, parse_slack_event returns a

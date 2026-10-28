@@ -5,14 +5,18 @@
 - WebUI: `./launch.sh` starts the WebUI server on
   `http://127.0.0.1:8765/` by default (`AIDON_WEBUI_PORT`
   overrides it; `webui serve` on its own defaults to
-  port 8002), localhost only, with a chat
+  port 8765), localhost only, with a chat
   thread, a left sidebar for projects and library, a
   Library tab, a settings and keys page showing hash
   prefixes only, never real keys, and approval cards
   in the UI, fail-closed on timeout. With arguments,
   `./launch.sh goal "..."` still runs the CLI.
+- Conversational CLI: `./launch.sh --cli` (or
+  `python -m src.system.main --cli`) opens a lightweight chat
+  interface with the same model configuration. It is not a full-screen
+  terminal UI; use `/help`, `/clear`, `/history`, and `/quit` there.
 - WhatsApp and Slack, both two-way, no Telegram,
-  with the old Aidon key names:
+  with the Aidon key names:
   `AIDON_WHATSAPP_TOKEN`, `AIDON_WHATSAPP_PHONE_ID`,
   `AIDON_WHATSAPP_VERIFY_TOKEN`,
   `AIDON_WHATSAPP_APP_SECRET`, `AIDON_WHATSAPP_OWNER`,
@@ -36,7 +40,70 @@
   tunnel, localhost alone is not reachable by Meta
   or Slack, and the full WebUI must not be tunneled
   unauthenticated, use a webhook-only listener in
-  front, as old Aidon did.
+  front, as Aidon did.
+
+## ✅ Pre-approvals, the same on every surface
+
+A pre-approval lets Aidon run **reversible** steps for one
+project without asking every time. It is not a blanket
+auto-approve: anything that sends to a third party,
+publishes, spends, deletes, installs, or adopts a plugin
+always gets a card, even if it was somehow ticked.
+
+Grant, list, and revoke from any of the four surfaces — the
+WebUI chat box, the WebUI Settings page (Pre-approvals
+panel), WhatsApp, or Slack — with the same words:
+
+- `preapprove <project> <kind> [hours]` — grant, 8 hours by
+  default. The kind can be a name or the number the menu
+  shows, so a phone reply can be `preapprove dinner 1 8`.
+- `preapprovals` — list what is active, with hours left.
+- `unpreapprove <project> <kind|all>` — revoke one kind or
+  everything for that project.
+
+Kinds: `live` (reversible runs only, the final card is
+skipped when the plan touches nothing but files), `spec`
+(accept the spec sheet), `semantic` (promote facts to
+long-term memory), `sandbox` (test steps in the isolated
+workdir). That menu is the closed list: a word that is not
+on it is refused with the menu, so an ordinary sentence
+that happens to start with "preapprove" cannot invent a
+grant.
+
+From the CLI, the same store:
+
+```bash
+python -m src.system.main scheduler preapprove --spec dinner --kind live --hours 8
+python -m src.system.main scheduler list
+python -m src.system.main scheduler revoke --spec dinner --kind all
+```
+
+All four read and write one file, `<Aidon home>/preapprovals.json`,
+so a grant made on your phone is the grant the WebUI panel
+shows, and a CLI run or a scheduled job honours it too.
+
+## 🎙️ Voice, themes, and run status
+
+- Fish Audio playback has a progressive WebUI path at
+  `/api/tts/stream`; supported browsers begin playback as audio chunks
+  arrive. The existing buffered endpoint remains the fallback when
+  streaming audio is unavailable. Karaoke text follows the same audio
+  element, so it stays aligned with playback.
+- The WebUI has dark and light themes, a robot avatar fallback, an
+  optional VRM avatar viewer, and a compact final-run footer showing
+  elapsed time and token usage.
+
+## 📎 Attachments
+
+- The WebUI accepts up to three combined image/document files per goal.
+  Each file is limited to 25 MiB and the complete request is limited to
+  75 MiB. Images are passed to the selected vision-capable model during
+  interpretation/planning; documents are stored in the library uploads
+  area and their paths are made available to the document-reading tools.
+- The camera dialog can capture a maximum 30-second video clip. Video is
+  stored with the goal and its path is available to the video workflow;
+  it is not sent directly to the chat model for frame-by-frame inference.
+  Use the separate CLI video workflow for video editing and analysis.
 
 ## 🔁 Core, in order
 
@@ -383,5 +450,5 @@ collection.
 - Post-hackathon, not built, not demoed: VM backend,
   Unity factory, procedural 3D assets, local server
   manager, stronger sandbox, dedicated live toolset,
-  and SAM 3.1 segmentation, see ROADMAP.md.
+  and SAM 3.1 segmentation, see [ROADMAP.md](ROADMAP.md).
 

@@ -9,7 +9,7 @@ WebUI, built now, after triggers, after v1 and MCP:
   a card, waits up to 180 seconds, fail-closed, and
   /api/approve sets the decision. A card is a decision,
   chat is conversation, same rule as everywhere else.
-- Settings and keys page, at /settings, showing
+- Settings APIs expose configuration and key metadata without exposing secrets.
   backend, ingest path, and key hash prefixes only,
   never a real key, never a secret, never a token.
 - Library tab, at /library, listing library files in
@@ -62,8 +62,11 @@ import hashlib
 import hmac
 import json
 import mimetypes
+import os
 import threading
 import time
+from email.parser import BytesParser
+from email.policy import default as email_default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -71,17 +74,37 @@ from urllib.parse import parse_qs, urlparse
 from .approval import ApprovalGate, Decision
 from .messaging import (MessagingConfig, normalize_number, parse_decision,
                         verify_whatsapp_signature)
+from .result_delivery import extract_result_delivery
 from .triggers import TriggerDispatcher, TriggerEvent
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Attachment limits are deliberately shared by the browser contract and the
+# server enforcement.  The server is authoritative because clients can be
+# replaced or bypassed.
+MAX_ATTACHMENT_FILES = 3
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+MAX_ATTACHMENT_TOTAL_BYTES = MAX_ATTACHMENT_FILES * MAX_ATTACHMENT_BYTES
+
+
+def _app_version() -> str:
+    """Resolve the displayed release version without exposing repo details."""
+    override = os.environ.get("AIDON_VERSION", "").strip().lstrip("v")
+    if override:
+        return override
+    try:
+        from importlib.metadata import version
+        return version("aidon")
+    except Exception:
+        return "0.1.0"
 
 # Shared page style: every WebUI page gets the same base look. The chat
 # page previously shipped only avatar-animation CSS and the handler-built
 # pages shipped no <head> at all, so they rendered as plain white text.
 # No external assets: everything here is inline, so pages work offline.
 BASE_CSS = """
-:root{--bg:#070b16;--surface:#0d1424;--surface2:#141d33;--text:#e9eef8;--muted:#8b96b3;--border:#1e2a45;--accent:#0082fb;--accent2:#7c5cff;--green:#3ecf8e;--amber:#f5a623;--red:#f0564f}
-body.light{--bg:#eef1f7;--surface:#ffffff;--surface2:#e6ebf4;--text:#131a2c;--muted:#5f6b87;--border:#d9e0ee;--accent:#0064e0;--accent2:#6a4dff;--green:#1f9d63;--amber:#c47b12;--red:#d43d36}
+:root{--bg:#030b1c;--surface:#07152d;--surface2:#0c2040;--text:#e9eef8;--muted:#8b96b3;--border:#1e2a45;--accent:#0082fb;--accent2:#7c5cff;--green:#3ecf8e;--amber:#f5a623;--red:#f0564f}
+body.light{--bg:#dfe8f4;--surface:#eef3f9;--surface2:#d5e1ef;--text:#131a2c;--muted:#5f6b87;--border:#c7d4e5;--accent:#0064e0;--accent2:#6a4dff;--green:#1f9d63;--amber:#c47b12;--red:#d43d36}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0 auto;padding:24px;max-width:980px;line-height:1.5}
 body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:56px 56px;opacity:.14}
 h1{font-family:Rajdhani,"Segoe UI",system-ui,sans-serif;font-size:1.8em;color:var(--text);margin:0 0 0.5em;text-transform:uppercase;letter-spacing:.12em}
@@ -124,6 +147,23 @@ th{background:var(--surface2)}
 body.chat-page{max-width:1200px}
 body.chat-page h1{display:inline-block;margin-right:12px;vertical-align:middle}
 #theme-toggle{padding:6px 12px;font-size:1.1em;vertical-align:middle}
+.settings-shell{max-width:980px;margin:0 auto;padding:8px 0 40px}
+.settings-top{display:flex;align-items:center;gap:14px;padding:8px 0 24px;border-bottom:1px solid var(--border)}
+.settings-top h1{flex:1;margin:0;font-size:1.65em}
+.settings-top a{font-size:.9em;text-decoration:none}
+.settings-intro{padding:18px 0 10px;color:var(--muted);font-size:.92em}
+.settings-intro code,.set-key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text)}
+.set-group{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:8px 20px 14px;margin:16px 0;box-shadow:0 12px 30px rgba(0,0,0,.12)}
+.set-group h2{color:var(--accent);font-size:1em;letter-spacing:.16em;text-transform:uppercase;margin:12px 0 4px}
+.set-row{display:flex;gap:22px;align-items:center;padding:14px 0;border-top:1px solid var(--border)}
+.set-row:first-of-type{border-top:0}
+.set-label{flex:1;min-width:0}.set-label label{font-weight:600}.set-key{display:block;font-size:.72em;color:var(--muted);margin-top:3px}.set-desc{font-size:.8em;color:var(--muted);line-height:1.4;margin-top:4px}
+.set-badge{font-size:.68em;color:var(--green);border:1px solid var(--green);border-radius:5px;padding:1px 5px;margin-left:5px}
+.set-input{flex:0 0 330px}.set-input input[type=text],.set-input input[type=password],.set-input input[type=number],.set-input select{width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:9px;background:var(--surface2);color:var(--text);outline:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.set-input input:focus,.set-input select:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow)}
+.range-control{display:grid;grid-template-columns:1fr 92px;gap:10px;align-items:center}.range-control input[type=range]{width:100%;accent-color:var(--accent)}.range-control input[type=number]{width:100%}.range-meta{display:flex;justify-content:space-between;margin-top:4px;color:var(--muted);font-size:.7em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.switch{position:relative;display:inline-block;width:46px;height:25px}.switch input{opacity:0;width:0;height:0}.switch span{position:absolute;inset:0;border-radius:13px;background:var(--surface2);border:1px solid var(--border);cursor:pointer}.switch span:before{content:"";position:absolute;width:17px;height:17px;left:3px;top:3px;border-radius:50%;background:var(--muted);transition:.15s}.switch input:checked+span{background:var(--accent);border-color:var(--accent)}.switch input:checked+span:before{transform:translateX(21px);background:#fff}
+#settings-footer{display:flex;align-items:center;gap:14px;padding:16px 0 28px}#settings-note{flex:1;color:var(--muted);font-size:.8em}#settings-save{padding:11px 24px;border:0;border-radius:10px;background:linear-gradient(92deg,var(--accent),var(--accent2));color:#fff;font-weight:700;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}
+@media(max-width:700px){.set-row{display:block}.set-input{width:100%;margin-top:10px}.settings-top{align-items:flex-start}.settings-shell{padding:0 4px 30px}}
 @media (max-width:700px){#layout{display:block}#sidecol{width:auto;margin-bottom:20px}}
 """
 
@@ -131,7 +171,7 @@ body.chat-page h1{display:inline-block;margin-right:12px;vertical-align:middle}
 def _page_html(title, body):
     """Wrap a handler-built fragment in a full styled page."""
     return ("<!doctype html><html><head><meta charset=\"utf-8\"><title>" + title +
-            "</title><style>" + BASE_CSS + "</style></head><body><script>try{if(localStorage.getItem('aidon-theme')==='light'){document.body.classList.add('light')}}catch(e){}</script>" + body + "</body></html>")
+            "</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/favicon.svg\"><style>" + BASE_CSS + "</style></head><body><script>try{if(localStorage.getItem('aidon-theme')==='light'){document.body.classList.add('light')}}catch(e){}</script>" + body + "</body></html>")
 
 
 CHAT_HTML = """<!doctype html>
@@ -195,6 +235,7 @@ CHAT_HTML = """<!doctype html>
 <h2>Library</h2><a href="/library">Library tab</a>
 <h2>Settings</h2><a href="/settings">Settings and keys</a>
 <h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a> <a href="/replay">Replay</a> <a href="/avatar-vrm">Open VRM avatar</a> <a href="/capabilities">Capabilities</a> <a href="/memory">Memory</a> <a href="/knowledge">Knowledge</a> <a href="/reports">Reports</a>
+<h2>System status</h2><div id="system-status"></div>
 <div id="stage-pills"><p>Stages: recall, interpret, research, plan, sandbox, verify, approval, live, learn</p><div id="pills"></div></div>
 </div>
 </div>
@@ -302,8 +343,10 @@ async function sendMessage(message) {
   const p = document.createElement('p');
   document.getElementById('messages').appendChild(p);
   await typewriterKaraoke(p, reply);
-  if (reply.includes('Done:')) { setAvatarStatus('Done'); }
-  else if (reply.includes('Failed:')) { setAvatarStatus('Failed'); }
+  const doneOpeners = ["Done:", "All done:", "Finished:", "That's done:", "Wrapped up:", "There we go:"];
+  const failedOpeners = ["That run failed:", "It didn't get there:", "Something went wrong:", "That one didn't make it:"];
+  if (doneOpeners.some(s => reply.includes(s))) { setAvatarStatus('Done'); }
+  else if (failedOpeners.some(s => reply.includes(s))) { setAvatarStatus('Failed'); }
   else { setAvatarStatus('Idle'); }
   speak(reply);
 }
@@ -343,7 +386,25 @@ async function refreshPills() {
     document.getElementById('pills').innerHTML = kinds.map((k) => '<span>' + k + '=' + (latest[k] || 'idle') + '</span> ').join('');
   } catch (e) {}
 }
-setInterval(refreshPills, 2000); refreshPills();
+async function refreshSystemStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const data = await r.json();
+    const box = document.getElementById('system-status');
+    if (!box) { return; }
+    const rows = [['Model', data.model], ['Backend', data.backend], ['Memory', data.memory], ['Search', data.web_search], ['Sandbox', data.sandbox], ['Voice', data.voice], ['Computer', data.computer], ['WhatsApp', data.whatsapp], ['Slack', data.slack]];
+    let html = '';
+    rows.forEach((row) => {
+      let val = escapeHtml(String(row[1] || ''));
+      if (row[0] === 'Memory' && data.memory_warning) {
+        val = '<span style="background:#f5a623;color:#111;padding:2px 6px">' + val + '</span><br><small>' + escapeHtml(data.memory_warning) + '</small>';
+      }
+      html += '<p>' + escapeHtml(row[0]) + ': ' + val + '</p>';
+    });
+    box.innerHTML = html;
+  } catch (e) {}
+}
+setInterval(refreshPills, 2000); refreshPills(); refreshSystemStatus(); setInterval(refreshSystemStatus, 30000);
 async function refreshApprovals() {
   try {
     const r = await fetch('/api/approvals');
@@ -673,6 +734,7 @@ class WebUIGate:
         self._events[card_id] = event
         self.cards[card_id] = {
             "kind": kind, "title": title, "body": body, "verdict": None,
+            "edited_text": "",
         }
         pending_since = _time.time()
         if self.nudge_tracker is not None:
@@ -690,7 +752,7 @@ class WebUIGate:
         card = self.cards[card_id]
         verdict = card["verdict"] or "rejected"
         card["verdict"] = verdict
-        return Decision(verdict)
+        return Decision(verdict, edited_text=card.get("edited_text", ""))
 
     def pending_cards(self) -> list[dict]:
         """Cards still awaiting a verdict, in creation order.
@@ -711,10 +773,13 @@ class WebUIGate:
                 self.cards[card_id]["verdict"] = "rejected"
                 event.set()
 
-    def approve(self, card_id: str, verdict: str) -> bool:
+    def approve(self, card_id: str, verdict: str, edited_text: str = "") -> bool:
         if card_id not in self.cards:
             return False
+        if verdict not in ("approved", "rejected", "edited"):
+            return False
         self.cards[card_id]["verdict"] = verdict
+        self.cards[card_id]["edited_text"] = str(edited_text or "")
         self._events[card_id].set()
         return True
 
@@ -726,8 +791,8 @@ HUB_MAX_EVENTS = 500
 CHAT_HTML = CHAT_HTML.replace("</style></head>", "</style><style>" + BASE_CSS + "</style></head>", 1)
 DAG_HTML = DAG_HTML.replace("</head>", "<style>" + BASE_CSS + "</style></head>", 1)
 REPLAY_HTML = REPLAY_HTML.replace("</head>", "<style>" + BASE_CSS + "</style></head>", 1)
-VRM_HTML = VRM_HTML.replace("</head>", "<style>" + BASE_CSS + "</style></head>", 1)
-FACTORY_HTML = FACTORY_HTML.replace("</head>", "<style>" + BASE_CSS + "</style></head>", 1)
+VRM_HTML = VRM_HTML.replace("</head>", "<link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/favicon.svg\"><style>" + BASE_CSS + "</style></head>", 1)
+FACTORY_HTML = FACTORY_HTML.replace("</head>", "<link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/favicon.svg\"><style>" + BASE_CSS + "</style></head>", 1)
 
 
 class WebUIServer:
@@ -739,6 +804,7 @@ class WebUIServer:
                  media_downloader=None, run_control=None, webui_token=None, transcribe_key=None,
                  tts_key=None, config=None):
         self.home = Path(home)
+        self.config = config
         self.dispatcher = dispatcher or TriggerDispatcher()
         self.auth_store = auth_store
         self.memory = memory
@@ -769,6 +835,11 @@ class WebUIServer:
         self.media_downloader = media_downloader
         self.run_control = run_control
         self._web_runs: dict[str, dict] = {}
+        # Runs blocked in ask_user, by run id and by conversation id.
+        # A question is a chat turn, not an approval card: no clock.
+        self._question_waiters: dict[str, dict] = {}
+        self._question_by_conversation: dict[str, dict] = {}
+        self._question_lock = threading.Lock()
         self.webui_token = webui_token
         self.transcribe_key = transcribe_key
         self.tts_key = tts_key
@@ -812,6 +883,110 @@ class WebUIServer:
             return f"Steered {parts[1]}: {parts[2]}" if ok else f"No such run {parts[1]}"
         return None
 
+    # ── pre-approval, one store, three surfaces ──────────────────────
+    def preapproval_store(self):
+        from .preapproval import PreapprovalStore
+        return PreapprovalStore(self.home)
+
+    def _resolve_preapproval(self, text: str) -> str | None:
+        """Handle preapprove / preapprovals / unpreapprove from any chat.
+
+        Returns None when the text is not a pre-approval command, so the
+        caller can carry on and treat it as a goal. The same function
+        serves the WebUI chat box, WhatsApp, and Slack, so a grant made
+        on a phone is the same grant the WebUI panel shows.
+        """
+        from .preapproval import handle_command
+        try:
+            return handle_command(self.preapproval_store(), text)
+        except Exception as exc:
+            return f"Pre-approval error: {type(exc).__name__}: {exc}"
+
+    def _resolve_memory_command(self, text: str) -> str | None:
+        """Handle explicit memory pinning from every messaging surface."""
+        stripped = text.strip()
+        if stripped == "/remember":
+            return "Usage: /remember <fact or preference>"
+        if not stripped.lower().startswith("/remember "):
+            return None
+        fact = stripped[len("/remember"):].strip()
+        if not fact:
+            return "Usage: /remember <fact or preference>"
+        if self.memory is None:
+            return "Long-term memory is unavailable."
+        try:
+            point = self.memory.remember(fact, source="chat-command")
+            return f"Remembered in long-term memory: {fact} (id {point.id})"
+        except Exception as exc:
+            return f"Could not remember that: {exc}"
+
+    @staticmethod
+    def _force_web_prefix(text: str) -> tuple[str, bool]:
+        """Strip the explicit /web command and return its force flag."""
+        stripped = str(text or "").strip()
+        if stripped == "/web":
+            return "", True
+        if stripped.lower().startswith("/web "):
+            return stripped[5:].strip(), True
+        return stripped, False
+
+    def handle_preapprovals(self) -> dict:
+        """Active grants, the kind menu, and the help text, for the UI."""
+        from .preapproval import HELP_TEXT, KINDS
+        try:
+            grants = self.preapproval_store().active()
+        except Exception:
+            grants = []
+        return {"grants": grants, "kinds": KINDS, "help": HELP_TEXT}
+
+    def handle_preapproval_grant(self, body: dict) -> tuple[int, dict]:
+        """Grant from the WebUI form: project, kind (name or number), hours."""
+        import time as _time
+
+        from .preapproval import (DEFAULT_HOURS, IRREVERSIBLE, KIND_NAMES,
+                                  MAX_HOURS, grantable_kind, kind_from_token)
+        spec_id = str(body.get("spec_id") or body.get("project")
+                      or "default").strip()
+        kind = kind_from_token(str(body.get("kind", "")))
+        if not spec_id:
+            return 400, {"ok": False, "error": "project id is required"}
+        if kind is None:
+            return 400, {"ok": False, "error": "choose a kind, by number or name"}
+        if kind in IRREVERSIBLE:
+            return 400, {"ok": False,
+                         "error": f"{kind} can never be pre-approved: it is "
+                                  f"irreversible or leaves the machine"}
+        if not grantable_kind(kind):
+            return 400, {"ok": False,
+                         "error": f"unknown kind {kind!r}, choose one of: "
+                                  f"{', '.join(KIND_NAMES)}"}
+        try:
+            hours = float(body.get("hours") or DEFAULT_HOURS)
+        except (TypeError, ValueError):
+            return 400, {"ok": False, "error": "hours must be a number"}
+        if hours <= 0:
+            return 400, {"ok": False, "error": "hours must be greater than 0"}
+        hours = min(hours, MAX_HOURS)
+        ok = self.preapproval_store().grant(
+            spec_id, kind, _time.time() + hours * 3600.0)
+        if not ok:
+            return 400, {"ok": False, "error": "grant refused"}
+        return 200, {"ok": True, "spec_id": spec_id, "kind": kind,
+                     "hours": hours}
+
+    def handle_preapproval_revoke(self, spec_id: str,
+                                  kind: str = "") -> tuple[int, dict]:
+        from .preapproval import kind_from_token
+        spec_id = str(spec_id or "").strip()
+        if not spec_id:
+            return 400, {"ok": False, "error": "project id is required"}
+        resolved = kind_from_token(kind) if kind else None
+        if kind and resolved is None:
+            return 400, {"ok": False, "error": f"unknown kind {kind!r}"}
+        removed = self.preapproval_store().revoke(spec_id, resolved)
+        return (200, {"ok": True, "removed": removed}) if removed \
+            else (404, {"ok": False, "removed": 0, "error": "nothing to revoke"})
+
     def _library_files(self) -> list[dict]:
         library_dir = self.home / "library" / "files"
         if not library_dir.exists():
@@ -831,6 +1006,49 @@ class WebUIServer:
         except Exception:
             return []
 
+    def _project_records(self) -> list[dict]:
+        """Return durable projects, including empty newly-created ones."""
+        records = []
+        seen = set()
+        try:
+            for item in self._conversations_db().list_projects():
+                record = {"id": str(item["id"]),
+                          "name": str(item.get("name") or item["id"]),
+                          "conversation_count": 0}
+                records.append(record)
+                seen.add(record["id"])
+        except Exception:
+            pass
+        try:
+            memory_projects = self._projects()
+        except Exception:
+            memory_projects = []
+        for project_id in memory_projects:
+            project_id = str(project_id)
+            if project_id and project_id not in seen:
+                records.append({"id": project_id, "name": project_id,
+                                "conversation_count": 0})
+                seen.add(project_id)
+        try:
+            db = self._conversations_db()
+            for item in records:
+                item["conversation_count"] = len(
+                    db.list_conversations(item["id"]))
+        except Exception:
+            pass
+        return records
+
+    def handle_project_create(self, body: dict) -> dict:
+        name = " ".join(str(body.get("name", "")).split()).strip()
+        if not name:
+            return {"ok": False, "error": "project name is required"}
+        if len(name) > 120:
+            return {"ok": False, "error": "project name is too long"}
+        try:
+            return self._conversations_db().create_project(name)
+        except Exception as exc:
+            return {"ok": False, "error": f"could not create project: {exc}"}
+
     def _avatar_path(self) -> Path | None:
         import os
         candidates = []
@@ -846,15 +1064,78 @@ class WebUIServer:
         control_reply = self._resolve_control(message)
         if control_reply is not None:
             return {"reply": control_reply}
-        project_id = str(body.get("project_id", "default"))
+        preapproval_reply = self._resolve_preapproval(message)
+        if preapproval_reply is not None:
+            return {"reply": preapproval_reply}
+        memory_reply = self._resolve_memory_command(message)
+        if memory_reply is not None:
+            return {"reply": memory_reply}
+        message, force_web = self._force_web_prefix(message)
+        if not message:
+            return {"reply": "Usage: /web <question>"}
+        message, delivery = extract_result_delivery(message)
+        # A plain chat is global/unassigned unless the user explicitly
+        # selected a project. Do not silently put it in "default".
+        project_id = str(body.get("project_id", "") or "")
         replies: list[str] = []
         event = TriggerEvent(source="webui", kind="chat", goal=message,
-                             project_id=project_id, reply=replies.append)
+                             project_id=project_id,
+                             payload={**({"result_delivery": delivery.__dict__}
+                                         if delivery else {}),
+                                      "force_web": force_web},
+                             reply=replies.append)
         try:
             self.dispatcher.dispatch(event)
         except Exception as exc:
             return {"reply": f"Error: {exc}"}
         return {"reply": replies[0] if replies else "Received."}
+
+    def ask_question(self, run_id: str, conversation_id: str, question: str) -> str:
+        """Block the run thread until the owner answers in chat.
+
+        The question is posted as a chat event so the owner sees it,
+        and run_snapshot reports it as waiting_question so the
+        composer stays usable. Questions carry no 180s clock (chat
+        is for conversation, cards are for decisions); the wait ends
+        on an answer or on run cancellation.
+        """
+        event = threading.Event()
+        waiter = {"run_id": run_id, "conversation_id": conversation_id,
+                  "question": str(question), "event": event, "answer": None}
+        with self._question_lock:
+            self._question_waiters[run_id] = waiter
+            self._question_by_conversation[conversation_id] = waiter
+        record = self._web_runs.get(run_id)
+        if record is not None:
+            record["events"].append({"kind": "aidon", "text": str(question)})
+        try:
+            while not event.wait(1.0):
+                if (self.run_control is not None
+                        and self.run_control.is_cancelled(run_id)):
+                    return ("QUESTION_CANCELLED: the run was cancelled "
+                            "while waiting for an answer.")
+            return waiter["answer"] if waiter["answer"] is not None else ""
+        finally:
+            with self._question_lock:
+                if self._question_waiters.get(run_id) is waiter:
+                    del self._question_waiters[run_id]
+                if self._question_by_conversation.get(conversation_id) is waiter:
+                    del self._question_by_conversation[conversation_id]
+
+    def answer_question(self, conversation_id: str, answer: str) -> str | None:
+        """Deliver a chat answer to the waiting run in this conversation."""
+        with self._question_lock:
+            waiter = self._question_by_conversation.get(conversation_id)
+            if waiter is None:
+                return None
+            waiter["answer"] = str(answer)
+            waiter["event"].set()
+            return waiter["run_id"]
+
+    def waiting_question(self, run_id: str) -> str | None:
+        with self._question_lock:
+            waiter = self._question_waiters.get(run_id)
+            return waiter["question"] if waiter else None
 
     def start_goal(self, body: dict) -> dict:
         """Start the same dispatcher path used by messaging triggers."""
@@ -862,21 +1143,105 @@ class WebUIServer:
         goal = str(body.get("goal", "")).strip()
         if not goal:
             return {"error": "goal is required"}
-        project_id = str(body.get("project_id", "default") or "default")
+        goal, force_web = self._force_web_prefix(goal)
+        if not goal:
+            return {"error": "a web question is required"}
+        force_web = force_web or bool(body.get("force_web", False))
+        goal, delivery = extract_result_delivery(goal)
+        # Keep ordinary chats outside projects. A project id is supplied
+        # only when the user selected one in the WebUI.
+        project_id = str(body.get("project_id", "") or "")
+        conversation_id = str(body.get("conversation_id", "") or "")
+        conversation_db = None
+        try:
+            conversation_db = self._conversations_db()
+            if not conversation_id:
+                conversation_id = conversation_db.create_conversation(project_id)["id"]
+            conversation_db.record_exchange(conversation_id, "user", goal)
+        except Exception:
+            # A run must still work if the optional conversation store is
+            # unavailable; the durable run record remains authoritative.
+            conversation_db = None
+        if self.memory is not None:
+            try:
+                self.memory.record_stm(
+                    "user", goal,
+                    attachments=body.get("image_paths") or [],
+                    project_id=project_id,
+                    conversation_id=conversation_id,
+                )
+            except Exception:
+                pass
+        # A message sent while this conversation's run waits for a
+        # question IS the answer, not a new goal: the composer is
+        # disabled while a run works and enabled only while it waits,
+        # so a goal arriving here can only be an answer. Return the
+        # same run id, as the frontend's answer path expects.
+        answered_run = self.answer_question(conversation_id, goal)
+        if answered_run is not None:
+            return {"run_id": answered_run, "conversation_id": conversation_id,
+                    "goal": goal}
         run_id = new_run_id()
         if self.run_control is not None:
             self.run_control.register(run_id, goal, project_id)
         record = {"run_id": run_id, "goal": goal, "project_id": project_id,
                   "status": "running", "events": [], "trace": []}
         self._web_runs[run_id] = record
+        stream_state = {"text": "", "active": False}
+
+        def stream_delta(delta):
+            text = str(delta or "")
+            if not text:
+                return
+            stream_state["active"] = True
+            stream_state["text"] += text
+            record["events"].append({"kind": "aidon-stream",
+                                     "stream_id": run_id, "delta": text})
+
+        def route_update(route):
+            if not route or len(route) < 2:
+                return
+            record["route"] = {"group": str(route[0]),
+                               "confidence": round(float(route[1]), 3)}
+
+        def trace_update(item):
+            if isinstance(item, dict):
+                record["trace"].append(dict(item))
+
+        def question_callback(question):
+            return self.ask_question(run_id, conversation_id, question)
 
         def reply(text):
-            record["events"].append({"kind": "aidon-final", "text": str(text)})
+            record["events"].append({"kind": "aidon-final", "text": str(text),
+                                     "stream_id": run_id if stream_state["active"] else ""})
+            if conversation_db is not None:
+                try:
+                    conversation_db.record_exchange(conversation_id, "assistant", str(text))
+                except Exception:
+                    pass
+            if self.memory is not None:
+                try:
+                    self.memory.record_stm(
+                        "assistant", str(text), project_id=project_id,
+                        conversation_id=conversation_id)
+                except Exception:
+                    pass
 
+        payload = {"run_id": run_id,
+                   "guidance": str(body.get("guidance", "")),
+                   "force_web": force_web,
+                   "_stream_callback": stream_delta,
+                   "_route_callback": route_update,
+                   "_trace_callback": trace_update,
+                   "_question_callback": question_callback,
+                   "result_delivery": delivery.__dict__ if delivery else {}}
+        image_paths = [str(path) for path in (body.get("image_paths") or [])
+                       if str(path).strip()]
+        if image_paths:
+            payload["image_paths"] = image_paths
         event = TriggerEvent(source="webui", kind="goal", goal=goal,
                              project_id=project_id,
-                             payload={"run_id": run_id,
-                                      "guidance": str(body.get("guidance", ""))},
+                             payload={**payload, "conversation_id": conversation_id},
                              reply=reply)
 
         def dispatch():
@@ -890,21 +1255,34 @@ class WebUIServer:
 
         threading.Thread(target=dispatch, daemon=True,
                          name=f"aidon-run-{run_id}").start()
-        return {"run_id": run_id, "conversation_id": body.get("conversation_id", "")}
+        return {"run_id": run_id, "conversation_id": conversation_id,
+                "goal": goal}
 
-    def run_snapshot(self, run_id: str) -> dict | None:
+    def run_snapshot(self, run_id: str, since: int = 0, trace_since: int = 0) -> dict | None:
         record = self._web_runs.get(run_id)
         control = self.run_control.get(run_id) if self.run_control is not None else None
         if record is None and control is None:
             return None
         out = dict(record or {})
         if control:
+            terminal = control.get("status") in {
+                "done", "failed", "rejected", "cancelled"}
             out.update({"status": control.get("status", out.get("status", "running")),
-                        "goal": control.get("goal", out.get("goal", ""))})
+                        "goal": control.get("goal", out.get("goal", "")),
+                        "stage": ("done" if terminal else
+                                   control.get("stage", out.get("stage", "interpret")))})
         out.setdefault("events", [])
         out.setdefault("trace", [])
-        out["event_total"] = len(out["events"])
-        out["trace_total"] = len(out["trace"])
+        # The browser polls incrementally. Returning the complete history on
+        # every poll caused each old assistant event to be rendered again,
+        # which looked like an infinite model loop.
+        all_events = out["events"]
+        all_trace = out["trace"]
+        out["event_total"] = len(all_events)
+        out["trace_total"] = len(all_trace)
+        out["events"] = all_events[max(0, int(since)):]
+        out["trace"] = all_trace[max(0, int(trace_since)):]
+        out["waiting_question"] = self.waiting_question(run_id)
         pending = self.webui_gate.pending_cards()
         out["pending"] = pending[0] if pending else None
         return out
@@ -961,6 +1339,29 @@ class WebUIServer:
                         decision_reply = self._resolve_decision(text)
                         if decision_reply is None:
                             decision_reply = self._resolve_control(text)
+                        if decision_reply is None:
+                            decision_reply = self._resolve_preapproval(text)
+                        if decision_reply is None:
+                            decision_reply = self._resolve_memory_command(text)
+                        # An answer to a waiting question is not a new
+                        # goal: deliver it to the waiter, ack in natural
+                        # language, and skip dispatching a new run.
+                        if decision_reply is None:
+                            answered = self.answer_question(
+                                "whatsapp:" + str(sender), text)
+                            if answered is not None:
+                                from .phrasing import question_ack as _qack
+                                ack = _qack()
+                                replies.append(ack)
+                                if self.whatsapp_sender is not None:
+                                    self.whatsapp_sender(sender, ack)
+                                continue
+                        if decision_reply is None:
+                            text, force_web = self._force_web_prefix(text)
+                            if not text:
+                                decision_reply = "Usage: /web <question>"
+                            else:
+                                decision_reply = None
                         if decision_reply is not None:
                             replies.append(decision_reply)
                             if self.whatsapp_sender is not None:
@@ -968,7 +1369,8 @@ class WebUIServer:
                             continue
                         local_replies: list[str] = []
                         event = TriggerEvent(source="whatsapp", kind="message",
-                                             goal=text, payload={"from": sender},
+                                             goal=text, payload={"from": sender,
+                                                                 "force_web": force_web},
                                              reply=local_replies.append)
                         self.dispatcher.dispatch(event)
                         for reply in local_replies:
@@ -1006,6 +1408,24 @@ class WebUIServer:
             decision_reply = self._resolve_decision(text)
             if decision_reply is None:
                 decision_reply = self._resolve_control(text)
+            if decision_reply is None:
+                decision_reply = self._resolve_preapproval(text)
+            if decision_reply is None:
+                decision_reply = self._resolve_memory_command(text)
+            force_web = False
+            if decision_reply is None:
+                text, force_web = self._force_web_prefix(text)
+                if not text:
+                    decision_reply = "Usage: /web <question>"
+            if decision_reply is None:
+                # An answer to a waiting question is not a new goal.
+                answered = self.answer_question("slack:" + channel, text)
+                if answered is not None:
+                    from .phrasing import question_ack as _qack
+                    ack = _qack()
+                    if self.slack_sender is not None:
+                        self.slack_sender(channel, ack, thread_ts)
+                    return 200, {"replies": [ack]}
             if decision_reply is not None:
                 if self.slack_sender is not None:
                     self.slack_sender(channel, decision_reply, thread_ts)
@@ -1062,6 +1482,9 @@ class WebUIServer:
                         image["downloaded"] = True
                     except Exception:
                         continue
+            payload["force_web"] = force_web
+            payload["channel"] = channel
+            payload["thread_ts"] = thread_ts
             event = TriggerEvent(source="slack", kind="message", goal=text,
                                  payload=payload,
                                  reply=replies.append)
@@ -1210,13 +1633,13 @@ class WebUIServer:
         "autonomy_threshold": "AIDON_AUTONOMY_THRESHOLD",
         "autonomy_decay_days": "AIDON_AUTONOMY_DECAY_DAYS",
         "corrected_subject": "AIDON_CORRECTED_SUBJECT",
-        "ollama_endpoint": "AIDON_OLLAMA_ENDPOINT",
-        "ollama_think": "AIDON_OLLAMA_THINK",
-        "ollama_num_ctx": "AIDON_OLLAMA_NUM_CTX",
+        "model_think": "AIDON_MODEL_THINK",
+        "model_num_ctx": "AIDON_MODEL_NUM_CTX",
         "fast_num_ctx": "AIDON_FAST_NUM_CTX",
         "research_allowlist": "AIDON_RESEARCH_ALLOWLIST",
         "router_fast_phases": "AIDON_ROUTER_FAST_PHASES",
         "kernel": "AIDON_KERNEL",
+        "computer_driver": "AIDON_COMPUTER_DRIVER",
         # Historical spelling remains writable for old installations.
         # New configuration uses the canonical Slack variable below.
         "AIDON_SLACK_SIGNING_SECRET": "AIDON_SLACK_SIGNING_SECRET",
@@ -1233,16 +1656,17 @@ class WebUIServer:
     SETTINGS_CATALOG = [
         {"group": "Model", "settings": [
             {"key": "AIDON_MODEL", "label": "Chat model", "type": "string", "default": "muse-spark", "desc": "Model id for the agent loop.", "secret": False},
-            {"key": "AIDON_BACKEND", "label": "Model backend", "type": "enum", "default": "", "desc": "meta, ollama, http, or fake.", "secret": False, "options": ["meta", "ollama", "http", "fake"]},
-            {"key": "AIDON_API_ENDPOINT", "label": "API endpoint", "type": "string", "default": "", "desc": "OpenAI-compatible endpoint, or Ollama when it points at localhost:11434.", "secret": False},
+            {"key": "AIDON_BACKEND", "label": "Model backend", "type": "enum", "default": "", "desc": "meta, native, http, or fake.", "secret": False, "options": ["meta", "native", "http", "fake"]},
+            {"key": "AIDON_API_ENDPOINT", "label": "API endpoint", "type": "string", "default": "", "desc": "Model API endpoint; leave empty until a backend is selected.", "secret": False},
             {"key": "AIDON_API_KEY", "label": "API key", "type": "string", "default": "", "desc": "Key for the Meta Model API or other endpoint.", "secret": True},
             {"key": "AIDON_EMBED_MODEL", "label": "Embed model", "type": "string", "default": "google/embeddinggemma-2", "desc": "Embedding model for memory.", "secret": False},
             {"key": "AIDON_SPARSE_MODEL", "label": "Sparse memory model", "type": "string", "default": "prithivida/Splade_PP_en_v1", "desc": "Learned sparse model for hybrid memory recall; empty uses keyword sparse weights.", "secret": False},
             {"key": "AIDON_FAST_MODEL", "label": "Fast model", "type": "string", "default": "", "desc": "Small model for fast phases, else the main model.", "secret": False},
+            {"key": "AIDON_FAST_API_ENDPOINT", "label": "Fast model endpoint", "type": "string", "default": "", "desc": "Endpoint for the fast model; empty uses the main API endpoint.", "secret": False},
+            {"key": "AIDON_FAST_API_KEY", "label": "Fast model API key", "type": "string", "default": "", "desc": "API key for the fast model endpoint; empty uses the main API key.", "secret": True},
             {"key": "AIDON_FAST_NUM_CTX", "label": "Fast model context", "type": "int", "default": "0", "desc": "Context window for the fast model, 0 = backend default.", "secret": False},
-            {"key": "AIDON_OLLAMA_ENDPOINT", "label": "Ollama endpoint", "type": "string", "default": "http://localhost:11434", "desc": "Local Ollama server.", "secret": False},
-            {"key": "AIDON_OLLAMA_THINK", "label": "Ollama think", "type": "bool", "default": "0", "desc": "Enable Ollama chain-of-thought.", "secret": False},
-            {"key": "AIDON_OLLAMA_NUM_CTX", "label": "Ollama context", "type": "int", "default": "0", "desc": "Context window for Ollama, 0 = backend default.", "secret": False},
+            {"key": "AIDON_MODEL_THINK", "label": "Model thinking", "type": "bool", "default": "0", "desc": "Enable server-side thinking when supported.", "secret": False},
+            {"key": "AIDON_MODEL_NUM_CTX", "label": "Model context", "type": "int", "default": "0", "desc": "Context window for the native backend, 0 = server default.", "secret": False},
             {"key": "AIDON_MODEL_TIMEOUT_S", "label": "Model timeout seconds", "type": "string", "default": "120", "desc": "Timeout for one model call, in seconds.", "secret": False},
             {"key": "AIDON_ROUTER_FAST_PHASES", "label": "Router fast phases", "type": "string", "default": "interpret,learn,respond", "desc": "Comma-separated phases routed to the fast model.", "secret": False},
             {"key": "AIDON_IMAGE_MODEL", "label": "Image model", "type": "string", "default": "muse-image-1.0", "desc": "Image generation model.", "secret": False},
@@ -1252,7 +1676,20 @@ class WebUIServer:
             {"key": "AIDON_VERIFIER_MODEL", "label": "Verifier model", "type": "string", "default": "", "desc": "Independent model for verification; empty uses the main model.", "secret": False},
             {"key": "AIDON_VERIFY_SEED", "label": "Verifier seed", "type": "string", "default": "42", "desc": "Deterministic verify seed; leave empty to disable.", "secret": False},
             {"key": "AIDON_VISION_TIERS", "label": "Vision tiers", "type": "string", "default": "strong", "desc": "Comma-separated model tiers allowed to receive images.", "secret": False},
-            {"key": "AIDON_THINK_PHASES", "label": "Thinking phases", "type": "string", "default": "interpret,verify", "desc": "Comma-separated phases that enable Ollama thinking; empty disables phase overrides.", "secret": False},
+            {"key": "AIDON_THINK_PHASES", "label": "Thinking phases", "type": "string", "default": "interpret,verify", "desc": "Comma-separated phases that enable model thinking; empty disables phase overrides.", "secret": False},
+            {"key": "AIDON_DYNAMIC_SAMPLING", "label": "Dynamic sampling", "type": "bool", "default": "1", "desc": "Per-phase temperature/top_p .env overrides apply; 0 = built-in sampling table only.", "secret": False},
+            {"key": "AIDON_TEMP_RESPOND", "label": "Temperature (respond)", "type": "string", "default": "", "desc": "Respond-phase temperature override; empty = built-in 0.8.", "secret": False},
+            {"key": "AIDON_TOP_P_RESPOND", "label": "Top_p (respond)", "type": "string", "default": "", "desc": "Respond-phase top_p override; empty = built-in 0.95.", "secret": False},
+            {"key": "AIDON_TEMP_WEBCHAT", "label": "Temperature (webchat)", "type": "string", "default": "", "desc": "Webchat-phase temperature override; empty = built-in 0.2.", "secret": False},
+            {"key": "AIDON_TOP_P_WEBCHAT", "label": "Top_p (webchat)", "type": "string", "default": "", "desc": "Webchat-phase top_p override; empty = built-in 0.95.", "secret": False},
+            {"key": "AIDON_TEMP_PLAN", "label": "Temperature (plan)", "type": "string", "default": "", "desc": "Plan-phase temperature override; empty = built-in 0.2.", "secret": False},
+            {"key": "AIDON_TOP_P_PLAN", "label": "Top_p (plan)", "type": "string", "default": "", "desc": "Plan-phase top_p override; empty = built-in 0.95.", "secret": False},
+            {"key": "AIDON_TEMP_VERIFY", "label": "Temperature (verify)", "type": "string", "default": "", "desc": "Verify-phase temperature override; empty = built-in 0.0.", "secret": False},
+            {"key": "AIDON_TOP_P_VERIFY", "label": "Top_p (verify)", "type": "string", "default": "", "desc": "Verify-phase top_p override; empty = built-in 0.9.", "secret": False},
+            {"key": "AIDON_EFFORT_RESPOND", "label": "Thinking effort (respond)", "type": "enum", "default": "", "desc": "Respond-phase thinking effort pin; empty = built-in off. A pin is never raised by escalation.", "secret": False, "options": ["", "off", "low", "medium", "high"]},
+            {"key": "AIDON_EFFORT_WEBCHAT", "label": "Thinking effort (webchat)", "type": "enum", "default": "", "desc": "Webchat-phase thinking effort pin; empty = built-in low. A pin is never raised by escalation.", "secret": False, "options": ["", "off", "low", "medium", "high"]},
+            {"key": "AIDON_EFFORT_PLAN", "label": "Thinking effort (plan)", "type": "enum", "default": "", "desc": "Plan-phase thinking effort pin; empty = built-in low. A pin is never raised by escalation.", "secret": False, "options": ["", "off", "low", "medium", "high"]},
+            {"key": "AIDON_EFFORT_VERIFY", "label": "Thinking effort (verify)", "type": "enum", "default": "", "desc": "Verify-phase thinking effort pin; empty = built-in low. A pin is never raised by escalation.", "secret": False, "options": ["", "off", "low", "medium", "high"]},
             {"key": "AIDON_MAX_TOKENS_PER_RUN", "label": "Max tokens per run", "type": "int", "default": "200000", "desc": "Hard token budget for one goal run.", "secret": False},
             {"key": "AIDON_MAX_STEPS", "label": "Max steps", "type": "int", "default": "50", "desc": "Hard step budget for one goal run.", "secret": False},
             {"key": "AIDON_MAX_WALLCLOCK_MIN", "label": "Max wallclock minutes", "type": "int", "default": "60", "desc": "Hard wallclock budget for one goal run, in minutes.", "secret": False},
@@ -1271,6 +1708,7 @@ class WebUIServer:
             {"key": "AIDON_SANDBOX_NETWORK", "label": "Sandbox network", "type": "bool", "default": "0", "desc": "Allow network access inside sandbox commands.", "secret": False},
             {"key": "AIDON_SANDBOX_REQUIRE_ISOLATION", "label": "Require isolation", "type": "bool", "default": "0", "desc": "Refuse sandbox commands when bubblewrap isolation is unavailable.", "secret": False},
             {"key": "AIDON_KERNEL", "label": "Kernel mode", "type": "bool", "default": "0", "desc": "Kernel mode: write/read/list/shell only, no calculate, no plugins.", "secret": False},
+            {"key": "AIDON_COMPUTER_DRIVER", "label": "Computer driver", "type": "enum", "default": "", "desc": "Opt-in desktop driver; requires a graphical session and kernel mode off.", "secret": False, "options": ["", "x11"]},
         ]},
         {"group": "Memory", "settings": [
             {"key": "AIDON_FORGET_HALF_LIFE_DAYS", "label": "Forget half-life days", "type": "string", "default": "21", "desc": "Forgetting-curve half-life, in days.", "secret": False},
@@ -1371,12 +1809,42 @@ class WebUIServer:
     def settings_catalog(self) -> dict:
         """Catalog + current values. Secrets come back masked.
 
-        A secret entry returns value "" and is_set, never the
-        value itself. A non-secret returns its .env value, else
+    A secret entry returns a fixed ``****`` mask when set and
+    is_set, never the value itself. A non-secret returns its .env value, else
         its process-environment value, else its default, with
         from_file saying whether .env set it.
         """
         import os
+        # Only expose a slider when the bound is meaningful and safe for
+        # the setting.  Unbounded or deployment-specific values remain
+        # ordinary inputs in the Settings page.
+        bounds = {
+            "AIDON_FAST_NUM_CTX": (0, 262144, 1024),
+            "AIDON_MODEL_NUM_CTX": (0, 262144, 1024),
+            "AIDON_MAX_TOKENS_PER_RUN": (1000, 1000000, 1000),
+            "AIDON_MAX_STEPS": (1, 200, 1),
+            "AIDON_MAX_WALLCLOCK_MIN": (1, 1440, 1),
+            "AIDON_APPROVAL_TIMEOUT_S": (30, 3600, 30),
+            "AIDON_MAX_SANDBOX_SECONDS": (1, 3600, 1),
+            "AIDON_SANDBOX_MEM_MB": (0, 32768, 128),
+            "AIDON_SANDBOX_NPROC": (0, 4096, 1),
+            "AIDON_SANDBOX_FSIZE_MB": (0, 102400, 512),
+            "AIDON_SANDBOX_CPU_S": (0, 86400, 60),
+            "AIDON_FORGET_GRACE_DAYS": (0, 3650, 1),
+            "AIDON_EPISODE_RECALL_LIMIT": (0, 100, 1),
+            "AIDON_KNOWLEDGE_RECALL_LIMIT": (0, 100, 1),
+            "AIDON_RECALL_MAX_TOKENS": (0, 100000, 100),
+            "AIDON_LEARN_MAX_SKILLS_PER_DAY": (0, 100, 1),
+            "AIDON_SKILL_MAX_FAILURES": (0, 100, 1),
+            "AIDON_RESEARCH_MAX_ROUNDS": (0, 100, 1),
+            "AIDON_MAX_STUCK_ITERATIONS": (0, 100, 1),
+            "AIDON_PARALLEL_TOOLS": (1, 32, 1),
+            "AIDON_SLACK_POLL_SECONDS": (3, 3600, 1),
+            "AIDON_SLACK_ACK_AFTER_SECONDS": (0, 3600, 1),
+            "AIDON_APPROVAL_NUDGE_MIN": (0, 1440, 1),
+            "AIDON_AUTONOMY_THRESHOLD": (0, 100, 1),
+            "AIDON_WEBUI_PORT": (1024, 65535, 1),
+        }
         file_vals = self._read_env_file()
         groups = []
         for group in self.SETTINGS_CATALOG:
@@ -1387,13 +1855,15 @@ class WebUIServer:
                         if k in entry}
                 if "options" in entry:
                     item["options"] = list(entry["options"])
+                if entry.get("type") == "int" and entry["key"] in bounds:
+                    item["min"], item["max"], item["step"] = bounds[entry["key"]]
                 raw = file_vals.get(entry["key"])
                 if raw is None:
                     raw = os.environ.get(entry["key"])
                 item["from_file"] = entry["key"] in file_vals
                 if entry.get("secret"):
-                    item["value"] = ""
                     item["is_set"] = bool(raw)
+                    item["value"] = "****" if item["is_set"] else ""
                 else:
                     item["value"] = raw if raw is not None else entry.get("default", "")
                 items.append(item)
@@ -1403,7 +1873,7 @@ class WebUIServer:
     def settings_set_env(self, key: str, value) -> dict:
         """Write one setting to <home>/.env, secrets included.
 
-        Old-Aidon behaviour: the settings page can enter
+        The settings page can enter
         everything, keys included. Accepts the friendly settings
         name (e.g. "timezone") or the env var name itself (e.g.
         "AIDON_TIMEZONE"), for every catalog key plus the original
@@ -1413,7 +1883,7 @@ class WebUIServer:
         number. A secret key with an empty value is a no-op
         ("don't change") and must never clear the key; a secret
         with a value is written, write-only — the catalog never
-        returns it back (value "" plus is_set). Unknown keys and
+        returns it back (value "****" plus is_set when set). Unknown keys and
         newline values are refused. The value is never printed or
         returned: the result carries only the key name.
         The .env file is created if missing and kept owner-only.
@@ -1519,6 +1989,9 @@ class WebUIServer:
         db_path = self.home / "conversations.db"
         if db_path.is_file():
             try:
+                project_db = self._conversations_db()
+                if project_db.delete_project(project_id):
+                    found = True
                 import sqlite3
                 conn = sqlite3.connect(str(db_path), timeout=10.0)
                 try:
@@ -1673,7 +2146,44 @@ class WebUIServer:
             return {"entity": entity, "related": []}
         return {"entity": entity, "related": graph.points_for(entity)}
 
-    # -- Group D additions: tools, conversations, briefs, ideas, hub runs,
+    def handle_memory_graph(self, collections=None, limit: int = 500) -> dict:
+        """Return a graph-ready view of memory and KB points.
+
+        Point nodes connect to shared entity nodes. The same entity graph is
+        used for episodic memory and knowledge-base records, so cross-links
+        are visible without inventing relationships with another model call.
+        """
+        if self.memory is None:
+            return {"nodes": [], "edges": [], "error": "memory unavailable"}
+        wanted = set(collections or ("working", "episodic", "semantic", "experience", "knowledge"))
+        nodes = []
+        edges = []
+        seen_entities = set()
+        count = 0
+        for collection in wanted:
+            if collection not in {"working", "episodic", "semantic", "experience", "knowledge"}:
+                continue
+            for point in self.memory.store.iter_points(collection):
+                if count >= max(1, min(int(limit), 2000)):
+                    break
+                point_id = str(point.id)
+                node_id = f"point:{collection}:{point_id}"
+                nodes.append({"id": node_id, "type": "memory", "collection": collection,
+                              "label": str(point.text or "")[:100]})
+                graph = getattr(self.memory, "entity_graph", None)
+                entities = graph.entities_for_point(collection, point_id) if graph else []
+                for entity in entities:
+                    entity_id = f"entity:{entity}"
+                    if entity not in seen_entities:
+                        nodes.append({"id": entity_id, "type": "entity", "label": entity})
+                        seen_entities.add(entity)
+                    edges.append({"source": node_id, "target": entity_id})
+                count += 1
+            if count >= max(1, min(int(limit), 2000)):
+                break
+        return {"nodes": nodes, "edges": edges}
+
+    # -- Additional WebUI surfaces: tools, conversations, briefs, ideas, hub runs,
     #    reports, TTS, and goals with images. These are new routes only;
     #    they do not change any existing route or page above. ----------
     @staticmethod
@@ -1766,6 +2276,25 @@ class WebUIServer:
             data = self._read_json_file(path)
             if data is not None and data.get("id") not in seen:
                 records.append(data)
+        # Session names come from the first user interaction. Keep this
+        # derived rather than asking the model for a title, so naming is
+        # immediate, deterministic, and survives restarts.
+        for record in records:
+            if record.get("title") and record.get("exchange_count"):
+                continue
+            try:
+                turns = self.handle_conversation_get(str(record.get("id", ""))) or {}
+                turns = turns.get("turns", [])
+                first_user = next((str(turn.get("text", "")).strip()
+                                   for turn in turns
+                                   if isinstance(turn, dict) and turn.get("role") == "user"), "")
+                if first_user:
+                    title = " ".join(first_user.split())
+                    record["title"] = title[:72] + ("…" if len(title) > 72 else "")
+                    record["exchange_count"] = len(turns)
+                    record["updated_at"] = turns[-1].get("created_at", "") if turns else ""
+            except Exception:
+                pass
         return {"conversations": records}
 
     def handle_conversation_create(self, body: dict) -> dict:
@@ -1941,24 +2470,101 @@ class WebUIServer:
                      "audio_bytes": len(result.get("audio", b"")),
                      "_audio": result.get("audio", b"")}
 
-    def handle_goal_with_images(self, body: dict) -> dict:
-        import base64 as _b64
-        goal = str(body.get("goal", ""))
-        library_dir = self._json_dir("library")
-        saved = []
-        for image in body.get("images", []) or []:
-            name = self._safe_name(image.get("name", "image.png"))
-            try:
-                data = _b64.b64decode(str(image.get("data_b64", "")))
-            except Exception:
-                continue
-            (library_dir / name).write_bytes(data)
-            saved.append(name)
-        return {"goal": goal, "images": saved,
-                "note": "JSON variant of the multipart goals-with-images endpoint; "
-                        "no run is started by this route."}
+    def open_tts_stream(self, body: dict):
+        """Open a progressive Fish response for the WebUI audio player."""
+        import re
+        text = str(body.get("text", "")).strip()
+        if not getattr(self, "tts_key", None):
+            raise ValueError("TTS key not configured")
+        if not text:
+            raise ValueError("empty text")
+        text = text[:2000]
+        text = re.sub(r"[#>*`_\[\]()|]", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        from ..capabilities.voice import open_tts_stream as _open_tts_stream
+        return _open_tts_stream(text, self.tts_key,
+                                str(body.get("voice_id", "") or self.tts_voice_id))
 
-    # -- routes added for old-Aidon WebUI parity -------------------------
+    @staticmethod
+    def parse_goal_multipart(raw: bytes, content_type: str) -> tuple[dict, list[dict]]:
+        """Parse a goal form without decoding the binary file parts as JSON."""
+        if not content_type.lower().startswith("multipart/form-data"):
+            raise ValueError("expected multipart/form-data")
+        header = (b"Content-Type: " + content_type.encode("ascii", "ignore") +
+                  b"\r\nMIME-Version: 1.0\r\n\r\n")
+        message = BytesParser(policy=email_default).parsebytes(header + raw)
+        fields: dict[str, str] = {}
+        files: list[dict] = []
+        for part in message.iter_parts():
+            if part.get_content_disposition() != "form-data":
+                continue
+            name = part.get_param("name", header="content-disposition")
+            if not name:
+                continue
+            data = part.get_payload(decode=True) or b""
+            filename = part.get_filename()
+            if filename is not None:
+                files.append({"name": filename, "data": data,
+                              "mime": part.get_content_type()})
+            else:
+                fields[str(name)] = data.decode("utf-8", "replace")
+        return fields, files
+
+    def handle_goal_with_files(self, body: dict, files: list[dict]) -> dict:
+        """Store attachments, start the goal, and attach images to inference."""
+        if len(files) > MAX_ATTACHMENT_FILES:
+            return {"error": f"at most {MAX_ATTACHMENT_FILES} files per request"}
+        total = sum(len(item.get("data", b"")) for item in files)
+        if total > MAX_ATTACHMENT_TOTAL_BYTES:
+            return {"error": f"attachments exceed the {MAX_ATTACHMENT_TOTAL_BYTES // (1024 * 1024)} MiB total limit"}
+        upload_dir = self.home / "library" / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        image_paths: list[str] = []
+        document_paths: list[str] = []
+        video_paths: list[str] = []
+        for item in files:
+            data = item.get("data", b"")
+            if len(data) > MAX_ATTACHMENT_BYTES:
+                return {"error": f"{item.get('name', 'attachment')} exceeds the {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MiB per-file limit"}
+            name = self._safe_name(item.get("name", "attachment"))
+            mime = str(item.get("mime", "application/octet-stream")).lower()
+            digest = hashlib.sha256(data).hexdigest()[:12]
+            destination = upload_dir / f"{digest}-{name}"
+            destination.write_bytes(data)
+            if mime.startswith("video/") or name.lower().endswith((".mp4", ".webm", ".mov", ".m4v", ".avi")):
+                video_paths.append(str(destination))
+            elif mime.startswith("image/") or name.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
+                image_paths.append(str(destination))
+            else:
+                document_paths.append(str(destination))
+        goal = str(body.get("goal", "")).strip()
+        if not goal:
+            return {"error": "goal is required"}
+        if document_paths:
+            goal += "\n\nAttached document paths (use the document reader when needed):\n" + "\n".join(document_paths)
+        if video_paths:
+            goal += "\n\nAttached video paths (use the video workflow when needed):\n" + "\n".join(video_paths)
+        result = self.start_goal({**body, "goal": goal, "image_paths": image_paths})
+        result.update({"images": [Path(path).name for path in image_paths],
+                      "documents": [Path(path).name for path in document_paths],
+                      "videos": [Path(path).name for path in video_paths]})
+        return result
+
+    def handle_goal_with_images(self, body: dict) -> dict:
+        """Compatibility JSON form for API callers that already have base64."""
+        import base64 as _b64
+        files = []
+        for image in body.get("images", []) or []:
+            try:
+                data = _b64.b64decode(str(image.get("data_b64", "")), validate=True)
+            except Exception:
+                return {"error": "bad base64 attachment"}
+            files.append({"name": image.get("name", "image.png"),
+                          "data": data, "mime": mimetypes.guess_type(
+                              str(image.get("name", "image.png")))[0] or "image/png"})
+        return self.handle_goal_with_files(body, files)
+
+    # -- WebUI routes -----------------------------------------------------
     # Each handler below is pure server logic (no socket), so tests
     # can call it directly; the do_GET/do_POST/do_DELETE branches
     # only map paths and status codes onto these results. Auth is
@@ -2013,6 +2619,20 @@ class WebUIServer:
                            "y": index * 90, "layer": layer})
         return 200, {"layout": layout}
 
+    def handle_keys(self) -> dict:
+        """API keys as name, scope, and hash prefix only.
+
+        The static settings page used to lose this list when the page
+        moved out of the inline HTML, so it is served here: never a
+        real key, only the first characters of the hash, which is
+        enough for the owner to tell two keys apart.
+        """
+        try:
+            keys = self.auth_store.list_keys() if self.auth_store else []
+        except Exception:
+            keys = []
+        return {"keys": keys}
+
     def handle_voice(self) -> dict:
         """Voice capability info: whether spoken replies are
         announced, and whether a TTS key is configured. No secret
@@ -2020,6 +2640,59 @@ class WebUIServer:
         """
         return {"announce": bool(getattr(self, "voice_announce", False)),
                 "tts_available": bool(getattr(self, "tts_key", None))}
+
+    def handle_status(self) -> dict:
+        """Return safe, human-readable capability status for the dashboard."""
+        import os
+        config = self.config
+        model = str(getattr(config, "model", "") or os.environ.get(
+            "AIDON_MODEL", "muse-spark"))
+        backend = str(getattr(config, "backend", "") or "auto")
+        memory = self.memory
+        memory_warning = ""
+        if getattr(memory, "_memory", None) is not None:
+            store_name = type(memory._memory.store).__name__
+            memory_name = f"{type(memory._memory.embedder).__name__} · {store_name}"
+            warnings = []
+            if store_name == "SQLiteStore":
+                warnings.append("Memory is on the SQLite fallback, not Qdrant — "
+                                "run ./setup.sh --with-qdrant for shared vector memory.")
+            if type(memory._memory.embedder).__name__ == "HashEmbedder":
+                warnings.append("Memory uses hash embeddings, not semantic embeddings — "
+                                "install the embedding packages with ./setup.sh for real recall.")
+            memory_warning = " ".join(warnings)
+        elif os.environ.get("AIDON_EMBEDDER", "").strip().lower() == "hash":
+            memory_name = "Hash memory"
+            memory_warning = ("Memory uses hash embeddings, not semantic embeddings — "
+                              "install the embedding packages with ./setup.sh for real recall.")
+        else:
+            try:
+                import importlib.util
+                if importlib.util.find_spec("qdrant_client") is None:
+                    memory_name = "SQLite memory (persistent fallback)"
+                    memory_warning = ("Memory is on the SQLite fallback, not Qdrant — "
+                                      "run ./setup.sh --with-qdrant for shared vector memory.")
+                else:
+                    memory_name = "Semantic memory (on demand)"
+            except Exception:
+                memory_name = "SQLite memory (persistent fallback)"
+                memory_warning = ("Memory is on the SQLite fallback, not Qdrant — "
+                                  "run ./setup.sh --with-qdrant for shared vector memory.")
+        msg = self.messaging_config
+        sandbox = str(getattr(config, "execution_backend", "bubblewrap"))
+        computer = str(getattr(config, "computer_driver", "") or "off")
+        return {
+            "model": model,
+            "backend": backend,
+            "memory": memory_name,
+            "memory_warning": memory_warning,
+            "whatsapp": "Online" if msg.whatsapp_configured() else "Not configured",
+            "slack": "Online" if msg.slack_configured() else "Not configured",
+            "web_search": str(getattr(config, "search_backend", "tavily")),
+            "sandbox": sandbox,
+            "voice": "Ready" if self.tts_key or self.transcribe_key else "Not configured",
+            "computer": computer,
+        }
 
     def handle_reports_list(self) -> dict:
         directory = self._json_dir("reports")
@@ -2186,14 +2859,20 @@ class WebUIServer:
             return {"points": []}
         try:
             points = self.memory.list_points(collection, limit=limit)
-        except Exception:
-            return {"points": []}
+        except Exception as exc:
+            return {"points": [], "total": 0,
+                    "error": f"{type(exc).__name__}: {exc}"}
         out = []
         for point in points:
             out.append({"id": getattr(point, "id", ""),
                         "text": getattr(point, "text", ""),
                         "payload": dict(getattr(point, "payload", {}) or {})})
-        return {"points": out}
+        # Keep the compact empty response compatible with older clients;
+        # the studio already derives zero from an empty points list.
+        if not out:
+            return {"points": []}
+        return {"points": out, "total": len(out),
+                "mode": type(getattr(self.memory, "store", None)).__name__}
 
     def handle_memory_point_delete(self, collection: str, point_id: str) -> dict:
         """Forget one point, via the same forget path the studio
@@ -2244,7 +2923,7 @@ class WebUIServer:
                 self.wfile.write(data)
 
             def _send_static(self, relative: str):
-                """Serve only files from the bundled old-Aidon WebUI assets."""
+                """Serve only files from the bundled WebUI assets."""
                 candidate = (STATIC_DIR / relative).resolve()
                 root = STATIC_DIR.resolve()
                 if root not in candidate.parents or not candidate.is_file():
@@ -2252,10 +2931,18 @@ class WebUIServer:
                     return
                 data = candidate.read_bytes()
                 if candidate.name in {"index.html", "dag.html", "capabilities.html",
-                                      "memory.html", "knowledge.html", "reports.html",
-                                      "settings.html"}:
-                    version = str(int(candidate.stat().st_mtime)).encode()
+                                      "memory.html", "knowledge.html", "reports.html"}:
+                    # Version the document against its dependent core assets
+                    # too.  Otherwise a CSS/JS edit made after index.html
+                    # keeps the browser's old cached files indefinitely.
+                    asset_times = [candidate.stat().st_mtime]
+                    for asset_name in ("style.css", "app.js", "avatar.js"):
+                        asset = STATIC_DIR / asset_name
+                        if asset.is_file():
+                            asset_times.append(asset.stat().st_mtime)
+                    version = str(int(max(asset_times))).encode()
                     data = data.replace(b"__ASSET_V__", version)
+                data = data.replace(b"__AIDON_VERSION__", _app_version().encode())
                 content_type = mimetypes.guess_type(str(candidate))[0] or \
                     "application/octet-stream"
                 self._send_bytes(200, content_type, data)
@@ -2281,58 +2968,72 @@ class WebUIServer:
                 elif parsed.path == "/":
                     self._send_static("index.html")
                 elif parsed.path in ("/dag", "/capabilities", "/memory", "/knowledge",
-                                     "/reports", "/settings"):
+                                     "/reports"):
                     self._send_static(parsed.path.lstrip("/") + ".html")
                 elif parsed.path == "/settings":
                     keys = server.auth_store.list_keys() if server.auth_store else []
-                    html = """<h1>Settings</h1>
-<p>Every knob, one page. Changes are written to <span id="env-path"></span>.
-Secret keys (API keys) are shown only as set or unset, never shown back —
-type a new value to set one, leave it empty to keep the current one.
-Restart the server for changes to take effect.</p>
+                    html = """<div class="settings-shell">
+<div class="settings-top"><a href="/">← Back to WebUI</a><h1>Settings</h1><button id="theme-toggle" title="Toggle dark / light theme">◐</button></div>
+<div class="settings-intro">Tune Aidon in one place. Changes are written to <code id="env-path"></code> and take effect after restarting Aidon. Secrets are never displayed; <span class="set-badge">SET</span> means a value already exists.</div>
 <div id="settings-groups"></div>
-<p><button id="settings-save">Save settings</button> <span id="settings-status"></span></p>
-<h2>Keys, hash prefixes only, never real keys</h2>"""
+<div id="settings-footer"><span id="settings-note">Use sliders where safe bounds are known; fields without bounds accept a value directly.</span><button id="settings-save">Save settings</button><span id="settings-status"></span></div>
+<div class="set-group"><h2>API access keys</h2>"""
                     for key in keys:
-                        html += f"<p>{key['name']} {key['scope']} {key['key_hash_prefix']}</p>"
-                    html += """<script>
+                        html += f"<div class=\"set-row\"><div class=\"set-label\"><label>{key['name']}</label><span class=\"set-key\">{key['scope']}</span></div><div class=\"set-input\"><span class=\"set-key\">hash {key['key_hash_prefix']}</span></div></div>"
+                    html += """</div></div><script>
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 async function loadSettings(){
   const r = await fetch('/api/settings/catalog'); const data = await r.json();
   document.getElementById('env-path').textContent = data.env_file || '';
   let out = '';
   (data.groups || []).forEach(function(g){
-    out += '<h2>' + esc(g.group) + '</h2>';
+    out += '<section class="set-group"><h2>' + esc(g.group) + '</h2>';
     g.settings.forEach(function(s){
-      out += '<p><label>' + esc(s.label) + ' (' + esc(s.key) + ')</label><br>';
+      out += '<div class="set-row"><div class="set-label"><label>' + esc(s.label) + '</label>' + (s.is_set ? '<span class="set-badge">SET</span>' : '') + '<span class="set-key">' + esc(s.key) + '</span>';
+      if (s.desc) out += '<div class="set-desc">' + esc(s.desc) + '</div>';
+      out += '</div><div class="set-input">';
       if (s.type === 'bool') {
-        out += '<input type="checkbox" data-key="' + esc(s.key) + '"' + ((s.value === '1' || s.value === 'true') ? ' checked' : '') + '>';
+        out += '<label class="switch"><input type="checkbox" data-key="' + esc(s.key) + '"' + ((s.value === '1' || s.value === 'true') ? ' checked' : '') + '><span></span></label>';
       } else if (s.type === 'enum') {
         out += '<select data-key="' + esc(s.key) + '">' + (s.options || []).map(function(o){ return '<option' + (o === s.value ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>';
+      } else if (s.type === 'int' && s.min !== undefined && s.max !== undefined) {
+        const n = Number(s.value); const safe = Number.isFinite(n) ? Math.min(s.max, Math.max(s.min, n)) : s.min;
+        out += '<div class="range-control"><input type="range" min="' + s.min + '" max="' + s.max + '" step="' + (s.step || 1) + '" value="' + safe + '" data-range-for="' + esc(s.key) + '"><input type="number" min="' + s.min + '" max="' + s.max + '" step="' + (s.step || 1) + '" data-key="' + esc(s.key) + '" value="' + esc(s.value) + '"></div><div class="range-meta"><span>' + s.min + '</span><span>' + s.max + '</span></div>';
+      } else if (s.type === 'int') {
+        out += '<input type="number" data-key="' + esc(s.key) + '" value="' + esc(s.value) + '">';
       } else if (s.secret) {
-        out += '<input type="password" data-key="' + esc(s.key) + '" placeholder="' + (s.is_set ? 'set - leave empty to keep, type to replace' : 'not set - type a value to set') + '">';
+        out += '<input type="password" data-key="' + esc(s.key) + '" placeholder="' + (s.is_set ? '******** (set - leave empty to keep, type to replace)' : 'not set - type a value to set') + '">';
       } else {
         out += '<input type="text" data-key="' + esc(s.key) + '" value="' + esc(s.value) + '">';
       }
-      if (s.desc) { out += '<br><small>' + esc(s.desc) + '</small>'; }
-      out += '</p>';
+      out += '</div></div>';
     });
+    out += '</section>';
   });
   document.getElementById('settings-groups').innerHTML = out;
+  document.querySelectorAll('[data-range-for]').forEach(function(range){
+    const number = document.querySelector('[data-key="' + range.getAttribute('data-range-for') + '"]');
+    if (!number) return;
+    range.addEventListener('input', function(){ number.value = range.value; });
+    number.addEventListener('input', function(){ if (number.value !== '') range.value = number.value; });
+  });
 }
 async function saveSettings(){
   const status = document.getElementById('settings-status'); status.textContent = 'Saving...';
   const fields = document.querySelectorAll('[data-key]'); let failed = 0;
   for (const f of fields) {
     let v = (f.type === 'checkbox') ? (f.checked ? '1' : '0') : f.value;
-    if (f.type === 'password' && !v) { continue; }
+    if (f.type === 'password' && (!v || v === '****')) { continue; }
     const r = await fetch('/api/settings/env', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: f.getAttribute('data-key'), value: v})});
     const d = await r.json();
     if (!d.ok) { failed++; status.textContent = 'Failed: ' + (d.error || 'unknown'); }
   }
-  if (!failed) { status.textContent = 'Saved. Restart the server for changes to take effect.'; }
+  if (!failed) { status.textContent = 'Saved. Restart Aidon for changes to take effect.'; }
 }
 document.getElementById('settings-save').addEventListener('click', saveSettings);
+document.getElementById('theme-toggle').addEventListener('click', function(){
+  const light = document.body.classList.toggle('light'); localStorage.setItem('aidon-theme', light ? 'light' : 'dark');
+});
 loadSettings();
 </script>"""
                     self._send_html(200, _page_html("Settings", html))
@@ -2363,18 +3064,20 @@ loadSettings();
                         items = server._library_files()
                     self._send_json(200, {"files": items})
                 elif parsed.path == "/api/projects":
-                    self._send_json(200, {"projects": server._projects()})
+                    self._send_json(200, {"projects": server._project_records()})
                 elif parsed.path == "/api/approvals":
                     # Auth already checked at the top of do_GET,
                     # the same is_authorized check every /api/
                     # route gets. Only still-pending cards: a
                     # decided or timed-out card is gone here.
                     self._send_json(200, {"cards": server.webui_gate.pending_cards()})
+                elif parsed.path == "/api/preapprovals":
+                    self._send_json(200, server.handle_preapprovals())
                 elif parsed.path == "/factory":
                     self._send_html(200, FACTORY_HTML)
                 elif parsed.path == "/api/factory":
                     self._send_json(200, {"stages": server.factory_stages()})
-                elif parsed.path == "/dag":
+                elif parsed.path in ("/dag", "/studio/dag"):
                     self._send_html(200, DAG_HTML)
                 elif parsed.path == "/api/dags":
                     self._send_json(200, server.handle_dags_list())
@@ -2382,7 +3085,7 @@ loadSettings();
                     dag_id = parsed.path[len("/api/dags/"):]
                     data = server.handle_dag_get(dag_id)
                     self._send_json(200 if "error" not in data else 404, data)
-                elif parsed.path == "/capabilities":
+                elif parsed.path in ("/capabilities", "/studio/capabilities"):
                     from ..capabilities.plugins import PluginRegistry as _PR
                     _reg = _PR(server.home); _reg.load_all()
                     html = "<h1>Capabilities</h1><p>What Aidon can do, what it has learned, and the evidence.</p>"
@@ -2391,7 +3094,7 @@ loadSettings();
                     html += "<h2>Capabilities studio</h2><p>Record a skill success or failure, or probe a plugin dir, or edit a skill's description, via POST /api/studio/capabilities with JSON {action: success|failure|probe|edit, name, path, description}.</p>"
                     html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/capabilities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('cap_action').value,name:document.getElementById('cap_name').value,path:document.getElementById('cap_path').value,description:document.getElementById('cap_desc').value})}).then(r=>r.json()).then(d=>document.getElementById('cap_result').textContent=JSON.stringify(d));\"><select id=\"cap_action\"><option>success</option><option>failure</option><option>probe</option></select> <input id=\"cap_name\" placeholder=\"skill name\"> <input id=\"cap_path\" placeholder=\"plugin dir for probe\"> <button>Run</button></form><pre id=\"cap_result\"></pre>"
                     self._send_html(200, _page_html("Capabilities", html))
-                elif parsed.path == "/memory":
+                elif parsed.path in ("/memory", "/studio/memory"):
                     html = "<h1>Memory</h1><p>Episodes Aidon remembers from past work, by collection, no secret values.</p>"
                     if server.memory is not None:
                         for coll in ("working", "episodic", "semantic", "experience", "knowledge"):
@@ -2405,7 +3108,7 @@ loadSettings();
                     html += "<h2>Memory studio</h2><p>Forget a point, prune a collection, or promote an episodic point, or edit a point's text, via POST /api/studio/memory with JSON {action: forget|prune|promote|edit, collection, point_id, text}.</p>"
                     html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/memory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('mem_action').value,collection:document.getElementById('mem_coll').value,point_id:document.getElementById('mem_id').value,text:document.getElementById('mem_text').value})}).then(r=>r.json()).then(d=>document.getElementById('mem_result').textContent=JSON.stringify(d));\"><select id=\"mem_action\"><option>forget</option><option>prune</option><option>promote</option></select> <input id=\"mem_coll\" value=\"episodic\"> <input id=\"mem_id\" placeholder=\"point id\"> <button>Run</button></form><pre id=\"mem_result\"></pre>"
                     self._send_html(200, _page_html("Memory", html))
-                elif parsed.path == "/knowledge":
+                elif parsed.path in ("/knowledge", "/studio/knowledge"):
                     html = "<h1>Knowledge</h1><p>Documents and facts Aidon has ingested, from the knowledge collection and library.</p>"
                     if server.memory is not None:
                         try:
@@ -2418,7 +3121,7 @@ loadSettings();
                     html += "<h2>Knowledge studio</h2><p>Recall, record, edit, or delete knowledge, via POST /api/studio/knowledge with JSON {action: recall|ingest|edit|delete, query, text, point_id}.</p>"
                     html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('kb_action').value,query:document.getElementById('kb_query').value,text:document.getElementById('kb_text').value})}).then(r=>r.json()).then(d=>document.getElementById('kb_result').textContent=JSON.stringify(d));\"><select id=\"kb_action\"><option>recall</option><option>ingest</option></select> <input id=\"kb_query\" placeholder=\"query\"> <input id=\"kb_text\" placeholder=\"text to ingest\"> <button>Run</button></form><pre id=\"kb_result\"></pre>"
                     self._send_html(200, _page_html("Knowledge", html))
-                elif parsed.path == "/reports":
+                elif parsed.path in ("/reports", "/studio/reports"):
                     from ..interface.scheduler_loop import daily_report as _daily
                     html = "<h1>Reports</h1><p>Daily reports, from learned last run and trace files, never invented.</p>"
                     html += f"<pre>{_daily(server.home)}</pre>"
@@ -2438,6 +3141,8 @@ loadSettings();
                     self._send_json(200, {"projects": server.projects_history()})
                 elif parsed.path == "/api/settings/catalog":
                     self._send_json(200, server.settings_catalog())
+                elif parsed.path == "/api/keys":
+                    self._send_json(200, server.handle_keys())
                 elif parsed.path == "/api/settings":
                     self._send_json(200, server.settings_get())
                 elif parsed.path == "/api/avatar.vrm":
@@ -2466,11 +3171,29 @@ loadSettings();
                     query = parse_qs(parsed.query)
                     entity = query.get("entity", [""])[0]
                     self._send_json(200, server.handle_entities(entity))
+                elif parsed.path == "/api/memory/graph":
+                    query = parse_qs(parsed.query)
+                    collections = query.get("collection", []) or None
+                    try:
+                        limit = int(query.get("limit", ["500"])[0])
+                    except ValueError:
+                        limit = 500
+                    self._send_json(200, server.handle_memory_graph(collections, limit))
                 elif parsed.path == "/api/tools":
                     self._send_json(200, server.handle_tools())
                 elif parsed.path.startswith("/api/runs/") and "/" not in parsed.path[len("/api/runs/"):]:
                     run_id = parsed.path[len("/api/runs/"):]
-                    data = server.run_snapshot(run_id)
+                    query = parse_qs(parsed.query)
+                    try:
+                        since = max(0, int(query.get("since", ["0"])[0]))
+                    except (TypeError, ValueError):
+                        since = 0
+                    try:
+                        trace_since = max(0, int(query.get("trace_since", ["0"])[0]))
+                    except (TypeError, ValueError):
+                        trace_since = 0
+                    data = server.run_snapshot(run_id, since=since,
+                                               trace_since=trace_since)
                     self._send_json(200 if data is not None else 404,
                                     data or {"error": "run not found"})
                 elif parsed.path == "/api/conversations":
@@ -2500,9 +3223,14 @@ loadSettings();
                     self._send_bytes(status, content_type, data)
                 elif parsed.path == "/api/voice":
                     self._send_json(200, server.handle_voice())
+                elif parsed.path == "/api/status":
+                    self._send_json(200, server.handle_status())
                 elif parsed.path == "/api/health":
                     runs = server.run_control.list_runs() if server.run_control else []
-                    self._send_json(200, {"ok": True, "runs": len(runs)})
+                    _status = server.handle_status()
+                    self._send_json(200, {"ok": True, "runs": len(runs),
+                                          "memory": _status.get("memory"),
+                                          "memory_warning": _status.get("memory_warning", "")})
                 elif parsed.path == "/api/avatar/status":
                     vrm_path = server._avatar_path()
                     self._send_json(200, {"present": vrm_path is not None,
@@ -2553,7 +3281,11 @@ loadSettings();
                         items = [item for item in items if needle in json.dumps(item).lower()]
                     matched = len(items)
                     page = items[offset:offset + max(1, min(limit, 200))]
-                    self._send_json(200, {"items": page, "total": len(raw_points),
+                    # "items" is what the memory page renders; "points"
+                    # is the original key this route answered with, kept
+                    # so older clients (and the route tests) keep working.
+                    self._send_json(200, {"items": page, "points": page,
+                                          "total": len(raw_points),
                                           "matched": matched, "mode": "Aidon memory"})
                 elif parsed.path in ("/webhook/whatsapp", "/webhooks/whatsapp"):
                     query = parse_qs(parsed.query)
@@ -2580,10 +3312,25 @@ loadSettings();
                     self._send_json(404, {"error": "webhook only"})
                     return
                 raw = self._read_body()
-                try:
-                    body = json.loads(raw) if raw else {}
-                except json.JSONDecodeError:
+                content_type = self.headers.get("Content-Type", "").lower()
+                if content_type.startswith("audio/"):
+                    # Audio uploads are binary and must reach /api/transcribe
+                    # unchanged; attempting json.loads here raises a
+                    # UnicodeDecodeError before that route can handle them.
                     body = {}
+                else:
+                    try:
+                        body = json.loads(raw) if raw else {}
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        body = {}
+                if parsed.path == "/api/goals/with-images" and content_type.startswith("multipart/form-data"):
+                    try:
+                        fields, files = server.parse_goal_multipart(raw, content_type)
+                        result = server.handle_goal_with_files(fields, files)
+                        self._send_json(200 if "run_id" in result else 400, result)
+                    except (ValueError, OSError) as exc:
+                        self._send_json(400, {"error": str(exc)})
+                    return
                 if parsed.path == "/api/library/upload":
                     import base64 as _b64
                     name = str(body.get("name", "upload.bin"))
@@ -2618,6 +3365,9 @@ loadSettings();
                         else:
                             result = server.settings_set_env(key, body.get("value", ""))
                             self._send_json(200 if result.get("ok") else 400, result)
+                elif parsed.path == "/api/projects":
+                    result = server.handle_project_create(body)
+                    self._send_json(200 if result.get("id") else 400, result)
                 elif parsed.path == "/api/settings/env":
                     result = server.settings_set_env(str(body.get("key", "")), body.get("value", ""))
                     self._send_json(200 if result.get("ok") else 400, result)
@@ -2628,14 +3378,16 @@ loadSettings();
                     import base64 as _b64t
                     try:
                         # The browser sends the MediaRecorder blob directly,
-                        # matching old Aidon's endpoint. Keep JSON/base64 as
+                        # matching the compatibility endpoint. Keep JSON/base64 as
                         # a compatibility form for API clients.
                         if raw and self.headers.get("Content-Type", "").lower().startswith("audio/"):
                             audio = raw
                         else:
                             audio = _b64t.b64decode(str(body.get("audio_b64", "")))
                         from ..capabilities.voice import transcribe as _transcribe
-                        result = _transcribe(audio, server.transcribe_key)
+                        content_type = self.headers.get("Content-Type", "audio/wav")
+                        result = _transcribe(audio, server.transcribe_key,
+                                             content_type=content_type)
                         self._send_json(200, result)
                     except Exception as exc:
                         self._send_json(500, {"error": str(exc)})
@@ -2649,9 +3401,9 @@ loadSettings();
                         self._send_json(409, {"error": "no pending approval"})
                     else:
                         decision = str(body.get("decision", body.get("verdict", "rejected")))
-                        if decision == "edited":
-                            decision = "approved"
-                        ok = server.webui_gate.approve(pending[0]["id"], decision)
+                        ok = server.webui_gate.approve(
+                            pending[0]["id"], decision,
+                            str(body.get("edited_text", "")))
                         self._send_json(200 if ok else 409, {"ok": ok, "run_id": run_id})
                 elif parsed.path.startswith("/api/runs/") and parsed.path.endswith("/steer"):
                     run_id = parsed.path[len("/api/runs/"):-len("/steer")].strip("/")
@@ -2691,8 +3443,12 @@ loadSettings();
                 elif parsed.path == "/api/approve":
                     card_id = str(body.get("id", ""))
                     verdict = str(body.get("verdict", "rejected"))
-                    ok = server.webui_gate.approve(card_id, verdict)
+                    ok = server.webui_gate.approve(
+                        card_id, verdict, str(body.get("edited_text", "")))
                     self._send_json(200 if ok else 404, {"ok": ok})
+                elif parsed.path == "/api/preapprovals":
+                    status, payload = server.handle_preapproval_grant(body)
+                    self._send_json(status, payload)
                 elif parsed.path == "/api/studio/memory":
                     if str(body.get("action", "")) == "edit":
                         # Edit works with or without a live memory
@@ -2802,6 +3558,28 @@ loadSettings();
                             return
                     else:
                         self._send_json(status, payload)
+                elif parsed.path == "/api/tts/stream":
+                    try:
+                        response = server.open_tts_stream(body)
+                    except Exception as exc:
+                        self._send_json(500, {"error": type(exc).__name__})
+                    else:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "audio/mpeg")
+                        self.send_header("Cache-Control", "no-store")
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+                        try:
+                            while True:
+                                chunk = response.read(4 * 1024)
+                                if not chunk:
+                                    break
+                                self.wfile.write(chunk)
+                                self.wfile.flush()
+                        except (BrokenPipeError, ConnectionResetError):
+                            pass
+                        finally:
+                            response.close()
                 elif parsed.path == "/api/goals/with-images":
                     self._send_json(200, server.handle_goal_with_images(body))
                 elif parsed.path == "/api/plugins/adopt":
@@ -2835,6 +3613,13 @@ loadSettings();
                     point_id = "/".join(parts[4:]).strip("/")
                     result = server.handle_memory_point_delete(collection, point_id)
                     self._send_json(200 if result["ok"] else 404, result)
+                elif parsed.path.startswith("/api/preapprovals/"):
+                    rest = parsed.path[len("/api/preapprovals/"):].strip("/")
+                    parts = rest.split("/")
+                    spec_id = parts[0] if parts else ""
+                    kind = parts[1] if len(parts) > 1 else ""
+                    status, payload = server.handle_preapproval_revoke(spec_id, kind)
+                    self._send_json(status, payload)
                 elif parsed.path.startswith("/api/dags/"):
                     dag_id = parsed.path[len("/api/dags/"):]
                     self._send_json(200, server.handle_dag_delete(dag_id))

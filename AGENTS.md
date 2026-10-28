@@ -144,7 +144,7 @@ a rung:
 
 ## Model routing
 
-Two-tier model routing, inspired by approaches used in projects such as OpenClaw and OpenCode.
+Two-tier model routing with fast and strong model tiers.
 
 When `AIDON_FAST_MODEL` specifies a different model, Aidon routes lightweight 
 phases to the fast tier and more demanding phases to the strong tier. 
@@ -178,7 +178,7 @@ policy); one-way social publishing ALWAYS needs human approval.
   API setup (phone-number ID), System User with whatsapp_business_messaging
   (permanent token), webhook config: callback URL = public URL +
   /webhook/whatsapp (needs a tunnel on AIVA: `cloudflared tunnel --url
-  http://localhost:8002` — the WebUI port, which is serve()'s default), verify token, subscribe to
+  http://localhost:8765` — the WebUI port, which is serve()'s default), verify token, subscribe to
   `messages`.
   SECURITY NOTE: NEVER tunnel the full WebUI — /api/goals and
   /api/settings are unauthenticated (localhost-only by default). Instead

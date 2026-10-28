@@ -186,6 +186,13 @@ class Registry:
             (run_id, key)).fetchone()
         return row["value"] if row else ""
 
+    def clear_state_prefix(self, run_id: str, prefix: str) -> None:
+        """Delete only state keys in one namespaced run-state family."""
+        self._db.execute(
+            "DELETE FROM run_state WHERE run_id = ? AND key LIKE ?",
+            (run_id, f"{prefix}%"))
+        self._db.commit()
+
     def clear_state(self, run_id: str) -> None:
         """Delete all state keys for one run."""
         self._db.execute("DELETE FROM run_state WHERE run_id = ?", (run_id,))

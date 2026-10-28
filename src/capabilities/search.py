@@ -1,4 +1,4 @@
-"""Web search, old Aidon backends, Tavily primary, SearXNG fallback.
+"""Web search, Aidon backends, Tavily primary, SearXNG fallback.
 
 Old keys, only: TAVILY_API_KEY, AIDON_SEARCH_BACKEND,
 AIDON_SEARXNG_URL. No new duplicate key.

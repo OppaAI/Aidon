@@ -22,6 +22,7 @@ checkpoints are the in-flight execution cursor.
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,6 +61,7 @@ class RunCheckpoint:
     passed: list[str] = field(default_factory=list)
     verified: list[str] = field(default_factory=list)
     attempt: int = 1
+    plan_fingerprint: str = ""
     updated_at: str = ""
 
     def to_json(self) -> str:
@@ -89,6 +91,7 @@ class RunCheckpoint:
             passed=[str(x) for x in (data.get("passed") or [])],
             verified=[str(x) for x in (data.get("verified") or [])],
             attempt=max(1, int(data.get("attempt") or 1)),
+            plan_fingerprint=str(data.get("plan_fingerprint") or ""),
             updated_at=str(data.get("updated_at") or ""),
         )
 
@@ -101,6 +104,8 @@ class CheckpointStore:
 
     def save(self, checkpoint: RunCheckpoint) -> None:
         checkpoint.updated_at = _now()
+        if not checkpoint.plan_fingerprint:
+            checkpoint.plan_fingerprint = plan_fingerprint(checkpoint.plan)
         self.registry.save_state(
             checkpoint.run_id, CHECKPOINT_KEY, checkpoint.to_json())
 
@@ -110,12 +115,15 @@ class CheckpointStore:
         raw = self.registry.get_state(run_id, CHECKPOINT_KEY)
         return RunCheckpoint.from_json(raw)
       
-    def load_for_goal(self, run_id: str, goal: str) -> RunCheckpoint | None:
-        """Load checkpoint only when the saved goal matches."""
+    def load_for_goal(self, run_id: str, goal: str,
+                      plan: Any = None) -> RunCheckpoint | None:
+        """Load only when goal and, when supplied, plan identity match."""
         cp = self.load(run_id)
         if cp is None:
             return None
         if normalize_goal(cp.goal) != normalize_goal(goal):
+            return None
+        if plan is not None and cp.plan_fingerprint != plan_fingerprint(plan):
             return None
         return cp
       
@@ -161,6 +169,13 @@ def plan_to_dict(plan: Any) -> dict:
     }
 
 
+def plan_fingerprint(plan: Any) -> str:
+    """Return a stable identity for the exact resumable plan."""
+    canonical = json.dumps(plan_to_dict(plan), sort_keys=True,
+                           ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def deliverable_still_present(workdir: Path, name: str) -> bool:
     """True when a named deliverable file still exists under workdir.
 
@@ -186,4 +201,3 @@ def filter_resumable_passed(
     """Keep only passed deliverables that still exist on disk."""
     return [name for name in passed
             if deliverable_still_present(workdir, name)]
-Grok finished responding

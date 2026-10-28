@@ -1,4 +1,4 @@
-"""Tool discovery, old Aidon tool_discovery concept, rebuilt.
+"""Tool discovery, Aidon tool_discovery concept, rebuilt.
 
 Discovery is search over the live registry, not a hand-written list: list_tools returns
 sandbox plus plugin tools, search_tools returns tools whose name or description contains

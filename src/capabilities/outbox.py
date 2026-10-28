@@ -1,4 +1,4 @@
-"""Durable notification outbox, old Aidon outbox concept, rebuilt, file-based.
+"""Durable notification outbox, Aidon outbox concept, rebuilt, file-based.
 
 Notifications are queued in <home>/outbox/notifications.json, one JSON list, never lost on restart.
 list() returns queued notifications, drain(sender) sends each through the caller-supplied sender,

@@ -1,6 +1,6 @@
-"""Semantic router, from old Aidon, embedding-based, no LLM call.
+"""Semantic router, from Aidon, embedding-based, no LLM call.
 
-What it was used for in old Aidon, exactly:
+What it was used for in Aidon, exactly:
 Classify a user goal, by embedding similarity, into
 chat, webchat, artifact, or agentic, before the full
 pipeline, so a chat question does not burn a full
@@ -22,14 +22,16 @@ memory, and it skips the full pipeline for chat and
 webchat goals. It does not make the model faster, it
 avoids model calls entirely for the route, and avoids
 a full run for chat goals.
-Example phrases are the old Aidon sets, copied as
+Example phrases are the Aidon sets, copied as
 data, not as code: chat greetings and questions,
 webchat lookups, artifact file goals, agentic actions.
 A router needs an embedder with embed_dense(list[str])
 -> list[list[float]], in tests a fake embedder that
 returns the example vectors, in production the real
 EmbeddingGemma 2 embedder. Low confidence, below 0.15,
-defaults to agentic, never to chat.
+defaults to agentic, never to chat — unless the best match itself is
+strong (>= 0.75), in which case the category is trusted even at a
+small margin, because question forms make categories overlap.
 """
 
 from __future__ import annotations
@@ -43,6 +45,8 @@ CHAT_EXAMPLES = [
     "thanks", "thank you", "bye", "goodbye",
     "what do you think about AI?", "tell me a joke",
     "what's the meaning of life?", "do you like music?",
+    "hey how are you doing today?", "how are you doing today?",
+    "good morning how are you?", "hey what are you up to?",
 ]
 
 WEBCHAT_EXAMPLES = [
@@ -62,6 +66,47 @@ WEBCHAT_EXAMPLES = [
     "what's the difference between RAM and VRAM?",
     "is the new camera worth it?",
     "what's a good restaurant in Seattle for a business dinner?",
+]
+
+# Intent examples are deliberately topic-free. The subject belongs in the
+# user's text; these examples only teach the router that the user wants an
+# external lookup.
+WEB_INTENT_EXAMPLES = [
+    "check the web",
+    "check online",
+    "look online",
+    "look into the web",
+    "search the internet",
+    "browse online",
+    "can you chat online",
+    "can you go online and check",
+    "can you check online whether this is true",
+    "see if this is true online",
+    "see if I qualify online",
+    "check whether I qualify",
+    "look up whether I qualify",
+    "am I qualified for this hackathon",
+    "am I eligible for this competition",
+    "do I qualify for this program",
+    "check the eligibility requirements",
+    "what are the official rules for this hackathon",
+    "what are the eligibility rules for this competition",
+    "does this comply with the law",
+    "is this legal right now",
+    "what regulations apply to this",
+    "does this meet the required standard",
+    "is this compliant with the regulations",
+    "check the current compliance requirements",
+    "what does the official standard say",
+    "verify this against the applicable law",
+    "use the internet to verify this",
+    "please use the web",
+    "can you verify this online",
+    "check the current rules online",
+    "verify this on the web",
+    "find this online",
+    "research this online",
+    "look up current information",
 ]
 
 ARTIFACT_EXAMPLES = [
@@ -128,7 +173,7 @@ class SemanticRouter:
     def __init__(self, embedder, example_vectors: dict | None = None, cache_path=None):
         # Embedder interface, in order: embed_dense, embed_batch,
         # or single embed. HashEmbedder and EmbeddingGemma 2
-        # use embed_batch, old Aidon used embed_dense, so accept
+        # use embed_batch, Aidon used embed_dense, so accept
         # all three, otherwise the router silently disables itself
         # in the WebUI handler's try/except, which is what was
         # happening before this fix, because HashEmbedder has no
@@ -146,6 +191,10 @@ class SemanticRouter:
             self._webchat_vecs = example_vectors["webchat"]
             self._agentic_vecs = example_vectors["agentic"]
             self._artifact_vecs = example_vectors["artifact"]
+            # Older callers may provide only the four category vectors. Do
+            # not treat their generic webchat examples as the separate,
+            # topic-free web-intent signal.
+            self._web_intent_vecs = example_vectors.get("web_intent", [])
             return
         cached = self._load_cache(cache_path) if cache_path else None
         if cached is not None:
@@ -153,11 +202,13 @@ class SemanticRouter:
             self._webchat_vecs = cached["webchat"]
             self._agentic_vecs = cached["agentic"]
             self._artifact_vecs = cached["artifact"]
+            self._web_intent_vecs = cached.get("web_intent", self._webchat_vecs)
             return
         self._chat_vecs = self._embed(CHAT_EXAMPLES)
         self._webchat_vecs = self._embed(WEBCHAT_EXAMPLES)
         self._agentic_vecs = self._embed(AGENTIC_EXAMPLES)
         self._artifact_vecs = self._embed(ARTIFACT_EXAMPLES)
+        self._web_intent_vecs = self._embed(WEB_INTENT_EXAMPLES)
         if cache_path:
             self._save_cache(cache_path)
 
@@ -169,10 +220,13 @@ class SemanticRouter:
             if data.get("embedder") != self._embedder_name:
                 return None
             if data.get("examples") != {"chat": CHAT_EXAMPLES, "webchat": WEBCHAT_EXAMPLES,
+                                        "web_intent": WEB_INTENT_EXAMPLES,
                                         "agentic": AGENTIC_EXAMPLES, "artifact": ARTIFACT_EXAMPLES}:
                 return None
             vecs = data["vectors"]
-            if len(vecs["chat"]) != len(CHAT_EXAMPLES) or len(vecs["webchat"]) != len(WEBCHAT_EXAMPLES):
+            if (len(vecs["chat"]) != len(CHAT_EXAMPLES)
+                    or len(vecs["webchat"]) != len(WEBCHAT_EXAMPLES)
+                    or len(vecs.get("web_intent", [])) != len(WEB_INTENT_EXAMPLES)):
                 return None
             return vecs
         except Exception:
@@ -186,8 +240,10 @@ class SemanticRouter:
             path.parent.mkdir(parents=True, exist_ok=True)
             data = {"embedder": self._embedder_name,
                     "examples": {"chat": CHAT_EXAMPLES, "webchat": WEBCHAT_EXAMPLES,
+                                 "web_intent": WEB_INTENT_EXAMPLES,
                                  "agentic": AGENTIC_EXAMPLES, "artifact": ARTIFACT_EXAMPLES},
                     "vectors": {"chat": self._chat_vecs, "webchat": self._webchat_vecs,
+                                "web_intent": self._web_intent_vecs,
                                 "agentic": self._agentic_vecs, "artifact": self._artifact_vecs}}
             path.write_text(_json.dumps(data))
         except Exception:
@@ -195,6 +251,7 @@ class SemanticRouter:
 
     def classify(self, text: str) -> tuple[str, float]:
         vec = self._embed([text])[0]
+        web_intent_score = max((_cosine(vec, v) for v in self._web_intent_vecs), default=0.0)
         scores = [
             ("chat", max(_cosine(vec, v) for v in self._chat_vecs)),
             ("webchat", max(_cosine(vec, v) for v in self._webchat_vecs)),
@@ -204,7 +261,30 @@ class SemanticRouter:
         scores.sort(key=lambda x: x[1], reverse=True)
         best_cat, best_score = scores[0]
         second_score = scores[1][1]
+        chat_score = next(score for category, score in scores if category == "chat")
+        # Semantic similarity to the topic-free lookup intent wins only when
+        # it is stronger than ordinary-chat similarity. This prevents words
+        # such as “today” in a greeting from becoming a web lookup, while
+        # “check online” still governs any topic that follows it.
+        # The learned embedder can spread a long request's intent across its
+        # topic and its action, so a natural request such as “chat online to
+        # see if I qualify” may score below the short example “check the web”.
+        # Keep the chat margin so greetings stay chat, but allow that valid
+        # semantic lookup signal through at 0.50.
+        if web_intent_score >= 0.50 and web_intent_score > chat_score + 0.05:
+            return "webchat", min(1.0, web_intent_score)
         confidence = min(1.0, (best_score - second_score) * 5.0)
+        # Absolute match quality counts too. Categories overlap on
+        # question forms, so a strong best match with a close second
+        # is still a good match: a greeting scoring chat 0.80 against
+        # a 0.78 second used to report 0.10 confidence and fall
+        # through to agentic below. When the best match itself is
+        # strong (>= 0.75), floor the margin confidence by it, so
+        # strong matches are trusted even at a small margin. Weak
+        # best matches keep the margin confidence and still fail
+        # safe to agentic below.
+        if best_score >= 0.75:
+            confidence = min(1.0, max(confidence, best_score - 0.30))
         if confidence < 0.15:
             return "agentic", confidence
         return best_cat, confidence

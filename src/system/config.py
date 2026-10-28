@@ -113,7 +113,7 @@ class Config:
     ingest_dir: Path | None = None
     budget_tokens: int = 200000
     budget_seconds: int = 3600
-    # Old Aidon knobs, carried over because they have a live
+    # Compatibility knobs, retained because they have a live
     # consumer in the new code, not as dead settings.
     model_timeout_seconds: float = 120.0
     timezone: str = "UTC"
@@ -128,6 +128,7 @@ class Config:
     whatsapp_owner: str = ""
     slack_bot_token: str = ""
     slack_signing_secret: str = ""
+    slack_outbound_channel: str = ""
     # Old capability keys, only, no new duplicates.
     search_backend: str = "tavily"
     searxng_url: str = "http://localhost:8888"
@@ -151,21 +152,22 @@ class Config:
     corrected_subject: bool = True
     # Old routing / kernel keys, only, no new duplicates.
     fast_model: str = ""
+    fast_api_endpoint: str = ""
+    fast_api_key: str = ""
     verifier_model: str = ""
     voice_announce: bool = False
     sam_base_url: str = "https://api.meta.ai/v1"
     sam_api_key: str = ""
     learn_max_skills_per_day: int = 5
     skill_max_failures: int = 3
-    # Backend selection, old Aidon keys: AIDON_BACKEND decides
-    # between a local Ollama, the Meta Model API, a plain
-    # OpenAI-compatible endpoint, and the offline fake client.
+    # Backend selection: AIDON_BACKEND decides between the native chat
+    # protocol, the Meta Model API, a plain OpenAI-compatible endpoint,
+    # and the offline fake client.
     backend: str = ""
-    ollama_endpoint: str = "http://localhost:11434"
-    ollama_think: bool = False
-    ollama_num_ctx: int = 0
+    model_think: bool = False
+    model_num_ctx: int = 0
     fast_num_ctx: int = 0
-    # Research caps, old Aidon names only, no new duplicates.
+    # Research caps, Aidon names only, no new duplicates.
     # AIDON_RESEARCH_ALLOWLIST is a comma list, empty = unrestricted.
     research_max_rounds: int = 10
     max_stuck_iterations: int = 8
@@ -176,6 +178,7 @@ class Config:
     sam_model: str = "meta-sam"
     router_fast_phases: str = "interpret,learn,respond"
     kernel_mode: bool = False
+    computer_driver: str = ""
 
     @classmethod
     def load(cls, home: Path | None = None) -> "Config":
@@ -233,6 +236,9 @@ class Config:
             whatsapp_owner=os.environ.get("AIDON_WHATSAPP_OWNER", ""),
             slack_bot_token=os.environ.get("SLACK_BOT_TOKEN", ""),
             slack_signing_secret=os.environ.get("AIDON_SLACK_SIGNING_SECRET", ""),
+            slack_outbound_channel=os.environ.get(
+                "AIDON_SLACK_OUTBOUND_CHANNEL",
+                os.environ.get("AIDON_SLACK_INBOUND_CHANNEL", "").split(",")[0].strip()),
             search_backend=os.environ.get("AIDON_SEARCH_BACKEND", "tavily"),
             searxng_url=os.environ.get("AIDON_SEARXNG_URL", "http://localhost:8888"),
             tavily_api_key=os.environ.get("TAVILY_API_KEY", ""),
@@ -254,6 +260,8 @@ class Config:
             owner_email=os.environ.get("AIDON_OWNER_EMAIL", ""),
             corrected_subject=os.environ.get("AIDON_CORRECTED_SUBJECT", "1") not in ("0", "false", "no"),
             fast_model=os.environ.get("AIDON_FAST_MODEL", ""),
+            fast_api_endpoint=os.environ.get("AIDON_FAST_API_ENDPOINT", ""),
+            fast_api_key=os.environ.get("AIDON_FAST_API_KEY", ""),
             verifier_model=os.environ.get("AIDON_VERIFIER_MODEL", ""),
             voice_announce=os.environ.get("AIDON_VOICE_ANNOUNCE", "0") not in ("0", "false", "no", ""),
             sam_base_url=os.environ.get("AIDON_SAM_BASE_URL", "https://api.meta.ai/v1"),
@@ -262,11 +270,9 @@ class Config:
                 "AIDON_LEARN_MAX_SKILLS_PER_DAY", 5),
             skill_max_failures=_env_int("AIDON_SKILL_MAX_FAILURES", 3),
             backend=os.environ.get("AIDON_BACKEND", "").strip().lower(),
-            ollama_endpoint=os.environ.get(
-                "AIDON_OLLAMA_ENDPOINT", "http://localhost:11434"),
-            ollama_think=os.environ.get("AIDON_OLLAMA_THINK", "0") not in
+            model_think=os.environ.get("AIDON_MODEL_THINK", "0") not in
             ("0", "false", "no", ""),
-            ollama_num_ctx=_env_int("AIDON_OLLAMA_NUM_CTX", 0),
+            model_num_ctx=_env_int("AIDON_MODEL_NUM_CTX", 0),
             fast_num_ctx=_env_int("AIDON_FAST_NUM_CTX", 0),
             research_max_rounds=_env_int("AIDON_RESEARCH_MAX_ROUNDS", 10),
             max_stuck_iterations=_env_int("AIDON_MAX_STUCK_ITERATIONS", 8),
@@ -275,8 +281,9 @@ class Config:
             webui_token=os.environ.get("AIDON_WEBUI_TOKEN", ""),
             image_model=os.environ.get("AIDON_IMAGE_MODEL", "muse-image-1.0"),
             sam_model=os.environ.get("AIDON_SAM_MODEL", "meta-sam"),
-            router_fast_phases=os.environ.get("AIDON_ROUTER_FAST_PHASES", "interpret,learn,respond"),
+            router_fast_phases=os.environ.get("AIDON_ROUTER_FAST_PHASES", "interpret,learn,respond,webchat"),
             kernel_mode=os.environ.get("AIDON_KERNEL", "0") not in ("0", "false", "no"),
+            computer_driver=os.environ.get("AIDON_COMPUTER_DRIVER", "").strip().lower(),
         )
 
     @property

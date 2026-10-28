@@ -1,4 +1,4 @@
-"""WhatsApp, old Aidon whatsapp.py concept, rebuilt as a separate module.
+"""WhatsApp, Aidon whatsapp.py concept, rebuilt as a separate module.
 
 WhatsApp is signature verification, message parsing, and sending, separate from Slack:
 verify_whatsapp_signature checks the app-secret signature, parse_whatsapp_message returns

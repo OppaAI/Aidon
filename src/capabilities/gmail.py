@@ -1,7 +1,7 @@
 """Gmail send and read, via OAuth refresh token, stdlib only.
 
-Old Aidon used a Google Workspace MCP transport for email.
-New Aidon wires email two ways, and the direct Gmail API is
+Email uses the direct Gmail API; the retired Google Workspace MCP
+transport is not part of this implementation. The direct Gmail API is
 the one that works from the keys the owner already holds:
 GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN,
 from the Aidon Gmail account, aidon.ai.agent@gmail.com,

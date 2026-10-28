@@ -1,4 +1,4 @@
-"""Security probe, old Aidon security probe concept, rebuilt.
+"""Security probe, Aidon security probe concept, rebuilt.
 
 A probe runs the plugin security scan, plus extra checks the scan alone does not do:
 network calls, file writes outside the workdir, and secret-like strings in tool code.

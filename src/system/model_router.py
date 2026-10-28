@@ -80,6 +80,17 @@ class RouterClient(ModelClient):
         except TypeError:
             return client.chat(messages)
 
+    def chat_stream(self, phase: str, messages, sampling=None):
+        client = self.route(phase)
+        stream = getattr(client, "chat_stream", None)
+        if not callable(stream):
+            yield client.chat(messages, sampling=sampling)
+            return
+        try:
+            yield from stream(messages, sampling=sampling)
+        except TypeError:
+            yield from stream(messages)
+
     def stats(self) -> dict:
         return dict(self.calls_by_phase)
 

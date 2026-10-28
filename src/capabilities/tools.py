@@ -23,6 +23,21 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+class ToolResult(str):
+    """Backward-compatible tool text with machine-readable artifact data.
+
+    Existing callers still receive a string, while the execution loop can
+    consume an authoritative path/type instead of parsing model-facing prose.
+    """
+
+    def __new__(cls, text: str, *, path=None, kind=""):
+        value = super().__new__(cls, str(text))
+        value.path = str(path) if path is not None else ""
+        value.kind = str(kind or "")
+        value.status = "ok"
+        return value
+
+
 def _confined(workdir: Path, name: str) -> Path:
     target = (workdir / name).resolve()
     root = workdir.resolve()

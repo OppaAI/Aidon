@@ -26,8 +26,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
 import threading
+from datetime import datetime
 
 from ..interface.approval import ApprovalGate, Decision
 from .config import Config
@@ -36,7 +39,24 @@ from .model_client import FakeClient
 from ..capabilities.sandbox import Sandbox
 
 
-def _cli_gate(home, timeout_seconds: int = 180) -> ApprovalGate:
+def _startup_style(kind: str, text: str) -> None:
+    """Print compact, terminal-friendly startup diagnostics."""
+    if sys.stderr.isatty():
+        colors = {
+            "section": "\033[38;5;141m\033[1m",
+            "info": "\033[38;5;51m",
+            "warn": "\033[38;5;220m",
+            "ok": "\033[38;5;78m",
+            "error": "\033[38;5;203m",
+        }
+        prefix = {"section": "◆", "info": "·", "warn": "!", "ok": "✓", "error": "✗"}[kind]
+        print(f"{colors[kind]}{prefix} {text}\033[0m", file=sys.stderr)
+    else:
+        print(text, file=sys.stderr)
+
+
+def _cli_gate(home, timeout_seconds: int = 180,
+              project_id: str = "default") -> ApprovalGate:
     from ..interface.autonomy import policy_for
 
     def decide(kind: str, title: str, body: str) -> Decision:
@@ -44,11 +64,20 @@ def _cli_gate(home, timeout_seconds: int = 180) -> ApprovalGate:
         answer = input("Approve? [y/N] ").strip().lower()
         return Decision("approved" if answer in ("y", "yes") else "rejected")
 
-    return ApprovalGate(
+    gate = ApprovalGate(
         decide,
         timeout_seconds=timeout_seconds,
         policy=policy_for(home),
     )
+    # Pre-approval applies to CLI and scheduled runs too, not only to
+    # the WebUI: the store is the same file the WebUI, WhatsApp, and
+    # Slack surfaces write, keyed by the run's project id.
+    try:
+        from ..interface.preapproval import PreapprovalStore
+        from ..interface.preapproval_gate import PreapprovalGate
+        return PreapprovalGate(gate, PreapprovalStore(home), project_id)
+    except Exception:
+        return gate
 
 
 def _network_available(execution_backend, sandbox) -> bool:
@@ -62,6 +91,25 @@ def _network_available(execution_backend, sandbox) -> bool:
     return False if getattr(sandbox, "bwrap", None) else True
 
 
+def _run_workspace(config: Config, run_id: str) -> Path:
+    """Create one timestamped workspace directory for a run."""
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
+    path = config.workdir / stamp
+    path.mkdir(parents=True, exist_ok=False)
+    return path
+
+
+def _run_sandbox(config: Config, run_id: str) -> Sandbox:
+    return Sandbox(
+        _run_workspace(config, run_id), config.sandbox_timeout_seconds,
+        mem_mb=config.sandbox_mem_mb, nproc=config.sandbox_nproc,
+        fsize_mb=config.sandbox_fsize_mb,
+        cpu_seconds=config.sandbox_cpu_seconds,
+        backend=config.sandbox_backend,
+        allow_network=config.sandbox_network,
+        require_isolation=config.sandbox_require_isolation)
+
+
 def _promotion_ask(point) -> bool:
     answer = input(
         f"\nPromote this run's episodic memory to long-term memory? "
@@ -69,7 +117,7 @@ def _promotion_ask(point) -> bool:
     return answer in ("y", "yes")
 
 
-def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
+def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     The loop approval-gates any extra tool whose name contains
@@ -93,11 +141,28 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
     never raises out of the tool.
     """
     from pathlib import Path
+    from ..capabilities.tools import ToolResult
     workdir = Path(workdir)
     tools: dict = {}
 
+    def _free_path(path: Path) -> Path:
+        """First non-existing sibling: stem, stem_2, stem_3, ..."""
+        if not path.exists():
+            return path
+        for index in range(2, 1000):
+            candidate = path.with_name(f"{path.stem}_{index}{path.suffix}")
+            if not candidate.exists():
+                return candidate
+        raise ValueError(f"no free filename near {path}")
+
     def _confined(name: str) -> Path:
-        target = (workdir / str(name)).resolve()
+        relative = str(name).replace("\\", "/")
+        # ``workdir/`` is a prompt label, not a real child directory.
+        if relative == "workdir":
+            relative = ""
+        elif relative.startswith("workdir/"):
+            relative = relative[len("workdir/"):]
+        target = (workdir / relative).resolve()
         root = workdir.resolve()
         if target != root and root not in target.parents:
             raise ValueError(f"path outside workdir: {name}")
@@ -129,8 +194,59 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
     except Exception:
         pass
     try:
-        from ..capabilities.docgen import build_ebook, generate_document
-        tools["generate_document"] = generate_document
+        from ..capabilities.docgen import build_ebook, generate_document, write_document_file
+        def _generate_document(title="Aidon document", sections=None,
+                               content="", body="", filename="", path="",
+                               input_path="", output="", output_path="",
+                               format="", overwrite=False, **kwargs):
+            # Models have historically called the destination ``path`` or
+            # requested ``format`` explicitly. Accept those aliases so a
+            # valid document plan is not rejected by a naming mismatch.
+            destination = str(filename or path or input_path or output or output_path or "")
+            if sections is None:
+                raw = content or body or kwargs.get("text", "")
+                sections = [{"heading": "", "body": str(raw)}]
+            elif isinstance(sections, str):
+                sections = [{"heading": "", "body": sections}]
+            if not destination:
+                # Keep generated artifacts discoverable even when the model
+                # omits a filename: derive a safe contextual stem and add
+                # the run timestamp. The containing directory is already
+                # the timestamped workspace for this run.
+                stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(title)).strip("_.")
+                stem = stem[:80] or "aidon_document"
+                destination = f"{stem}_{Path(workdir).name}"
+                if format:
+                    destination += "." + str(format).lstrip(".")
+                else:
+                    destination += ".md"
+            if destination:
+                if format and "." not in Path(destination).name:
+                    destination += "." + str(format).lstrip(".")
+                target = _confined(destination)
+                if target.exists() and not overwrite:
+                    # Same dead-end as write_file: a FILE_EXISTS string
+                    # is marked as a passed step, then repair skips the
+                    # deliverable forever while nothing was written.
+                    # Rename instead; the original is untouched.
+                    renamed_from = destination
+                    target = _free_path(target)
+                else:
+                    renamed_from = ""
+                if target.exists() and overwrite:
+                    ok, why = _approval(
+                        "live", "Overwrite existing document",
+                        f"Replace the existing file {target}?",
+                        force_ask=True)
+                    if not ok:
+                        return f"overwrite rejected for {destination}: {why}"
+                result = write_document_file(title, sections, target)
+                if renamed_from:
+                    result = (f"wrote {target} (renamed: requested "
+                              f"{renamed_from} already existed)")
+                return ToolResult(result, path=target, kind="document")
+            return generate_document(title, sections)
+        tools["generate_document"] = _generate_document
         tools["build_ebook"] = build_ebook
     except Exception:
         pass
@@ -239,22 +355,42 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
     except Exception:
         pass
 
-    # Compatibility names from old Aidon.
+    # Compatibility names from Aidon.
     if "threads_publish" in tools:
         tools["threads_post"] = tools["threads_publish"]
     if "instagram_publish" in tools:
         tools["instagram_post"] = tools["instagram_publish"]
 
-    def read_file(name):
+    def read_file(name="", path="", input_path="", file=""):
+        name = str(name or path or input_path or file)
         path = _confined(name)
         if not path.is_file():
             return f"file not found: {name}"
         return path.read_text(encoding="utf-8", errors="replace")
 
-    def write_file(name, text):
+    def write_file(name="", text="", input_path="", path="", file="",
+                   content="", overwrite=False):
+        name = str(name or input_path or path or file)
         path = _confined(name)
-        path.write_text(str(text), encoding="utf-8")
-        return f"wrote {path}"
+        if path.exists() and not overwrite:
+            # Never dead-end the run with a FILE_EXISTS string: the
+            # executor marks a returned string as a passed step, then
+            # repair skips that deliverable forever while the file
+            # was never written. Rename instead; the original is
+            # untouched, so no approval is needed for a rename.
+            path = _free_path(path)
+            renamed_from = name
+        else:
+            renamed_from = ""
+        if path.exists() and overwrite:
+            ok, why = _approval("live", "Overwrite existing file",
+                                f"Replace the existing file {path}?",
+                                force_ask=True)
+            if not ok:
+                return f"overwrite rejected for {name}: {why}"
+        path.write_text(str(text if text != "" else content), encoding="utf-8")
+        note = f" (renamed: requested {renamed_from} already existed)" if renamed_from else ""
+        return ToolResult(f"wrote {path}{note}", path=path, kind="file")
 
     tools["read_file"] = read_file
     tools["write_file"] = write_file
@@ -285,14 +421,59 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         if gate is None:
             return False, "no approval gate configured"
         try:
+            from ..interface.phrasing import approval_lead_in
+            lead = None
+            if phrase is not None:
+                try:
+                    lead = phrase("approval")
+                except Exception:
+                    lead = None
+            if not lead:
+                lead = approval_lead_in()
             decision = gate.ask(
-                kind, title, body,
+                kind, title, f"{lead}\n\n{body}",
                 action_class=action_class,
                 force_ask=force_ask,
             )
             return decision.verdict in ("approved", "auto_approved"), decision.verdict
         except Exception as exc:
             return False, f"approval failed: {exc}"
+
+    # The WebUI goal runner receives this dictionary as its extra toolset.
+    # Keep desktop control here as well as in the CLI tool builder; otherwise
+    # the status panel can say x11 while the planner cannot select
+    # computer_use for a WebUI goal.
+    # Prefer explicit configuration, but also discover an installed X11
+    # driver automatically. Discovery is read-only; every actual desktop
+    # action remains approval-gated below.
+    _computer_requested = getattr(config, "computer_driver", "") == "x11"
+    if not getattr(config, "kernel_mode", False) and (_computer_requested or
+                                                       os.environ.get("DISPLAY")):
+        try:
+            from ..capabilities.computer_use import run_computer_use
+            from ..capabilities.x11_driver import X11Driver, x11_available
+            if not _computer_requested and not x11_available():
+                raise RuntimeError("no discoverable X11 driver")
+            desktop_driver = X11Driver()
+
+            def computer_use(actions, screenshot_dir="computer-screenshots"):
+                def approve(kind, detail):
+                    ok, _ = _approval(
+                        "live_execute", "Approve desktop action",
+                        f"Run X11 computer action {kind}: {detail}",
+                        force_ask=True,
+                    )
+                    return ok
+                target = _confined(screenshot_dir)
+                result = run_computer_use(
+                    actions, approve=approve, driver=desktop_driver,
+                    screenshot_dir=target)
+                return json.dumps(result, ensure_ascii=False)
+
+            tools["computer_use"] = computer_use
+        except Exception:
+            # A missing xdotool or DISPLAY must not make other tools vanish.
+            pass
 
     # Recording host audio is a sensitive side effect. Keep the old
     # mandatory approval boundary even though the recorder itself lives in
@@ -400,7 +581,37 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
 
     tools["notify"] = notify
 
-    # MCP client tools from old Aidon. Connections live for this goal run;
+    # Desktop control is opt-in and never a raw shell. Kernel mode keeps it
+    # unavailable; the demo must explicitly run with AIDON_KERNEL=0.
+    if getattr(config, "computer_driver", "") == "x11" and not getattr(config, "kernel_mode", False):
+        try:
+            from ..capabilities.computer_use import run_computer_use
+            from ..capabilities.x11_driver import X11Driver
+
+            _desktop_driver = X11Driver()
+
+            def computer_use(actions, screenshot_dir="computer-screenshots"):
+                def approve(kind, detail):
+                    ok, why = _approval(
+                        "live_execute", "Approve desktop action",
+                        f"Run X11 computer action {kind}: {detail}",
+                        force_ask=True,
+                    )
+                    return ok
+
+                target = _confined(screenshot_dir)
+                result = run_computer_use(
+                    actions, approve=approve, driver=_desktop_driver,
+                    screenshot_dir=target,
+                )
+                return json.dumps(result, ensure_ascii=False)
+
+            tools["computer_use"] = computer_use
+        except Exception:
+            # A missing display or driver leaves the capability unavailable.
+            pass
+
+    # MCP client tools from Aidon. Connections live for this goal run;
     # every new stdio connection is approval-gated before third-party code
     # is started. Server tools are exposed with a namespaced name so they
     # cannot collide with Aidon's own tools.
@@ -497,8 +708,21 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         pass
 
     def ask_user(question):
-        # Interview / clarifying questions are chat turns, not approval cards.
-        return str(question)
+        # Interview / clarifying questions are chat turns, not approval
+        # cards. When the surface provides a question channel (the
+        # WebUI waiter), block until the owner answers; questions
+        # carry no 180s clock. Without a channel, say so instead of
+        # echoing the question back as if it were answered.
+        if question_answer is not None:
+            try:
+                return str(question_answer(question))
+            except Exception as exc:
+                return f"question failed: {exc}"
+        if gate is None:
+            return "no gate configured"
+        return ("QUESTION_NOT_DELIVERED: no channel exists to ask the user "
+                "this question; proceed with your best judgment and note "
+                "the assumption.")
 
     def declare_blocked(reason):
         # Single shape source: direction.blocked_note is the dict form,
@@ -652,24 +876,34 @@ def _make_memory(config: Config):
         from ..memory.entity_graph import EntityGraph
         from ..memory.memory import Memory
         embedder = make_embedder_cached()
-        return Memory(config.home, embedder=embedder, entity_graph=EntityGraph(config.home))
+        mem = Memory(config.home, embedder=embedder, entity_graph=EntityGraph(config.home))
+        if type(mem.store).__name__ == "SQLiteStore":
+            print("warning: Qdrant client not installed, using persistent "
+                  "SQLite memory fallback (run ./setup.sh --with-qdrant "
+                  "for a Qdrant server)", file=sys.stderr)
+        return mem
     except Exception as exc:
         print(f"warning: real embedder unavailable ({exc}), "
               "using HashEmbedder for this run", file=sys.stderr)
     try:
         from ..memory.embedder import HashEmbedder
         from ..memory.memory import Memory
-        return Memory(config.home, embedder=HashEmbedder())
+        mem = Memory(config.home, embedder=HashEmbedder())
+        if type(mem.store).__name__ == "SQLiteStore":
+            print("warning: Qdrant client not installed, using persistent "
+                  "SQLite memory fallback (run ./setup.sh --with-qdrant "
+                  "for a Qdrant server)", file=sys.stderr)
+        return mem
     except Exception as exc:
-        # A broken Qdrant install must not make every command fail.
-        # The in-process store keeps the run working for this process,
-        # and says so, rather than pretending it persisted anything.
-        print(f"warning: Qdrant unavailable ({exc}), using in-process "
-              "memory for this run, nothing persists", file=sys.stderr)
+        # A broken vector-store install must not make every command fail.
+        # SQLite keeps memory durable without pretending it is a vector
+        # database; Qdrant can still be installed later for larger stores.
+        print(f"warning: Qdrant unavailable ({exc}), using persistent "
+              "SQLite memory fallback", file=sys.stderr)
         from ..memory.embedder import HashEmbedder
-        from ..memory.memory import InMemoryStore, Memory
+        from ..memory.memory import Memory, SQLiteStore
         return Memory(config.home, embedder=HashEmbedder(),
-                      store=InMemoryStore())
+                      store=SQLiteStore(config.home))
 
 
 class _LazyMemory:
@@ -686,10 +920,16 @@ class _LazyMemory:
     def __init__(self, config: Config):
         self._config = config
         self._memory = None
+        self._lock = threading.Lock()
 
     def _get(self):
         if self._memory is None:
-            self._memory = _make_memory(self._config)
+            # The WebUI loads several panels concurrently.  Without a
+            # lock, each first request can load the 440M embedder before
+            # the others see the cached Memory instance.
+            with self._lock:
+                if self._memory is None:
+                    self._memory = _make_memory(self._config)
         return self._memory
 
     def __getattr__(self, name):
@@ -698,7 +938,9 @@ class _LazyMemory:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="aidon")
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument("--cli", action="store_true",
+                        help="Open the conversational terminal interface")
+    sub = parser.add_subparsers(dest="command", required=False)
     goal_parser = sub.add_parser("goal", aliases=["run"], help="Run a goal")
     goal_parser.add_argument("text", help="Goal in plain language")
     goal_parser.add_argument("--project", default="default",
@@ -745,15 +987,20 @@ def main(argv: list[str] | None = None) -> int:
     webui_parser.add_argument("action", nargs="?", default="serve",
                               choices=["serve"],
                               help="Serve the WebUI, localhost only")
-    webui_parser.add_argument("--port", type=int, default=8002,
-                              help="Port for WebUI serve, default 8002, localhost only")
+    webui_parser.add_argument("--port", type=int, default=8765,
+                              help="Port for WebUI serve, default 8765, localhost only")
     webui_parser.add_argument("--webhook-only", action="store_true",
                               help="Serve only /webhook/whatsapp and /webhook/slack, no chat, settings, or library, for a tunnel front")
     scheduler_parser = sub.add_parser("scheduler", help="Scheduler daemon and pre-approval")
-    scheduler_parser.add_argument("action", choices=["serve", "preapprove", "morning"],
-                                  help="Serve due jobs, grant a pre-approval, or list the morning report")
+    scheduler_parser.add_argument("action", choices=["serve", "preapprove", "morning",
+                                                     "list", "revoke"],
+                                  help="Serve due jobs, grant, list, or revoke a pre-approval, "
+                                       "or list the morning report")
     scheduler_parser.add_argument("--spec", default="default", help="Spec id for pre-approval")
-    scheduler_parser.add_argument("--kind", default="sandbox", help="Action kind for pre-approval, reversible only")
+    scheduler_parser.add_argument("--kind", default=None,
+                                  help="Action kind for pre-approval, by name or by the number "
+                                       "the menu shows (default sandbox when granting). "
+                                       "Omitted on revoke means every kind for that spec")
     scheduler_parser.add_argument("--hours", type=float, default=8.0, help="Pre-approval duration, hours")
     benchmark_parser = sub.add_parser("benchmark", help="Self-learning benchmark, canned, not live")
     benchmark_parser.add_argument("action", choices=["learn"], help="Snake to Worm, fresh vs adapted")
@@ -789,14 +1036,14 @@ def main(argv: list[str] | None = None) -> int:
     email_parser.add_argument("--subject", default="", help="Subject for send")
     email_parser.add_argument("--body", default="", help="Body for send")
 
-    memory_parser = sub.add_parser("memory", help="Inspect and prune Aidon memory, old Aidon memory commands")
+    memory_parser = sub.add_parser("memory", help="Inspect and prune Aidon memory, Aidon memory commands")
     memory_parser.add_argument("action", choices=["forget", "ingest", "check", "prune", "list"], help="forget = delete matching memories, ingest = ingest a folder, check = list points, prune = delete decayed memories, list = list projects")
     memory_parser.add_argument("query", nargs="?", default="", help="Query for forget, folder for ingest")
     memory_parser.add_argument("--id", default=None, help="Exact point id for forget")
     memory_parser.add_argument("--collection", default="episodic", help="Collection for forget, check, prune")
     memory_parser.add_argument("--project", default="default", help="Project id")
     memory_parser.add_argument("--dry-run", action="store_true", help="Prune dry run only, do not delete")
-    skills_parser = sub.add_parser("skills", help="Inspect the skill library, old Aidon skills commands")
+    skills_parser = sub.add_parser("skills", help="Inspect the skill library, Aidon skills commands")
     skills_parser.add_argument("action", choices=["list", "show", "check", "rollback"], help="list = list skills, show = show one skill state, check = governor check, rollback = reset a skill to candidate")
     skills_parser.add_argument("name", nargs="?", default="", help="Skill name")
     tools_parser = sub.add_parser("tools", help="Inspect the tool registry")
@@ -819,7 +1066,7 @@ def main(argv: list[str] | None = None) -> int:
     export_parser.add_argument("--dir", default="", help="Output directory, default <home>/export")
     export_parser.add_argument("--registry", action="store_true", help="Export the full registry to Markdown, in addition to memory points")
     export_parser.add_argument("--full", action="store_true", help="Also export missions, skills, DAGs, and runs as separate Markdown files")
-    schedule_parser = sub.add_parser("schedule", help="Cron-like scheduled jobs, old Aidon schedule commands, scheduler serve runs them")
+    schedule_parser = sub.add_parser("schedule", help="Cron-like scheduled jobs, Aidon schedule commands, scheduler serve runs them")
     schedule_parser.add_argument("action", choices=["add", "list", "remove", "show"], help="add = add a job, list = list jobs, remove = remove a job, show = show a job")
     schedule_parser.add_argument("--name", default="", help="Job name")
     schedule_parser.add_argument("--goal", default="", help="Goal for add")
@@ -833,29 +1080,29 @@ def main(argv: list[str] | None = None) -> int:
     chain_parser = sub.add_parser("chain", help="Declarative tool chains, zero-LLM scheduled jobs")
     chain_parser.add_argument("action", choices=["validate", "run"], help="validate = validate a chain spec JSON, run = run a validated chain through sandbox tools")
     chain_parser.add_argument("path", help="Chain spec JSON file")
-    chat_parser = sub.add_parser("chat", help="Interactive terminal chat, old Aidon chat command, type a goal, empty line to exit")
+    chat_parser = sub.add_parser("chat", help="Interactive terminal chat, Aidon chat command, type a goal, empty line to exit")
     computer_parser = sub.add_parser("computer", help="Screenshot and computer use, approval-gated, no GUI action without a driver")
     computer_parser.add_argument("action", choices=["screenshot", "run"], help="screenshot = capture screen to a file, run = run a computer-use action JSON file")
     computer_parser.add_argument("path", help="Output PNG for screenshot, or action JSON file for run")
     computer_parser.add_argument("--approve", action="store_true", help="Approve irreversible actions in this run, otherwise they are refused")
 
-    report_parser = sub.add_parser("report", help="Autonomy and daily reports, old Aidon report commands")
+    report_parser = sub.add_parser("report", help="Autonomy and daily reports, Aidon report commands")
     report_parser.add_argument("action", choices=["autonomy", "daily"], help="autonomy = counts and gate status, daily = daily report text")
     demo_parser = sub.add_parser("demo", help="Demo learning and invent-tool, live, not canned")
     demo_parser.add_argument("action", choices=["learn", "invent-tool"], help="learn = real experience counts, invent-tool = draft a plugin skeleton and scan it, adoption still needs the gate")
     demo_parser.add_argument("--name", default="", help="Plugin name for invent-tool")
     demo_parser.add_argument("--description", default="", help="Plugin description for invent-tool")
-    slack_parser = sub.add_parser("slack", help="Slack inbound listening, old Aidon slack listen")
+    slack_parser = sub.add_parser("slack", help="Slack inbound listening, Aidon slack listen")
     slack_parser.add_argument("action", choices=["listen", "status"], help="listen = poll Slack once or for --seconds, status = configured or not")
     slack_parser.add_argument("--channel", default="", help="Slack channel id, or AIDON_SLACK_INBOUND_CHANNEL")
     slack_parser.add_argument("--seconds", type=int, default=0, help="Listen duration in seconds, 0 = one poll only")
     slack_parser.add_argument("--run", action="store_true", help="Run polled messages as goals, otherwise just print them")
-    whatsapp_parser = sub.add_parser("whatsapp", help="WhatsApp status and send, old Aidon whatsapp commands")
+    whatsapp_parser = sub.add_parser("whatsapp", help="WhatsApp status and send, Aidon whatsapp commands")
     whatsapp_parser.add_argument("action", choices=["status", "send"], help="status = configured or missing, send = send a real WhatsApp message, fails if not configured, never faked")
     whatsapp_parser.add_argument("--to", default="", help="Recipient number for send")
     whatsapp_parser.add_argument("--text", default="", help="Message text for send")
-    tick_parser = sub.add_parser("tick", help="Run due scheduler jobs once, old Aidon tick")
-    repl_parser = sub.add_parser("repl", help="Full REPL, old Aidon repl, /help, /history, /quit, or a goal")
+    tick_parser = sub.add_parser("tick", help="Run due scheduler jobs once, Aidon tick")
+    repl_parser = sub.add_parser("repl", help="Full REPL, Aidon repl, /help, /history, /quit, or a goal")
     learn_parser = sub.add_parser("learn", help="Idle learn cycle: re-test candidate skills, promote passers, consolidate validated duplicates")
     skill_lib_parser = sub.add_parser("skill-library", help="Full skill library: list, show, promote, trust, retire, rollback, versions")
     skill_lib_parser.add_argument("action", choices=["list", "show", "promote", "trust", "retire", "rollback", "versions"], help="list = list skills, show = show one, promote/trust/retire = lifecycle, rollback = restore a version, versions = version history")
@@ -910,7 +1157,11 @@ def main(argv: list[str] | None = None) -> int:
     think_parser.add_argument("--level", default="", help="Requested effort level: off, low, medium, high")
     think_parser.add_argument("--escalate", action="store_true", help="Raise one level (verifier rejection only)")
     args = parser.parse_args(argv)
-    # Old Aidon called this surface `run`; keep the spelling while using
+    if args.cli:
+        args.command = "chat"
+    elif not args.command:
+        parser.error("a command is required (or use --cli for conversational mode)")
+    # This surface is called `run`; keep the spelling while using
     # the new goal runner and its current state/control implementation.
     if args.command == "run":
         args.command = "goal"
@@ -922,28 +1173,37 @@ def main(argv: list[str] | None = None) -> int:
     try:
         client = client_for_config(config)
     except ValueError as exc:
-        print(f"model backend error: {exc}", file=sys.stderr)
+        _startup_style("error", f"Model backend error: {exc}")
         return 2
     if isinstance(client, FakeClient):
-        print("warning: no model backend configured, using FakeClient; "
-              "set AIDON_BACKEND and AIDON_API_ENDPOINT / AIDON_API_KEY "
-              "in .env for a real run", file=sys.stderr)
+        _startup_style("warn", "No model backend configured; using FakeClient. "
+                       "Set AIDON_BACKEND, AIDON_API_ENDPOINT, and "
+                       "AIDON_API_KEY in .env for a real run.")
     # Count every model call in the workflow, including planning, research,
     # verification, repairs, learning, and the final response.
     client = CountingClient(client)
-    # Fast model, same backend, different model name. This is how a
-    # local small model works too: set the endpoint to a local
-    # Ollama, AIDON_MODEL to the strong model, and AIDON_FAST_MODEL
-    # to the small local model. No Ollama-specific branch in the loop.
+    # Fast model, different model name, optionally its own endpoint.
+    # This is how a local small model works too: set the endpoint to a local
+    # native server, AIDON_MODEL to the strong model, and AIDON_FAST_MODEL
+    # to the small local model. No Native-specific branch in the loop.
     main_client = client
     fast_client = None
     model_router = None
     if config.fast_model and config.fast_model != config.model:
         from dataclasses import replace
         from ..agentic.router import RoutedClient
+        # The fast model may live on its own endpoint (e.g. main on the
+        # Meta API, fast Llama on a local server). When a fast endpoint
+        # is set, backend is re-inferred from it; otherwise the main
+        # backend, endpoint, and key carry over unchanged.
+        _fast_endpoint = (getattr(config, "fast_api_endpoint", "") or "").strip()
+        _fast_key = getattr(config, "fast_api_key", "") or ""
         fast_config = replace(
             config, model=config.fast_model,
-            ollama_num_ctx=config.fast_num_ctx or config.ollama_num_ctx)
+            model_num_ctx=config.fast_num_ctx or config.model_num_ctx,
+            api_base=_fast_endpoint or config.api_base,
+            api_key=_fast_key or config.api_key,
+            backend="" if _fast_endpoint else config.backend)
         fast_client = CountingClient(client_for_config(fast_config))
         fast_phases = {s.strip() for s in config.router_fast_phases.split(",") if s.strip()}
         client = RoutedClient(fast_client, client, fast_phases=fast_phases)
@@ -1338,7 +1598,7 @@ def main(argv: list[str] | None = None) -> int:
             except FileNotFoundError:
                 print(f"No mission {args.id}"); return 2
             if mission.get("status") != "cancelled" and mission.get("status") != "rejected":
-                # Old Aidon discard was explicit only for REJECTED drafts, here we require cancelled or rejected, otherwise refuse
+                # Discard is explicit only for cancelled or rejected drafts; otherwise refuse.
                 print(f"Discard refused: mission {args.id} status is {mission.get('status')}, not cancelled or rejected"); return 2
             store.set_status(args.id, "cancelled")
             print(f"Discarded {args.id}")
@@ -1432,15 +1692,26 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result.get("ok") else 2
         return 2
     if args.command == "chat":
-        print("Aidon chat, type a goal, empty line to exit. This is a terminal chat, not the WebUI, approval is asked on the console.")
-        while True:
+        from ..interface.repl import Repl
+        from .model_client import Message
+        from ..agentic.think_effort import sampling_for
+        messages = []
+
+        def _chat_handler(text: str) -> str:
+            messages.append(Message("user", text))
             try:
-                line = input("You: ").strip()
-            except EOFError:
-                break
-            if not line:
-                break
-            print(f"Aidon: received goal {line!r}, run it with goal command for a full sandbox run, chat here is a direct reply only, no pipeline, no approval gate for a chat reply.")
+                reply = client.chat(messages, sampling=sampling_for("respond"))
+            except TypeError:
+                reply = client.chat(messages)
+            messages.append(Message("assistant", str(reply)))
+            return str(reply)
+
+        def _remember(text: str) -> str:
+            point = memory.remember(text, source="cli-command")
+            return f"Remembered in long-term memory: {text} (id {point.id})"
+
+        Repl(_chat_handler, title="Aidon Chat", on_clear=messages.clear,
+             on_remember=_remember).run()
         return 0
     if args.command == "computer":
         from ..capabilities.computer_use import capture_screenshot, run_computer_use
@@ -1577,7 +1848,7 @@ def main(argv: list[str] | None = None) -> int:
             _tick_control = _TickControl(config.home)
             _tick_control.register(_tick_run_id, job.goal, job.project_id)
             print(f"Tick job {job.name}: run id {_tick_run_id}")
-            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id=job.project_id, plugins=_plugins, execution_backend=_backend, budget=_B(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T(config.home, project_id=job.project_id), model_verifier=_MV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), run_id=_tick_run_id, run_control=_tick_control)
+            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds, job.project_id), config.home, memory=memory, project_id=job.project_id, plugins=_plugins, execution_backend=_backend, budget=_B(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T(config.home, project_id=job.project_id), model_verifier=_MV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), run_id=_tick_run_id, run_control=_tick_control)
             report = runner.run(job.goal)
             print(f"Tick job {job.name}: {report.status}, files: {', '.join(report.files)}")
         return 0
@@ -1599,7 +1870,11 @@ def main(argv: list[str] | None = None) -> int:
             if report.status == "chat":
                 return report.chat_reply or "Received."
             return f"[{report.status}] {', '.join(report.files)} {report.error}".strip()
-        Repl(_repl_handler).run()
+        def _remember(text: str) -> str:
+            point = memory.remember(text, source="cli-command")
+            return f"Remembered in long-term memory: {text} (id {point.id})"
+
+        Repl(_repl_handler, on_remember=_remember).run()
         return 0
     if args.command == "webui":
         from ..interface.messaging import MessagingConfig, send_slack, send_whatsapp
@@ -1615,6 +1890,8 @@ def main(argv: list[str] | None = None) -> int:
         msg.whatsapp_owner = config.whatsapp_owner or msg.whatsapp_owner
         msg.slack_bot_token = config.slack_bot_token or msg.slack_bot_token
         msg.slack_signing_secret = config.slack_signing_secret or msg.slack_signing_secret
+        msg.slack_outbound_channel = (config.slack_outbound_channel
+                                      or msg.slack_outbound_channel)
         dispatcher = TriggerDispatcher()
         # Goal handler, wired here, not echo: WebUI chat,
         # WhatsApp, and Slack all run the same GoalRunner,
@@ -1626,11 +1903,13 @@ def main(argv: list[str] | None = None) -> int:
             result = send_whatsapp(msg, to, text)
             if not result["ok"]:
                 print(f"WhatsApp send failed: {result['error']}")
+            return result
 
         def slack_sender(channel: str, text: str, thread_ts=None):
             result = send_slack(msg, channel, text, thread_ts=thread_ts)
             if not result["ok"]:
                 print(f"Slack send failed: {result['error']}")
+            return result
 
         from ..interface.messaging import download_whatsapp_media
         from ..interface.run_control import RunControl
@@ -1660,6 +1939,11 @@ def main(argv: list[str] | None = None) -> int:
             from ..interface.scheduler_loop import NudgeTracker
             run_id = str(event.payload.get("run_id", "")) or new_run_id()
             run_control.register(run_id, event.goal, event.project_id)
+            # Each goal gets its own timestamped workspace directory. This
+            # prevents unrelated runs from colliding on filenames and keeps
+            # the user-visible artifact path contextual instead of exposing
+            # a generic ``workdir`` directory.
+            run_sandbox = _run_sandbox(config, run_id)
             # Full runner, same as the CLI goal run, not a thin runner:
             # budget, trace, model verifier, plugins, execution backend,
             # semantic router skip, and autonomy plus nudge trackers
@@ -1684,7 +1968,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 from ..capabilities.execution import make_backend
                 execution_backend = make_backend(
-                    config.execution_backend, sandbox,
+                    config.execution_backend, run_sandbox,
                     image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 execution_backend = None
@@ -1692,6 +1976,17 @@ def main(argv: list[str] | None = None) -> int:
                 semantic_router = SemanticRouter(memory.embedder, cache_path=config.home / 'semantic_router_vectors.json')
             except Exception:
                 semantic_router = None
+            conversation_context = ""
+            conversation_id = str(event.payload.get("conversation_id", "") or "")
+            if conversation_id:
+                try:
+                    history = server._conversations_db().history(conversation_id, limit=8)
+                    conversation_context = "\n".join(
+                        f"{item.get('role', 'user')}: {str(item.get('text', ''))[:1200]}"
+                        for item in history[:-1]
+                    )
+                except Exception:
+                    conversation_context = ""
             try:
                 from ..interface.preapproval import PreapprovalStore
                 from ..interface.preapproval_gate import PreapprovalGate
@@ -1702,13 +1997,62 @@ def main(argv: list[str] | None = None) -> int:
                 try:
                     from ..agentic.research_allow import DomainGrants, load_allowlist
                     from ..capabilities.search import search as _s
-                    _r = _s(goal_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url,
+                    search_text = goal_text
+                    if conversation_context:
+                        search_text = (f"Conversation topic:\n{conversation_context}\n\n"
+                                       f"Current request:\n{goal_text}")
+                    _r = _s(search_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url,
                             allowlist=load_allowlist(config.home, config.research_allowlist),
                             grants=DomainGrants(config.home))
                     return [f"{x.get('title', '')}: {x.get('snippet', '')}" for x in _r.get("results", [])]
                 except Exception:
                     return []
-            runner = GoalRunner(client, sandbox, _gate,
+            # Slack/WhatsApp runs have no WebUI waiter callback in the
+            # payload, so build one: send the question straight to the
+            # surface (not via the reply list, which is only flushed
+            # after the run ends), then block in the shared waiter
+            # until the owner's next message in that channel arrives
+            # as the answer. Without a channel/sender key there is no
+            # waiter, and ask_user says so honestly.
+            _question_callback = None
+            _qkey = ""
+            if event.source == "slack":
+                _qkey = "slack:" + str(event.payload.get("channel", ""))
+            elif event.source == "whatsapp":
+                _qkey = "whatsapp:" + str(event.payload.get("from", ""))
+            if _qkey and not _qkey.endswith(":"):
+                def _question_callback(question, _key=_qkey):
+                    if event.source == "slack" and slack_sender is not None:
+                        try:
+                            slack_sender(
+                                str(event.payload.get("channel", "")),
+                                str(question),
+                                event.payload.get("thread_ts"))
+                        except Exception:
+                            pass
+                    elif event.source == "whatsapp" and whatsapp_sender is not None:
+                        try:
+                            whatsapp_sender(
+                                str(event.payload.get("from", "")),
+                                str(question))
+                        except Exception:
+                            pass
+                    return server.ask_question(run_id, _key, question)
+            def _say(prompt):
+                from ..system.model_client import Message as _Message
+                messages = [_Message("user", prompt)]
+                if model_router is not None:
+                    try:
+                        return model_router.chat("respond", messages)
+                    except TypeError:
+                        return model_router.chat(messages)
+                return client.chat(messages)
+
+            def _phrase(kind):
+                from ..interface.phrasing import phrase_with_model as _pwm
+                return _pwm(kind, _say)
+
+            runner = GoalRunner(client, run_sandbox, _gate,
                                 config.home, memory=memory,
                                 project_id=event.project_id, plugins=plugins,
                                 execution_backend=execution_backend, budget=budget,
@@ -1717,48 +2061,50 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_gate, researcher=_web_researcher), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, sandbox))
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"))
             def _surface_reply(text):
                 # The WebUI already displays and polls the run ID. Keep the
                 # ID in Slack/WhatsApp replies where it is needed for
                 # cross-surface control commands, but do not show it in chat.
-                event.send_reply(str(text) if event.source == "webui"
-                                 else f"[{run_id}] {text}")
-            # Swarm, Aidon decides: if the goal genuinely splits,
-            # run the subgoals in parallel and merge, else single run.
-            try:
-                from ..agentic.swarm import run_swarm
-                def _swarm_runner(subgoal):
-                    import uuid as _sw_uuid
-                    sub_runner = GoalRunner(client, sandbox, server.webui_gate.gate,
-                                            config.home, memory=memory,
-                                            project_id=event.project_id, plugins=plugins,
-                                            budget=budget, trace=trace,
-                                            model_verifier=ModelVerifier(client),
-                                            kernel_mode=config.kernel_mode,
-                                            semantic_router=semantic_router,
-                                            use_semantic_router_skip=True,
-                                            run_id=f"{run_id}-{_sw_uuid.uuid4().hex[:8]}", run_control=run_control, researcher=_web_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=server.webui_gate.gate, researcher=_web_researcher), router=model_router, versioned_writes=True, network_available=_network_available(None, sandbox))
-                    sub_report = sub_runner.run(subgoal)
-                    return f"[{sub_report.status}] {', '.join(sub_report.files)} {sub_report.error}".strip()
-                swarm_result = run_swarm(event.goal, client, _swarm_runner)
-                if swarm_result.get("swarmed"):
-                    _surface_reply(f"Swarm, subgoals: {', '.join(swarm_result['subgoals'])}\n{swarm_result['merged']}")
+                rendered = str(text) if event.source == "webui" \
+                    else f"[{run_id}] {text}"
+                event.send_reply(rendered)
+                delivery = event.payload.get("result_delivery") or {}
+                channel = str(delivery.get("channel", "")).lower()
+                if not channel or event.source != "webui":
                     return
-            except Exception:
-                pass
+                if channel == "whatsapp":
+                    recipient = msg.whatsapp_owner
+                    result = whatsapp_sender(recipient, rendered) if recipient else {
+                        "ok": False, "error": "AIDON_WHATSAPP_OWNER is not configured"}
+                elif channel == "slack":
+                    recipient = msg.slack_outbound_channel
+                    result = slack_sender(recipient, rendered) if recipient else {
+                        "ok": False, "error": "AIDON_SLACK_OUTBOUND_CHANNEL is not configured"}
+                else:
+                    result = {"ok": False, "error": "unsupported result channel"}
+                if not result.get("ok"):
+                    event.send_reply(f"Result delivery to {channel} failed: "
+                                     f"{result.get('error', 'unknown error')}")
+            # WebUI goals run once. Swarm remains an explicit CLI option;
+            # automatically splitting ordinary chat made conversational
+            # questions appear multiple times and multiplied model calls.
             report = runner.run(event.goal)
+            route_callback = event.payload.get("_route_callback")
+            if callable(route_callback):
+                route_callback(runner.last_route)
             run_control.set_status(run_id, report.status)
             if report.status == "chat":
                 _surface_reply((report.chat_reply or "Received.") + "\n" + format_run_stats(report))
-            elif report.status == "done":
-                _surface_reply(f"Done: {', '.join(report.files)}\n{format_run_stats(report)}")
-            elif report.status == "rejected":
-                _surface_reply("Rejected, no live action taken.\n" + format_run_stats(report))
-            elif report.status == "cancelled":
-                _surface_reply("Cancelled, no further steps run.\n" + format_run_stats(report))
             else:
-                _surface_reply(f"Failed: {report.error}\n{format_run_stats(report)}")
+                from ..interface.phrasing import (
+                    phrase_with_model as _pwm, report_text as _report_text)
+                _phrase = (_pwm("report-" + report.status, _say)
+                           if report.status in ("done", "failed", "rejected",
+                                                "cancelled") else None)
+                _surface_reply(_report_text(
+                    report.status, report.files, report.error, run_id,
+                    format_run_stats(report), phrase=_phrase))
 
         dispatcher.register("webui", _goal_handler)
         dispatcher.register("whatsapp", _goal_handler)
@@ -1833,21 +2179,35 @@ def main(argv: list[str] | None = None) -> int:
                 _slack_thread.start()
                 print("Slack inbound polling auto-started")
         missing = msg.whatsapp_missing()
+        _startup_style("section", "Messaging")
         if missing:
-            print(f"WhatsApp not fully configured, missing: {', '.join(missing)}")
+            _startup_style("warn", f"WhatsApp incomplete; missing: {', '.join(missing)}")
         if not msg.whatsapp_owner:
-            print("WhatsApp inbound disabled: AIDON_WHATSAPP_OWNER not set, owner only, fail closed.")
+            _startup_style("warn", "WhatsApp inbound disabled: AIDON_WHATSAPP_OWNER is not set (owner-only, fail-closed).")
         if not msg.whatsapp_app_secret:
-            print("Warning: AIDON_WHATSAPP_APP_SECRET not set, webhook signature check is off.")
+            _startup_style("warn", "WhatsApp signature verification is off: AIDON_WHATSAPP_APP_SECRET is not set.")
         if not msg.slack_bot_token:
-            print("Slack send not configured: SLACK_BOT_TOKEN not set.")
+            _startup_style("warn", "Slack sending is not configured: SLACK_BOT_TOKEN is not set.")
         if args.webhook_only and not msg.slack_signing_secret:
-            print("Warning: AIDON_SLACK_SIGNING_SECRET not set; Slack webhook signature check is off (Slack polling does not need it).")
-        if args.webhook_only:
-            print(f"Webhook listener on http://127.0.0.1:{args.port}/, WhatsApp and Slack only")
+            _startup_style("warn", "Slack signature verification is off: AIDON_SLACK_SIGNING_SECRET is not set.")
+        try:
+            import importlib.util
+            qdrant_available = importlib.util.find_spec("qdrant_client") is not None
+        except Exception:
+            qdrant_available = False
+        if not qdrant_available:
+            _startup_style("warn", "Qdrant client is not installed; using persistent SQLite memory fallback.")
+        elif os.environ.get("AIDON_QDRANT_URL", "").strip():
+            _startup_style("info", "Qdrant remote store configured; connection checked when memory is first used.")
         else:
-            print(f"WebUI on http://127.0.0.1:{args.port}/, localhost only, WhatsApp and Slack webhooks at /webhook/whatsapp and /webhook/slack")
-            print("Public reachability still needs a tunnel, localhost alone is not reachable by Meta or Slack.")
+            _startup_style("info", "Qdrant local store available under the Aidon home.")
+        _startup_style("section", "WebUI")
+        if args.webhook_only:
+            _startup_style("ok", f"Webhook listener: http://127.0.0.1:{args.port}/ (WhatsApp and Slack only)")
+        else:
+            _startup_style("ok", f"WebUI: http://127.0.0.1:{args.port}/ (localhost only)")
+            _startup_style("info", "Webhooks: /webhook/whatsapp and /webhook/slack")
+            _startup_style("info", "External services need a tunnel; localhost is not publicly reachable.")
         server.serve(port=args.port)
         return 0
     if args.command == "v1":
@@ -2076,13 +2436,57 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Steered {args.run_id}: {args.note}" if ok else f"No such run {args.run_id}")
             return 0 if ok else 2
     if args.command == "scheduler":
-        from ..interface.preapproval import PreapprovalStore
+        from ..interface.preapproval import (DEFAULT_HOURS, HELP_TEXT,
+                                             IRREVERSIBLE, MAX_HOURS,
+                                             PreapprovalStore, grantable_kind,
+                                             kind_from_token)
         import time as _time
         store = PreapprovalStore(config.home)
         if args.action == "preapprove":
-            ok = store.grant(args.spec, args.kind, _time.time() + args.hours * 3600, reversible=True)
-            print(f"Pre-approval {'granted' if ok else 'refused, irreversible or external email'}: {args.spec} {args.kind}")
-            return 0 if ok else 2
+            # Same kinds and same refusal as the WebUI, WhatsApp, and
+            # Slack surfaces: by name or by the menu number.
+            raw_kind = args.kind or "sandbox"
+            kind = kind_from_token(raw_kind)
+            if kind is None:
+                print(f"Unknown kind {raw_kind!r}.\n\n{HELP_TEXT}")
+                return 2
+            if kind not in IRREVERSIBLE and not grantable_kind(kind):
+                print(f"Unknown kind {kind!r}.\n\n{HELP_TEXT}")
+                return 2
+            hours = args.hours if args.hours and args.hours > 0 else DEFAULT_HOURS
+            hours = min(hours, MAX_HOURS)
+            ok = store.grant(args.spec, kind,
+                             _time.time() + hours * 3600, reversible=True)
+            if ok:
+                print(f"Pre-approved {kind} for {args.spec}, for the next {hours:g}h.")
+                print("Irreversible steps (send, publish, spend, delete, install) still ask.")
+                return 0
+            print(f"Refused: {kind} can never be pre-approved, it is irreversible "
+                  f"or leaves the machine.")
+            return 2
+        if args.action == "list":
+            rows = store.active()
+            if not rows:
+                print("No pre-approvals are active.")
+                return 0
+            now = _time.time()
+            for row in rows:
+                left = max(0.0, (float(row["until"]) - now) / 3600.0)
+                spec_id = row["spec_id"]
+                kind_name = row["action_kind"]
+                print(f"{spec_id} {kind_name} {left:.1f}h left")
+            return 0
+        if args.action == "revoke":
+            kind = None
+            if args.kind and args.kind.lower() not in ("all", "*"):
+                kind = kind_from_token(args.kind)
+                if kind is None:
+                    print(f"Unknown kind {args.kind!r}.\n\n{HELP_TEXT}")
+                    return 2
+            removed = store.revoke(args.spec, kind)
+            print(f"Revoked {removed} pre-approval(s) for {args.spec}."
+                  if removed else f"Nothing was pre-approved for {args.spec}.")
+            return 0 if removed else 2
         if args.action == "morning":
             for item in store.morning_report():
                 print(f"{item['spec_id']} {item['action_kind']}: undo: {item['undo']}")
@@ -2156,7 +2560,7 @@ def main(argv: list[str] | None = None) -> int:
                 _serve_control.register(_serve_run_id, job.goal, job.project_id)
                 print(f"Job {job.name}: run id {_serve_run_id}")
 
-                # Scheduled non-goal jobs retain the old Aidon scheduler
+                # Scheduled non-goal jobs retain the Aidon scheduler
                 # semantics. They do not need a model GoalRunner.
                 _handled = False
                 if job.kind == "learn":
@@ -2173,6 +2577,8 @@ def main(argv: list[str] | None = None) -> int:
                     from ..capabilities.chain import (
                         run_chain as _run_chain,
                         run_conditional_chain as _run_cond,
+                        validate_chain_spec as _validate_chain,
+                        validate_conditional_chain as _validate_cond,
                     )
                     from ..capabilities.tools import ToolRegistry as _ChainTools
                     import json as _chain_json
@@ -2180,10 +2586,29 @@ def main(argv: list[str] | None = None) -> int:
                     _tools = _ChainTools(
                         sandbox.workdir, sandbox=sandbox,
                         network_available=_network_available(_backend, sandbox))
+                    _chain_failures = (
+                        _validate_cond(_chain, allowed_tools=tuple(_tools.names()))
+                        if isinstance(_chain, list)
+                        else _validate_chain(_chain))
+                    if _chain_failures:
+                        print(f"Job {job.name}: chain rejected: {_chain_failures}")
+                        _handled = True
+                        continue
+                    _chain_decision = _cli_gate(
+                        config.home, config.approval_timeout_seconds,
+                        job.project_id).ask(
+                            "live", f"Approve scheduled chain {job.name}?",
+                            json.dumps(_chain, sort_keys=True), force_ask=True)
+                    if _chain_decision.verdict not in ("approved", "auto_approved"):
+                        print(f"Job {job.name}: chain rejected by approval")
+                        _handled = True
+                        continue
                     if isinstance(_chain, list):
                         def _invoke(name, args):
                             return _tools.call(name, args)
-                        _chain_result = _run_cond(_chain, _invoke)
+                        _chain_result = _run_cond(
+                            _chain, _invoke,
+                            allowed_tools=tuple(_tools.names()))
                     else:
                         _chain_result = _run_chain(_chain, _tools)
                     print(f"Job {job.name}: chain {_chain_result}")
@@ -2455,13 +2880,13 @@ def main(argv: list[str] | None = None) -> int:
     _goal_control = _GoalControl(config.home)
     _goal_control.register(_goal_run_id, args.text, args.project)
     print(f"run id: {_goal_run_id}")
-    runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home,
+    runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds, args.project), config.home,
                         memory=memory, promotion_ask=_promotion_ask,
                         project_id=args.project, plugins=plugins, execution_backend=execution_backend,
                         budget=budget, trace=trace, model_verifier=model_verifier,
                         kernel_mode=config.kernel_mode, semantic_router=_cli_router,
                         use_semantic_router_skip=True, researcher=_researcher,
-                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds), researcher=_researcher),
+                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds, args.project), researcher=_researcher),
                         router=model_router, versioned_writes=True,
                         run_id=_goal_run_id, run_control=_goal_control,
                         network_available=_network_available(execution_backend, sandbox),

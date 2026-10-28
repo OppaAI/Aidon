@@ -1,4 +1,4 @@
-"""REPL, old Aidon repl concept, rebuilt.
+"""REPL, Aidon repl concept, rebuilt.
 
 A REPL is a read, eval, print loop, with history, not a one-shot chat: /help lists commands,
 /history shows past goals, /clear clears history, /quit exits, and any other line is passed
@@ -21,21 +21,41 @@ from __future__ import annotations
 
 import inspect
 import os
+import sys
 
 
 class Repl:
-    def __init__(self, handler, input_fn=input, output_fn=print):
+    def __init__(self, handler, input_fn=input, output_fn=print,
+                 title="Aidon REPL", on_clear=None, on_remember=None):
         self.handler = handler
         self.input_fn = input_fn
         self.output_fn = output_fn
+        self.title = title
+        self.on_clear = on_clear
+        self.on_remember = on_remember
         self.history: list[str] = []
         self.staged: list[str] = []
+        if getattr(sys.stdout, "isatty", lambda: False)():
+            self.reset = "\033[0m"
+            self.bold = "\033[1m"
+            self.blue = "\033[38;5;33m"
+            self.cyan = "\033[38;5;51m"
+            self.violet = "\033[38;5;141m"
+            self.green = "\033[38;5;78m"
+            self.amber = "\033[38;5;220m"
+            self.red = "\033[38;5;203m"
+        else:
+            self.reset = self.bold = self.blue = self.cyan = ""
+            self.violet = self.green = self.amber = self.red = ""
+
+    def _paint(self, colour: str, text: str) -> str:
+        return f"{colour}{text}{self.reset}" if colour else text
 
     def _read_line(self) -> str | None:
         """Read one line: returns None on EOF, raises nothing on interrupt."""
         try:
             try:
-                line = self.input_fn("aidon> ").strip()
+                line = self.input_fn(self._paint(self.cyan, "you> ")).strip()
             except TypeError:
                 line = self.input_fn().strip()
         except EOFError:
@@ -64,7 +84,10 @@ class Repl:
         return self.handler(line)
 
     def run(self) -> list[str]:
-        self.output_fn("Aidon REPL, /help for commands, /quit to exit.")
+        self.output_fn(self._paint(self.blue + self.bold,
+                                   f"  {self.title}"))
+        self.output_fn(self._paint(self.violet,
+                                   "  /help for commands · /quit to leave"))
         while True:
             line = self._read_line()
             if line is None:
@@ -74,8 +97,22 @@ class Repl:
             if line == "/quit":
                 break
             if line == "/help":
-                self.output_fn("/help, /history, /clear, /attach <path>, /staged, "
-                               "/clear-staged, /quit, or a goal to run.")
+                self.output_fn("/help, /history, /clear, /remember <fact>, "
+                               "/attach <path>, /staged, /clear-staged, /quit, "
+                               "or a goal to run.")
+                continue
+            if line == "/remember" or line.startswith("/remember "):
+                text = line[len("/remember"):].strip()
+                if not text:
+                    self.output_fn("Usage: /remember <fact>")
+                    continue
+                if self.on_remember is None:
+                    self.output_fn("Remember is unavailable in this session.")
+                else:
+                    try:
+                        self.output_fn(str(self.on_remember(text)))
+                    except Exception as exc:
+                        self.output_fn(f"Error remembering fact: {exc}")
                 continue
             if line == "/history":
                 for item in self.history:
@@ -83,6 +120,8 @@ class Repl:
                 continue
             if line == "/clear":
                 self.history.clear()
+                if self.on_clear is not None:
+                    self.on_clear()
                 self.output_fn("History cleared.")
                 continue
             if line == "/staged":
@@ -113,8 +152,14 @@ class Repl:
                 continue
             except Exception as exc:
                 reply = f"Error: {type(exc).__name__}: {exc}"
+                if self.red:
+                    self.output_fn(self._paint(self.red, f"✗ {reply}"))
+                    self.staged.clear()
+                    self.history.append(line)
+                    continue
             finally:
                 self.staged.clear()
             self.history.append(line)
-            self.output_fn(reply)
+            prefix = self._paint(self.green, "aidon> ") if self.green else ""
+            self.output_fn(prefix + str(reply))
         return self.history

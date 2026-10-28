@@ -1,11 +1,11 @@
-"""WhatsApp and Slack, two-way, following old Aidon, with old key names.
+"""WhatsApp and Slack, two-way, following Aidon, with old key names.
 
-Old key names are canonical here, exactly as in old Aidon:
+Old key names are canonical here, exactly as in Aidon:
 - WhatsApp: AIDON_WHATSAPP_TOKEN, AIDON_WHATSAPP_PHONE_ID,
   AIDON_WHATSAPP_VERIFY_TOKEN, AIDON_WHATSAPP_APP_SECRET,
   AIDON_WHATSAPP_OWNER
 - Slack: SLACK_BOT_TOKEN, plus AIDON_SLACK_SIGNING_SECRET, which is
-  Slack's own name, not an old Aidon name, because old Slack
+  Slack's own name, not an Aidon name, because old Slack
   was polling, not a webhook, so it had no signing secret.
   AIDON_SLACK_INBOUND_CHANNEL, AIDON_SLACK_POLL_SECONDS, and
   AIDON_SLACK_ACK_AFTER_SECONDS belong to that old polling
@@ -34,7 +34,7 @@ Numbers are normalized to digits only, and compared
 exactly, after normalization. Empty owner means inbound
 is disabled, not open to everyone. A non-owner message
 is ignored, never dispatched, never replied to.
-Slack has no owner gate in old Aidon, it has a bot
+Slack has no owner gate in Aidon, it has a bot
 token and channel subscriptions, so no owner gate is
 added for Slack here.
 
@@ -112,6 +112,7 @@ class MessagingConfig:
     whatsapp_owner: str = ""
     slack_bot_token: str = ""
     slack_signing_secret: str = ""
+    slack_outbound_channel: str = ""
     # Slack Incoming Webhook URLs are destination-specific. Keys are Slack
     # conversation IDs (C..., D..., or G...), values are secret URLs.
     slack_webhooks: dict[str, str] | None = None
@@ -142,6 +143,8 @@ class MessagingConfig:
             whatsapp_owner=get("AIDON_WHATSAPP_OWNER"),
             slack_bot_token=get("SLACK_BOT_TOKEN"),
             slack_signing_secret=get("AIDON_SLACK_SIGNING_SECRET"),
+            slack_outbound_channel=get("AIDON_SLACK_OUTBOUND_CHANNEL",
+                                       "AIDON_SLACK_INBOUND_CHANNEL").split(",")[0].strip(),
             slack_webhooks=webhooks,
         )
 

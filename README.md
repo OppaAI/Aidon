@@ -17,7 +17,7 @@
 
 [![Author](https://img.shields.io/badge/Author-OppaAI-D9578C)](https://github.com/OppaAI)
 <img src="https://img.shields.io/badge/Contributors-1-3776AB" alt="Contributors: 1">
-<img src="https://img.shields.io/badge/Commits-131-76B900" alt="Commits: 131">
+<img src="https://img.shields.io/github/commit-activity/t/OppaAI/Aidon?label=Commits&color=76B900" alt="Total commits">
 <img src="https://img.shields.io/badge/Start%20date-October%2026%2C%202026-E95420" alt="Start date: October 26, 2026">
 <img src="https://img.shields.io/badge/Credentials-none-6C757D" alt="Credentials: none">
 
@@ -54,7 +54,8 @@ is a real part of what Aidon runs, not just a build-time choice.
 ```sh
 ./setup.sh
 # Fill in your own endpoint, key, and model name in $AIDON_HOME/.env
-./launch.sh            # WebUI at http://127.0.0.1:8002/
+./launch.sh            # WebUI at http://127.0.0.1:8765/
+./launch.sh --cli      # conversational command-line chat
 ./launch.sh goal "Plan a dinner for two"
 ```
 
@@ -64,8 +65,8 @@ is a real part of what Aidon runs, not just a build-time choice.
 - [Configuration](docs/CONFIGURATION.md) — models, `.env`, and the Aidon home.
 - [Usage](docs/USAGE.md) — WebUI and messaging, core loop, spec sheet, tools and plugins, triggers, research and live execution, budgets, trace, v1 API, and MCP.
 - [Security notes](docs/SECURITY.md) — trust boundaries and safe operation.
-- [Architecture](ARCHITECTURE.md) — run order, components, storage, and security boundaries.
-- [Roadmap](ROADMAP.md) — what is built, what is not built yet, and what is post-hackathon, NOT built, NOT demoed.
+- [Architecture](docs/ARCHITECTURE.md) — run order, components, storage, and security boundaries.
+- [Roadmap](docs/ROADMAP.md) — what is built, what is not built yet, and what is post-hackathon, NOT built, NOT demoed.
 
 ## 🧠 Models
 

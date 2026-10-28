@@ -9,13 +9,19 @@ Rules, in order, each checked before the real gate is asked:
 - Irreversible kinds always ask the real gate. The set
   comes from the store's IRREVERSIBLE attribute if it has
   one, otherwise from the preapproval module, otherwise
-  from the built-in set: send_external, publish, spend,
-  delete, live_execute.
+  from the built-in set: send_external, external_email,
+  publish, spend, delete, live_execute, plugin, install,
+  mandatory.
 - External email always asks the real gate, even if it
   was somehow ticked. Kinds "external_email" and
   "send_external" are excluded, full stop. An external
   send under pre-approval becomes a draft for the
   morning, never a sent email.
+- "live" is honoured only when the caller says the run is
+  reversible (``reversible=True``): a plan that sends,
+  publishes, spends, deletes, or installs is not reversible
+  and still gets its card. A grant for "live" is therefore
+  never a licence to do something irreversible.
 - If the store says this spec and kind are pre-approved
   right now, return an approved decision without asking
   the real gate, so an away owner is not woken for a
@@ -43,7 +49,10 @@ try:
 except Exception:
     _MODULE_IRREVERSIBLE = set()
 
-_DEFAULT_IRREVERSIBLE = {"send_external", "publish", "spend", "delete", "live_execute"}
+_DEFAULT_IRREVERSIBLE = {
+    "send_external", "external_email", "publish", "spend", "delete",
+    "live_execute", "plugin", "install", "mandatory",
+}
 _EXTERNAL_KINDS = {"external_email", "send_external"}
 
 
@@ -55,6 +64,12 @@ class PreapprovalGate:
         self.store = store
         self.spec_id = spec_id
 
+    def __getattr__(self, name):
+        # Timeouts, policy, and anything else the wrapped gate exposes
+        # stay reachable, so wrapping never changes how a caller
+        # configures the gate.
+        return getattr(self.gate, name)
+
     def _irreversible(self) -> set:
         store_set = getattr(self.store, "IRREVERSIBLE", None)
         combined = set(_DEFAULT_IRREVERSIBLE) | set(_MODULE_IRREVERSIBLE or set())
@@ -64,12 +79,19 @@ class PreapprovalGate:
 
     def ask(self, kind: str, title: str, body: str, **kwargs) -> Decision:
         """Return an approved decision for a pre-approved reversible kind, else ask the real gate."""
+        reversible = bool(kwargs.pop("reversible", False))
         if kind in _EXTERNAL_KINDS or kind in self._irreversible():
+            return self.gate.ask(kind, title, body, **kwargs)
+        if kind == "live" and not reversible:
+            # A live card is the one decision that must stay with the
+            # owner unless the plan is reversible, which the caller
+            # states explicitly. Silence is not reversible.
             return self.gate.ask(kind, title, body, **kwargs)
         try:
             preapproved = self.store.is_preapproved(self.spec_id, kind, time.time())
         except Exception:
             preapproved = False
         if preapproved:
-            return Decision("approved")
+            return Decision("approved",
+                            reason=f"pre-approved {kind} for {self.spec_id}")
         return self.gate.ask(kind, title, body, **kwargs)

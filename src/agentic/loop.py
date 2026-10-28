@@ -24,7 +24,7 @@ At most 3 attempts in total (1 initial + 2 repairs),
 then the run fails, it does not ask for approval, and
 it does not go live.
 
-Memory, blank by design: new Aidon starts with empty
+Memory, blank by design: a fresh Aidon starts with empty
 collections, no import from previous projects. When a
 memory is present, the loop recalls Experiences before
 planning fresh, records episodic memory scoped by
@@ -38,6 +38,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -59,6 +60,33 @@ class Step:
     deliverable: str = ""
     criteria: str = ""
     executor: str = "tool"
+
+
+# Tool-name fragments that mean the step leaves the workdir, touches a
+# third party, spends money, deletes data, or installs code. A plan that
+# contains any of them is not reversible, so a "live" pre-approval must
+# not cover it. Conservative on purpose: a false "not reversible" only
+# means one more card, a false "reversible" would skip one it should not.
+SIDE_EFFECT_TOOL_WORDS = (
+    "send", "post", "publish", "email", "mail", "install", "adopt",
+    "delete", "spend", "pay", "upload", "record", "tts", "speak",
+    "mcp_", "sam_", "transcribe", "threads", "instagram", "slack",
+    "whatsapp", "notify", "schedule_job", "cancel_schedule",
+)
+
+
+def plan_is_reversible(plan: Plan) -> bool:
+    """True when every step stays inside the run's own workdir.
+
+    Used by the pre-approval gate: a pre-approved "live" card is
+    honoured only for a plan that cannot send, publish, spend,
+    delete, or install anything.
+    """
+    for step in plan.normalized_steps():
+        name = str(getattr(step, "tool", "") or "").lower()
+        if any(word in name for word in SIDE_EFFECT_TOOL_WORDS):
+            return False
+    return True
 
 
 @dataclass
@@ -131,7 +159,7 @@ def format_duration(seconds: float | int | None) -> str:
 
 
 def format_elapsed(report: dict) -> str:
-    """Render the old-compatible elapsed footer for a report dictionary."""
+    """Render the compatible elapsed footer for a report dictionary."""
     elapsed = report.get("elapsed_seconds")
     if elapsed is None:
         return ""
@@ -232,7 +260,9 @@ class GoalRunner:
                  researcher=None, extra_tools=None, router=None,
                  versioned_writes: bool = False,
                  network_available: bool | None = None,
-                 guidance: str = ""):
+                 guidance: str = "", image_paths=None, force_web: bool = False,
+                 stream_callback=None, conversation_context: str = "",
+                 route_callback=None, trace_callback=None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -250,6 +280,7 @@ class GoalRunner:
         # into the plan prompt as a guidance block (the same block
         # make_plan uses), never as a separate approval or question.
         self.guidance = guidance
+        self.image_paths = [Path(path) for path in (image_paths or [])]
         # The ToolRegistry gains the same network_available
         # parameter in a sibling change; pass it through only
         # when the registry accepts it, so this runner works
@@ -268,6 +299,9 @@ class GoalRunner:
         self.budget = budget
         self.trace = trace
         self.model_verifier = model_verifier
+        self._effort_escalated = False
+        if self.model_verifier is not None:
+            self.model_verifier.effort_escalated = False
         self.kernel_mode = kernel_mode
         self.semantic_router = semantic_router
         self.use_semantic_router_skip = use_semantic_router_skip
@@ -280,6 +314,11 @@ class GoalRunner:
         self.last_route = None
         self.researcher = researcher
         self.extra_tools = extra_tools or {}
+        self.force_web = bool(force_web)
+        self.stream_callback = stream_callback
+        self.conversation_context = str(conversation_context or "")
+        self.route_callback = route_callback
+        self.trace_callback = trace_callback
 
     def _trace(self, kind: str, status: str, detail: str = "") -> None:
         # Attribute to this runner's own run id: sub-runners share
@@ -289,7 +328,23 @@ class GoalRunner:
         # the recorder's own run id, so unregistered runs behave
         # exactly as before.
         if self.trace is not None:
-            self.trace.record(kind, status, detail, run_id=self.run_id)
+            event = self.trace.record(kind, status, detail, run_id=self.run_id)
+            if callable(self.trace_callback):
+                self.trace_callback({
+                    "phase": kind, "status": status, "title": detail,
+                    "detail": detail, "seconds": 0,
+                    "tokens_in": 0, "tokens_out": 0,
+                })
+        if self.run_control is not None and self.run_id:
+            stage_map = {
+                "interpret": "interpret", "research": "research",
+                "recall": "recall", "plan": "plan", "sandbox": "sandbox",
+                "verify": "sandbox", "approval": "approval",
+                "live": "live", "learn": "learn",
+            }
+            stage = stage_map.get(kind)
+            if stage:
+                self.run_control.set_stage(self.run_id, stage)
 
     def _approval_body(self, body: str) -> str:
         """Approval-card body, with the network-on line when
@@ -321,7 +376,7 @@ class GoalRunner:
         if store is None:
             return
         try:
-            from .checkpoint import RunCheckpoint, plan_to_dict
+            from .checkpoint import RunCheckpoint, plan_fingerprint, plan_to_dict
             store.save(RunCheckpoint(
                 run_id=str(self.run_id),
                 goal=goal,
@@ -330,18 +385,19 @@ class GoalRunner:
                 passed=sorted(set(passed or [])),
                 verified=sorted(set(verified or [])),
                 attempt=attempt,
+                plan_fingerprint=plan_fingerprint(plan),
             ))
         except Exception as exc:
             self._trace("checkpoint", "failed", f"save failed: {exc}")
 
-    def _load_checkpoint(self, workdir, goal: str = ""):
+    def _load_checkpoint(self, workdir, goal: str = "", plan=None):
         store = self._checkpoint_store()
         if store is None:
             return None
         try:
             from .checkpoint import filter_resumable_passed
             if goal:
-                cp = store.load_for_goal(str(self.run_id), goal)
+                cp = store.load_for_goal(str(self.run_id), goal, plan=plan)
             else:
                 cp = store.load(str(self.run_id))
             if cp is None:
@@ -434,6 +490,16 @@ class GoalRunner:
   
     def _ask_for_approval(self, kind: str, title: str, body: str, **kwargs) -> Decision:
         """Ask the owner while excluding human wait from active elapsed time."""
+        # Natural framing, varied per approval; the title and body keep
+        # their exact content, so the owner still sees what is asked.
+        # The framing comes from the fast respond phase when one is
+        # configured (a small model writes one sentence), else from
+        # the rotation. Facts stay in the body, never in the model.
+        from ..interface.phrasing import approval_lead_in, phrase_with_model
+        lead = phrase_with_model(
+            "approval",
+            lambda prompt: self._chat("respond", [Message("user", prompt)]))
+        body = f"{lead or approval_lead_in()}\n\n{body}"
         timer = getattr(self, "_elapsed_timer", None)
         if timer is None:
             return self.gate.ask(kind, title, body, **kwargs)
@@ -474,9 +540,35 @@ class GoalRunner:
         # text-only.
         try:
             from .think_effort import sampling_for
-            sampling = sampling_for(phase)
+            sampling = sampling_for(
+                phase,
+                escalate=self._effort_escalated and str(phase) in ("repair", "verify"),
+                creative=bool(getattr(self, "_creative_mode", False)))
         except Exception:
             sampling = None
+        if (self.stream_callback is not None
+                and str(phase).lower() in ("respond", "webchat")):
+            stream_client = self.router if self.router is not None else self.client
+            stream = getattr(stream_client, "chat_stream", None)
+            if callable(stream):
+                chunks = []
+                try:
+                    iterator = (stream(str(phase), messages, sampling=sampling)
+                                if self.router is not None
+                                else stream(messages, sampling=sampling))
+                except TypeError:
+                    try:
+                        iterator = (stream(str(phase), messages)
+                                    if self.router is not None
+                                    else stream(messages))
+                    except TypeError:
+                        iterator = stream(messages)
+                for chunk in iterator:
+                    text = str(chunk)
+                    if text:
+                        chunks.append(text)
+                        self.stream_callback(text)
+                return "".join(chunks)
         has_image = False
         for message in messages or []:
             content = getattr(message, "content", "")
@@ -542,13 +634,15 @@ class GoalRunner:
             # Mandatory-approval commands always need a human,
             # even in autonomous mode: recursive delete, piped
             # download-to-shell, sudo, raw disk writes, and the
-            # rest of the security gate's list.
+            # rest of the security gate's list. The kind is
+            # "mandatory", not "live": a pre-approval granted for a
+            # reversible live run must never cover one of these.
             from ..capabilities.security_gate import command_needs_mandatory_approval
             command_text = " ".join(str(c) for c in args.get("command", [])) if isinstance(args.get("command"), list) else str(args.get("command", ""))
             reason = command_needs_mandatory_approval(command_text)
             if reason:
                 decision = self._ask_for_approval(
-                    "live", f"Mandatory approval: shell ({reason})",
+                    "mandatory", f"Mandatory approval: shell ({reason})",
                     self._approval_body(f"Run shell command: {command_text}?"),
                     force_ask=True,
                 )
@@ -564,7 +658,80 @@ class GoalRunner:
             if not result.ok:
                 raise ValueError(f"shell failed: {result.stderr[:200]}")
             return result.stdout
+        # Normalize harmless model naming variations at the execution
+        # boundary. Deterministic validation still rejects missing paths or
+        # empty shell commands before they reach this point.
+        if isinstance(args, dict):
+            args = dict(args)
+            if name in ("write", "write_file"):
+                if not args.get("file"):
+                    for alias in ("name", "path", "input_path", "filename"):
+                        if args.get(alias):
+                            args["file"] = args[alias]
+                            break
+                if "text" not in args and "content" in args:
+                    args["text"] = args["content"]
+            elif name == "shell" and isinstance(args.get("command"), str):
+                import shlex
+                args["command"] = shlex.split(args["command"])
         try:
+            if name == "shell" and isinstance(args, dict):
+                command_text = " ".join(str(x) for x in
+                                        (args.get("command") or []))
+                # In kernel mode generate_document is NOT available
+                # (seed tools only), so the guard must not point at
+                # it: it points at the plugin ladder instead. A
+                # misleading "use the available tool" message here
+                # sent a real run in circles.
+                if self.kernel_mode:
+                    _pdf_note = ("Kernel mode: generate_document is not "
+                                 "available here (seed tools only). Earn "
+                                 "the capability via the plugin ladder: "
+                                 "research, draft a plugin or skill, "
+                                 "sandbox-test it, adopt it with owner "
+                                 "approval.")
+                else:
+                    _pdf_note = ("use the available generate_document "
+                                 "tool instead")
+                if ("fpdf" in command_text.lower() and
+                        "generate_document" in self.extra_tools):
+                    raise ValueError(
+                        "Do not use shell/fpdf for PDF output; "
+                        f"{_pdf_note}")
+                if "generate_document" in self.extra_tools:
+                    # The text check above misses the common bypass:
+                    # write a script file importing fpdf, then run it
+                    # by name (``python3 make_pdf.py`` contains no
+                    # "fpdf"). Refuse to run a workdir script that
+                    # imports a PDF library when the document tool
+                    # already writes PDFs with no install needed.
+                    import re as _re
+                    workdir = getattr(self.sandbox, "workdir", None)
+                    for token in (args.get("command") or []):
+                        if not str(token).endswith(".py"):
+                            continue
+                        try:
+                            candidate = Path(str(token))
+                            if not candidate.is_absolute():
+                                candidate = Path(workdir) / candidate
+                            elif workdir is not None:
+                                # Only police scripts inside the run's
+                                # workdir; host scripts are not the
+                                # planner's PDF bypass.
+                                resolved = candidate.resolve()
+                                root = Path(workdir).resolve()
+                                if resolved != root and root not in resolved.parents:
+                                    continue
+                            source = candidate.read_text(
+                                encoding="utf-8", errors="replace")
+                        except Exception:
+                            continue
+                        if _re.search(r"^\s*(?:import|from)\s+(fpdf|reportlab)\b",
+                                      source, _re.MULTILINE):
+                            raise ValueError(
+                                "Do not run a script importing fpdf or "
+                                "reportlab for PDF output; "
+                                f"{_pdf_note}")
             return self.tools.call(name, args)
         except ValueError as exc:
             if str(exc).startswith("unknown tool:") and self.plugins is not None:
@@ -619,6 +786,10 @@ class GoalRunner:
                       "with tool, args, deliverable. Tools: write, read, "
                       "list, shell, calculate. Keep every file inside "
                       "the workdir.")
+        system += (" Every item in deliverables MUST be produced by exactly "
+                   "one step; never return deliverables with an empty or "
+                   "missing steps array. For GUI requests, use the "
+                   "computer_use tool when it is listed as available.")
         if self.plugins is not None and not self.kernel_mode:
             plugin_tools = self.plugins.tool_names()
             if plugin_tools:
@@ -632,8 +803,45 @@ class GoalRunner:
             # extra tools are advertised only outside kernel mode.
             system += (" Extra tools available to plan steps: "
                        + ", ".join(sorted(self.extra_tools)) + ".")
+            if "computer_use" in self.extra_tools:
+                system += (" For GUI tasks such as opening an application or "
+                           "typing into it, use computer_use with validated "
+                           "click/type/key actions; do not substitute a "
+                           "file-only plan.")
+            if "generate_document" in self.extra_tools:
+                system += (" For PDF or document requests, call "
+                            "generate_document directly. Do not use shell "
+                            "to import fpdf, reportlab, or install a PDF "
+                            "library; the document tool already writes the "
+                            "requested output file.")
+                system += (" Document and file tools refuse to overwrite an "
+                           "existing path unless overwrite=true is supplied "
+                           "and the human approves it. When the path exists, "
+                           "they write to a numbered rename (name_2, "
+                           "name_3, ...) and report the actual path; use "
+                           "that reported path in deliverables and "
+                           "criteria, and do not retry the original path.")
+                system += (" Do not invent a filename or the literal "
+                           "workdir/ prefix. If the user did not specify a "
+                           "filename, omit the output path and let Aidon "
+                           "derive a contextual timestamped filename.")
+            if "install_python_package" in self.extra_tools:
+                system += (" If a genuinely required optional Python package "
+                           "is unavailable and no built-in capability can "
+                           "do the job, use install_python_package in an "
+                           "isolated mission venv. Never install packages "
+                           "through shell, pip, or sudo; installation is "
+                           "approval-gated.")
+        system += (" Discover before building: the tools listed above are "
+                   "what you can call. If a listed tool does the job, use "
+                   "it; do not write a replacement script, plugin, or tool "
+                   "for it. If a listed tool fails, diagnose the error and "
+                   "try another listed tool before building a replacement. "
+                   "Before writing code that imports a package, confirm the "
+                   "package is already available; never write code that "
+                   "depends on a package you have not confirmed.")
         user = goal
-        # Old Aidon recalled both prior experiences and ingested knowledge
+        # Recall both prior experiences and ingested knowledge.
         # before planning. Keep the block bounded so memory cannot crowd
         # out the actual goal or the plan schema.
         if self.memory is not None:
@@ -694,7 +902,8 @@ class GoalRunner:
         if self.budget is not None:
             self.budget.add_tokens(user)
         _phase = "repair" if failure_context else "plan"
-        reply = self._chat(_phase, [Message("system", system), Message("user", user)])
+        user_message = self._attachment_message(user)
+        reply = self._chat(_phase, [Message("system", system), user_message])
         if self.budget is not None:
             self.budget.add_tokens(reply)
         self._trace("plan", "done", "plan proposed")
@@ -716,6 +925,13 @@ class GoalRunner:
                             deliverable="deliverable.md")],
                 deliverables=["deliverable.md"],
                 criteria=["deliverable.md exists"])
+
+    def _attachment_message(self, text: str) -> Message:
+        """Preserve the user text and attach WebUI images when present."""
+        if not self.image_paths:
+            return Message("user", text)
+        from ..system.model_client import image_file_message
+        return image_file_message(text, self.image_paths)
 
     def _research_and_replan(self, plan: Plan, goal: str,
                              spec=None) -> Plan:
@@ -767,6 +983,13 @@ class GoalRunner:
     def run(self, goal: str, spec=None, research_report=None,
             live_actions=None) -> RunReport:
         self._elapsed_timer = ElapsedTimer().start()
+        # Creative requests get a wider response distribution. Keep this
+        # narrow and phrase-based so ordinary tasks remain deterministic;
+        # callers can still use AIDON_TEMP_* and AIDON_TOP_P_* overrides.
+        self._creative_mode = bool(re.search(
+            r"\b(creative writing|write (?:a|an|the) (?:story|poem|scene|script)|"
+            r"short story|fiction|poem|poetry|screenplay|song lyrics)\b",
+            str(goal), re.IGNORECASE))
         # Sandbox network-on announcement, one line on
         # stderr at run start. Unknown (None) or off says
         # nothing.
@@ -795,24 +1018,50 @@ class GoalRunner:
             try:
                 self.last_route = self.semantic_router.classify(goal)
                 self._trace("interpret", "done", f"semantic route {self.last_route[0]} {self.last_route[1]:.2f}")
+                if callable(self.route_callback):
+                    self.route_callback(self.last_route)
             except Exception:
                 self.last_route = None
-        # Write-intent guard, from old Aidon: the router is a hint, not a
+        # Write-intent guard, from Aidon: the router is a hint, not a
         # safety boundary. A goal that asks for a write, a save, or a file
         # is never answered by a path with no write tools, even if the
         # router said chat, because that would silently miss the task.
         _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
+        # Classification is advisory.  If the request reaches the
+        # executable pipeline (especially because it writes a file), expose
+        # the effective route, not the discarded low-confidence chat guess.
+        if (_write_intent and self.last_route and
+                self.last_route[0] in ("chat", "webchat")):
+            self.last_route = ("agentic", 1.0)
+            self._trace("interpret", "done",
+                        "agentic route selected because the request changes state")
+            if callable(self.route_callback):
+                self.route_callback(self.last_route)
+        if self.force_web and self.researcher is not None and spec is None and not _write_intent:
+            from ..capabilities.webchat import webchat_reply
+            reply = webchat_reply(goal, self.researcher, self.client,
+                                  on_token=self.stream_callback,
+                                  context=self.conversation_context)
+            report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                               False, False, chat_reply=reply)
+            return self._finalize(report)
         if self.use_semantic_router_skip and self.last_route and self.last_route[0] == "chat" and spec is None and not _write_intent:
-            reply = self._chat("respond", [Message("user", goal)])
+            reply = self._chat("respond", [self._attachment_message(goal)])
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
         if self.use_semantic_router_skip and self.last_route and self.last_route[0] == "webchat" and spec is None and not _write_intent and self.researcher is not None:
             from ..capabilities.webchat import webchat_reply
-            reply = webchat_reply(goal, self.researcher, self.client)
+            reply = webchat_reply(goal, self.researcher, self.client,
+                                  on_token=self.stream_callback,
+                                  context=self.conversation_context)
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
+        if self.last_route is None:
+            self.last_route = ("agentic", 1.0)
+            if callable(self.route_callback):
+                self.route_callback(self.last_route)
         self._start_mission(goal)
         if spec is not None:
             spec_deliverables = spec.deliverables if hasattr(spec, "deliverables") else spec.get("deliverables", [])
@@ -926,6 +1175,18 @@ class GoalRunner:
         report.adapted_from = str(self._adapted_from)
         report.dag_summary = dict(self._dag_summary)
         report.replan_note = str(getattr(self, "_replan_note", "") or "")
+        # A direct chat/webchat answer is a successful completed exchange,
+        # even though it has no file plan. Keep it in episodic memory so
+        # ordinary conversation is learnable too; working memory contains
+        # the verbatim turn, while this point is the durable summary hook.
+        if report.status == "chat" and self.memory is not None:
+            try:
+                self.memory.record_episodic(
+                    self.project_id, report.goal,
+                    {"kind": "chat", "outcome": report.chat_reply or "",
+                     "status": "done"})
+            except Exception:
+                pass
         # Proven-run DAG learn, successful runs only, best
         # effort: a learn failure must never fail the run.
         if report.status == "done":
@@ -1021,8 +1282,63 @@ class GoalRunner:
                 pass
         plan_failures = validate_plan(plan, allowed_tools=_allowed)
         if plan_failures:
-            return RunReport("failed", goal, plan, False, False,
-                             error="; ".join(plan_failures)[:500])
+            # A model can describe desired outputs while omitting executable
+            # steps. Give it a bounded repair pass before rejecting the run.
+            failure_text = "; ".join(plan_failures)
+            repaired = None
+            for _ in range(2):
+                try:
+                    candidate = self._plan(
+                        goal,
+                        failure_context=("The proposed plan was rejected by "
+                                         "the deterministic validator: "
+                                         f"{failure_text}. Return a complete "
+                                         "JSON plan with executable steps; "
+                                         "each deliverable must match a step."))
+                    candidate_failures = validate_plan(candidate,
+                                                       allowed_tools=_allowed)
+                    if not candidate_failures:
+                        repaired = candidate
+                        break
+                    plan = candidate
+                    failure_text = "; ".join(candidate_failures)
+                except Exception as exc:
+                    failure_text = f"plan repair failed: {exc}"
+                    break
+            if repaired is None:
+                return RunReport("failed", goal, plan, False, False,
+                                 error=failure_text[:500])
+            plan = repaired
+        # A document goal must have a document-producing step. A model can
+        # occasionally substitute ``list`` and then claim that the listing
+        # proves a PDF exists; that can never satisfy the user's request.
+        # Use the registered deterministic document tool as a safe fallback
+        # instead of allowing a known-invalid plan to reach verification.
+        document_request = bool(re.search(
+            r"\b(?:create|write|make|generate|produce|save|put)\b.*\b(?:pdf|document)\b|"
+            r"\b(?:pdf|document)\b.*\b(?:create|write|make|generate|produce|save)\b",
+            str(goal), re.IGNORECASE | re.DOTALL))
+        has_document_step = any(
+            str(step.tool).lower() in {"generate_document", "write_file"}
+            for step in plan.normalized_steps())
+        if document_request and not has_document_step:
+            if "generate_document" not in self.extra_tools:
+                return RunReport(
+                    "failed", goal, plan, False, False,
+                    error="document request cannot run: generate_document tool is unavailable")
+            plan = Plan(
+                steps=[Step(
+                    tool="generate_document",
+                    args={"title": "Aidon document", "content": goal,
+                          "format": "pdf",
+                          "filename": "generated_document.pdf"},
+                    deliverable="generated_document.pdf",
+                    criteria="PDF file is created inside workdir")],
+                deliverables=["generated_document.pdf"],
+                criteria=["PDF file is created inside workdir",
+                          "Output message provides link to the PDF"])
+            self._trace("plan", "repaired",
+                        "replaced list-only document plan with generate_document")
         # Plan guard, cycle check only: loop steps carry no ids,
         # so the full guard (which requires ids and args) is a
         # CLI/file check, but a depends_on cycle in a raw dict
@@ -1047,7 +1363,8 @@ class GoalRunner:
                              error="plan has no deliverables")
         passed: set[str] = set()
         verified: list[str] = []
-        resume = self._load_checkpoint(self.sandbox.workdir, goal=goal)
+        resume = self._load_checkpoint(self.sandbox.workdir, goal=goal,
+                                       plan=plan)
         if resume is not None and resume.phase in ("sandbox", "verified", "approved"):
             passed = set(resume.passed)
             verified = list(resume.verified)
@@ -1093,7 +1410,46 @@ class GoalRunner:
                         if step.deliverable:
                             self._call_tool("write", {"file": step.deliverable, "text": _reply})
                     else:
-                        self._call_tool(step.tool, step.args)
+                        tool_result = self._call_tool(step.tool, step.args)
+                        # File-producing extra tools return their actual
+                        # path. Bind that path to the step when the model
+                        # supplied a prose deliverable such as
+                        # "Aidon introduction PDF" instead of a filename.
+                        if step.tool in {"generate_document", "write_file"}:
+                            artifact_path = getattr(tool_result, "path", "")
+                            raw_result = str(tool_result).strip()
+                            # Structured ToolResult is authoritative. Keep
+                            # the prose fallback for older plugins/tools.
+                            raw_path = artifact_path or (
+                                raw_result[6:].strip()
+                                if raw_result.lower().startswith("wrote ")
+                                else raw_result)
+                            candidate = Path(raw_path)
+                            if not candidate.is_absolute():
+                                candidate = self.sandbox.workdir / candidate
+                            if candidate.is_file():
+                                try:
+                                    actual = candidate.resolve().relative_to(
+                                        self.sandbox.workdir.resolve())
+                                    old = step.deliverable
+                                    step.deliverable = str(actual)
+                                    current_plan.deliverables = [
+                                        str(actual) if item == old else item
+                                        for item in current_plan.deliverables]
+                                    # Criteria are model-authored too. Replace
+                                    # a prose filename with the path proven by
+                                    # the tool, so verification cannot ask for
+                                    # a non-existent label after a successful
+                                    # generation.
+                                    current_plan.criteria = [
+                                        str(item).replace(str(old), str(actual))
+                                        if old else item
+                                        for item in current_plan.criteria]
+                                    if step.criteria and old:
+                                        step.criteria = str(step.criteria).replace(
+                                            str(old), str(actual))
+                                except ValueError:
+                                    pass
                     from .step_lines import record_attempt
                     record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "done")
                     self._trace("sandbox", "done", step.tool)
@@ -1126,7 +1482,7 @@ class GoalRunner:
             model_failed = False
             if ok and self.model_verifier is not None:
                 try:
-                    mv = self.model_verifier.verify(goal, current_plan.deliverables, self.sandbox.workdir)
+                    mv = self.model_verifier.verify(goal, current_plan.deliverables, self.sandbox.workdir, criteria)
                     self._trace("verify", mv["verdict"], f"model verifier {mv['reason'][:100]}")
                     if mv["verdict"] == "no":
                         model_failed = True
@@ -1137,6 +1493,13 @@ class GoalRunner:
             # it. A ledger file that exists but totals wrong
             # is not passed, so repair can rewrite it, while
             # a good file that passed every check is untouched.
+            # A step that wrote its file is provisionally passed
+            # above; a verification failure on that file must
+            # take it back out, or the repair attempt would skip
+            # the very step it has to fix.
+            for name in list(passed):
+                if any(name in msg for msg in failures):
+                    passed.discard(name)
             for name in verified:
                 if not any(name in msg for msg in failures):
                     passed.add(name)
@@ -1153,6 +1516,13 @@ class GoalRunner:
                                  error="; ".join(failures)[:500],
                                  attempts=attempt)
             # Repair: ask for a repaired plan, passed files untouched.
+            # Raise effort only for substantive verification rejection. A
+            # shell/tool/network exception is operational, not something
+            # more reasoning can fix.
+            if verify_failures or model_failed:
+                self._effort_escalated = True
+                if self.model_verifier is not None:
+                    self.model_verifier.effort_escalated = True
             steer_notes = self.run_control.steer_notes(self.run_id) if self.run_control is not None else []
             context = ("Passed deliverables (do not rewrite): "
                        + ", ".join(sorted(passed))
@@ -1185,6 +1555,7 @@ class GoalRunner:
             "live", "Approve live execution?",
             self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"),
             force_ask=True,
+            reversible=plan_is_reversible(current_plan),
         )
         # edited means "change the proposal" — not approve the original.
         # Live card has no apply-edit path; require a clean approved.

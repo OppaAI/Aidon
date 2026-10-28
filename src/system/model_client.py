@@ -51,7 +51,7 @@ class ChatResponse:
     raw: Any = None
 
 
-def parse_ollama_tool_calls(message: dict) -> list[ToolCall]:
+def parse_native_tool_calls(message: dict) -> list[ToolCall]:
     calls = []
     for item in message.get("tool_calls") or []:
         function = item.get("function", {}) if isinstance(item, dict) else {}
@@ -134,7 +134,12 @@ class ModelClient:
     def chat(self, messages: list[Message], sampling=None) -> str:
         raise NotImplementedError
 
-    def chat_response(self, messages: list[Message], sampling=None) -> ChatResponse:
+    def chat_stream(self, messages: list[Message], sampling=None):
+        """Yield text deltas when supported; default keeps old clients safe."""
+        yield self.chat(messages, sampling=sampling)
+
+    def chat_response(self, messages: list[Message], sampling=None,
+                      tools=None) -> ChatResponse:
         """Compatibility adapter for callers expecting a normalized response."""
         return ChatResponse(text=self.chat(messages, sampling=sampling))
 
@@ -169,7 +174,7 @@ class HttpModelClient(ModelClient):
         self.model = model
         self.timeout = timeout
 
-    def chat(self, messages: list[Message], sampling=None) -> str:
+    def _payload(self, messages: list[Message], sampling=None, tools=None) -> dict:
         payload = {
             "model": self.model,
             "messages": [{"role": m.role, "content": m.content}
@@ -182,6 +187,11 @@ class HttpModelClient(ModelClient):
                 payload["top_p"] = sampling["top_p"]
             if sampling.get("seed") is not None:
                 payload["seed"] = sampling["seed"]
+        if tools:
+            payload["tools"] = tools
+        return payload
+
+    def _post(self, payload: dict) -> dict:
         # A list content is sent as-is, so image parts reach
         # the model, not just the text part. A string content
         # is unchanged, so old text-only calls keep working.
@@ -192,29 +202,76 @@ class HttpModelClient(ModelClient):
             headers={"Content-Type": "application/json",
                      "Authorization": f"Bearer {self.api_key}"},
         )
+        emitted = False
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        choices = data.get("choices") or []
-        if not choices:
-            return ""
-        content = choices[0].get("message", {}).get("content", "")
+            return json.loads(resp.read().decode("utf-8"))
+
+    @staticmethod
+    def _content(message: dict) -> str:
+        content = message.get("content", "")
         if isinstance(content, list):
             return "".join(part.get("text", "") for part in content
                            if isinstance(part, dict))
         return str(content)
 
+    def chat_response(self, messages: list[Message], sampling=None,
+                      tools=None) -> ChatResponse:
+        data = self._post(self._payload(messages, sampling=sampling, tools=tools))
+        choices = data.get("choices") or []
+        if not choices:
+            return ChatResponse(raw=data)
+        message = choices[0].get("message", {}) or {}
+        return ChatResponse(
+            text=self._content(message),
+            tool_calls=parse_openai_tool_calls(message),
+            usage=data.get("usage") or {}, raw=data)
 
-class OllamaClient(ModelClient):
-    """Local Ollama, native ``/api/chat``, stdlib only.
+    def chat(self, messages: list[Message], sampling=None) -> str:
+        return self.chat_response(messages, sampling=sampling).text
 
-    The user's ``.env`` points AIDON_API_ENDPOINT at
-    ``http://localhost:11434`` (no ``/v1``), which is Ollama's
-    native API, not an OpenAI-compatible one. Posting to
-    ``/chat/completions`` there returns 404, so a generic HTTP
-    client cannot drive it. This client speaks the native API
+    def chat_stream(self, messages: list[Message], sampling=None):
+        payload = self._payload(messages, sampling=sampling)
+        payload["stream"] = True
+        req = urllib.request.Request(
+            f"{self.api_base}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"), method="POST",
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {self.api_key}"})
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line or line == "data: [DONE]":
+                    continue
+                if line.startswith("data:"):
+                    line = line[5:].strip()
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                choices = data.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                text = delta.get("content", "")
+                if text:
+                    emitted = True
+                    yield str(text)
+        if not emitted:
+            # Some compatible gateways ignore stream=true and return one
+            # normal JSON response. Preserve compatibility rather than
+            # silently showing an empty answer.
+            yield self.chat(messages, sampling=sampling)
+
+
+class NativeModelClient(ModelClient):
+    """Native ``/api/chat`` client, stdlib only.
+
+    This protocol is not OpenAI-compatible. Posting to
+    ``/chat/completions`` returns 404, so a generic HTTP client
+    cannot drive it. This client speaks the native API
     and maps the two knobs that matter for latency and memory:
     ``think`` (chain-of-thought, off by default here because it
-    multiplies output tokens) and ``num_ctx`` (Ollama silently
+    multiplies output tokens) and ``num_ctx`` (the server silently
     truncates to a small default when this is unset).
     """
 
@@ -232,7 +289,7 @@ class OllamaClient(ModelClient):
             content = message.content
             images: list[str] = []
             if isinstance(content, list):
-                # OpenAI-style multimodal parts -> Ollama text + images.
+                # OpenAI-style multimodal parts -> native text + images.
                 text_parts = []
                 for part in content:
                     if not isinstance(part, dict):
@@ -254,8 +311,31 @@ class OllamaClient(ModelClient):
             body["options"] = {"num_ctx": self.num_ctx}
         return body
 
-    def chat(self, messages: list[Message], sampling=None) -> str:
+    def _request(self, body: dict) -> dict:
+        req = urllib.request.Request(
+            f"{self.base}/api/chat",
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", "replace")
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"Native model endpoint {self.base} returned {exc.code}: {detail[:300]}"
+            ) from exc
+
+    def chat_response(self, messages: list[Message], sampling=None,
+                      tools=None) -> ChatResponse:
         body = self._body(messages)
+        if tools:
+            body["tools"] = tools
         if sampling:
             if sampling.get("think") is not None:
                 body["think"] = bool(sampling["think"])
@@ -266,26 +346,50 @@ class OllamaClient(ModelClient):
                 body["options"]["top_p"] = sampling["top_p"]
             if sampling.get("seed") is not None:
                 body["options"]["seed"] = sampling["seed"]
-        req = urllib.request.Request(
-            f"{self.base}/api/chat",
-            data=json.dumps(body).encode("utf-8"),
-            method="POST",
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            detail = ""
-            try:
-                detail = exc.read().decode("utf-8", "replace")
-            except Exception:
-                pass
-            raise RuntimeError(
-                f"Ollama {self.base} returned {exc.code}: {detail[:300]}"
-            ) from exc
+        data = self._request(body)
         message = data.get("message") or {}
-        return str(message.get("content", "") or "")
+        return ChatResponse(
+            text=str(message.get("content", "") or ""),
+            tool_calls=parse_native_tool_calls(message),
+            usage=data.get("prompt_eval_count") and {
+                "prompt_eval_count": data.get("prompt_eval_count"),
+                "eval_count": data.get("eval_count"),
+            } or {},
+            thinking=str(message.get("thinking", "") or ""), raw=data)
+
+    def chat(self, messages: list[Message], sampling=None) -> str:
+        return self.chat_response(messages, sampling=sampling).text
+
+    def chat_stream(self, messages: list[Message], sampling=None):
+        body = self._body(messages)
+        body["stream"] = True
+        if sampling:
+            if sampling.get("think") is not None:
+                body["think"] = bool(sampling["think"])
+            body.setdefault("options", {})
+            for key in ("temperature", "top_p", "seed"):
+                if sampling.get(key) is not None:
+                    body["options"][key] = sampling[key]
+        req = urllib.request.Request(
+            f"{self.base}/api/chat", data=json.dumps(body).encode("utf-8"),
+            method="POST", headers={"Content-Type": "application/json"})
+        emitted = False
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                message = data.get("message") or {}
+                text = message.get("content", "")
+                if text:
+                    emitted = True
+                    yield str(text)
+        if not emitted:
+            yield self.chat(messages, sampling=sampling)
 
 
 class MetaModelAPIClient(HttpModelClient):
@@ -305,36 +409,38 @@ class MetaModelAPIClient(HttpModelClient):
 def client_for_config(config) -> ModelClient:
     """Build the model client the ``.env`` asks for.
 
-    Backend is chosen by ``AIDON_BACKEND`` (ollama|meta|http|fake),
+    Backend is chosen by ``AIDON_BACKEND`` (native|meta|http|fake),
     and inferred when it is unset: a Meta key means meta, a
-    non-Ollama endpoint means http, anything else is fake so an
+    non-native endpoint means http, anything else is fake so an
     offline checkout still runs its tests.
     """
     backend = (getattr(config, "backend", "") or "").strip().lower()
     api_base = (getattr(config, "api_base", "") or "").strip()
-    if not backend:
+    if backend in ("", "auto"):
         # Old keys only: AIDON_API_KEY + AIDON_API_ENDPOINT.
-        # A Meta endpoint means meta, an Ollama endpoint means
-        # ollama, any other endpoint means http, else fake.
+        # A Meta endpoint means meta, a local native endpoint means
+        # native, any other endpoint means http, else fake.
         if api_base and "api.meta.ai" in api_base:
             backend = "meta"
-        elif api_base and "localhost:11434" not in api_base \
-                and "127.0.0.1:11434" not in api_base:
-            backend = "http"
+        elif api_base and ("localhost:11434" in api_base
+                           or "127.0.0.1:11434" in api_base):
+            backend = "native"
         elif api_base:
-            backend = "ollama"
+            backend = "http"
+        elif getattr(config, "api_key", ""):
+            backend = "meta"
         else:
             backend = "fake"
     timeout = float(getattr(config, "model_timeout_seconds", 120.0) or 120.0)
     if backend == "fake":
         return FakeClient("")
-    if backend == "ollama":
+    if backend == "native":
         endpoint = api_base or getattr(
-            config, "ollama_endpoint", "http://localhost:11434")
-        return OllamaClient(
+            config, "native_endpoint", "http://localhost:11434")
+        return NativeModelClient(
             endpoint, config.model, timeout=timeout,
-            think=bool(getattr(config, "ollama_think", False)),
-            num_ctx=int(getattr(config, "ollama_num_ctx", 0) or 0))
+            think=bool(getattr(config, "model_think", False)),
+            num_ctx=int(getattr(config, "model_num_ctx", 0) or 0))
     if backend == "meta":
         return MetaModelAPIClient(
             config.api_key, config.model,
@@ -345,4 +451,4 @@ def client_for_config(config) -> ModelClient:
                                timeout=timeout)
     raise ValueError(
         f"Unknown AIDON_BACKEND {backend!r} "
-        "(expected ollama, meta, http, or fake)")
+        "(expected native, meta, http, or fake)")

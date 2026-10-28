@@ -1,6 +1,6 @@
 """MCP client: use an external MCP server, stdio JSON-RPC, stdlib only.
 
-New Aidon already serves MCP (src/interface/mcp_server.py). This is the
+The repository already serves MCP (src/interface/mcp_server.py). This is the
 other direction: Aidon as a client, calling tools on a server
 someone else runs, for example a Gmail Workspace MCP server.
 The client spawns the server command, sends initialize with

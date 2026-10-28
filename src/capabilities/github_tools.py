@@ -1,8 +1,8 @@
-"""GitHub, old Aidon: search and fetch, with an optional token.
+"""GitHub, Aidon: search and fetch, with an optional token.
 
 Old key, only: GITHUB_TOKEN. No new duplicate.
 A token is optional, it only raises the rate limit,
-unauthenticated is 10 requests per minute in old Aidon,
+unauthenticated is 10 requests per minute in Aidon,
 and a rate limit is an error, never a retry loop.
 Search is repositories, fetch is a file at a ref,
 with the raw media type, never the wrong +raw type,

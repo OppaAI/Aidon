@@ -13,7 +13,7 @@ reordered by completion time.
 Rate limits and credits are the constraint, not the
 model: a swarm multiplies calls, so max_workers is
 capped at 3 by default, and a budget, when given, is
-shared, not per worker. Old Aidon swarm was off by
+shared, not per worker. Swarm use is off by
 default, on only when the goal enumerated the split;
 here Aidon decides every time, by the split call.
 A runner is a callable goal -> text, in tests a fake,

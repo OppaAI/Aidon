@@ -1,4 +1,4 @@
-"""Recall budget, old Aidon recall_budget concept, rebuilt.
+"""Recall budget, Aidon recall_budget concept, rebuilt.
 
 Recall is not free: a recall budget caps how many points, how many tokens, and how many
 collections a single recall can spend. check_recall(points, budget) returns whether the

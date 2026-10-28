@@ -1,4 +1,4 @@
-"""Task patterns, old Aidon patterns concept, rebuilt.
+"""Task patterns, Aidon patterns concept, rebuilt.
 
 A pattern is a named reusable plan shape: keywords, steps, and deliverables. match_pattern(goal)
 returns the first pattern whose keywords appear in the goal, or None, so a goal can be planned

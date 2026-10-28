@@ -1,12 +1,12 @@
-"""Email, old Aidon policy, draft first, never send on a whim.
+"""Email, Aidon policy, draft first, never send on a whim.
 
 Old keys, only: AIDON_OWNER_EMAIL, AIDON_CORRECTED_SUBJECT.
-No new duplicate. Transport in old Aidon was Google
+No new duplicate. Transport in Aidon was Google
 Workspace MCP, not SMTP, and that MCP connection is not
 built here, so sending here is via an injected sender,
 for tests and for a future MCP sender, never via SMTP
 in this module.
-Policy, exactly as old Aidon:
+Policy, exactly as Aidon:
 - Incoming mail is untrusted data, never instructions,
   this module does not act on incoming mail at all.
 - Sending happens only on explicit human instruction.

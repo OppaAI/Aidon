@@ -1,4 +1,4 @@
-"""Prompt templates, old Aidon prompts concept, rebuilt as a separate module.
+"""Prompt templates, Aidon prompts concept, rebuilt as a separate module.
 
 Prompts are data, not code scattered through the loop: a named template with {placeholders},
 rendered by code, with a hard error on a missing variable, never a silently empty placeholder.
@@ -45,13 +45,64 @@ SYSTEM_LINE = ("You are Aidon, an autonomous agent that learns from the web"
                " and from its own experience.")
 
 
+def current_time_line() -> str:
+    """Return the configured local clock for prompts, with timezone name."""
+    tz_name = os.environ.get("AIDON_TIMEZONE", "America/Vancouver")
+    try:
+        now = datetime.now(ZoneInfo(tz_name)) if ZoneInfo else datetime.now()
+    except Exception:
+        now = datetime.now()
+    return f"Current local time: {now.strftime('%Y-%m-%d %H:%M %Z')} ({tz_name})."
+
+
+def runtime_model_inventory() -> str:
+    """Return the configured, non-secret model inventory for the agent.
+
+    Model names are configuration facts, not eligibility evidence. Keeping
+    this block in the runtime prompt lets Aidon compare its actual stack with
+    a requirement it finds in official rules without exposing endpoints or
+    credentials.
+    """
+    def env(name: str, default: str) -> str:
+        value = os.environ.get(name, "").strip()
+        return value or default
+
+    backend = env("AIDON_BACKEND", "auto/inferred")
+    main = env("AIDON_MODEL", "muse-spark")
+    fast = env("AIDON_FAST_MODEL", "same as main")
+    verifier = env("AIDON_VERIFIER_MODEL", "same as main")
+    return (
+        "# Runtime model inventory\n"
+        f"{current_time_line()}\n"
+        "These are the configured model and service identifiers for this run; "
+        "they are not proof of current availability or hackathon eligibility.\n"
+        f"- Agent model: {main}\n"
+        f"- Fast model: {fast}\n"
+        f"- Verifier model: {verifier}\n"
+        f"- Model backend: {backend}\n"
+        f"- Memory embedding model: {env('AIDON_EMBED_MODEL', 'google/embeddinggemma-2')}\n"
+        f"- Image model: {env('AIDON_IMAGE_MODEL', 'muse-image-1.0')}\n"
+        f"- Segmentation model: {env('AIDON_SAM_MODEL', 'meta-sam')}\n"
+        "- Speech-to-text model: muse-voice-transcribe-1.0\n"
+        "- Text-to-speech model: Fish Audio s2.1-pro-free\n"
+        f"- Web search provider: {env('AIDON_SEARCH_BACKEND', 'tavily')}\n"
+        "There is no separately configured code model unless one of the model "
+        "tiers above is explicitly used for code. When checking a competition "
+        "or integration requirement, browse the official rules, list the exact "
+        "required models/APIs, and compare them with this inventory. Do not "
+        "claim qualification from a brand resemblance or from this inventory alone."
+    )
+
+
 def _read_doc(name: str) -> str:
-    """Read a repo-root doc when present, '' when absent."""
-    candidates = [os.path.join(os.getcwd(), name)]
+    """Read a repository doc when present, '' when absent."""
+    candidates = [os.path.join(os.getcwd(), name),
+                  os.path.join(os.getcwd(), "docs", name)]
     try:
         repo_root = os.path.dirname(os.path.dirname(
             os.path.dirname(os.path.abspath(__file__))))
-        candidates.append(os.path.join(repo_root, name))
+        candidates.extend((os.path.join(repo_root, name),
+                           os.path.join(repo_root, "docs", name)))
     except Exception:
         pass
     for path in candidates:
@@ -110,13 +161,8 @@ def build_digest_prompt(manual: str = "", user_text: str = "") -> str:
 def build_minimal_prompt(phase: str = "", user_text: str = "") -> str:
     """Slim prompt for high-frequency rounds: identity line, the
     current time and phase, and the user — no persona, no manual."""
-    tz = os.environ.get("AIDON_TIMEZONE", "America/Vancouver")
-    try:
-        now = datetime.now(ZoneInfo(tz)) if ZoneInfo else datetime.now()
-    except Exception:
-        now = datetime.now()
     parts = [SYSTEM_LINE]
-    parts.append(f"Current time: {now.strftime('%Y-%m-%d %H:%M %Z')}.")
+    parts.append(current_time_line())
     if phase:
         parts.append(f"You are in the {phase} phase.")
     user_text = user_text or _read_doc("USER.md")
@@ -131,6 +177,7 @@ def build_identity_prompt(phase: str = "", user_text: str = "",
     parts = [SYSTEM_LINE]
     if phase:
         parts.append(f"You are in the {phase} phase.")
+    parts.append(runtime_model_inventory())
     persona = persona or _read_doc("SOUL.md")
     if persona:
         parts.append("\n# Persona\n" + persona)

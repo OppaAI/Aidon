@@ -25,7 +25,7 @@ only, not installed by setup, and not needed now.
 then starts the WebUI server with the same home, backend, and
 ingest path.
 
-At minimum, configure an endpoint, key, and model. Optional features can be installed separately:
+At minimum, configure an endpoint, key, and model. Heavy ML packages and optional features are offered interactively by `./setup.sh`; answer yes only for capabilities you need. Use `--with-optional` to accept every optional package without prompting:
 
 - `AIDON_API_ENDPOINT` — endpoint URL for the model API
 - `AIDON_API_KEY` — API key for that endpoint
@@ -36,7 +36,15 @@ The base install does not pull heavyweight ML packages. Use `uv sync --extra mem
 `--extra embed`, `--extra sparse`, `--extra vision`, `--extra kb`, or `--extra docs`
 for the corresponding capabilities. `./setup.sh --with-optional` installs all optional groups.
 
-Setup and launch, in that order, are the entry points, as in the old Aidon guides.
+Vector memory: embedded local mode works for one process. For shared memory
+across the WebUI, tick loop, and listeners, setup offers a Qdrant server
+(binary + systemd, no docker): answer yes at the prompt, or run
+`./setup.sh --with-qdrant`. It installs the pinned binary, starts the
+`aidon-qdrant` service, health-checks port 6333, and sets
+`AIDON_QDRANT_URL=http://127.0.0.1:6333` in `.env`. Without a server,
+the dashboard shows a memory-fallback warning instead of failing silently.
+
+Setup and launch, in that order, are the entry points, as in the Aidon guides.
 
 ```sh
 ./setup.sh

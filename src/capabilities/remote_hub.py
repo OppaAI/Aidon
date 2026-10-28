@@ -1,4 +1,4 @@
-"""Remote hub, old Aidon remote_hub concept, rebuilt as a local hub directory, honestly named.
+"""Remote hub, Aidon remote_hub concept, rebuilt as a local hub directory, honestly named.
 
 A hub here is a directory under <home>/hub/, where a plugin or skill can be published as a
 copy, listed, and fetched back, so a team can share a plugin without a central server.

@@ -1,4 +1,4 @@
-"""Eval, old Aidon eval concept, rebuilt, code only, separate from metrics truth grading.
+"""Eval, Aidon eval concept, rebuilt, code only, separate from metrics truth grading.
 
 eval_run checks a run's deliverables against criteria, by code: a criterion passes if its
 text appears, case-insensitive, in any deliverable file's content, or if the criterion

@@ -220,7 +220,7 @@ def gate_text(source: str, text: str, *, client=None, metrics=None,
     the scan. Info findings (scanner unavailable) never
     change the verdict on their own.
     """
-    # ``metrics`` and ``is_code`` were part of the old Aidon API.  Keep them
+    # ``metrics`` and ``is_code`` were part of the Aidon API.  Keep them
     # accepted so migrated callers and plugins do not fail at runtime.
     findings = []
     findings.extend(_builtin_scan(text, is_code=is_code))

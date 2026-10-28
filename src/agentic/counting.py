@@ -48,7 +48,10 @@ class CountingClient(ModelClient):
         self.tokens_by_phase: dict[str, int] = {}
 
     def chat(self, messages, phase: str = "chat", sampling=None) -> str:
-        reply = self.inner.chat(messages)
+        try:
+            reply = self.inner.chat(messages, sampling=sampling)
+        except TypeError:
+            reply = self.inner.chat(messages)
         tokens = max(1, (len(_text_of(messages)) + len(reply)) // 4)
         self.calls += 1
         self.tokens_estimated += tokens
@@ -57,7 +60,24 @@ class CountingClient(ModelClient):
         return reply
 
     def chat_phase(self, phase: str, messages, sampling=None) -> str:
-        return self.chat(messages, phase=phase)
+        return self.chat(messages, phase=phase, sampling=sampling)
+
+    def chat_stream(self, messages, sampling=None):
+        chunks = []
+        try:
+            stream = self.inner.chat_stream(messages, sampling=sampling)
+        except TypeError:
+            stream = self.inner.chat_stream(messages)
+        for chunk in stream:
+            text = str(chunk)
+            chunks.append(text)
+            yield text
+        reply = "".join(chunks)
+        tokens = max(1, (len(_text_of(messages)) + len(reply)) // 4)
+        self.calls += 1
+        self.tokens_estimated += tokens
+        self.calls_by_phase["stream"] = self.calls_by_phase.get("stream", 0) + 1
+        self.tokens_by_phase["stream"] = self.tokens_by_phase.get("stream", 0) + tokens
 
     def report(self) -> dict:
         return {"model_calls": self.calls,

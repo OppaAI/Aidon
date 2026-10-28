@@ -105,6 +105,17 @@ class RunControl:
         if record is None:
             return False
         record["status"] = str(status)
+        if status in ("done", "failed", "rejected", "cancelled"):
+            record["stage"] = "done"
+        self._path(run_id).write_text(json.dumps(record, indent=2))
+        return True
+
+    def set_stage(self, run_id: str, stage: str) -> bool:
+        """Publish the current pipeline stage for the WebUI progress bar."""
+        record = self.get(run_id)
+        if record is None:
+            return False
+        record["stage"] = str(stage)
         self._path(run_id).write_text(json.dumps(record, indent=2))
         return True
 

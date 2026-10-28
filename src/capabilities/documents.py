@@ -198,6 +198,10 @@ def read_document(path_or_url: str, sandbox=None,
             return f"READ_FAILED: file not found: {path_or_url}"
         if not err_path.is_file():
             return f"READ_FAILED: not a file: {path_or_url}"
+        # The local path IS the file to convert; without this the
+        # converter was handed the string "None" and every plain
+        # local read failed with FileNotFoundError.
+        local = err_path
     try:
         converter = MarkItDown()
         result = converter.convert(str(local))

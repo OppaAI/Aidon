@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Aidon</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="stylesheet" href="/static/style.css?v=__ASSET_V__">
 <script type="importmap">
 {
@@ -20,10 +21,15 @@
   <!-- ============ LEFT SIDEBAR ============ -->
   <aside id="leftbar">
     <div id="brand">
-      <span id="brand-mark">A</span>
+      <span id="brand-mark" aria-label="Aidon mark">
+        <svg viewBox="0 0 64 64" role="img" aria-hidden="true">
+          <path d="M10 52 28 12a5 5 0 0 1 8 0l18 40h-9l-5-12H24l-5 12Zm18-21h8l-4-10Z"/>
+        </svg>
+      </span>
       <span id="brand-name">Aidon</span>
       <button id="theme-toggle" class="icon-btn" title="Toggle dark / light theme">◐</button>
     </div>
+    <div id="brand-subtitle">Your Goals. My Actions.</div>
     <nav id="main-nav">
       <button class="nav-btn active" data-view="chat" title="Chat">
         <span class="nav-ico">💬</span><span class="nav-label">Chat</span>
@@ -51,6 +57,9 @@
       </a>
       <a class="nav-btn" href="/knowledge" title="Knowledge Studio — the documents and facts Aidon has ingested">
         <span class="nav-ico">📖</span><span class="nav-label">Knowledge</span>
+      </a>
+      <a class="nav-btn" href="/reports" title="Reports — run summaries and daily reports">
+        <span class="nav-ico">📰</span><span class="nav-label">Report</span>
       </a>
     </nav>
     <div id="projects-bar">
@@ -93,7 +102,6 @@
       </div>
     </div>
     <div id="left-foot">
-      <a id="reports-link" class="icon-btn" href="/reports" title="Daily reports">📰</a>
       <a id="settings-link" class="icon-btn" href="/settings" title="Settings">⚙</a>
       <span id="run-status"><span id="status-dot"></span><span id="status-text">idle</span></span>
     </div>
@@ -101,26 +109,43 @@
 
   <!-- ============ CENTER: CHAT ============ -->
   <main id="center">
+    <header id="center-head">
+      <div class="center-brand"><span class="center-mark">A</span><span>Aidon</span>
+        <span class="version-label">v__AIDON_VERSION__</span><span class="online-dot"></span><span class="online-label">Autonomous Agent</span></div>
+    </header>
     <div id="stages"></div>
+    <div id="middle-status" hidden role="status" aria-live="polite"></div>
     <div id="thread"></div>
     <div id="approval-slot"></div>
     <div id="img-preview" hidden></div>
     <footer id="composer">
-      <button id="mic" title="Voice input (Meta Transcribe)">&#9679;</button>
-      <button id="attach-btn" title="Attach image" aria-label="Attach image">&#128206;</button>
-      <button id="camera-btn" title="Take photo" aria-label="Take photo">&#128247;</button>
-      <div id="composer-inputs">
-        <input id="goal-input" type="text" placeholder="Chat or give Aidon a goal…" autocomplete="off">
-        <input id="guidance-input" type="text" placeholder="Guidance (optional) — your steps or hints; Aidon follows them and fills the gaps…" autocomplete="off">
+      <div id="compose-box">
+        <div id="composer-inputs">
+          <textarea id="goal-input" rows="3" placeholder="Start with a goal…&#10;&#10;Plan something, research a question, or ask Aidon to build a result for you. Your run stages and deliverables will appear here." autocomplete="off"></textarea>
+          <input id="guidance-input" type="text" placeholder="Guidance (optional) — your steps or hints; Aidon follows them and fills the gaps…" autocomplete="off">
+        </div>
+        <div id="composer-tools">
+          <div id="composer-left">
+            <button id="attach-btn" class="composer-icon" title="Attach image or document" aria-label="Attach image or document">&#128206;</button>
+            <button id="camera-btn" class="composer-icon" title="Take photo" aria-label="Take photo">&#128247;</button>
+            <button id="web-btn" class="composer-icon" title="Force web search" aria-label="Force web search"><svg class="globe-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.8 12h16.4M12 3.5c2.2 2.3 3.3 5.1 3.3 8.5s-1.1 6.2-3.3 8.5c-2.2-2.3-3.3-5.1-3.3-8.5S9.8 5.8 12 3.5z"></path></svg></button>
+            <button id="preapprove-btn" class="composer-icon preapprove-control" title="Approve for me" aria-label="Approve for me"><span class="preapprove-icon">✓</span><span>Approve for me</span></button>
+          </div>
+          <div id="composer-right">
+            <canvas id="voice-wave" width="180" height="28" title="Your voice activity"></canvas>
+            <button id="mic" title="Record voice input" aria-label="Record voice input"><span class="mic-icon">&#127908;</span></button>
+            <button id="send" type="button" title="Send prompt" aria-label="Send prompt" onclick="if (window.aidonStartRun) window.aidonStartRun();">&#10148;</button>
+          </div>
+        </div>
       </div>
-      <button id="send">Run</button>
     </footer>
     <div id="steer-row" hidden>
       <input id="steer-input" type="text" placeholder="Steer mid-run — Aidon finishes the current step, then follows…" autocomplete="off">
       <button id="steer-send">Steer</button>
       <button id="cancel-run">Cancel run</button>
     </div>
-    <div id="hint">Enter = run &nbsp;·&nbsp; approvals appear as cards above &nbsp;·&nbsp; mic needs AIDON_API_KEY (Meta Transcribe)</div>
+    <div id="hint">Enter = run &nbsp;·&nbsp; Ctrl+Enter = new line &nbsp;·&nbsp; click the mic to record, click stop to transcribe</div>
+    <div id="disclaimer">Aidon can make mistakes. Check important information.</div>
   </main>
 
   <!-- ============ RIGHT SIDEBAR ============ -->
@@ -146,7 +171,24 @@
         </svg>
       </div>
     </div>
-    <canvas id="voice-wave" width="240" height="36" title="Voice activity"></canvas>
+    <canvas id="avatar-wave" width="220" height="28" title="Aidon voice activity"></canvas>
+    <div id="dashboard-stack">
+      <section class="dash-card">
+        <div class="dash-title"><span>▣</span> Current Project <span class="dash-chevron">›</span></div>
+        <div class="dash-empty">Start a goal to create a project</div>
+      </section>
+      <section class="dash-card">
+        <div class="dash-title"><span>✦</span> System Status</div>
+        <div class="dash-status"><span>Model</span><b data-status="model">Loading…</b></div>
+        <div class="dash-status"><span>Memory</span><b data-status="memory">Loading…</b></div>
+        <div class="dash-status"><span>WhatsApp</span><b data-status="whatsapp">Loading…</b></div>
+        <div class="dash-status"><span>Slack</span><b data-status="slack">Loading…</b></div>
+        <div class="dash-status"><span>Web search</span><b data-status="web_search">Loading…</b></div>
+        <div class="dash-status"><span>Sandbox</span><b data-status="sandbox">Loading…</b></div>
+        <div class="dash-status"><span>Voice</span><b data-status="voice">Loading…</b></div>
+        <div class="dash-status"><span>Computer</span><b data-status="computer">Loading…</b></div>
+      </section>
+    </div>
     <div id="thinking-head">
       <span>Thinking</span>
       <span id="thinking-count"></span>

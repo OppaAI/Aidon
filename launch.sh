@@ -7,6 +7,8 @@
 #     with WhatsApp and Slack webhooks at
 #     /webhook/whatsapp and /webhook/slack.
 #   ./launch.sh goal "Plan a dinner for two"
+#   ./launch.sh --cli
+#     Opens the conversational terminal interface.
 #   ./launch.sh interview "Plan a dinner" --run
 #   ./launch.sh trigger list
 #   ./launch.sh plugin list
@@ -30,6 +32,23 @@
 #   future only.
 set -eu
 
+if [ -t 1 ] 2>/dev/null; then
+  RESET=$(printf '\033[0m'); BOLD=$(printf '\033[1m'); DIM=$(printf '\033[2m')
+  BLUE=$(printf '\033[38;5;33m'); CYAN=$(printf '\033[38;5;51m')
+  VIOLET=$(printf '\033[38;5;141m'); GREEN=$(printf '\033[38;5;78m')
+  AMBER=$(printf '\033[38;5;220m'); RED=$(printf '\033[38;5;203m')
+else
+  RESET=''; BOLD=''; DIM=''; BLUE=''; CYAN=''; VIOLET=''; GREEN=''; AMBER=''; RED=''
+fi
+title() { printf '%s\n' "${BLUE}${BOLD}$*${RESET}"; }
+section() { printf '\n%s\n' "${VIOLET}${BOLD}◆ $*${RESET}"; }
+info() { printf '%s %s\n' "${CYAN}·${RESET}" "$*"; }
+ok() { printf '%s %s\n' "${GREEN}✓${RESET}" "$*"; }
+warn() { printf '%s %s\n' "${AMBER}!${RESET}" "$*" >&2; }
+fail() { printf '%s %s\n' "${RED}✗${RESET}" "$*" >&2; }
+
+title "  Aidon  ·  launch"
+
 REPO_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 AIDON_HOME=${AIDON_HOME:-$HOME/.aidon}
 export AIDON_HOME
@@ -42,23 +61,25 @@ if [ -x "$REPO_DIR/.venv/bin/python" ]; then
 elif command -v python3 >/dev/null 2>&1; then
   PYTHON=python3
 else
-  echo "ERROR: no python3 found. Install Python 3.11 or later." >&2
+  fail "Python 3.11 or later is required. Install it, then run ./setup.sh."
   exit 1
 fi
 
 if [ ! -d "$AIDON_HOME" ]; then
-  echo "Aidon home not found at $AIDON_HOME, running setup first..."
+  section "First launch"
+  info "I could not find $AIDON_HOME, so I will prepare it now."
   "$REPO_DIR/setup.sh"
 fi
 
 if [ ! -f "$AIDON_HOME/.env" ] && [ ! -f "$REPO_DIR/.env" ]; then
-  echo "WARNING: no .env found in $AIDON_HOME or $REPO_DIR. Fill one in from examples/.env.example for a real model run, or run offline tests for now." >&2
+  warn "No .env found. Run ./setup.sh or copy examples/.env.example before a real model run."
 fi
 
 cd "$REPO_DIR"
 
 if [ "${1:-}" = "--both" ]; then
-  # Keep the old Aidon ports so an existing Tailscale Funnel continues to
+  section "Starting WebUI and webhook listener"
+  # Keep the Aidon ports so an existing Tailscale Funnel continues to
   # work: public webhook Funnel -> 8766, tailnet WebUI -> 8765.
   WEBUI_PORT=${AIDON_WEBUI_PORT:-8765}
   WEBHOOK_PORT=${AIDON_WEBHOOK_PORT:-8766}
@@ -66,7 +87,7 @@ if [ "${1:-}" = "--both" ]; then
   if command -v ss >/dev/null 2>&1; then
     for port in "$WEBUI_PORT" "$WEBHOOK_PORT"; do
       if ss -ltn "sport = :$port" 2>/dev/null | tail -n +2 | grep -q .; then
-        echo "ERROR: port $port is already in use; stop that process first." >&2
+        fail "Port $port is already in use. Stop that process, then try again."
         exit 1
       fi
     done
@@ -82,16 +103,18 @@ if [ "${1:-}" = "--both" ]; then
   }
   trap cleanup EXIT INT TERM
 
-  echo "Webhook listener on :$WEBHOOK_PORT (pid $WEBHOOK_PID)"
-  echo "WebUI on :$WEBUI_PORT; Ctrl+C stops both"
+  ok "Webhook listener is running on :$WEBHOOK_PORT (pid $WEBHOOK_PID)."
+  info "WebUI is running on :$WEBUI_PORT. Press Ctrl+C to stop both."
   AIDON_SLACK_AUTOSTART=1 "$PYTHON" -m src.system.main webui serve \
     --port "$WEBUI_PORT"
   exit $?
 fi
 
 if [ $# -eq 0 ]; then
+  info "Opening the WebUI at http://127.0.0.1:${AIDON_WEBUI_PORT:-8765}/"
   exec "$PYTHON" -m src.system.main webui serve \
     --port "${AIDON_WEBUI_PORT:-8765}"
 else
+  info "Running your Aidon command."
   exec "$PYTHON" -m src.system.main "$@"
 fi
