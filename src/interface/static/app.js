@@ -17,6 +17,21 @@
   const statusDot = document.getElementById("status-dot");
   const statusText = document.getElementById("status-text");
 
+  function loadDashboardStatus() {
+    fetch("/api/status").then((r) => r.json()).then((data) => {
+      document.querySelectorAll("[data-status]").forEach((node) => {
+        const key = node.getAttribute("data-status");
+        let value = data[key] || "Unavailable";
+        if (key === "model" && data.backend) value += " · " + data.backend;
+        node.textContent = value;
+        node.classList.toggle("status-ready", ["Online", "Ready", "bubblewrap", "docker", "Semantic memory (on demand)", "EmbeddingGemma2Embedder"].includes(value));
+      });
+    }).catch(() => {
+      document.querySelectorAll("[data-status]").forEach((node) => { node.textContent = "Unavailable"; });
+    });
+  }
+  loadDashboardStatus();
+
   let currentRun = null;
   let pollTimer = null;
   let lastEventCount = 0;
