@@ -2040,6 +2040,8 @@ class WebUIServer:
             {"key": "AIDON_PARALLEL_TOOLS", "label": "Parallel tools", "type": "int", "default": "4", "desc": "Parallel research/tool workers.", "secret": False},
             {"key": "AIDON_RESEARCH_ALLOWLIST", "label": "Research allowlist", "type": "string", "default": "", "desc": "Comma-separated domains research may use, empty = unrestricted.", "secret": False},
             {"key": "AIDON_YOUTUBE_API_KEY", "label": "YouTube API key", "type": "string", "default": "", "desc": "Key for YouTube search.", "secret": True},
+            {"key": "AIDON_DEEP_RESEARCH_ROUNDS", "label": "Deep research rounds", "type": "int", "default": "2", "desc": "Max search rounds for the deep_research tool.", "secret": False},
+            {"key": "AIDON_DEEP_RESEARCH_SOURCES", "label": "Deep research sources", "type": "int", "default": "5", "desc": "Max pages fetched per deep_research round.", "secret": False},
         ]},
         {"group": "Messaging", "settings": [
             {"key": "AIDON_WHATSAPP_TOKEN", "label": "WhatsApp token", "type": "string", "default": "", "desc": "WhatsApp Cloud API token.", "secret": True},
@@ -2155,6 +2157,8 @@ class WebUIServer:
             "AIDON_LEARN_MAX_SKILLS_PER_DAY": (0, 100, 1),
             "AIDON_SKILL_MAX_FAILURES": (0, 100, 1),
             "AIDON_RESEARCH_MAX_ROUNDS": (0, 100, 1),
+            "AIDON_DEEP_RESEARCH_ROUNDS": (1, 5, 1),
+            "AIDON_DEEP_RESEARCH_SOURCES": (1, 10, 1),
             "AIDON_MAX_STUCK_ITERATIONS": (0, 100, 1),
             "AIDON_PARALLEL_TOOLS": (1, 32, 1),
             "AIDON_PARALLEL_WORKERS": (1, 32, 1),

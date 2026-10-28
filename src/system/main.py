@@ -888,6 +888,52 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     tools["web_search"] = web_search
     tools["fetch_url"] = fetch_url
     tools["read_document"] = read_document
+
+    def deep_research_tool(query):
+        # Multi-round search + fetch + condense with citations.
+        # The plan tool runs without a model client, so the judge
+        # is heuristic (top sources) and the summary extractive;
+        # the module's judge/synthesis activate when a caller
+        # passes a client. Search goes through the configured
+        # backend with the same allowlist/grants as web search,
+        # so citations carry real URLs (the researcher callable
+        # returns title/snippet strings only, no URLs).
+        try:
+            from ..agentic.deep_research import deep_research as _deep
+            from ..agentic.research_allow import DomainGrants, load_allowlist
+            from ..capabilities.documents import read_document as _read_doc
+            from ..capabilities.search import search as _search
+
+            def _search_fn(query_text):
+                result = _search(query_text, backend=config.search_backend,
+                                 tavily_key=config.tavily_api_key,
+                                 searxng_url=config.searxng_url,
+                                 allowlist=load_allowlist(config.home, config.research_allowlist),
+                                 grants=DomainGrants(config.home))
+                return result.get("results", []) if isinstance(result, dict) else result
+
+            def _fetch_fn(url):
+                try:
+                    return _read_doc(str(url))
+                except Exception as exc:
+                    return f"fetch failed: {type(exc).__name__}: {exc}"
+
+            def _env_int(name, default):
+                try:
+                    return max(1, int(os.environ.get(name, default)))
+                except Exception:
+                    return default
+
+            out = _deep(str(query), _search_fn, _fetch_fn, chat=None,
+                        max_rounds=_env_int("AIDON_DEEP_RESEARCH_ROUNDS", 2),
+                        max_sources=_env_int("AIDON_DEEP_RESEARCH_SOURCES", 5))
+            head = (f"Deep research: {out['query']} "
+                    f"({out['rounds']} round(s), {len(out['evidence'])} source(s))")
+            return head + "\n\n" + out["summary"]
+        except Exception as exc:
+            return f"deep research failed: {type(exc).__name__}: {exc}"
+
+    tools["deep_research"] = deep_research_tool
     tools["search_document"] = search_document
     tools["search_research_cache"] = search_research_cache
     tools["slack_send"] = slack_send
