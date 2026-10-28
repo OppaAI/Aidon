@@ -82,7 +82,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 # No external assets: everything here is inline, so pages work offline.
 BASE_CSS = """
 :root{--bg:#030b1c;--surface:#07152d;--surface2:#0c2040;--text:#e9eef8;--muted:#8b96b3;--border:#1e2a45;--accent:#0082fb;--accent2:#7c5cff;--green:#3ecf8e;--amber:#f5a623;--red:#f0564f}
-body.light{--bg:#edf3fc;--surface:#fbfdff;--surface2:#e4eefb;--text:#131a2c;--muted:#5f6b87;--border:#d9e0ee;--accent:#0064e0;--accent2:#6a4dff;--green:#1f9d63;--amber:#c47b12;--red:#d43d36}
+body.light{--bg:#dfe8f4;--surface:#eef3f9;--surface2:#d5e1ef;--text:#131a2c;--muted:#5f6b87;--border:#c7d4e5;--accent:#0064e0;--accent2:#6a4dff;--green:#1f9d63;--amber:#c47b12;--red:#d43d36}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0 auto;padding:24px;max-width:980px;line-height:1.5}
 body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:56px 56px;opacity:.14}
 h1{font-family:Rajdhani,"Segoe UI",system-ui,sans-serif;font-size:1.8em;color:var(--text);margin:0 0 0.5em;text-transform:uppercase;letter-spacing:.12em}

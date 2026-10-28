@@ -19,7 +19,7 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 html[data-theme="light"] {
-  --bg: #edf3fc; --surface: #fbfdff; --surface2: #e4eefb;
+  --bg: #dfe8f4; --surface: #eef3f9; --surface2: #d5e1ef;
   --text: #131a2c; --muted: #5f6b87; --border: #d9e0ee;
   --accent: #0064e0; --accent2: #6a4dff;
   --accent-glow: rgba(0, 100, 224, .22);
@@ -47,6 +47,7 @@ body::before { /* faint sci-fi grid backdrop */
 /* ── LEFT SIDEBAR ───────────────────────────────────────────────── */
 #leftbar { width: 264px; flex: 0 0 auto; display: flex; flex-direction: column;
   background: var(--surface); border-right: 1px solid var(--border);
+  font-family: var(--font-display);
   min-height: 0; }
 #brand { display: flex; align-items: center; gap: 10px; padding: 14px 14px 10px; }
 #brand-mark { width: 32px; height: 32px; border-radius: 9px; flex: 0 0 auto;
@@ -62,20 +63,22 @@ body::before { /* faint sci-fi grid backdrop */
 #main-nav { display: flex; flex-direction: column; gap: 2px; padding: 4px 10px 10px; }
 .nav-btn { display: flex; align-items: center; gap: 10px; padding: 9px 12px;
   border: none; border-radius: 10px; background: none; color: var(--muted);
-  font-size: 14px; cursor: pointer; text-align: left; transition: all .12s; }
+  font-family: var(--font-display); font-size: 16px; font-weight: 600; cursor: pointer;
+  text-align: left; transition: all .12s; }
 .nav-btn:hover { background: var(--surface2); color: var(--text); }
-.nav-btn.active { background: var(--surface2); color: var(--accent); font-weight: 600; }
+.nav-btn.active { background: var(--surface2); color: var(--accent); font-weight: 700; }
 a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
 .nav-ico { font-size: 17px; width: 24px; text-align: center; flex: 0 0 auto; }
 #left-content { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .left-view { display: none; flex: 1; min-height: 0; flex-direction: column; }
 .left-view.active { display: flex; }
 .left-head { display: flex; align-items: center; justify-content: space-between;
-  padding: 6px 14px 8px; font-size: 12px; text-transform: uppercase;
+  padding: 6px 14px 8px; font-family: var(--font-display); font-size: 12px; text-transform: uppercase;
   letter-spacing: .08em; color: var(--muted); font-weight: 600; }
 .mini-btn { width: 26px; height: 26px; border-radius: 8px; border: 1px solid var(--border);
   background: var(--surface2); color: var(--muted); font-size: 15px; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+  font-family: var(--font-display); display: inline-flex; align-items: center;
+  justify-content: center; padding: 0; }
 .mini-btn:hover { color: var(--accent); border-color: var(--accent); }
 #history-list, #search-results, #ideas-list, #goals-list, #library-list {
   flex: 1; overflow-y: auto; padding: 0 8px 12px; display: flex;
@@ -277,8 +280,12 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
 .card details { margin-top: 10px; font-size: 12.5px; }
 .card summary { cursor: pointer; color: var(--muted); }
 #composer { display: flex; flex-direction: column; gap: 4px; padding: 10px 0 4px; }
-#composer-row { display: flex; gap: 8px; align-items: flex-end; }
-#composer-left, #composer-right { display: flex; gap: 8px; align-items: flex-end; }
+#compose-box { width: 100%; display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px 8px; border: 1px solid var(--accent); border-radius: 17px;
+  background: var(--surface); box-shadow: 0 0 0 2px var(--accent-glow); }
+#composer-tools { display: flex; justify-content: space-between; align-items: center;
+  min-height: 44px; }
+#composer-left, #composer-right { display: flex; gap: 8px; align-items: center; }
 #composer-right { margin-left: auto; }
 #composer-left { flex: 0 0 auto; }
 #composer-left .composer-icon, #composer-right button { width: 44px; height: 44px; flex: 0 0 44px; }
@@ -288,15 +295,15 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
 .composer-icon:hover { color: var(--accent); border-color: var(--accent); }
 #preapprove-btn { color: var(--green); font-weight: 700; }
 #preapprove-btn.active { background: var(--green); color: #fff; border-color: var(--green); }
-#composer-inputs { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+#composer-inputs { width: 100%; display: flex; flex-direction: column; gap: 6px; }
 #goal-input { width: 100%; min-height: 92px; resize: vertical; overflow-wrap: anywhere;
   padding: 12px 14px; border-radius: 16px;
-  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); background: var(--surface2); color: var(--text);
   font-size: 14px; line-height: 1.45; outline: none; font-family: inherit; }
 #goal-input:focus { border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-glow), 0 0 18px var(--accent-glow); }
-#guidance-input { padding: 8px 14px; border-radius: 16px;
-  border: 1px dashed var(--border); background: var(--surface); color: var(--muted);
+#guidance-input { width: 100%; padding: 8px 14px; border-radius: 16px;
+  border: 1px dashed var(--border); background: var(--surface2); color: var(--muted);
   font-size: 12px; outline: none; font-family: var(--font-mono); }
 #guidance-input:focus { border-color: var(--accent); color: var(--text); }
 #steer-row { display: flex; gap: 8px; padding: 6px 0 2px; }
@@ -375,6 +382,8 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
   margin-top: 8px; }
 .dash-status b { font-weight: 500; }
 .status-ready { color: var(--green); }
+[data-status="model"] { color: #fff; }
+html[data-theme="light"] [data-status="model"] { color: #193353; }
 .think-phase { font-size: 10.5px; color: var(--accent); text-transform: uppercase;
   letter-spacing: .05em; margin: 8px 2px 0; font-weight: 600;
   flex: 0 0 auto; }
@@ -426,7 +435,8 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
   #rightbar { display: none; }
 }
 @media (max-width: 700px) {
-  #composer-row { align-items: stretch; }
+  #compose-box { padding: 8px; }
+  #composer-tools { align-items: stretch; }
   #composer-left, #composer-right { gap: 5px; }
   #composer-left .composer-icon, #composer-right button { width: 38px; height: 38px; flex-basis: 38px; }
   #goal-input { min-height: 78px; }

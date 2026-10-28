@@ -58,6 +58,9 @@
       <a class="nav-btn" href="/knowledge" title="Knowledge Studio — the documents and facts Aidon has ingested">
         <span class="nav-ico">📖</span><span class="nav-label">Knowledge</span>
       </a>
+      <a class="nav-btn" href="/reports" title="Reports — run summaries and daily reports">
+        <span class="nav-ico">📰</span><span class="nav-label">Report</span>
+      </a>
     </nav>
     <div id="projects-bar">
       <div class="left-head">
@@ -99,7 +102,6 @@
       </div>
     </div>
     <div id="left-foot">
-      <a id="reports-link" class="icon-btn" href="/reports" title="Daily reports">📰</a>
       <a id="settings-link" class="icon-btn" href="/settings" title="Settings">⚙</a>
       <span id="run-status"><span id="status-dot"></span><span id="status-text">idle</span></span>
     </div>
@@ -118,19 +120,21 @@
     <div id="img-preview" hidden></div>
     <canvas id="voice-wave" width="520" height="34" title="Voice activity"></canvas>
     <footer id="composer">
-      <div id="composer-row">
-        <div id="composer-left">
-          <button id="attach-btn" class="composer-icon" title="Attach image or document" aria-label="Attach image or document">&#128206;</button>
-          <button id="camera-btn" class="composer-icon" title="Take photo" aria-label="Take photo">&#128247;</button>
-          <button id="preapprove-btn" class="composer-icon" title="Preapprove reversible live actions" aria-label="Preapprove reversible live actions">✓</button>
-        </div>
+      <div id="compose-box">
         <div id="composer-inputs">
           <textarea id="goal-input" rows="3" placeholder="Chat or give Aidon a goal…" autocomplete="off"></textarea>
           <input id="guidance-input" type="text" placeholder="Guidance (optional) — your steps or hints; Aidon follows them and fills the gaps…" autocomplete="off">
         </div>
-        <div id="composer-right">
-          <button id="mic" title="Record voice input" aria-label="Record voice input"><span class="mic-icon">&#127908;</span></button>
-          <button id="send" title="Run" aria-label="Run">&#10148;</button>
+        <div id="composer-tools">
+          <div id="composer-left">
+            <button id="attach-btn" class="composer-icon" title="Attach image or document" aria-label="Attach image or document">&#128206;</button>
+            <button id="camera-btn" class="composer-icon" title="Take photo" aria-label="Take photo">&#128247;</button>
+            <button id="preapprove-btn" class="composer-icon" title="Preapprove reversible live actions" aria-label="Preapprove reversible live actions">✓</button>
+          </div>
+          <div id="composer-right">
+            <button id="mic" title="Record voice input" aria-label="Record voice input"><span class="mic-icon">&#127908;</span></button>
+            <button id="send" title="Run" aria-label="Run">&#10148;</button>
+          </div>
         </div>
       </div>
     </footer>
