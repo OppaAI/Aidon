@@ -200,7 +200,6 @@ CHAT_HTML = """<!doctype html>
 </style></head>
 <body class="chat-page">
 <h1>Aidon</h1><button id="theme-toggle" title="Toggle dark / light theme">Theme</button>
-<div id="memory-warning" style="display:none;border:2px solid #f5a623;padding:8px 12px;margin:8px 0"></div>
 <div id="layout">
 <div id="sidecol">
 <div id="avatar" aria-label="Aidon robot avatar, default; VRM is available separately">
@@ -236,6 +235,7 @@ CHAT_HTML = """<!doctype html>
 <h2>Library</h2><a href="/library">Library tab</a>
 <h2>Settings</h2><a href="/settings">Settings and keys</a>
 <h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a> <a href="/replay">Replay</a> <a href="/avatar-vrm">Open VRM avatar</a> <a href="/capabilities">Capabilities</a> <a href="/memory">Memory</a> <a href="/knowledge">Knowledge</a> <a href="/reports">Reports</a>
+<h2>System status</h2><div id="system-status"></div>
 <div id="stage-pills"><p>Stages: recall, interpret, research, plan, sandbox, verify, approval, live, learn</p><div id="pills"></div></div>
 </div>
 </div>
@@ -384,18 +384,25 @@ async function refreshPills() {
     document.getElementById('pills').innerHTML = kinds.map((k) => '<span>' + k + '=' + (latest[k] || 'idle') + '</span> ').join('');
   } catch (e) {}
 }
-async function refreshMemoryWarning() {
+async function refreshSystemStatus() {
   try {
     const r = await fetch('/api/status');
     const data = await r.json();
-    const box = document.getElementById('memory-warning');
-    if (box && data.memory_warning) {
-      box.textContent = data.memory_warning;
-      box.style.display = 'block';
-    }
+    const box = document.getElementById('system-status');
+    if (!box) { return; }
+    const rows = [['Model', data.model], ['Backend', data.backend], ['Memory', data.memory], ['Search', data.web_search], ['Sandbox', data.sandbox], ['Voice', data.voice], ['Computer', data.computer], ['WhatsApp', data.whatsapp], ['Slack', data.slack]];
+    let html = '';
+    rows.forEach((row) => {
+      let val = escapeHtml(String(row[1] || ''));
+      if (row[0] === 'Memory' && data.memory_warning) {
+        val = '<span style="background:#f5a623;color:#111;padding:2px 6px">' + val + '</span><br><small>' + escapeHtml(data.memory_warning) + '</small>';
+      }
+      html += '<p>' + escapeHtml(row[0]) + ': ' + val + '</p>';
+    });
+    box.innerHTML = html;
   } catch (e) {}
 }
-setInterval(refreshPills, 2000); refreshPills(); refreshMemoryWarning();
+setInterval(refreshPills, 2000); refreshPills(); refreshSystemStatus(); setInterval(refreshSystemStatus, 30000);
 async function refreshApprovals() {
   try {
     const r = await fetch('/api/approvals');

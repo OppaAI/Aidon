@@ -47,9 +47,10 @@ def test_status_quiet_on_qdrant_and_real_embedder():
     assert status["memory_warning"] == ""
 
 
-def test_chat_page_has_memory_warning_banner():
-    assert 'id="memory-warning"' in CHAT_HTML
+def test_chat_page_has_system_status_section():
+    assert 'id="system-status"' in CHAT_HTML
     assert "/api/status" in CHAT_HTML
+    assert 'id="memory-warning"' not in CHAT_HTML
 
 
 def test_setup_offers_qdrant_server_binary():
