@@ -525,9 +525,13 @@
   async function pumpStreamSpeech(state) {
     if (state.playing || !state.queue.length) return;
     state.playing = true;
+    // The next Fish request is started when the sentence enters the queue,
+    // not after the previous audio ends. Awaiting this promise preserves
+    // sentence order while removing network/request latency from playback.
     const item = state.queue.shift();
     try {
-      const progressive = await fetchSpeechAudio(item);
+      const progressive = await item.audio;
+      if (progressive && progressive.error) throw progressive.error;
       if (state.generation !== streamSpeechGeneration) {
         if (progressive.cancel) progressive.cancel();
         if (progressive.url) URL.revokeObjectURL(progressive.url);
@@ -574,7 +578,12 @@
     state.buffer += String(delta || "");
     const split = completeSpeechSentences(state.buffer, done);
     state.buffer = split.rest;
-    state.queue.push(...split.found.map((part) => part.trim()).filter(Boolean));
+    for (const part of split.found.map((value) => value.trim()).filter(Boolean)) {
+      // Attach the rejection immediately so a cancelled/failed prefetch does
+      // not become an unhandled browser promise before the queue reaches it.
+      const audio = fetchSpeechAudio(part).catch((error) => ({ error }));
+      state.queue.push({ text: part, audio });
+    }
     if (done) state.done = true;
     pumpStreamSpeech(state);
     return true;

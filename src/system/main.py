@@ -1825,6 +1825,17 @@ def main(argv: list[str] | None = None) -> int:
                 semantic_router = SemanticRouter(memory.embedder, cache_path=config.home / 'semantic_router_vectors.json')
             except Exception:
                 semantic_router = None
+            conversation_context = ""
+            conversation_id = str(event.payload.get("conversation_id", "") or "")
+            if conversation_id:
+                try:
+                    history = server._conversations_db().history(conversation_id, limit=8)
+                    conversation_context = "\n".join(
+                        f"{item.get('role', 'user')}: {str(item.get('text', ''))[:1200]}"
+                        for item in history[:-1]
+                    )
+                except Exception:
+                    conversation_context = ""
             try:
                 from ..interface.preapproval import PreapprovalStore
                 from ..interface.preapproval_gate import PreapprovalGate
@@ -1835,7 +1846,11 @@ def main(argv: list[str] | None = None) -> int:
                 try:
                     from ..agentic.research_allow import DomainGrants, load_allowlist
                     from ..capabilities.search import search as _s
-                    _r = _s(goal_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url,
+                    search_text = goal_text
+                    if conversation_context:
+                        search_text = (f"Conversation topic:\n{conversation_context}\n\n"
+                                       f"Current request:\n{goal_text}")
+                    _r = _s(search_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url,
                             allowlist=load_allowlist(config.home, config.research_allowlist),
                             grants=DomainGrants(config.home))
                     return [f"{x.get('title', '')}: {x.get('snippet', '')}" for x in _r.get("results", [])]
@@ -1850,7 +1865,7 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_gate, researcher=_web_researcher), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"))
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_gate, researcher=_web_researcher), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context)
             def _surface_reply(text):
                 # The WebUI already displays and polls the run ID. Keep the
                 # ID in Slack/WhatsApp replies where it is needed for

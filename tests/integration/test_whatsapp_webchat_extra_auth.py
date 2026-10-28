@@ -53,6 +53,20 @@ def test_webchat_reply_uses_researcher_facts():
     assert "Runtime model inventory" in sent
 
 
+def test_webchat_reply_uses_context_to_resolve_followup():
+    client = FakeClient("The facts identify the event.")
+    webchat_reply(
+        "Can you check the rules for this?",
+        lambda goal: ["The official event rules are in the supplied source."],
+        client,
+        context="user: We joined the Meta Global AI Hackathon.\n"
+                "assistant: I will help verify it.",
+    )
+    sent = client.calls[0][0].content
+    assert "Meta Global AI Hackathon" in sent
+    assert "use only to resolve references" in sent
+
+
 def test_webchat_reply_empty_facts_says_not_found_and_does_not_call_model():
     client = FakeClient("Invented answer, do not use.")
     reply = webchat_reply("What is the weather?", lambda goal: [], client)

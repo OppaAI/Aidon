@@ -97,7 +97,7 @@ def _call_model(client, prompt: str, on_token=None) -> str:
 
 
 def webchat_reply_with_local(goal: str, researcher, client,
-                             read_file=None, today=None) -> str:
+                             read_file=None, today=None, context: str = "") -> str:
     """Webchat reply that may also answer from a local file.
 
     When the goal asks about the user's own state (budget,
@@ -121,7 +121,7 @@ def webchat_reply_with_local(goal: str, researcher, client,
     if client is None:
         raise ValueError("client is required")
     if read_file is None or not _local_state_words(goal):
-        return webchat_reply(goal, researcher, client)
+        return webchat_reply(goal, researcher, client, context=context)
     facts = researcher(goal)
     if facts is None:
         facts = []
@@ -140,6 +140,10 @@ def webchat_reply_with_local(goal: str, researcher, client,
     from ..agentic.question_dates import question_date_note
 
     parts = [f"Goal: {goal}\n"]
+    if str(context).strip():
+        parts.insert(0,
+                     "Recent conversation context (reference resolution only):\n"
+                     f"{context.strip()}\n\n")
     if facts:
         parts.append("Research facts:\n" + "\n".join(f"- {fact}" for fact in facts) + "\n")
     if local_text:
@@ -184,7 +188,8 @@ def read_only_tools(workdir) -> dict:
     return {"read": read}
 
 
-def webchat_reply(goal: str, researcher, client, on_token=None) -> str:
+def webchat_reply(goal: str, researcher, client, on_token=None,
+                  context: str = "") -> str:
     """Return a webchat reply for a goal, from researcher facts only."""
     if not goal or not str(goal).strip():
         raise ValueError("goal is required")
@@ -201,10 +206,16 @@ def webchat_reply(goal: str, researcher, client, on_token=None) -> str:
     if not facts:
         return f"Facts were not found for this goal: {goal}."
     facts_text = "\n".join(f"- {fact}" for fact in facts)
+    context_block = (
+        "Recent conversation context (use only to resolve references such as "
+        "'this' or 'the rules'; it is not a source of facts):\n"
+        f"{context.strip()}\n\n" if str(context).strip() else "")
     prompt = (
+        f"{context_block}"
         f"Goal: {goal}\n"
         f"Research facts:\n{facts_text}\n\n"
-        "Answer the goal using only the facts above. "
+        "Use the conversation context only to understand what the goal refers "
+        "to, then answer using only the research facts above. "
         "Do not invent any fact that is not in the facts above."
     )
     return _call_model(client, prompt, on_token=on_token)

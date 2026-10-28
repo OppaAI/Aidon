@@ -261,7 +261,7 @@ class GoalRunner:
                  versioned_writes: bool = False,
                  network_available: bool | None = None,
                  guidance: str = "", image_paths=None, force_web: bool = False,
-                 stream_callback=None):
+                 stream_callback=None, conversation_context: str = ""):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -315,6 +315,7 @@ class GoalRunner:
         self.extra_tools = extra_tools or {}
         self.force_web = bool(force_web)
         self.stream_callback = stream_callback
+        self.conversation_context = str(conversation_context or "")
 
     def _trace(self, kind: str, status: str, detail: str = "") -> None:
         # Attribute to this runner's own run id: sub-runners share
@@ -893,7 +894,8 @@ class GoalRunner:
         if self.force_web and self.researcher is not None and spec is None and not _write_intent:
             from ..capabilities.webchat import webchat_reply
             reply = webchat_reply(goal, self.researcher, self.client,
-                                  on_token=self.stream_callback)
+                                  on_token=self.stream_callback,
+                                  context=self.conversation_context)
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
@@ -905,7 +907,8 @@ class GoalRunner:
         if self.use_semantic_router_skip and self.last_route and self.last_route[0] == "webchat" and spec is None and not _write_intent and self.researcher is not None:
             from ..capabilities.webchat import webchat_reply
             reply = webchat_reply(goal, self.researcher, self.client,
-                                  on_token=self.stream_callback)
+                                  on_token=self.stream_callback,
+                                  context=self.conversation_context)
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
