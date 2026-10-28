@@ -3,13 +3,13 @@
 #
 # Interactive by default, like the Aidon setup: it asks for
 # things one by one, and every answer is skippable.
-#   - A model backend first: Meta Model API (hackathon) or Ollama
-#     (local, no Meta key) or another OpenAI-compatible endpoint.
+#   - A model backend first: Meta Model API, a native chat endpoint,
+#     or another OpenAI-compatible endpoint.
 #   - Then model names, one by one: Enter keeps the shown default,
 #     typing replaces it.
 #   - Then API keys, one by one: a key already set is never asked
 #     again, an empty answer skips that feature (it stays off, and
-#     can be added later in .env or on the WebUI /settings page).
+#     can be added later in .env or through the WebUI).
 #   - Then optional packages, one by one: each package is offered
 #     with a yes/no, and only the ones you say yes to are installed.
 #     A missing optional package is not an error: the feature that
@@ -198,16 +198,14 @@ install_package() {
 
 if [ "$NONINTERACTIVE" = 0 ]; then
   echo ""
-  echo "Model backend - Aidon needs an LLM, and there are two ways in:"
+  echo "Model backend - Aidon needs an LLM:"
   echo "  1) Meta Model API (the hackathon API, needs a key)"
-  echo "  2) Ollama (local, no Meta key - the alternative when you do"
-  echo "     not use the hackathon API; Ollama must be running and the"
-  echo "     model must be pulled)"
+  echo "  2) Native chat endpoint (local or hosted, no API key required by Aidon)"
   echo "  3) Another OpenAI-compatible endpoint"
   cur_backend=$(dotenv_get "AIDON_BACKEND")
   cur_endpoint=$(dotenv_get "AIDON_API_ENDPOINT")
   default_choice=1
-  if [ "$cur_backend" = "ollama" ]; then default_choice=2; fi
+  if [ "$cur_backend" = "native" ]; then default_choice=2; fi
   case "$cur_endpoint" in
     *localhost:11434*|*127.0.0.1:11434*) default_choice=2 ;;
   esac
@@ -217,25 +215,16 @@ if [ "$NONINTERACTIVE" = 0 ]; then
   [ -z "$choice" ] && choice="$default_choice"
   case "$choice" in
     2)
-      dotenv_set "AIDON_BACKEND" "ollama"
-      echo "Ollama: no Meta API key needed."
-      # A Meta model name left over from .env.example is not a local
+      dotenv_set "AIDON_BACKEND" "native"
+      echo "Native endpoint: no API key is required by Aidon."
+      # A Meta model name left over from .env.example is not a native
       # model; clear it so Enter does not keep it by accident.
       case "$(dotenv_get "AIDON_MODEL")" in
         muse-spark*) dotenv_set "AIDON_MODEL" "" ;;
       esac
-      ask_setting "AIDON_OLLAMA_ENDPOINT" "Ollama endpoint" "http://localhost:11434"
-      ask_setting "AIDON_MODEL" "Ollama model (must be pulled in Ollama)"
+      ask_setting "AIDON_API_ENDPOINT" "Native model endpoint" ""
+      ask_setting "AIDON_MODEL" "Model name"
       ask_setting "AIDON_FAST_MODEL" "Fast-tier model (empty = no routing)"
-      model=$(dotenv_get "AIDON_MODEL")
-      if command -v ollama >/dev/null 2>&1; then
-        if [ -n "$model" ] && ask_yes_no "Pull $model now with ollama pull?"; then
-          ollama pull "$model" || echo "  ollama pull failed, pull it yourself."
-        fi
-      else
-        echo "Ollama is not on PATH. Install it, start it, and pull the model above,"
-        echo "or Aidon cannot call an LLM until then."
-      fi
       ;;
     3)
       dotenv_set "AIDON_BACKEND" "http"
@@ -377,9 +366,9 @@ echo ""
 echo "Setup done. Next: fill in anything you skipped in $AIDON_HOME/.env, then ./launch.sh"
 echo ""
 echo "Keys and setup, by you, after this script, names only, no values here:"
-echo "  Model: AIDON_BACKEND (meta | ollama | http | fake), AIDON_API_ENDPOINT, AIDON_API_KEY, AIDON_MODEL"
-echo "  Ollama alternative, no Meta key: AIDON_BACKEND=ollama, AIDON_OLLAMA_ENDPOINT=http://localhost:11434,"
-echo "    AIDON_MODEL=<a model pulled in Ollama>, AIDON_FAST_MODEL=<small local model>"
+echo "  Model: AIDON_BACKEND (native | meta | http | fake), AIDON_API_ENDPOINT, AIDON_API_KEY, AIDON_MODEL"
+echo "  Native backend: AIDON_BACKEND=native, AIDON_API_ENDPOINT=<endpoint>,"
+echo "    AIDON_MODEL=<model name>, AIDON_FAST_MODEL=<small model>"
 echo "  WhatsApp: AIDON_WHATSAPP_TOKEN, AIDON_WHATSAPP_PHONE_ID, AIDON_WHATSAPP_VERIFY_TOKEN, AIDON_WHATSAPP_APP_SECRET, AIDON_WHATSAPP_OWNER"
 echo "  Slack: SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, or polling with SLACK_BOT_TOKEN and a channel"
 echo "  Gmail: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN"

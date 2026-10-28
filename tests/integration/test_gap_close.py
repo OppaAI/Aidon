@@ -4,6 +4,7 @@ from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
 from src.interface.approval import ApprovalGate, Decision
 from src.agentic.think_effort import sampling_for
+from src.agentic.counting import CountingClient
 from src.capabilities.tools import ToolRegistry
 from src.memory.docstore import _sparse_vector
 
@@ -25,6 +26,13 @@ def test_sampling_reaches_client(tmp_path):
     runner = GoalRunner(client, Sandbox(tmp_path), ApprovalGate(lambda kind, title, body: Decision('approved', 'test')), tmp_path)
     runner._chat("verify", [])
     assert client.last_sampling == sampling_for("verify")
+
+
+def test_counting_wrapper_preserves_sampling(tmp_path):
+    client = FakeClient("ok")
+    wrapped = CountingClient(client)
+    wrapped.chat_phase("verify", [], sampling={"temperature": 0.0, "think": True})
+    assert client.last_sampling == {"temperature": 0.0, "think": True}
 
 
 def test_versioned_write_tool(tmp_path):

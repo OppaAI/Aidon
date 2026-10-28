@@ -97,6 +97,9 @@ def test_think_effort_table_and_escalation():
     assert effort_for("unknown-phase") == "low"
     assert effort_for("verify", {"verify": "high"}) == "high"
     assert sampling_for("verify")["temperature"] == 0.0
+    assert sampling_for("respond")["think"] is False
+    assert sampling_for("verify")["think"] is True
+    assert sampling_for("verify", escalate=True)["think"] is True
     assert sampling_for("respond")["temperature"] > sampling_for("verify")["temperature"]
     assert resolve_effort("verify", escalate=True) == "medium"
     assert resolve_effort("verify", requested="high", escalate=True) == "high"

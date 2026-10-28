@@ -953,8 +953,8 @@ def main(argv: list[str] | None = None) -> int:
     client = CountingClient(client)
     # Fast model, same backend, different model name. This is how a
     # local small model works too: set the endpoint to a local
-    # Ollama, AIDON_MODEL to the strong model, and AIDON_FAST_MODEL
-    # to the small local model. No Ollama-specific branch in the loop.
+    # native server, AIDON_MODEL to the strong model, and AIDON_FAST_MODEL
+    # to the small local model. No Native-specific branch in the loop.
     main_client = client
     fast_client = None
     model_router = None
@@ -963,7 +963,7 @@ def main(argv: list[str] | None = None) -> int:
         from ..agentic.router import RoutedClient
         fast_config = replace(
             config, model=config.fast_model,
-            ollama_num_ctx=config.fast_num_ctx or config.ollama_num_ctx)
+            model_num_ctx=config.fast_num_ctx or config.model_num_ctx)
         fast_client = CountingClient(client_for_config(fast_config))
         fast_phases = {s.strip() for s in config.router_fast_phases.split(",") if s.strip()}
         client = RoutedClient(fast_client, client, fast_phases=fast_phases)

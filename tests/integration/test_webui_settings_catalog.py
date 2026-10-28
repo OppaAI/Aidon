@@ -43,7 +43,7 @@ def test_catalog_groups_and_dead_keys_absent(tmp_path):
     # Enum options are carried for enum entries only.
     backend = [entry for group in catalog["groups"] for entry in group["settings"]
                if entry["key"] == "AIDON_BACKEND"][0]
-    assert backend["type"] == "enum" and backend["options"] == ["meta", "ollama", "http", "fake"]
+    assert backend["type"] == "enum" and backend["options"] == ["meta", "native", "http", "fake"]
     assert "options" not in [entry for group in catalog["groups"] for entry in group["settings"]
                              if entry["key"] == "AIDON_MODEL"][0]
 
@@ -78,7 +78,7 @@ def test_settings_set_env_validates_types(tmp_path):
     assert server.settings_set_env("autonomy_enabled", "yes")["ok"] is True
     assert "AIDON_AUTONOMY_ENABLED=1" in (tmp_path / "home" / ".env").read_text()
     assert server.settings_set_env("autonomy_enabled", "maybe")["ok"] is False
-    assert server.settings_set_env("backend", "ollama")["ok"] is True
+    assert server.settings_set_env("backend", "native")["ok"] is True
     assert server.settings_set_env("backend", "bogus")["ok"] is False
     assert server.settings_set_env("search_backend", "searxng")["ok"] is True
     assert server.settings_set_env("execution_backend", "docker")["ok"] is True
@@ -86,10 +86,10 @@ def test_settings_set_env_validates_types(tmp_path):
     assert server.settings_set_env("forget_half_life_days", "21.5")["ok"] is True
     assert server.settings_set_env("forget_half_life_days", "soon")["ok"] is False
     # Every non-secret catalog key is writable.
-    for key in ("AIDON_OLLAMA_ENDPOINT", "AIDON_ROUTER_FAST_PHASES",
+    for key in ("AIDON_MODEL_THINK", "AIDON_ROUTER_FAST_PHASES",
                 "AIDON_THREADS_ACCOUNT_ID", "AIDON_IG_USER_ID",
                 "AIDON_APPROVAL_NUDGE_CHANNEL", "AIDON_KERNEL"):
-        value = "1" if key == "AIDON_KERNEL" else "test-value"
+        value = "1" if key in ("AIDON_KERNEL", "AIDON_MODEL_THINK") else "test-value"
         assert server.settings_set_env(key, value)["ok"] is True, key
 
 

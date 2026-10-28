@@ -295,6 +295,9 @@ class GoalRunner:
         self.budget = budget
         self.trace = trace
         self.model_verifier = model_verifier
+        self._effort_escalated = False
+        if self.model_verifier is not None:
+            self.model_verifier.effort_escalated = False
         self.kernel_mode = kernel_mode
         self.semantic_router = semantic_router
         self.use_semantic_router_skip = use_semantic_router_skip
@@ -502,7 +505,9 @@ class GoalRunner:
         # text-only.
         try:
             from .think_effort import sampling_for
-            sampling = sampling_for(phase)
+            sampling = sampling_for(
+                phase,
+                escalate=self._effort_escalated and str(phase) in ("repair", "verify"))
         except Exception:
             sampling = None
         has_image = False
@@ -1191,6 +1196,13 @@ class GoalRunner:
                                  error="; ".join(failures)[:500],
                                  attempts=attempt)
             # Repair: ask for a repaired plan, passed files untouched.
+            # Raise effort only for substantive verification rejection. A
+            # shell/tool/network exception is operational, not something
+            # more reasoning can fix.
+            if verify_failures or model_failed:
+                self._effort_escalated = True
+                if self.model_verifier is not None:
+                    self.model_verifier.effort_escalated = True
             steer_notes = self.run_control.steer_notes(self.run_id) if self.run_control is not None else []
             context = ("Passed deliverables (do not rewrite): "
                        + ", ".join(sorted(passed))

@@ -158,13 +158,12 @@ class Config:
     sam_api_key: str = ""
     learn_max_skills_per_day: int = 5
     skill_max_failures: int = 3
-    # Backend selection, Aidon keys: AIDON_BACKEND decides
-    # between a local Ollama, the Meta Model API, a plain
-    # OpenAI-compatible endpoint, and the offline fake client.
+    # Backend selection: AIDON_BACKEND decides between the native chat
+    # protocol, the Meta Model API, a plain OpenAI-compatible endpoint,
+    # and the offline fake client.
     backend: str = ""
-    ollama_endpoint: str = "http://localhost:11434"
-    ollama_think: bool = False
-    ollama_num_ctx: int = 0
+    model_think: bool = False
+    model_num_ctx: int = 0
     fast_num_ctx: int = 0
     # Research caps, Aidon names only, no new duplicates.
     # AIDON_RESEARCH_ALLOWLIST is a comma list, empty = unrestricted.
@@ -266,11 +265,9 @@ class Config:
                 "AIDON_LEARN_MAX_SKILLS_PER_DAY", 5),
             skill_max_failures=_env_int("AIDON_SKILL_MAX_FAILURES", 3),
             backend=os.environ.get("AIDON_BACKEND", "").strip().lower(),
-            ollama_endpoint=os.environ.get(
-                "AIDON_OLLAMA_ENDPOINT", "http://localhost:11434"),
-            ollama_think=os.environ.get("AIDON_OLLAMA_THINK", "0") not in
+            model_think=os.environ.get("AIDON_MODEL_THINK", "0") not in
             ("0", "false", "no", ""),
-            ollama_num_ctx=_env_int("AIDON_OLLAMA_NUM_CTX", 0),
+            model_num_ctx=_env_int("AIDON_MODEL_NUM_CTX", 0),
             fast_num_ctx=_env_int("AIDON_FAST_NUM_CTX", 0),
             research_max_rounds=_env_int("AIDON_RESEARCH_MAX_ROUNDS", 10),
             max_stuck_iterations=_env_int("AIDON_MAX_STUCK_ITERATIONS", 8),

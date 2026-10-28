@@ -28,6 +28,7 @@ from ..system.model_client import Message, ModelClient
 class ModelVerifier:
     def __init__(self, client: ModelClient):
         self.client = client
+        self.effort_escalated = False
 
     def verify(self, goal: str, deliverables: list[str], workdir: Path) -> dict:
         workdir = Path(workdir)
@@ -46,11 +47,21 @@ class ModelVerifier:
                   + "\n\nAnswer YES if every deliverable is complete and "
                     "matches the goal, otherwise NO, with one line reason. "
                     "Start your answer with YES or NO.")
+        from .think_effort import sampling_for
+        sampling = sampling_for("verify", escalate=self.effort_escalated)
+        messages = [Message("system", "You verify deliverables, strictly."),
+                    Message("user", prompt)]
         if hasattr(self.client, "chat_phase"):
-            reply = self.client.chat_phase("verify", [Message("system", "You verify deliverables, strictly."), Message("user", prompt)]).strip()
+            try:
+                reply = self.client.chat_phase("verify", messages,
+                                               sampling=sampling).strip()
+            except TypeError:
+                reply = self.client.chat_phase("verify", messages).strip()
         else:
-            reply = self.client.chat([Message("system", "You verify deliverables, strictly."),
-                                      Message("user", prompt)]).strip()
+            try:
+                reply = self.client.chat(messages, sampling=sampling).strip()
+            except TypeError:
+                reply = self.client.chat(messages).strip()
         if not reply:
             return {"verdict": "unknown", "reason": "empty model reply"}
         first = reply.split()[0].strip(".,:").upper()

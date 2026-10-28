@@ -2,7 +2,7 @@
 
 import json
 
-from src.system.model_client import HttpModelClient, Message, OllamaClient
+from src.system.model_client import HttpModelClient, Message, NativeModelClient
 
 
 class _Response:
@@ -19,7 +19,7 @@ class _Response:
         return self.payload
 
 
-def test_ollama_native_tool_call_is_normalized(monkeypatch):
+def test_native_native_tool_call_is_normalized(monkeypatch):
     seen = {}
 
     def fake_urlopen(request, timeout):
@@ -42,7 +42,7 @@ def test_ollama_native_tool_call_is_normalized(monkeypatch):
     tool_schema = [{"type": "function", "function": {
         "name": "read_file", "parameters": {"type": "object"}
     }}]
-    response = OllamaClient("http://localhost:11434", "test").chat_response(
+    response = NativeModelClient("http://localhost:11434", "test").chat_response(
         [Message("user", "read note.md")], tools=tool_schema)
 
     assert seen["url"].endswith("/api/chat")

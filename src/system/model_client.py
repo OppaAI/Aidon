@@ -51,7 +51,7 @@ class ChatResponse:
     raw: Any = None
 
 
-def parse_ollama_tool_calls(message: dict) -> list[ToolCall]:
+def parse_native_tool_calls(message: dict) -> list[ToolCall]:
     calls = []
     for item in message.get("tool_calls") or []:
         function = item.get("function", {}) if isinstance(item, dict) else {}
@@ -225,17 +225,15 @@ class HttpModelClient(ModelClient):
         return self.chat_response(messages, sampling=sampling).text
 
 
-class OllamaClient(ModelClient):
-    """Local Ollama, native ``/api/chat``, stdlib only.
+class NativeModelClient(ModelClient):
+    """Native ``/api/chat`` client, stdlib only.
 
-    The user's ``.env`` points AIDON_API_ENDPOINT at
-    ``http://localhost:11434`` (no ``/v1``), which is Ollama's
-    native API, not an OpenAI-compatible one. Posting to
-    ``/chat/completions`` there returns 404, so a generic HTTP
-    client cannot drive it. This client speaks the native API
+    This protocol is not OpenAI-compatible. Posting to
+    ``/chat/completions`` returns 404, so a generic HTTP client
+    cannot drive it. This client speaks the native API
     and maps the two knobs that matter for latency and memory:
     ``think`` (chain-of-thought, off by default here because it
-    multiplies output tokens) and ``num_ctx`` (Ollama silently
+    multiplies output tokens) and ``num_ctx`` (the server silently
     truncates to a small default when this is unset).
     """
 
@@ -253,7 +251,7 @@ class OllamaClient(ModelClient):
             content = message.content
             images: list[str] = []
             if isinstance(content, list):
-                # OpenAI-style multimodal parts -> Ollama text + images.
+                # OpenAI-style multimodal parts -> native text + images.
                 text_parts = []
                 for part in content:
                     if not isinstance(part, dict):
@@ -292,7 +290,7 @@ class OllamaClient(ModelClient):
             except Exception:
                 pass
             raise RuntimeError(
-                f"Ollama {self.base} returned {exc.code}: {detail[:300]}"
+                f"Native model endpoint {self.base} returned {exc.code}: {detail[:300]}"
             ) from exc
 
     def chat_response(self, messages: list[Message], sampling=None,
@@ -314,7 +312,7 @@ class OllamaClient(ModelClient):
         message = data.get("message") or {}
         return ChatResponse(
             text=str(message.get("content", "") or ""),
-            tool_calls=parse_ollama_tool_calls(message),
+            tool_calls=parse_native_tool_calls(message),
             usage=data.get("prompt_eval_count") and {
                 "prompt_eval_count": data.get("prompt_eval_count"),
                 "eval_count": data.get("eval_count"),
@@ -342,36 +340,38 @@ class MetaModelAPIClient(HttpModelClient):
 def client_for_config(config) -> ModelClient:
     """Build the model client the ``.env`` asks for.
 
-    Backend is chosen by ``AIDON_BACKEND`` (ollama|meta|http|fake),
+    Backend is chosen by ``AIDON_BACKEND`` (native|meta|http|fake),
     and inferred when it is unset: a Meta key means meta, a
-    non-Ollama endpoint means http, anything else is fake so an
+    non-native endpoint means http, anything else is fake so an
     offline checkout still runs its tests.
     """
     backend = (getattr(config, "backend", "") or "").strip().lower()
     api_base = (getattr(config, "api_base", "") or "").strip()
-    if not backend:
+    if backend in ("", "auto"):
         # Old keys only: AIDON_API_KEY + AIDON_API_ENDPOINT.
-        # A Meta endpoint means meta, an Ollama endpoint means
-        # ollama, any other endpoint means http, else fake.
+        # A Meta endpoint means meta, a local native endpoint means
+        # native, any other endpoint means http, else fake.
         if api_base and "api.meta.ai" in api_base:
             backend = "meta"
-        elif api_base and "localhost:11434" not in api_base \
-                and "127.0.0.1:11434" not in api_base:
-            backend = "http"
+        elif api_base and ("localhost:11434" in api_base
+                           or "127.0.0.1:11434" in api_base):
+            backend = "native"
         elif api_base:
-            backend = "ollama"
+            backend = "http"
+        elif getattr(config, "api_key", ""):
+            backend = "meta"
         else:
             backend = "fake"
     timeout = float(getattr(config, "model_timeout_seconds", 120.0) or 120.0)
     if backend == "fake":
         return FakeClient("")
-    if backend == "ollama":
+    if backend == "native":
         endpoint = api_base or getattr(
-            config, "ollama_endpoint", "http://localhost:11434")
-        return OllamaClient(
+            config, "native_endpoint", "http://localhost:11434")
+        return NativeModelClient(
             endpoint, config.model, timeout=timeout,
-            think=bool(getattr(config, "ollama_think", False)),
-            num_ctx=int(getattr(config, "ollama_num_ctx", 0) or 0))
+            think=bool(getattr(config, "model_think", False)),
+            num_ctx=int(getattr(config, "model_num_ctx", 0) or 0))
     if backend == "meta":
         return MetaModelAPIClient(
             config.api_key, config.model,
@@ -382,4 +382,4 @@ def client_for_config(config) -> ModelClient:
                                timeout=timeout)
     raise ValueError(
         f"Unknown AIDON_BACKEND {backend!r} "
-        "(expected ollama, meta, http, or fake)")
+        "(expected native, meta, http, or fake)")

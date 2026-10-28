@@ -49,8 +49,14 @@ def effort_for(phase: str, overrides: dict | None = None) -> str:
     return _EFFORT_TABLE.get(phase, "low")
 
 
-def sampling_for(phase: str) -> dict:
-    """Sampling parameters for a phase; unknown phases get the default."""
+def sampling_for(phase: str, *, escalate: bool = False) -> dict:
+    """Sampling parameters for a phase with graceful effort degradation.
+
+    Backends that expose only a thinking on/off switch receive ``think``.
+    Backends that do not understand that hint simply ignore it and still
+    receive the portable temperature/top-p settings.
+    """
+    level = resolve_effort(phase, escalate=escalate)
     result = dict(_SAMPLING_TABLE.get(phase, _DEFAULT_SAMPLING))
     # Preserve old per-phase .env overrides, e.g.
     # AIDON_TEMP_VERIFY=0.0 and AIDON_TOP_P_RESPOND=0.95.
@@ -82,7 +88,12 @@ def sampling_for(phase: str) -> dict:
         phases = {part.strip().lower() for part in phases_raw.split(",")
                   if part.strip()}
         result["think"] = ("all" in phases or
-                            str(phase).lower() in phases)
+                            str(phase).lower() in phases or
+                            (escalate and level != "off"))
+    else:
+        # Native backends may only support a boolean thinking switch. All
+        # positive effort levels degrade to that supported representation.
+        result["think"] = level != "off"
     return result
 
 
