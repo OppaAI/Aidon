@@ -17,6 +17,7 @@ from src.memory.experience import (build_experience, goal_shape_for,
 from src.memory.kb import KnowledgeBase, extract_text
 from src.memory.memory import (Memory, decay_score, is_grace_protected,
                         should_prune, InMemoryStore)
+from src.memory.scoring import ltm_eligibility
 from src.agentic.loop import GoalRunner
 from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
@@ -94,6 +95,15 @@ def test_promote_with_ask_yes_and_no(tmp_path):
     assert out2 is None
     texts = [h.point.text for h in memory.recall("semantic", "fact to drop", graph=False)]
     assert "fact to drop" not in texts
+
+
+def test_remember_pins_semantic_memory_and_scores_high(tmp_path):
+    memory = _memory(tmp_path)
+    point = memory.remember("I prefer concise answers", source="test")
+    assert point.payload["pinned"] is True
+    assert point.payload["memory_source"] == "test"
+    assert ltm_eligibility(point.payload) == 1.0
+    assert memory.recall("semantic", "concise answers", graph=False)
 
 
 def test_kb_extract_html_and_docx(tmp_path):

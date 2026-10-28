@@ -1560,7 +1560,12 @@ def main(argv: list[str] | None = None) -> int:
             messages.append(Message("assistant", str(reply)))
             return str(reply)
 
-        Repl(_chat_handler, title="Aidon Chat", on_clear=messages.clear).run()
+        def _remember(text: str) -> str:
+            point = memory.remember(text, source="cli-command")
+            return f"Remembered in long-term memory: {text} (id {point.id})"
+
+        Repl(_chat_handler, title="Aidon Chat", on_clear=messages.clear,
+             on_remember=_remember).run()
         return 0
     if args.command == "computer":
         from ..capabilities.computer_use import capture_screenshot, run_computer_use
@@ -1719,7 +1724,11 @@ def main(argv: list[str] | None = None) -> int:
             if report.status == "chat":
                 return report.chat_reply or "Received."
             return f"[{report.status}] {', '.join(report.files)} {report.error}".strip()
-        Repl(_repl_handler).run()
+        def _remember(text: str) -> str:
+            point = memory.remember(text, source="cli-command")
+            return f"Remembered in long-term memory: {text} (id {point.id})"
+
+        Repl(_repl_handler, on_remember=_remember).run()
         return 0
     if args.command == "webui":
         from ..interface.messaging import MessagingConfig, send_slack, send_whatsapp

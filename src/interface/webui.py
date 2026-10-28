@@ -876,6 +876,24 @@ class WebUIServer:
         except Exception as exc:
             return f"Pre-approval error: {type(exc).__name__}: {exc}"
 
+    def _resolve_memory_command(self, text: str) -> str | None:
+        """Handle explicit memory pinning from every messaging surface."""
+        stripped = text.strip()
+        if stripped == "/remember":
+            return "Usage: /remember <fact or preference>"
+        if not stripped.lower().startswith("/remember "):
+            return None
+        fact = stripped[len("/remember"):].strip()
+        if not fact:
+            return "Usage: /remember <fact or preference>"
+        if self.memory is None:
+            return "Long-term memory is unavailable."
+        try:
+            point = self.memory.remember(fact, source="chat-command")
+            return f"Remembered in long-term memory: {fact} (id {point.id})"
+        except Exception as exc:
+            return f"Could not remember that: {exc}"
+
     def handle_preapprovals(self) -> dict:
         """Active grants, the kind menu, and the help text, for the UI."""
         from .preapproval import HELP_TEXT, KINDS
@@ -970,6 +988,9 @@ class WebUIServer:
         preapproval_reply = self._resolve_preapproval(message)
         if preapproval_reply is not None:
             return {"reply": preapproval_reply}
+        memory_reply = self._resolve_memory_command(message)
+        if memory_reply is not None:
+            return {"reply": memory_reply}
         message, delivery = extract_result_delivery(message)
         project_id = str(body.get("project_id", "default"))
         replies: list[str] = []
@@ -1131,6 +1152,8 @@ class WebUIServer:
                             decision_reply = self._resolve_control(text)
                         if decision_reply is None:
                             decision_reply = self._resolve_preapproval(text)
+                        if decision_reply is None:
+                            decision_reply = self._resolve_memory_command(text)
                         if decision_reply is not None:
                             replies.append(decision_reply)
                             if self.whatsapp_sender is not None:
@@ -1178,6 +1201,8 @@ class WebUIServer:
                 decision_reply = self._resolve_control(text)
             if decision_reply is None:
                 decision_reply = self._resolve_preapproval(text)
+            if decision_reply is None:
+                decision_reply = self._resolve_memory_command(text)
             if decision_reply is not None:
                 if self.slack_sender is not None:
                     self.slack_sender(channel, decision_reply, thread_ts)

@@ -26,12 +26,13 @@ import sys
 
 class Repl:
     def __init__(self, handler, input_fn=input, output_fn=print,
-                 title="Aidon REPL", on_clear=None):
+                 title="Aidon REPL", on_clear=None, on_remember=None):
         self.handler = handler
         self.input_fn = input_fn
         self.output_fn = output_fn
         self.title = title
         self.on_clear = on_clear
+        self.on_remember = on_remember
         self.history: list[str] = []
         self.staged: list[str] = []
         if getattr(sys.stdout, "isatty", lambda: False)():
@@ -96,8 +97,22 @@ class Repl:
             if line == "/quit":
                 break
             if line == "/help":
-                self.output_fn("/help, /history, /clear, /attach <path>, /staged, "
-                               "/clear-staged, /quit, or a goal to run.")
+                self.output_fn("/help, /history, /clear, /remember <fact>, "
+                               "/attach <path>, /staged, /clear-staged, /quit, "
+                               "or a goal to run.")
+                continue
+            if line == "/remember" or line.startswith("/remember "):
+                text = line[len("/remember"):].strip()
+                if not text:
+                    self.output_fn("Usage: /remember <fact>")
+                    continue
+                if self.on_remember is None:
+                    self.output_fn("Remember is unavailable in this session.")
+                else:
+                    try:
+                        self.output_fn(str(self.on_remember(text)))
+                    except Exception as exc:
+                        self.output_fn(f"Error remembering fact: {exc}")
                 continue
             if line == "/history":
                 for item in self.history:

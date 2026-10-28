@@ -650,7 +650,29 @@ class Memory:
         data.update(payload or {})
         if attachments:
             data["attachments"] = list(attachments)
-        return self.record("episodic", text, data)
+        point = self.record("episodic", text, data)
+        try:
+            from .scoring import ltm_eligibility
+            score = ltm_eligibility(point.payload)
+            point.payload["memory_score"] = score
+            if hasattr(self.store, "set_payload"):
+                self.store.set_payload("episodic", point.id,
+                                       {"memory_score": score})
+        except Exception:
+            pass
+        return point
+
+    def remember(self, text: str, *, source: str = "explicit",
+                 project_id: str = "") -> Point:
+        """Pin a user-requested fact directly into global semantic LTM."""
+        text = str(text or "").strip()
+        if not text:
+            raise ValueError("memory text is required")
+        payload = {"kind": "semantic", "pinned": True,
+                   "memory_source": source, "memory_score": 1.0}
+        if project_id:
+            payload["project_id"] = project_id
+        return self.record("semantic", text, payload)
 
     def record_access(self, collection: str, point_id) -> None:
         """A recall is an access, best-effort, never failing recall.

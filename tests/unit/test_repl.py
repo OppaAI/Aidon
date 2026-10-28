@@ -118,6 +118,15 @@ def test_help_lists_new_commands_and_old_behaviour():
     assert history == ["goal"]
 
 
+def test_remember_command_uses_callback_without_running_goal():
+    seen = []
+    out, history, _ = _drive(["/remember I like blue", "/quit"],
+                             lambda line: seen.append(line))
+    assert seen == []
+    assert history == []
+    assert "Remember is unavailable in this session." in out
+
+
 def test_eof_still_ends_session():
     out, history, _ = _drive(["goal"], lambda line: "reply")
     assert history == ["goal"]
