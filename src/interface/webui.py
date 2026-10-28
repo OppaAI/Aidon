@@ -1709,6 +1709,7 @@ class WebUIServer:
             {"key": "AIDON_SANDBOX_REQUIRE_ISOLATION", "label": "Require isolation", "type": "bool", "default": "0", "desc": "Refuse sandbox commands when bubblewrap isolation is unavailable.", "secret": False},
             {"key": "AIDON_KERNEL", "label": "Kernel mode", "type": "bool", "default": "0", "desc": "Kernel mode: write/read/list/shell only, no calculate, no plugins.", "secret": False},
             {"key": "AIDON_COMPUTER_DRIVER", "label": "Computer driver", "type": "enum", "default": "", "desc": "Opt-in desktop driver; requires a graphical session and kernel mode off.", "secret": False, "options": ["", "x11"]},
+            {"key": "AIDON_PARALLEL_WORKERS", "label": "Parallel DAG workers", "type": "int", "default": "3", "desc": "Max concurrent DAG/plan steps in one level; 1 = sequential.", "secret": False},
         ]},
         {"group": "Memory", "settings": [
             {"key": "AIDON_FORGET_HALF_LIFE_DAYS", "label": "Forget half-life days", "type": "string", "default": "21", "desc": "Forgetting-curve half-life, in days.", "secret": False},
@@ -1839,6 +1840,7 @@ class WebUIServer:
             "AIDON_RESEARCH_MAX_ROUNDS": (0, 100, 1),
             "AIDON_MAX_STUCK_ITERATIONS": (0, 100, 1),
             "AIDON_PARALLEL_TOOLS": (1, 32, 1),
+            "AIDON_PARALLEL_WORKERS": (1, 32, 1),
             "AIDON_SLACK_POLL_SECONDS": (3, 3600, 1),
             "AIDON_SLACK_ACK_AFTER_SECONDS": (0, 3600, 1),
             "AIDON_APPROVAL_NUDGE_MIN": (0, 1440, 1),

@@ -1562,6 +1562,7 @@ class GoalRunner:
         from concurrent.futures import ThreadPoolExecutor
 
         from .dag import compute_levels
+        from .dag_executor import resolve_parallel_workers
 
         steps = current_plan.normalized_steps()
         by_id = {step.id: step for step in steps}
@@ -1570,10 +1571,7 @@ class GoalRunner:
                                      for step in steps])
         except ValueError as exc:
             return [f"parallel schedule failed: {exc}"], False
-        try:
-            workers = max(1, int(os.environ.get("AIDON_PARALLEL_WORKERS", "3") or "3"))
-        except ValueError:
-            workers = 3
+        workers = resolve_parallel_workers()
         lock = threading.Lock()
         failures: list[str] = []
         done_ids: set[str] = set()

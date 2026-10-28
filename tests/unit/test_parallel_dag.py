@@ -124,6 +124,29 @@ def test_to_plan_steps_carries_ids_and_deps():
     assert steps[1]["id"] == "b" and steps[1]["depends_on"] == ["a"]
 
 
+# --- worker knob ---
+
+def test_resolve_parallel_workers(monkeypatch):
+    from src.agentic.dag_executor import resolve_parallel_workers
+    assert resolve_parallel_workers(5) == 5
+    assert resolve_parallel_workers(0) == 1
+    monkeypatch.setenv("AIDON_PARALLEL_WORKERS", "7")
+    assert resolve_parallel_workers() == 7
+    monkeypatch.setenv("AIDON_PARALLEL_WORKERS", "bogus")
+    assert resolve_parallel_workers() == 3
+    monkeypatch.delenv("AIDON_PARALLEL_WORKERS", raising=False)
+    assert resolve_parallel_workers() == 3
+
+
+def test_settings_catalog_has_parallel_workers():
+    from src.interface.webui import WebUIServer
+    entries = [s for group in WebUIServer.SETTINGS_CATALOG
+               for s in group["settings"]]
+    match = [s for s in entries if s["key"] == "AIDON_PARALLEL_WORKERS"]
+    assert len(match) == 1
+    assert match[0]["type"] == "int" and match[0]["default"] == "3"
+
+
 # --- loop parallel path ---
 
 def test_loop_parallel_levels_skip_dependents_on_failure(tmp_path):

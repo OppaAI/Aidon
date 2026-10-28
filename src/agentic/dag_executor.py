@@ -40,6 +40,27 @@ def _is_transient(exc: BaseException) -> bool:
     return "transient" in str(exc).lower()
 
 
+def resolve_parallel_workers(max_workers=None) -> int:
+    """Resolve the parallel-worker count: explicit arg, else env, else 3.
+
+    The single knob for both parallel executors (the loop's
+    level driver and DAGExecutor): AIDON_PARALLEL_WORKERS in
+    .env, the settings page, and .env.example. An invalid
+    value falls back to 3, never to 0 or negative, so a typo
+    cannot serialize or crash a run.
+    """
+    if max_workers is not None:
+        try:
+            return max(1, int(max_workers))
+        except (TypeError, ValueError):
+            pass
+    try:
+        import os
+        return max(1, int(os.environ.get("AIDON_PARALLEL_WORKERS", "3") or "3"))
+    except ValueError:
+        return 3
+
+
 class DAGExecutor:
     """Run a DAG's nodes in order, checkpointing each completion."""
 
@@ -174,17 +195,19 @@ class DAGExecutor:
             "failed": failed,
         }
 
-    def execute_parallel(self, max_workers: int = 3) -> dict:
+    def execute_parallel(self, max_workers: int | None = None) -> dict:
         """Run a DAG level by level, nodes in one level concurrently.
 
         Levels come from compute_levels: a level runs only after
         every earlier level finished, so a node never runs before
         its dependencies, and independent nodes share a level and
-        run together. A failure in a level stops the run — later
-        levels never start — while completed nodes and their
-        checkpoints are preserved, exactly like the sequential
-        execute(). Checkpoints are written under a lock, so
-        concurrent completions cannot interleave.
+        run together. Workers resolve via resolve_parallel_workers
+        (explicit arg, else AIDON_PARALLEL_WORKERS, else 3). A
+        failure in a level stops the run — later levels never
+        start — while completed nodes and their checkpoints are
+        preserved, exactly like the sequential execute().
+        Checkpoints are written under a lock, so concurrent
+        completions cannot interleave.
         """
         import threading
         from concurrent.futures import ThreadPoolExecutor
@@ -203,7 +226,7 @@ class DAGExecutor:
             return {"status": "failed", "results": results, "completed": completed,
                     "failed": {"__schedule__": str(exc)}}
         by_id = dict(self.dag.nodes)
-        workers = max(1, int(max_workers))
+        workers = resolve_parallel_workers(max_workers)
 
         def _run(node_id):
             try:
