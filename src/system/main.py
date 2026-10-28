@@ -421,8 +421,9 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         if gate is None:
             return False, "no approval gate configured"
         try:
+            from ..interface.phrasing import approval_lead_in
             decision = gate.ask(
-                kind, title, body,
+                kind, title, f"{approval_lead_in()}\n\n{body}",
                 action_class=action_class,
                 force_ask=force_ask,
             )
@@ -1989,6 +1990,37 @@ def main(argv: list[str] | None = None) -> int:
                     return [f"{x.get('title', '')}: {x.get('snippet', '')}" for x in _r.get("results", [])]
                 except Exception:
                     return []
+            # Slack/WhatsApp runs have no WebUI waiter callback in the
+            # payload, so build one: send the question straight to the
+            # surface (not via the reply list, which is only flushed
+            # after the run ends), then block in the shared waiter
+            # until the owner's next message in that channel arrives
+            # as the answer. Without a channel/sender key there is no
+            # waiter, and ask_user says so honestly.
+            _question_callback = None
+            _qkey = ""
+            if event.source == "slack":
+                _qkey = "slack:" + str(event.payload.get("channel", ""))
+            elif event.source == "whatsapp":
+                _qkey = "whatsapp:" + str(event.payload.get("from", ""))
+            if _qkey and not _qkey.endswith(":"):
+                def _question_callback(question, _key=_qkey):
+                    if event.source == "slack" and slack_sender is not None:
+                        try:
+                            slack_sender(
+                                str(event.payload.get("channel", "")),
+                                str(question),
+                                event.payload.get("thread_ts"))
+                        except Exception:
+                            pass
+                    elif event.source == "whatsapp" and whatsapp_sender is not None:
+                        try:
+                            whatsapp_sender(
+                                str(event.payload.get("from", "")),
+                                str(question))
+                        except Exception:
+                            pass
+                    return server.ask_question(run_id, _key, question)
             runner = GoalRunner(client, run_sandbox, _gate,
                                 config.home, memory=memory,
                                 project_id=event.project_id, plugins=plugins,
@@ -1998,7 +2030,7 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback")), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"))
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"))
             def _surface_reply(text):
                 # The WebUI already displays and polls the run ID. Keep the
                 # ID in Slack/WhatsApp replies where it is needed for
@@ -2033,14 +2065,11 @@ def main(argv: list[str] | None = None) -> int:
             run_control.set_status(run_id, report.status)
             if report.status == "chat":
                 _surface_reply((report.chat_reply or "Received.") + "\n" + format_run_stats(report))
-            elif report.status == "done":
-                _surface_reply(f"Done: {', '.join(report.files)}\n{format_run_stats(report)}")
-            elif report.status == "rejected":
-                _surface_reply("Rejected, no live action taken.\n" + format_run_stats(report))
-            elif report.status == "cancelled":
-                _surface_reply("Cancelled, no further steps run.\n" + format_run_stats(report))
             else:
-                _surface_reply(f"Failed: {report.error}\n{format_run_stats(report)}")
+                from ..interface.phrasing import report_text as _report_text
+                _surface_reply(_report_text(
+                    report.status, report.files, report.error, run_id,
+                    format_run_stats(report)))
 
         dispatcher.register("webui", _goal_handler)
         dispatcher.register("whatsapp", _goal_handler)

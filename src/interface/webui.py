@@ -343,8 +343,10 @@ async function sendMessage(message) {
   const p = document.createElement('p');
   document.getElementById('messages').appendChild(p);
   await typewriterKaraoke(p, reply);
-  if (reply.includes('Done:')) { setAvatarStatus('Done'); }
-  else if (reply.includes('Failed:')) { setAvatarStatus('Failed'); }
+  const doneOpeners = ["Done:", "All done:", "Finished:", "That's done:", "Wrapped up:", "There we go:"];
+  const failedOpeners = ["That run failed:", "It didn't get there:", "Something went wrong:", "That one didn't make it:"];
+  if (doneOpeners.some(s => reply.includes(s))) { setAvatarStatus('Done'); }
+  else if (failedOpeners.some(s => reply.includes(s))) { setAvatarStatus('Failed'); }
   else { setAvatarStatus('Idle'); }
   speak(reply);
 }
@@ -1341,6 +1343,19 @@ class WebUIServer:
                             decision_reply = self._resolve_preapproval(text)
                         if decision_reply is None:
                             decision_reply = self._resolve_memory_command(text)
+                        # An answer to a waiting question is not a new
+                        # goal: deliver it to the waiter, ack in natural
+                        # language, and skip dispatching a new run.
+                        if decision_reply is None:
+                            answered = self.answer_question(
+                                "whatsapp:" + str(sender), text)
+                            if answered is not None:
+                                from .phrasing import question_ack as _qack
+                                ack = _qack()
+                                replies.append(ack)
+                                if self.whatsapp_sender is not None:
+                                    self.whatsapp_sender(sender, ack)
+                                continue
                         if decision_reply is None:
                             text, force_web = self._force_web_prefix(text)
                             if not text:
@@ -1402,6 +1417,15 @@ class WebUIServer:
                 text, force_web = self._force_web_prefix(text)
                 if not text:
                     decision_reply = "Usage: /web <question>"
+            if decision_reply is None:
+                # An answer to a waiting question is not a new goal.
+                answered = self.answer_question("slack:" + channel, text)
+                if answered is not None:
+                    from .phrasing import question_ack as _qack
+                    ack = _qack()
+                    if self.slack_sender is not None:
+                        self.slack_sender(channel, ack, thread_ts)
+                    return 200, {"replies": [ack]}
             if decision_reply is not None:
                 if self.slack_sender is not None:
                     self.slack_sender(channel, decision_reply, thread_ts)
@@ -1459,6 +1483,8 @@ class WebUIServer:
                     except Exception:
                         continue
             payload["force_web"] = force_web
+            payload["channel"] = channel
+            payload["thread_ts"] = thread_ts
             event = TriggerEvent(source="slack", kind="message", goal=text,
                                  payload=payload,
                                  reply=replies.append)

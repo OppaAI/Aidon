@@ -490,6 +490,10 @@ class GoalRunner:
   
     def _ask_for_approval(self, kind: str, title: str, body: str, **kwargs) -> Decision:
         """Ask the owner while excluding human wait from active elapsed time."""
+        # Natural framing, varied per approval; the title and body keep
+        # their exact content, so the owner still sees what is asked.
+        from ..interface.phrasing import approval_lead_in
+        body = f"{approval_lead_in()}\n\n{body}"
         timer = getattr(self, "_elapsed_timer", None)
         if timer is None:
             return self.gate.ask(kind, title, body, **kwargs)
