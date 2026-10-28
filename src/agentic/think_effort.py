@@ -129,11 +129,14 @@ def sampling_for(phase: str, *, escalate: bool = False,
         result["think"] = think_max or level != "off"
     if think_max:
         # The model's own maximum: Meta's chat completions accept
-        # reasoning_effort up to "xhigh" (its ladder tops above
-        # Aidon's "high"); backends that do not know the field ignore
-        # it, like the think hint above.
+        # reasoning_effort up to "max" for muse-spark-1.3 standard
+        # (the API schema and Reasoning guide both list it; the
+        # feature page omits it). The Contributor variant does NOT
+        # support "max" and tops at "xhigh" — the HTTP client
+        # downgrades there. Backends that do not know the field
+        # ignore it, like the think hint above.
         result["think"] = True
-        result["reasoning_effort"] = "xhigh"
+        result["reasoning_effort"] = "max"
     return result
 
 

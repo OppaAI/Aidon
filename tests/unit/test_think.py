@@ -17,14 +17,14 @@ from src.system.model_client import HttpModelClient
 
 def test_think_max_sets_model_maximum_effort():
     sample = sampling_for("plan", think_max=True)
-    assert sample["reasoning_effort"] == "xhigh"
+    assert sample["reasoning_effort"] == "max"
     assert sample["think"] is True
 
 
 def test_think_max_wins_over_env_pin(monkeypatch):
     monkeypatch.setenv("AIDON_EFFORT_PLAN", "low")
     sample = sampling_for("plan", think_max=True)
-    assert sample["reasoning_effort"] == "xhigh"
+    assert sample["reasoning_effort"] == "max"
     assert sample["think"] is True
 
 
@@ -54,10 +54,17 @@ def test_think_flag_store_round_trip(tmp_path):
 def test_http_payload_carries_reasoning_effort():
     client = HttpModelClient(api_base="http://127.0.0.1:9",
                              api_key="k", model="muse-spark")
-    payload = client._payload([], sampling={"reasoning_effort": "xhigh"})
-    assert payload["reasoning_effort"] == "xhigh"
+    payload = client._payload([], sampling={"reasoning_effort": "max"})
+    assert payload["reasoning_effort"] == "max"
     plain = client._payload([], sampling={"temperature": 0.2})
     assert "reasoning_effort" not in plain
+
+
+def test_http_payload_downgrades_max_for_contributor():
+    client = HttpModelClient(api_base="http://127.0.0.1:9",
+                             api_key="k", model="muse-spark-1.3-contributor")
+    payload = client._payload([], sampling={"reasoning_effort": "max"})
+    assert payload["reasoning_effort"] == "xhigh"
 
 
 def test_help_texts_list_think_and_all_slash_commands():

@@ -189,9 +189,14 @@ class HttpModelClient(ModelClient):
                 payload["seed"] = sampling["seed"]
             if sampling.get("reasoning_effort") is not None:
                 # Meta chat completions: "none" is rejected by Muse
-                # Spark, the ladder tops at "xhigh"; other backends
-                # ignore an unknown field, like the think hint.
-                payload["reasoning_effort"] = sampling["reasoning_effort"]
+                # Spark. "max" is the standard model's top level but
+                # is NOT supported by the Contributor variant, which
+                # tops at "xhigh" — downgrade there so a /think run
+                # on the test model does not 400.
+                effort = str(sampling["reasoning_effort"])
+                if effort == "max" and "contributor" in str(self.model).lower():
+                    effort = "xhigh"
+                payload["reasoning_effort"] = effort
         if tools:
             payload["tools"] = tools
         return payload
