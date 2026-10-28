@@ -69,7 +69,7 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
     text = str(criterion).strip()
     # Models often describe the evidence instead of naming the generated
     # file. The file-producing tool is the source of truth in this case.
-    if re.search(r"(?:pdf|document|file)\s+(?:file\s+)?created\s+inside\s+(?:the\s+)?workdir",
+    if re.search(r"(?:pdf|document|file)\s+(?:file\s+)?(?:is\s+)?created\s+inside\s+(?:the\s+)?workdir",
                  text, re.IGNORECASE):
         files = [path for path in workdir.rglob("*")
                  if path.is_file() and (path.suffix.lower() == ".pdf"
