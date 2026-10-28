@@ -99,6 +99,25 @@ def test_generated_file_path_replaces_prose_deliverable(tmp_path):
     assert report.files == ["intro.pdf"]
 
 
+def test_document_goal_does_not_accept_list_only_plan(tmp_path):
+    plan = {"steps": [{"tool": "list", "args": {},
+                        "deliverable": "workdir_listing_verification"}],
+            "deliverables": ["workdir_listing_verification"],
+            "criteria": ["PDF is created inside workdir with auto-derived filename"]}
+
+    def generate_document(title, content, format):
+        path = tmp_path / "home" / "work" / "derived.pdf"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"%PDF-1.4")
+        return str(path)
+
+    runner = _runner(tmp_path, FakeClient(json.dumps(plan)))
+    runner.extra_tools = {"generate_document": generate_document}
+    report = runner.run("Write a detailed introduction in a PDF file")
+    assert report.status == "done"
+    assert report.files == ["derived.pdf"]
+
+
 def test_loop_repair_keeps_passed_files(tmp_path):
     # First plan: good file + bad criterion (ledger total wrong).
     # Repair plan: fixes only the ledger, good file must survive untouched.

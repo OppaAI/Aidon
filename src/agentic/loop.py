@@ -1241,6 +1241,35 @@ class GoalRunner:
                 return RunReport("failed", goal, plan, False, False,
                                  error=failure_text[:500])
             plan = repaired
+        # A document goal must have a document-producing step. A model can
+        # occasionally substitute ``list`` and then claim that the listing
+        # proves a PDF exists; that can never satisfy the user's request.
+        # Use the registered deterministic document tool as a safe fallback
+        # instead of allowing a known-invalid plan to reach verification.
+        document_request = bool(re.search(
+            r"\b(?:create|write|make|generate|produce|save|put)\b.*\b(?:pdf|document)\b|"
+            r"\b(?:pdf|document)\b.*\b(?:create|write|make|generate|produce|save)\b",
+            str(goal), re.IGNORECASE | re.DOTALL))
+        has_document_step = any(
+            str(step.tool).lower() in {"generate_document", "write_file"}
+            for step in plan.normalized_steps())
+        if document_request and not has_document_step:
+            if "generate_document" not in self.extra_tools:
+                return RunReport(
+                    "failed", goal, plan, False, False,
+                    error="document request cannot run: generate_document tool is unavailable")
+            plan = Plan(
+                steps=[Step(
+                    tool="generate_document",
+                    args={"title": "Aidon document", "content": goal,
+                          "format": "pdf"},
+                    deliverable="generated_document.pdf",
+                    criteria="PDF file is created inside workdir")],
+                deliverables=["generated_document.pdf"],
+                criteria=["PDF file is created inside workdir",
+                          "Output message provides link to the PDF"])
+            self._trace("plan", "repaired",
+                        "replaced list-only document plan with generate_document")
         # Plan guard, cycle check only: loop steps carry no ids,
         # so the full guard (which requires ids and args) is a
         # CLI/file check, but a depends_on cycle in a raw dict
