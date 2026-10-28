@@ -128,6 +128,7 @@ class Config:
     whatsapp_owner: str = ""
     slack_bot_token: str = ""
     slack_signing_secret: str = ""
+    slack_outbound_channel: str = ""
     # Old capability keys, only, no new duplicates.
     search_backend: str = "tavily"
     searxng_url: str = "http://localhost:8888"
@@ -233,6 +234,9 @@ class Config:
             whatsapp_owner=os.environ.get("AIDON_WHATSAPP_OWNER", ""),
             slack_bot_token=os.environ.get("SLACK_BOT_TOKEN", ""),
             slack_signing_secret=os.environ.get("AIDON_SLACK_SIGNING_SECRET", ""),
+            slack_outbound_channel=os.environ.get(
+                "AIDON_SLACK_OUTBOUND_CHANNEL",
+                os.environ.get("AIDON_SLACK_INBOUND_CHANNEL", "").split(",")[0].strip()),
             search_backend=os.environ.get("AIDON_SEARCH_BACKEND", "tavily"),
             searxng_url=os.environ.get("AIDON_SEARXNG_URL", "http://localhost:8888"),
             tavily_api_key=os.environ.get("TAVILY_API_KEY", ""),

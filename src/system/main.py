@@ -1635,6 +1635,8 @@ def main(argv: list[str] | None = None) -> int:
         msg.whatsapp_owner = config.whatsapp_owner or msg.whatsapp_owner
         msg.slack_bot_token = config.slack_bot_token or msg.slack_bot_token
         msg.slack_signing_secret = config.slack_signing_secret or msg.slack_signing_secret
+        msg.slack_outbound_channel = (config.slack_outbound_channel
+                                      or msg.slack_outbound_channel)
         dispatcher = TriggerDispatcher()
         # Goal handler, wired here, not echo: WebUI chat,
         # WhatsApp, and Slack all run the same GoalRunner,
@@ -1646,11 +1648,13 @@ def main(argv: list[str] | None = None) -> int:
             result = send_whatsapp(msg, to, text)
             if not result["ok"]:
                 print(f"WhatsApp send failed: {result['error']}")
+            return result
 
         def slack_sender(channel: str, text: str, thread_ts=None):
             result = send_slack(msg, channel, text, thread_ts=thread_ts)
             if not result["ok"]:
                 print(f"Slack send failed: {result['error']}")
+            return result
 
         from ..interface.messaging import download_whatsapp_media
         from ..interface.run_control import RunControl
@@ -1742,8 +1746,26 @@ def main(argv: list[str] | None = None) -> int:
                 # The WebUI already displays and polls the run ID. Keep the
                 # ID in Slack/WhatsApp replies where it is needed for
                 # cross-surface control commands, but do not show it in chat.
-                event.send_reply(str(text) if event.source == "webui"
-                                 else f"[{run_id}] {text}")
+                rendered = str(text) if event.source == "webui" \
+                    else f"[{run_id}] {text}"
+                event.send_reply(rendered)
+                delivery = event.payload.get("result_delivery") or {}
+                channel = str(delivery.get("channel", "")).lower()
+                if not channel or event.source != "webui":
+                    return
+                if channel == "whatsapp":
+                    recipient = msg.whatsapp_owner
+                    result = whatsapp_sender(recipient, rendered) if recipient else {
+                        "ok": False, "error": "AIDON_WHATSAPP_OWNER is not configured"}
+                elif channel == "slack":
+                    recipient = msg.slack_outbound_channel
+                    result = slack_sender(recipient, rendered) if recipient else {
+                        "ok": False, "error": "AIDON_SLACK_OUTBOUND_CHANNEL is not configured"}
+                else:
+                    result = {"ok": False, "error": "unsupported result channel"}
+                if not result.get("ok"):
+                    event.send_reply(f"Result delivery to {channel} failed: "
+                                     f"{result.get('error', 'unknown error')}")
             # Swarm, Aidon decides: if the goal genuinely splits,
             # run the subgoals in parallel and merge, else single run.
             try:

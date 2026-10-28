@@ -112,6 +112,7 @@ class MessagingConfig:
     whatsapp_owner: str = ""
     slack_bot_token: str = ""
     slack_signing_secret: str = ""
+    slack_outbound_channel: str = ""
     # Slack Incoming Webhook URLs are destination-specific. Keys are Slack
     # conversation IDs (C..., D..., or G...), values are secret URLs.
     slack_webhooks: dict[str, str] | None = None
@@ -142,6 +143,8 @@ class MessagingConfig:
             whatsapp_owner=get("AIDON_WHATSAPP_OWNER"),
             slack_bot_token=get("SLACK_BOT_TOKEN"),
             slack_signing_secret=get("AIDON_SLACK_SIGNING_SECRET"),
+            slack_outbound_channel=get("AIDON_SLACK_OUTBOUND_CHANNEL",
+                                       "AIDON_SLACK_INBOUND_CHANNEL").split(",")[0].strip(),
             slack_webhooks=webhooks,
         )
 

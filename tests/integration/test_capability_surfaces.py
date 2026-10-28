@@ -60,7 +60,7 @@ def test_webui_tabs_and_cli_commands():
     main_text = (Path(__file__).resolve().parents[2] / "src" / "system" / "main.py").read_text()
     for cmd in ['"memory"', '"skills"', '"tools"', '"dag"', '"mission"', '"outbox"', '"export"', '"schedule"', '"sandbox"', '"chain"', '"chat"', '"computer"']:
         assert cmd in main_text, cmd
-    roadmap = (Path(__file__).resolve().parents[2] / "ROADMAP.md").read_text()
+    roadmap = (Path(__file__).resolve().parents[2] / "docs" / "ROADMAP.md").read_text()
     assert "Screenshot" in roadmap and "Computer use" in roadmap
     # Fly brain is still last entry
     assert roadmap.rstrip().endswith("turning into a bug.")

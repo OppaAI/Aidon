@@ -423,5 +423,5 @@ collection.
 - Post-hackathon, not built, not demoed: VM backend,
   Unity factory, procedural 3D assets, local server
   manager, stronger sandbox, dedicated live toolset,
-  and SAM 3.1 segmentation, see ROADMAP.md.
+  and SAM 3.1 segmentation, see [ROADMAP.md](ROADMAP.md).
 

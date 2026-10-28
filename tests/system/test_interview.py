@@ -159,7 +159,7 @@ def test_example_spec_sheet_parses_and_reconciles(tmp_path):
     # from the local workdir, not from a test fixture.
     import pathlib
     repo = pathlib.Path(__file__).resolve().parents[2]
-    text = (repo / "examples" / "SPEC-SHEET-EXAMPLE.md").read_text()
+    text = (repo / "docs" / "examples" / "SPEC-SHEET-EXAMPLE.md").read_text()
     parsed = parse_spec_sheet(text)
     assert parsed.verify()[0] is True
     assert "October 2026" in parsed.goal
@@ -176,7 +176,7 @@ def test_example_spec_sheet_parses_and_reconciles(tmp_path):
 def test_template_has_no_amounts_or_example_constraints(tmp_path):
     import pathlib
     repo = pathlib.Path(__file__).resolve().parents[2]
-    text = (repo / "examples" / "SPEC-SHEET-TEMPLATE.md").read_text()
+    text = (repo / "docs" / "examples" / "SPEC-SHEET-TEMPLATE.md").read_text()
     assert "$100" not in text
     assert "no milk" not in text.lower()
     assert "no eggs" not in text.lower()

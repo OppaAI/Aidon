@@ -2,8 +2,8 @@
 
 How to use this sheet: fill it in, save it, and attach it in the chat box.
 Aidon reads it, verifies it, and skips the interview.
-Template: specs/template.md in your Aidon home, and examples/SPEC-SHEET-TEMPLATE.md in the repo.
-Example: examples/SPEC-SHEET-EXAMPLE.md in the repo.
+Template: specs/template.md in your Aidon home, and docs/examples/SPEC-SHEET-TEMPLATE.md in the repo.
+Example: docs/examples/SPEC-SHEET-EXAMPLE.md in the repo.
 Docs: README, Spec sheet section.
 
 ## Goal

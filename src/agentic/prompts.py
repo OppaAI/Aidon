@@ -46,12 +46,14 @@ SYSTEM_LINE = ("You are Aidon, an autonomous agent that learns from the web"
 
 
 def _read_doc(name: str) -> str:
-    """Read a repo-root doc when present, '' when absent."""
-    candidates = [os.path.join(os.getcwd(), name)]
+    """Read a repository doc when present, '' when absent."""
+    candidates = [os.path.join(os.getcwd(), name),
+                  os.path.join(os.getcwd(), "docs", name)]
     try:
         repo_root = os.path.dirname(os.path.dirname(
             os.path.dirname(os.path.abspath(__file__))))
-        candidates.append(os.path.join(repo_root, name))
+        candidates.extend((os.path.join(repo_root, name),
+                           os.path.join(repo_root, "docs", name)))
     except Exception:
         pass
     for path in candidates:

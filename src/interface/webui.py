@@ -71,6 +71,7 @@ from urllib.parse import parse_qs, urlparse
 from .approval import ApprovalGate, Decision
 from .messaging import (MessagingConfig, normalize_number, parse_decision,
                         verify_whatsapp_signature)
+from .result_delivery import extract_result_delivery
 from .triggers import TriggerDispatcher, TriggerEvent
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -929,10 +930,13 @@ class WebUIServer:
         preapproval_reply = self._resolve_preapproval(message)
         if preapproval_reply is not None:
             return {"reply": preapproval_reply}
+        message, delivery = extract_result_delivery(message)
         project_id = str(body.get("project_id", "default"))
         replies: list[str] = []
         event = TriggerEvent(source="webui", kind="chat", goal=message,
-                             project_id=project_id, reply=replies.append)
+                             project_id=project_id,
+                             payload={"result_delivery": delivery.__dict__}
+                             if delivery else {}, reply=replies.append)
         try:
             self.dispatcher.dispatch(event)
         except Exception as exc:
@@ -945,6 +949,7 @@ class WebUIServer:
         goal = str(body.get("goal", "")).strip()
         if not goal:
             return {"error": "goal is required"}
+        goal, delivery = extract_result_delivery(goal)
         project_id = str(body.get("project_id", "default") or "default")
         run_id = new_run_id()
         if self.run_control is not None:
@@ -959,7 +964,9 @@ class WebUIServer:
         event = TriggerEvent(source="webui", kind="goal", goal=goal,
                              project_id=project_id,
                              payload={"run_id": run_id,
-                                      "guidance": str(body.get("guidance", ""))},
+                                      "guidance": str(body.get("guidance", "")),
+                                      "result_delivery": delivery.__dict__
+                                      if delivery else {}},
                              reply=reply)
 
         def dispatch():
