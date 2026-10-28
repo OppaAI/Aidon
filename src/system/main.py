@@ -157,13 +157,19 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         pass
     try:
         from ..capabilities.docgen import build_ebook, generate_document, write_document_file
-        def _generate_document(title, sections, filename="", path="",
+        def _generate_document(title="Aidon document", sections=None,
+                               content="", body="", filename="", path="",
                                input_path="", output="", output_path="",
-                               format=""):
+                               format="", **kwargs):
             # Models have historically called the destination ``path`` or
             # requested ``format`` explicitly. Accept those aliases so a
             # valid document plan is not rejected by a naming mismatch.
             destination = str(filename or path or input_path or output or output_path or "")
+            if sections is None:
+                raw = content or body or kwargs.get("text", "")
+                sections = [{"heading": "", "body": str(raw)}]
+            elif isinstance(sections, str):
+                sections = [{"heading": "", "body": sections}]
             if destination:
                 if format and "." not in Path(destination).name:
                     destination += "." + str(format).lstrip(".")

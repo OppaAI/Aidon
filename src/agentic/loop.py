@@ -376,7 +376,7 @@ class GoalRunner:
         if store is None:
             return
         try:
-            from .checkpoint import RunCheckpoint, plan_fingerprint
+            from .checkpoint import RunCheckpoint, plan_fingerprint, plan_to_dict
             store.save(RunCheckpoint(
                 run_id=str(self.run_id),
                 goal=goal,
@@ -665,6 +665,14 @@ class GoalRunner:
                 import shlex
                 args["command"] = shlex.split(args["command"])
         try:
+            if name == "shell" and isinstance(args, dict):
+                command_text = " ".join(str(x) for x in
+                                        (args.get("command") or []))
+                if ("fpdf" in command_text.lower() and
+                        "generate_document" in self.extra_tools):
+                    raise ValueError(
+                        "Do not use shell/fpdf for PDF output; use the "
+                        "available generate_document tool instead")
             return self.tools.call(name, args)
         except ValueError as exc:
             if str(exc).startswith("unknown tool:") and self.plugins is not None:
@@ -741,6 +749,19 @@ class GoalRunner:
                            "typing into it, use computer_use with validated "
                            "click/type/key actions; do not substitute a "
                            "file-only plan.")
+            if "generate_document" in self.extra_tools:
+                system += (" For PDF or document requests, call "
+                            "generate_document directly. Do not use shell "
+                            "to import fpdf, reportlab, or install a PDF "
+                            "library; the document tool already writes the "
+                            "requested output file.")
+            if "install_python_package" in self.extra_tools:
+                system += (" If a genuinely required optional Python package "
+                           "is unavailable and no built-in capability can "
+                           "do the job, use install_python_package in an "
+                           "isolated mission venv. Never install packages "
+                           "through shell, pip, or sudo; installation is "
+                           "approval-gated.")
         user = goal
         # Recall both prior experiences and ingested knowledge.
         # before planning. Keep the block bounded so memory cannot crowd
