@@ -385,8 +385,29 @@ class SQLiteStore(InMemoryStore):
     def search(self, collection: str, vector: list[float], query_text: str,
                limit: int = 5,
                sparse: tuple[list[int], list[float]] | None = None) -> list[Hit]:
-        return InMemoryStore.search(self, collection, vector, query_text,
-                                    limit, sparse)
+        # Do NOT delegate to InMemoryStore.search: it ranks over
+        # self._data, which SQLiteStore never builds (its __init__
+        # opens SQLite instead). Rank over this store's own rows
+        # with the same dense+sparse + RRF algorithm.
+        if limit <= 0:
+            return []
+        points = self._rows(collection)
+        dense_ranked = sorted(
+            points, key=lambda p: _cosine(vector, p.vector), reverse=True)
+        query_sparse = dict(zip(sparse[0], sparse[1])) if sparse else {}
+        if not query_sparse:
+            query_sparse = dict(zip(*_sparse_from_text(query_text)))
+
+        def sparse_score(point: Point) -> float:
+            point_sparse = dict(zip(point.sparse[0], point.sparse[1])) \
+                if point.sparse and point.sparse[0] else \
+                dict(zip(*_sparse_from_text(point.text)))
+            return sum(min(query_sparse.get(i, 0.0), w)
+                       for i, w in point_sparse.items())
+
+        sparse_ranked = sorted(points, key=sparse_score, reverse=True)
+        over = max(limit * 2, 4)
+        return _rrf(dense_ranked[:over], sparse_ranked[:over], limit)
 
 
 def _sparse_from_text(text: str):

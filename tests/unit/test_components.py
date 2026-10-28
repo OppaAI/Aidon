@@ -783,7 +783,7 @@ def test_prompts_builders_and_blocks():
     digest = build_digest_prompt(manual="## Capability ladder\nladder\n## Hard rules\nrules\n", user_text="")
     assert "Capability ladder" in digest and "Hard rules" in digest
     minimal = build_minimal_prompt("research", user_text="")
-    assert "research phase" in minimal and "Current time:" in minimal
+    assert "research phase" in minimal and "Current local time:" in minimal
     assert guidance_block("") == ""
     assert "binding" in guidance_block("stay under budget")
     assert context_block("dinner for two").startswith("Context:")

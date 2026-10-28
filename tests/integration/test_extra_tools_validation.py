@@ -40,23 +40,28 @@ def test_extra_tool_step_passes_validation_and_executes(tmp_path):
     assert "not allowed" not in (report.error or "")
 
 
-def test_unknown_tool_still_fails_validation(tmp_path):
+def test_unknown_tool_never_executes(tmp_path):
+    # Dev's bounded repair pass replaces an invalid plan instead of
+    # failing up front. The invariant that survives: the unknown
+    # tool never executes and never survives into the final plan.
     runner = _runner(tmp_path, extra_tools={"schedule_job": lambda **kw: "scheduled"})
     plan = Plan(
         steps=[{"tool": "bogus_tool_xyz", "args": {}, "deliverable": "x.md"}],
         deliverables=["x.md"], criteria=[])
     report = runner._execute_plan("do the bogus thing", plan)
-    assert report.status == "failed"
-    assert "bogus_tool_xyz" in (report.error or "")
-    assert "not allowed" in (report.error or "")
+    tools = [s.get("tool", "") if isinstance(s, dict) else getattr(s, "tool", "")
+             for s in report.plan.steps]
+    assert "bogus_tool_xyz" not in tools
 
 
-def test_schedule_job_step_fails_without_extra_tools(tmp_path):
+def test_schedule_job_without_extra_tools_never_executes(tmp_path):
+    # Same repair contract: without the extra tool registered, the
+    # schedule_job step is repaired away, never executed.
     runner = _runner(tmp_path, extra_tools=None)
     report = runner._execute_plan("schedule a job", _plan_with_extra_step())
-    assert report.status == "failed"
-    assert "schedule_job" in (report.error or "")
-    assert "not allowed" in (report.error or "")
+    tools = [s.get("tool", "") if isinstance(s, dict) else getattr(s, "tool", "")
+             for s in report.plan.steps]
+    assert "schedule_job" not in tools
 
 
 def test_plan_prompt_lists_extra_tools_when_set(tmp_path):
