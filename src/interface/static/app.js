@@ -19,6 +19,17 @@
   const statusDot = document.getElementById("status-dot");
   const statusText = document.getElementById("status-text");
 
+  // Bind the primary action immediately.  The rest of this file wires
+  // optional camera/voice/history features; a failure in one of those must
+  // never make the main send control inert.
+  if (sendBtn) {
+    sendBtn.disabled = false;
+    sendBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (window.aidonStartRun) window.aidonStartRun();
+    });
+  }
+
   function scrollThreadToLatest() {
     if (!thread) return;
     // The composer and streamed markdown can change layout after the first
@@ -1524,6 +1535,14 @@
     pollTimer = setInterval(poll, 2000);
     poll();
   }
+  // Also expose the primary action for the markup fallback and diagnostics.
+  window.aidonStartRun = (...args) => {
+    if (window.aidonSendInProgress) return;
+    window.aidonSendInProgress = true;
+    return Promise.resolve(startRun(...args)).finally(() => {
+      window.aidonSendInProgress = false;
+    });
+  };
 
   async function sendSteer() {
     const text = steerInput.value.trim();
@@ -1569,7 +1588,6 @@
     cancelBtn.disabled = false;
   }
 
-  sendBtn.addEventListener("click", startRun);
   const webBtn = document.getElementById("web-btn");
   if (webBtn) webBtn.addEventListener("click", () => {
     const active = webBtn.classList.toggle("active");
