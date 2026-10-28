@@ -18,6 +18,11 @@ urllib, and the API error, never the key, is returned.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
+import tempfile
+import uuid
 import urllib.request
 import urllib.error
 
@@ -79,10 +84,56 @@ def transcribe(audio_bytes: bytes, transcribe_key: str, post=None,
         if post is not None:
             result = post("https://api.meta.ai/v1/asr/transcribe", transcribe_key, audio_bytes)
             return {"ok": True, "text": result.get("text", "") if isinstance(result, dict) else str(result)}
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            return {"ok": False,
+                    "error": "ffmpeg is required to convert browser audio to mono 24 kHz WAV",
+                    "text": ""}
+        suffix = ".wav" if (content_type or "").lower().startswith("audio/wav") else ".webm"
+        with tempfile.TemporaryDirectory(prefix="aidon-asr-") as work:
+            source = os.path.join(work, "input" + suffix)
+            target = os.path.join(work, "audio.wav")
+            with open(source, "wb") as handle:
+                handle.write(audio_bytes)
+            converted = subprocess.run(
+                [ffmpeg, "-v", "error", "-y", "-i", source,
+                 "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le",
+                 "-map_metadata", "-1", target],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+                check=False,
+            )
+            if converted.returncode != 0 or not os.path.isfile(target):
+                detail = converted.stderr.decode("utf-8", "replace")[-300:].strip()
+                return {"ok": False, "error": "audio conversion failed" + (f": {detail}" if detail else ""), "text": ""}
+            with open(target, "rb") as handle:
+                wav = handle.read()
+        boundary = "----AidonASR" + uuid.uuid4().hex
+        request_json = json.dumps({
+            "model": "muse-voice-transcribe-1.0",
+            "audioEncoding": "WAV",
+            "mode": "PUSH_TO_TALK",
+        })
+        chunks = []
+        def field(name, value, mime):
+            chunks.extend([
+                f"--{boundary}\r\n".encode(),
+                f'Content-Disposition: form-data; name="{name}"\r\n'.encode(),
+                f"Content-Type: {mime}\r\n\r\n".encode(),
+                value if isinstance(value, bytes) else value.encode(),
+                b"\r\n",
+            ])
+        field("request", request_json, "application/json")
+        chunks.extend([
+            f"--{boundary}\r\n".encode(),
+            b'Content-Disposition: form-data; name="audio"; filename="recording.wav"\r\n',
+            b"Content-Type: audio/wav\r\n\r\n", wav, b"\r\n",
+            f"--{boundary}--\r\n".encode(),
+        ])
         request = urllib.request.Request(
-            "https://api.meta.ai/v1/asr/transcribe", data=audio_bytes, method="POST",
+            "https://api.meta.ai/v1/asr/transcribe", data=b"".join(chunks), method="POST",
             headers={"Authorization": f"Bearer {transcribe_key}",
-                     "Content-Type": content_type or "audio/wav"})
+                     "Accept": "application/json",
+                     "Content-Type": f"multipart/form-data; boundary={boundary}"})
         with urllib.request.urlopen(request, timeout=60) as response:
             result = json.loads(response.read())
             return {"ok": True, "text": result.get("text", "")}
