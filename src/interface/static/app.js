@@ -1212,8 +1212,8 @@
     if (state === "no-device") cameraUnavailable("No webcam detected");
   });
 
-  async function startRun() {
-    const goal = input.value.trim();
+  async function startRun(goalOverride = "") {
+    const goal = (goalOverride || input.value).trim();
     if (!goal || sendBtn.disabled) return;
     const previousRun = currentRun;
     const guidance = guidanceInput.value.trim();
@@ -1506,11 +1506,9 @@
         if (!r.ok) throw new Error(data.error || data.detail || ("HTTP " + r.status));
         const transcript = data.text || data.transcript || "";
         if (transcript) {
-          input.value = (input.value ? input.value + " " : "") + transcript;
-          input.focus();
-          // Voice input is a complete goal: send it immediately after
-          // transcription instead of requiring a second click.
-          setTimeout(() => startRun(), 300);
+          // Voice input is a complete goal: send it directly. It is
+          // rendered in the user chat bubble, not copied into the composer.
+          startRun(transcript);
         } else {
           showMiddleStatus(data.error || data.detail || "Transcription failed", "error");
         }

@@ -1953,6 +1953,25 @@ class WebUIServer:
             data = self._read_json_file(path)
             if data is not None and data.get("id") not in seen:
                 records.append(data)
+        # Session names come from the first user interaction. Keep this
+        # derived rather than asking the model for a title, so naming is
+        # immediate, deterministic, and survives restarts.
+        for record in records:
+            if record.get("title") and record.get("exchange_count"):
+                continue
+            try:
+                turns = self.handle_conversation_get(str(record.get("id", ""))) or {}
+                turns = turns.get("turns", [])
+                first_user = next((str(turn.get("text", "")).strip()
+                                   for turn in turns
+                                   if isinstance(turn, dict) and turn.get("role") == "user"), "")
+                if first_user:
+                    title = " ".join(first_user.split())
+                    record["title"] = title[:72] + ("…" if len(title) > 72 else "")
+                    record["exchange_count"] = len(turns)
+                    record["updated_at"] = turns[-1].get("created_at", "") if turns else ""
+            except Exception:
+                pass
         return {"conversations": records}
 
     def handle_conversation_create(self, body: dict) -> dict:
