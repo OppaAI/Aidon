@@ -21,7 +21,12 @@ An Experience contains, in one record:
 Build rule: Aidon builds an Experience after the FIRST
 successful run, and after every successful run after that.
 A failed or rejected run does not become an Experience,
-because it did not prove a workflow that works.
+because it did not prove a workflow that works. A failed
+run becomes a FailedExample instead: a negative lesson in
+the same collection, recalled at plan time so a similar
+goal does not replay the failed approach. Rejected and
+cancelled runs are not recorded — a human rejection or an
+interruption is not evidence the approach was wrong.
 
 Use rule: on a new goal, recall Experiences by goal
 similarity first, before planning fresh. If a recalled
@@ -187,6 +192,12 @@ def recall_experiences(memory: Memory, goal: str,
     shape = goal_shape_for(goal)
     scored = []
     for hit in hits:
+        # FailedExample points share this collection, but they
+        # are negative lessons, not reusable workflows: they
+        # must never occupy a success-recall slot or reach
+        # the adapt path, which expects proven dag_nodes.
+        if (hit.point.payload or {}).get("kind") == "failed_example":
+            continue
         exp = Experience.from_point(hit.point)
         # Re-rank: vector score plus shape overlap, so a
         # workflow with the same constraints beats a workflow
@@ -194,3 +205,93 @@ def recall_experiences(memory: Memory, goal: str,
         scored.append((hit.score + _shape_overlap(exp.goal_shape, shape), exp))
     scored.sort(key=lambda kv: kv[0], reverse=True)
     return [exp for _, exp in scored[:limit]]
+
+
+# --- Failed examples: negative lessons, same collection ---
+
+# Same threshold as the adapt path: below this shape overlap
+# a failure is about a different task, not this goal.
+_FAILURE_SHAPE_MIN = 0.3
+
+
+@dataclass
+class FailedExample:
+    goal: str
+    goal_shape: str
+    error: str = ""
+    failed_tools: list[str] = field(default_factory=list)
+    failed_deliverables: list[str] = field(default_factory=list)
+    lesson: str = ""
+
+    def to_text(self) -> str:
+        return (f"Failed goal: {self.goal}\nShape: {self.goal_shape}\n"
+                f"Error: {self.error}\nLesson: {self.lesson}")
+
+    def to_payload(self) -> dict:
+        return {
+            "goal": self.goal,
+            "goal_shape": self.goal_shape,
+            "dag_nodes": "[]",
+            "tools_used": list(self.failed_tools),
+            "skills_used": [],
+            "outcome": f"failed: {self.error}",
+            "lesson": self.lesson,
+            "failed_deliverables": list(self.failed_deliverables),
+            "kind": "failed_example",
+        }
+
+
+def record_failure(memory: Memory, goal: str, error: str = "",
+                   failed_tools: list[str] | None = None,
+                   failed_deliverables: list[str] | None = None) -> Point:
+    """Record a failed run as a negative lesson, no model call.
+
+    The lesson is deterministic text built from the error,
+    the tools used, and the deliverables never produced, so
+    a future planner can see exactly what not to repeat.
+    """
+    tools = [t for t in dict.fromkeys(failed_tools or [])]
+    deliverables = [d for d in dict.fromkeys(failed_deliverables or [])]
+    err = (error or "")[:500]
+    lesson = (f"Failed: {err or 'unknown error'}. "
+              f"Failed tools: {', '.join(tools) or 'none'}. "
+              f"Failed deliverables: {', '.join(deliverables) or 'none'}. "
+              f"Do not repeat this approach for a similar goal.")
+    example = FailedExample(
+        goal=goal, goal_shape=goal_shape_for(goal), error=err,
+        failed_tools=tools, failed_deliverables=deliverables, lesson=lesson)
+    return memory.record("experience", example.to_text(), example.to_payload())
+
+
+def recall_failures(memory: Memory, goal: str,
+                    limit: int = 3) -> list[FailedExample]:
+    """Recall negative lessons for a goal, best shape match first."""
+    hits = memory.recall("experience", goal, limit=limit, graph=False)
+    shape = goal_shape_for(goal)
+    scored = []
+    for hit in hits:
+        payload = hit.point.payload or {}
+        if payload.get("kind") != "failed_example":
+            continue
+        example = FailedExample(
+            goal=payload.get("goal", hit.point.text),
+            goal_shape=payload.get("goal_shape", ""),
+            error=payload.get("outcome", "").removeprefix("failed: "),
+            failed_tools=payload.get("tools_used", []),
+            failed_deliverables=payload.get("failed_deliverables", []),
+            lesson=payload.get("lesson", ""))
+        scored.append((_shape_overlap(example.goal_shape, shape), example))
+    scored.sort(key=lambda kv: kv[0], reverse=True)
+    return [example for _, example in scored[:limit]]
+
+
+def matching_failure(memory: Memory, goal: str) -> FailedExample | None:
+    """Best negative lesson for a goal, or None when unrelated.
+
+    Same 0.3 shape threshold as the adapt path: a failure
+    about a different task must not steer this goal's plan.
+    """
+    for example in recall_failures(memory, goal, limit=3):
+        if _shape_overlap(example.goal_shape, goal_shape_for(goal)) >= _FAILURE_SHAPE_MIN:
+            return example
+    return None

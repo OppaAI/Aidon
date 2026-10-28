@@ -1079,17 +1079,42 @@ class GoalRunner:
                 plan.deliverables = list(spec_deliverables)
             plan = self._research_and_replan(plan, goal, spec=spec)
             return self._finalize(self._execute_plan(goal, plan))
+        failure_note = ""
         if self.memory is not None:
             try:
-                from ..memory.experience import recall_experiences
+                from ..memory.experience import recall_experiences, matching_failure
                 try:
                     recall_limit = max(0, int(os.environ.get(
                         "AIDON_EPISODE_RECALL_LIMIT", "1") or "1"))
                 except ValueError:
                     recall_limit = 1
                 experiences = recall_experiences(
-                    self.memory, goal, limit=recall_limit)
-                if experiences and experiences[0].dag_nodes:
+                    self.memory, goal, limit=max(recall_limit, 3))
+                failure = matching_failure(self.memory, goal)
+                if failure is None:
+                    # DAG composition first: when the goal spans
+                    # distinct known workflows, sequencing them
+                    # beats adapting any single one and silently
+                    # dropping the rest.
+                    composed = self._composed_plan(experiences, goal)
+                    if composed is not None:
+                        plan, source_goals = composed
+                        if plan.deliverables:
+                            self._adapted = True
+                            self._adapted_from = " + ".join(source_goals)
+                            return self._finalize(self._execute_plan(goal, plan))
+                else:
+                    # Failed-example learning: a previous run
+                    # failed for a similar goal, so the adapt
+                    # fast-path is skipped and the planner gets
+                    # the failure as repair context instead of
+                    # replaying the failed approach.
+                    failure_note = (
+                        f"A previous run for a similar goal failed: {failure.lesson} "
+                        f"(failed tools: {', '.join(failure.failed_tools) or 'none'}; "
+                        f"failed deliverables: {', '.join(failure.failed_deliverables) or 'none'}). "
+                        f"Do not repeat that approach.")
+                if failure is None and experiences and experiences[0].dag_nodes:
                     # Adaptive DAG first: add, remove, modify, reorder,
                     # validated, with rollback to the saved graph on failure.
                     # A sequential adapt is the fallback, never a broken graph.
@@ -1146,7 +1171,7 @@ class GoalRunner:
             except Exception:
                 pass
         try:
-            plan = self._plan(goal)
+            plan = self._plan(goal, failure_context=failure_note)
         except Exception as exc:
             # Same rule as the spec branch above: an initial
             # plan failure (including a budget breach) fails
@@ -1158,6 +1183,56 @@ class GoalRunner:
         plan = self._research_and_replan(plan, goal)
         return self._finalize(self._execute_plan(goal, plan))
 
+    def _composed_plan(self, experiences, goal):
+        """Build a plan by sequencing distinct recalled workflows, or None.
+
+        Trigger: at least two recalled experiences with DAG
+        nodes, each matching the goal shape (>= 0.3, the adapt
+        threshold) and pairwise distinct from each other
+        (shape overlap < 0.5, the store-merge threshold, so
+        near-duplicate workflows are not sequenced twice).
+        A failed composition returns None and the caller falls
+        back to single-experience adapt or a fresh plan.
+        """
+        from ..memory.experience import goal_shape_for
+        from .dag import compose_dags, dag_from_experience
+
+        def overlap(a: str, b: str) -> float:
+            set_a, set_b = set(a.split()), set(b.split())
+            return len(set_a & set_b) / len(set_a | set_b) if (set_a | set_b) else 0.0
+
+        goal_shape = goal_shape_for(goal)
+        candidates = []
+        for exp in experiences:
+            if not exp.dag_nodes:
+                continue
+            exp_shape = exp.goal_shape or goal_shape_for(exp.goal)
+            if overlap(exp_shape, goal_shape) < 0.3:
+                continue
+            if any(overlap(exp_shape, cand.goal_shape or goal_shape_for(cand.goal)) >= 0.5
+                   for cand in candidates):
+                continue
+            candidates.append(exp)
+            if len(candidates) >= 3:
+                break
+        if len(candidates) < 2:
+            return None
+        composed = compose_dags([dag_from_experience(exp) for exp in candidates])
+        if composed is None:
+            return None
+        try:
+            composed = composed.relativize(self.sandbox.workdir)
+        except Exception:
+            pass
+        steps = composed.to_plan_steps()
+        plan = Plan(
+            steps=steps,
+            deliverables=[str(s["deliverable"]) for s in steps if s.get("deliverable")],
+            criteria=[])
+        plan = self._research_and_replan(plan, goal)
+        if not plan.deliverables:
+            return None
+        return plan, [exp.goal for exp in candidates]
 
     def _finalize(self, report: RunReport) -> RunReport:
         """Fill model-usage and adaptation fields, from the counting client if present."""
@@ -1200,6 +1275,28 @@ class GoalRunner:
                         report.goal, nodes)
                     if dag_id:
                         report.learned_dag = f"{action}:{dag_id}"
+            except Exception:
+                pass
+        # Failed-example learning: a failed run is evidence
+        # too. Record what failed (goal, error, tools, the
+        # deliverables never produced) so a similar goal plans
+        # fresh instead of replaying the failed approach.
+        # Rejected and cancelled runs are not recorded: a
+        # human rejection or an interruption is not evidence
+        # that the approach was wrong. Best effort, as above.
+        if report.status == "failed" and self.memory is not None:
+            try:
+                from ..memory.experience import record_failure
+                produced = set(report.files or [])
+                failed_deliverables = [d for d in report.plan.deliverables
+                                       if d not in produced]
+                failed_tools = []
+                for step in report.plan.normalized_steps():
+                    if step.tool not in failed_tools:
+                        failed_tools.append(step.tool)
+                record_failure(self.memory, report.goal,
+                               (report.error or "")[:500],
+                               failed_tools, failed_deliverables)
             except Exception:
                 pass
         try:

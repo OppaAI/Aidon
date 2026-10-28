@@ -434,3 +434,59 @@ def adapt_dag(experience, new_goal: str, client=None):
     summary = {"kept": kept, "modified": modified, "added": added, "removed": removed,
                "reordered": [n.id for n in dag.topological_order()], "rolled_back": False}
     return dag, summary, model_calls
+
+
+def compose_dags(dags: list[DAG]) -> DAG | None:
+    """Sequence several proven DAGs into one, A-then-B, or None.
+
+    A goal that spans two known workflows ("do A, then B")
+    cannot be served by adapting either one alone: the top-1
+    adapt would silently drop the other half. Composition
+    stitches them in order instead.
+
+    Each source DAG's node ids are prefixed with its position
+    ("0:", "1:", ...) so identical ids in different workflows
+    cannot collide. Every source node of a later DAG (no
+    dependencies inside its own DAG) gains a dependency on
+    every sink node of the previous DAG (no dependents inside
+    its own DAG), so the later workflow runs only after the
+    earlier one finishes. The composed graph is validated
+    strictly; any failure — duplicate deliverable, missing
+    dependency, cycle — returns None instead of a broken
+    graph, and the caller falls back to single-experience
+    adapt or a fresh plan.
+
+    Composition sequences proven workflows verbatim: it does
+    not rename task words, so word-level adaptation stays a
+    single-experience operation, applied to the top-1 match.
+    """
+    if len(dags) < 2:
+        return None
+    if any(len(dag.nodes) == 0 for dag in dags):
+        return None
+    nodes: list[DAGNode] = []
+    previous_sinks: list[str] = []
+    for index, dag in enumerate(dags):
+        prefix = f"{index}:"
+        # Sinks: nodes no other node in this DAG depends on.
+        depended_on = set()
+        for node in dag.nodes.values():
+            depended_on.update(node.depends_on)
+        sinks = [prefix + node.id for node in dag.nodes.values()
+                 if node.id not in depended_on]
+        for node in dag.nodes.values():
+            new_node = copy.deepcopy(node)
+            new_node.id = prefix + node.id
+            new_node.depends_on = [prefix + dep for dep in node.depends_on]
+            if not node.depends_on:
+                # Source node of this DAG: wait for the whole
+                # previous DAG, not just its last node.
+                new_node.depends_on.extend(previous_sinks)
+            nodes.append(new_node)
+        previous_sinks = sinks
+    composed = DAG(nodes)
+    try:
+        composed.validate_strict()
+    except ValueError:
+        return None
+    return composed
