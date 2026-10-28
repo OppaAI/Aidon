@@ -658,6 +658,10 @@ class GoalRunner:
                       "with tool, args, deliverable. Tools: write, read, "
                       "list, shell, calculate. Keep every file inside "
                       "the workdir.")
+        system += (" Every item in deliverables MUST be produced by exactly "
+                   "one step; never return deliverables with an empty or "
+                   "missing steps array. For GUI requests, use the "
+                   "computer_use tool when it is listed as available.")
         if self.plugins is not None and not self.kernel_mode:
             plugin_tools = self.plugins.tool_names()
             if plugin_tools:
@@ -1098,8 +1102,33 @@ class GoalRunner:
                 pass
         plan_failures = validate_plan(plan, allowed_tools=_allowed)
         if plan_failures:
-            return RunReport("failed", goal, plan, False, False,
-                             error="; ".join(plan_failures)[:500])
+            # A model can describe desired outputs while omitting executable
+            # steps. Give it a bounded repair pass before rejecting the run.
+            failure_text = "; ".join(plan_failures)
+            repaired = None
+            for _ in range(2):
+                try:
+                    candidate = self._plan(
+                        goal,
+                        failure_context=("The proposed plan was rejected by "
+                                         "the deterministic validator: "
+                                         f"{failure_text}. Return a complete "
+                                         "JSON plan with executable steps; "
+                                         "each deliverable must match a step."))
+                    candidate_failures = validate_plan(candidate,
+                                                       allowed_tools=_allowed)
+                    if not candidate_failures:
+                        repaired = candidate
+                        break
+                    plan = candidate
+                    failure_text = "; ".join(candidate_failures)
+                except Exception as exc:
+                    failure_text = f"plan repair failed: {exc}"
+                    break
+            if repaired is None:
+                return RunReport("failed", goal, plan, False, False,
+                                 error=failure_text[:500])
+            plan = repaired
         # Plan guard, cycle check only: loop steps carry no ids,
         # so the full guard (which requires ids and args) is a
         # CLI/file check, but a depends_on cycle in a raw dict
