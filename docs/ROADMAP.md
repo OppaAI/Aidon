@@ -214,6 +214,17 @@ will be available inside a future VM once that backend exists.
   stay in .env, every other setting moves to one YAML
   file, with a one-time migration and the settings
   page editing both sources without drift.
+- Dynamic per-task role (ROLE.md): at run start Aidon
+  writes itself the role the task calls for (expert web
+  designer for a site, systems architect for code, chef
+  for a menu), so the run's prompts carry task expertise
+  instead of a generic assistant voice. Guardrails, not
+  optional: the role is expertise framing only and never
+  overrides the system prompt, approval gates, budget,
+  sandbox rules, or task constraints, which are always
+  stated after the role so they win; a library of vetted
+  roles is evaluated against fast-model generation
+  before either is trusted.
 - Email, RSS, and database triggers, as plugins,
   beyond the core triggers built now.
 

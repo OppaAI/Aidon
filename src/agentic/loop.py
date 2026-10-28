@@ -678,11 +678,26 @@ class GoalRunner:
             if name == "shell" and isinstance(args, dict):
                 command_text = " ".join(str(x) for x in
                                         (args.get("command") or []))
+                # In kernel mode generate_document is NOT available
+                # (seed tools only), so the guard must not point at
+                # it: it points at the plugin ladder instead. A
+                # misleading "use the available tool" message here
+                # sent a real run in circles.
+                if self.kernel_mode:
+                    _pdf_note = ("Kernel mode: generate_document is not "
+                                 "available here (seed tools only). Earn "
+                                 "the capability via the plugin ladder: "
+                                 "research, draft a plugin or skill, "
+                                 "sandbox-test it, adopt it with owner "
+                                 "approval.")
+                else:
+                    _pdf_note = ("use the available generate_document "
+                                 "tool instead")
                 if ("fpdf" in command_text.lower() and
                         "generate_document" in self.extra_tools):
                     raise ValueError(
-                        "Do not use shell/fpdf for PDF output; use the "
-                        "available generate_document tool instead")
+                        "Do not use shell/fpdf for PDF output; "
+                        f"{_pdf_note}")
                 if "generate_document" in self.extra_tools:
                     # The text check above misses the common bypass:
                     # write a script file importing fpdf, then run it
@@ -715,8 +730,8 @@ class GoalRunner:
                                       source, _re.MULTILINE):
                             raise ValueError(
                                 "Do not run a script importing fpdf or "
-                                "reportlab for PDF output; use the "
-                                "available generate_document tool instead")
+                                "reportlab for PDF output; "
+                                f"{_pdf_note}")
             return self.tools.call(name, args)
         except ValueError as exc:
             if str(exc).startswith("unknown tool:") and self.plugins is not None:
@@ -817,6 +832,14 @@ class GoalRunner:
                            "isolated mission venv. Never install packages "
                            "through shell, pip, or sudo; installation is "
                            "approval-gated.")
+        system += (" Discover before building: the tools listed above are "
+                   "what you can call. If a listed tool does the job, use "
+                   "it; do not write a replacement script, plugin, or tool "
+                   "for it. If a listed tool fails, diagnose the error and "
+                   "try another listed tool before building a replacement. "
+                   "Before writing code that imports a package, confirm the "
+                   "package is already available; never write code that "
+                   "depends on a package you have not confirmed.")
         user = goal
         # Recall both prior experiences and ingested knowledge.
         # before planning. Keep the block bounded so memory cannot crowd
