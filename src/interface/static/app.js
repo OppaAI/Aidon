@@ -73,6 +73,7 @@
   let lastTraceCount = 0;
   let lastTracePhase = null;
   let routeShownFor = null;
+  let lastRoute = null;
   let runTraceHistory = [];
   let cardShownFor = null;
   const streamMessages = {};
@@ -177,19 +178,33 @@
     };
   }
 
-  function renderFinalMessage(text) {
+  function renderFinalMessage(text, route) {
     const parts = finalMessageParts(text);
     let html = md(parts.body);
-    if (parts.stats) {
-      html += '<div class="run-stats"><span class="run-stats-icon" aria-hidden="true">◷</span>' +
-        '<span>' + esc(parts.stats) + "</span></div>";
+    let routeChip = "";
+    if (route && route.group) {
+      const icons = { chat: "💬", webchat: "🌐", agentic: "⚙️", artifact: "📄" };
+      const labels = { chat: "Local chat", webchat: "Web chat",
+                       agentic: "Agentic", artifact: "Artifact" };
+      const confidence = Math.round(
+        Math.max(0, Math.min(1, Number(route.confidence) || 0)) * 100);
+      routeChip = '<span>' + (icons[route.group] || "◆") + " " +
+        esc(labels[route.group] || route.group) + " · " + confidence +
+        "%</span><span> · </span>";
+    }
+    if (parts.stats || routeChip) {
+      html += '<div class="run-stats">' + routeChip +
+        (parts.stats
+          ? '<span class="run-stats-icon" aria-hidden="true">◷</span>' +
+            '<span>' + esc(parts.stats) + "</span>"
+          : "") + "</div>";
     }
     return html;
   }
 
   // Typewriter reveal: streams text into the message char-by-char,
   // karaoke style. Returns the element; callers can append buttons after.
-  function addMsgTyped(kind, text, t, final = false) {
+  function addMsgTyped(kind, text, t, final = false, route = null) {
     const d = document.createElement("div");
     d.className = "msg " + kind;
     if (t) {
@@ -218,7 +233,7 @@
         scrollThreadToLatest();
         if (i < full.length) requestAnimationFrame(tick);
         else {
-          body.innerHTML = final ? renderFinalMessage(full) : md(full);
+          body.innerHTML = final ? renderFinalMessage(full, route) : md(full);
           resolve();
         }
       })();
@@ -903,21 +918,13 @@
   }
 
   function renderRoute(route) {
-    if (!route || !route.group || routeShownFor === currentRun) return;
-    const list = document.getElementById("thinking-list");
-    if (!list) return;
-    const labels = { chat: "Local chat", webchat: "Web chat",
-                     agentic: "Agentic", artifact: "Artifact" };
-    const confidence = Math.round(
-      Math.max(0, Math.min(1, Number(route.confidence) || 0)) * 100);
-    const item = document.createElement("div");
-    item.className = "think-item route-item";
-    item.innerHTML = '<div class="think-head-row"><div class="think-title">' +
-      esc(labels[route.group] || route.group) +
-      '</div><div class="think-meta">' + confidence +
-      '% confidence</div></div>';
-    list.prepend(item);
-    routeShownFor = currentRun;
+    // The route no longer gets its own item in the thinking list:
+    // that list scrolls, so the item scrolled out of view. The route
+    // rides on the finished message's stats line instead
+    // (renderFinalMessage), so this only remembers the latest route
+    // for the current run.
+    if (!route || !route.group || routeShownFor === "__history__") return;
+    lastRoute = route;
   }
 
   document.getElementById("thinking-toggle-all").addEventListener("click", () => {
@@ -1060,12 +1067,23 @@
             return;
           }
           if (m) {
-            m._streamText = String(e.text || m._streamText || "");
-            m.innerHTML = e.kind === "aidon-final"
-              ? renderFinalMessage(m._streamText) : md(m._streamText);
-            if (e.kind === "aidon-final") delete streamMessages[sid];
+            if (e.kind === "aidon-final" && m._streamText && e.text &&
+                String(e.text).trim() !== String(m._streamText).trim()) {
+              // Streamed intermediate prose differs from the final
+              // summary (agentic runs stream fast-node prose, then
+              // finish with an assembled summary): keep the streamed
+              // bubble and show the final as its own message, instead
+              // of discarding the prose by replacing it.
+              delete streamMessages[sid];
+              m = addMsgTyped("aidon", e.text, e.t, true, lastRoute);
+            } else {
+              m._streamText = String(e.text || m._streamText || "");
+              m.innerHTML = e.kind === "aidon-final"
+                ? renderFinalMessage(m._streamText, lastRoute) : md(m._streamText);
+              if (e.kind === "aidon-final") delete streamMessages[sid];
+            }
           } else {
-            m = addMsgTyped("aidon", e.text, e.t, e.kind === "aidon-final");
+            m = addMsgTyped("aidon", e.text, e.t, e.kind === "aidon-final", lastRoute);
           }
           const btn = playButton(e.text || m._streamText || "", m);
           m.appendChild(btn);
@@ -1531,6 +1549,7 @@
     lastTracePhase = null;
     runTraceHistory = [];
     routeShownFor = null;
+    lastRoute = null;
     // keep previous messages in the thread — just scroll to the latest
     document.getElementById("thinking-list").innerHTML = "";
     document.getElementById("thinking-count").textContent = "";

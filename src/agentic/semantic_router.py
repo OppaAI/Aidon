@@ -29,7 +29,9 @@ A router needs an embedder with embed_dense(list[str])
 -> list[list[float]], in tests a fake embedder that
 returns the example vectors, in production the real
 EmbeddingGemma 2 embedder. Low confidence, below 0.15,
-defaults to agentic, never to chat.
+defaults to agentic, never to chat — unless the best match itself is
+strong (>= 0.75), in which case the category is trusted even at a
+small margin, because question forms make categories overlap.
 """
 
 from __future__ import annotations
@@ -272,6 +274,17 @@ class SemanticRouter:
         if web_intent_score >= 0.50 and web_intent_score > chat_score + 0.05:
             return "webchat", min(1.0, web_intent_score)
         confidence = min(1.0, (best_score - second_score) * 5.0)
+        # Absolute match quality counts too. Categories overlap on
+        # question forms, so a strong best match with a close second
+        # is still a good match: a greeting scoring chat 0.80 against
+        # a 0.78 second used to report 0.10 confidence and fall
+        # through to agentic below. When the best match itself is
+        # strong (>= 0.75), floor the margin confidence by it, so
+        # strong matches are trusted even at a small margin. Weak
+        # best matches keep the margin confidence and still fail
+        # safe to agentic below.
+        if best_score >= 0.75:
+            confidence = min(1.0, max(confidence, best_score - 0.30))
         if confidence < 0.15:
             return "agentic", confidence
         return best_cat, confidence

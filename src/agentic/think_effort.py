@@ -46,10 +46,25 @@ _SAMPLING_TABLE = {
 _DEFAULT_SAMPLING = {"temperature": 0.2, "top_p": 0.95}
 
 
+def _env_effort_pin(phase: str) -> str | None:
+    """Pinned effort from AIDON_EFFORT_<PHASE>, or None when unset/invalid.
+
+    A pin is a user decision, not a suggestion: escalation never raises
+    it (see resolve_effort), matching the .env.example documentation.
+    """
+    raw = os.environ.get(f"AIDON_EFFORT_{str(phase).upper()}")
+    if raw is not None and raw.strip() in EFFORT_LEVELS:
+        return raw.strip()
+    return None
+
+
 def effort_for(phase: str, overrides: dict | None = None) -> str:
     """Effort level for a phase; overrides win, unknown phases get low."""
     if overrides and phase in overrides and overrides[phase] in EFFORT_LEVELS:
         return overrides[phase]
+    pin = _env_effort_pin(phase)
+    if pin is not None:
+        return pin
     return _EFFORT_TABLE.get(phase, "low")
 
 
@@ -70,18 +85,22 @@ def sampling_for(phase: str, *, escalate: bool = False,
         result.update(temperature=1.0, top_p=0.98)
     # Preserve old per-phase .env overrides, e.g.
     # AIDON_TEMP_VERIFY=0.0 and AIDON_TOP_P_RESPOND=0.95.
-    temp = os.environ.get(f"AIDON_TEMP_{str(phase).upper()}")
-    top_p = os.environ.get(f"AIDON_TOP_P_{str(phase).upper()}")
-    try:
-        if temp is not None and temp.strip():
-            result["temperature"] = float(temp)
-    except ValueError:
-        pass
-    try:
-        if top_p is not None and top_p.strip():
-            result["top_p"] = float(top_p)
-    except ValueError:
-        pass
+    # AIDON_DYNAMIC_SAMPLING=0 makes sampling static: the built-in
+    # table only, per-phase .env overrides ignored.
+    dynamic = os.environ.get("AIDON_DYNAMIC_SAMPLING", "1").strip().lower() not in ("0", "false", "no", "off")
+    if dynamic:
+        temp = os.environ.get(f"AIDON_TEMP_{str(phase).upper()}")
+        top_p = os.environ.get(f"AIDON_TOP_P_{str(phase).upper()}")
+        try:
+            if temp is not None and temp.strip():
+                result["temperature"] = float(temp)
+        except ValueError:
+            pass
+        try:
+            if top_p is not None and top_p.strip():
+                result["top_p"] = float(top_p)
+        except ValueError:
+            pass
     if str(phase).lower() == "verify":
         raw_seed = os.environ.get("AIDON_VERIFY_SEED")
         # Old default: deterministic verify calls use seed 42. An explicitly
@@ -123,6 +142,9 @@ def resolve_effort(phase: str, requested: str | None = None,
     else:
         level = effort_for(phase, overrides)
     if escalate:
+        # A pinned level is never raised by escalation.
+        if requested is None and _env_effort_pin(phase) is not None:
+            return level
         index = EFFORT_LEVELS.index(level)
         level = EFFORT_LEVELS[min(index + 1, len(EFFORT_LEVELS) - 1)]
     return level
