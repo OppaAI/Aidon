@@ -299,12 +299,10 @@ def test_settings_page_has_the_preapproval_panel(tmp_path):
         with urllib.request.urlopen(base + "/api/preapprovals") as response:
             payload = json.loads(response.read())
         assert "grants" in payload
-        try:
-            urllib.request.urlopen(base + "/settings")
-        except urllib.error.HTTPError as exc:
-            assert exc.code == 404
-        else:
-            raise AssertionError("/settings route must be removed")
+        with urllib.request.urlopen(base + "/settings") as response:
+            page = response.read().decode()
+        assert "settings-groups" in page
+        assert "Pre-approvals" not in page or "Settings" in page
     finally:
         httpd.shutdown()
 

@@ -21,21 +21,39 @@ from __future__ import annotations
 
 import inspect
 import os
+import sys
 
 
 class Repl:
-    def __init__(self, handler, input_fn=input, output_fn=print):
+    def __init__(self, handler, input_fn=input, output_fn=print,
+                 title="Aidon REPL", on_clear=None):
         self.handler = handler
         self.input_fn = input_fn
         self.output_fn = output_fn
+        self.title = title
+        self.on_clear = on_clear
         self.history: list[str] = []
         self.staged: list[str] = []
+        if getattr(sys.stdout, "isatty", lambda: False)():
+            self.reset = "\033[0m"
+            self.bold = "\033[1m"
+            self.blue = "\033[38;5;33m"
+            self.cyan = "\033[38;5;51m"
+            self.violet = "\033[38;5;141m"
+            self.green = "\033[38;5;78m"
+            self.amber = "\033[38;5;220m"
+        else:
+            self.reset = self.bold = self.blue = self.cyan = ""
+            self.violet = self.green = self.amber = ""
+
+    def _paint(self, colour: str, text: str) -> str:
+        return f"{colour}{text}{self.reset}" if colour else text
 
     def _read_line(self) -> str | None:
         """Read one line: returns None on EOF, raises nothing on interrupt."""
         try:
             try:
-                line = self.input_fn("aidon> ").strip()
+                line = self.input_fn(self._paint(self.cyan, "you> ")).strip()
             except TypeError:
                 line = self.input_fn().strip()
         except EOFError:
@@ -64,7 +82,10 @@ class Repl:
         return self.handler(line)
 
     def run(self) -> list[str]:
-        self.output_fn("Aidon REPL, /help for commands, /quit to exit.")
+        self.output_fn(self._paint(self.blue + self.bold,
+                                   f"  {self.title}"))
+        self.output_fn(self._paint(self.violet,
+                                   "  /help for commands · /quit to leave"))
         while True:
             line = self._read_line()
             if line is None:
@@ -83,6 +104,8 @@ class Repl:
                 continue
             if line == "/clear":
                 self.history.clear()
+                if self.on_clear is not None:
+                    self.on_clear()
                 self.output_fn("History cleared.")
                 continue
             if line == "/staged":
@@ -116,5 +139,6 @@ class Repl:
             finally:
                 self.staged.clear()
             self.history.append(line)
-            self.output_fn(reply)
+            prefix = self._paint(self.green, "aidon> ") if self.green else ""
+            self.output_fn(prefix + str(reply))
         return self.history

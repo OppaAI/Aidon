@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Aidon</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="stylesheet" href="/static/style.css?v=__ASSET_V__">
 <script type="importmap">
 {
@@ -20,7 +21,11 @@
   <!-- ============ LEFT SIDEBAR ============ -->
   <aside id="leftbar">
     <div id="brand">
-      <span id="brand-mark">A</span>
+      <span id="brand-mark" aria-label="Aidon mark">
+        <svg viewBox="0 0 64 64" role="img" aria-hidden="true">
+          <path d="M10 52 28 12a5 5 0 0 1 8 0l18 40h-9l-5-12H24l-5 12Zm18-21h8l-4-10Z"/>
+        </svg>
+      </span>
       <span id="brand-name">Aidon</span>
       <button id="theme-toggle" class="icon-btn" title="Toggle dark / light theme">◐</button>
     </div>

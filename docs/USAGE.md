@@ -5,7 +5,7 @@
 - WebUI: `./launch.sh` starts the WebUI server on
   `http://127.0.0.1:8765/` by default (`AIDON_WEBUI_PORT`
   overrides it; `webui serve` on its own defaults to
-  port 8002), localhost only, with a chat
+  port 8765), localhost only, with a chat
   thread, a left sidebar for projects and library, a
   Library tab, a settings and keys page showing hash
   prefixes only, never real keys, and approval cards

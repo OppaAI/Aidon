@@ -37,6 +37,28 @@
 # Usage: ./setup.sh [--non-interactive] [--with-optional]
 set -eu
 
+# Meta-inspired terminal palette: deep blue, cyan, violet, green, amber.
+# Colors turn off automatically when output is redirected or --non-interactive
+# is used, so logs remain clean and scripts stay pipe-friendly.
+if [ -t 1 ] 2>/dev/null; then
+  RESET=$(printf '\033[0m'); BOLD=$(printf '\033[1m'); DIM=$(printf '\033[2m')
+  BLUE=$(printf '\033[38;5;33m'); CYAN=$(printf '\033[38;5;51m')
+  VIOLET=$(printf '\033[38;5;141m'); GREEN=$(printf '\033[38;5;78m')
+  AMBER=$(printf '\033[38;5;220m'); RED=$(printf '\033[38;5;203m')
+else
+  RESET=''; BOLD=''; DIM=''; BLUE=''; CYAN=''; VIOLET=''; GREEN=''; AMBER=''; RED=''
+fi
+say() { printf '%s\n' "$*"; }
+title() { printf '%s\n' "${BLUE}${BOLD}$*${RESET}"; }
+section() { printf '\n%s\n' "${VIOLET}${BOLD}◆ $*${RESET}"; }
+info() { printf '%s %s\n' "${CYAN}·${RESET}" "$*"; }
+ok() { printf '%s %s\n' "${GREEN}✓${RESET}" "$*"; }
+warn() { printf '%s %s\n' "${AMBER}!${RESET}" "$*" >&2; }
+fail() { printf '%s %s\n' "${RED}✗${RESET}" "$*" >&2; }
+
+title "  Aidon  ·  setup"
+info "Preparing a calm, local workspace for your agent."
+
 REPO_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 AIDON_HOME=${AIDON_HOME:-$HOME/.aidon}
 NONINTERACTIVE=0
@@ -46,42 +68,43 @@ for arg in "$@"; do
     --non-interactive) NONINTERACTIVE=1 ;;
     --with-optional) WITH_OPTIONAL=1 ;;
     -h|--help)
-      echo "usage: ./setup.sh [--non-interactive] [--with-optional]"
+      say "usage: ./setup.sh [--non-interactive] [--with-optional]"
       exit 0 ;;
-    *) echo "unknown flag: $arg" >&2; exit 1 ;;
+    *) fail "I don't recognize '$arg'. Try --help."; exit 1 ;;
   esac
 done
 
-echo "Aidon home: $AIDON_HOME"
+info "Workspace: $AIDON_HOME"
 mkdir -p "$AIDON_HOME/workspace" "$AIDON_HOME/ingest" "$AIDON_HOME/plugins" "$AIDON_HOME/skills" "$AIDON_HOME/specs" "$AIDON_HOME/library/files" "$AIDON_HOME/runs" "$AIDON_HOME/summaries" "$AIDON_HOME/learned" "$AIDON_HOME/email/drafts" "$AIDON_HOME/trace" "$AIDON_HOME/v1" "$AIDON_HOME/live" "$AIDON_HOME/dags"
 
 if ! command -v python3 >/dev/null 2>&1; then
-  echo "ERROR: python3 is not installed. Install Python 3.11 or later, then run ./setup.sh again." >&2
+  fail "Python 3.11+ is required. Install it, then run ./setup.sh again."
   exit 1
 fi
-echo "python3: $(python3 --version 2>&1)"
+ok "Python ready: $(python3 --version 2>&1)"
 
 # Install the project itself and its declared base dependencies. The old
 # Aidon setup did this through uv; without this step a fresh machine falls
 # back to system Python and silently misses the installed package/runtime.
 if command -v uv >/dev/null 2>&1; then
-  echo "Installing Aidon and declared dependencies with uv..."
+  section "Installing the core"
+  info "Syncing the declared dependencies with uv."
   (cd "$REPO_DIR" && uv sync) || {
-    echo "WARNING: uv sync failed; optional features may be unavailable." >&2
+    warn "uv sync failed; optional features may be unavailable."
   }
 else
-  echo "WARNING: uv not found; Aidon will use the available Python environment." >&2
-  echo "Install uv and rerun setup.sh for the declared project dependencies." >&2
+  warn "uv is not installed; using the available Python environment."
+  info "Install uv and rerun setup.sh for the declared dependencies."
 fi
 
 if [ -f "$AIDON_HOME/.env" ]; then
-  echo ".env already exists at $AIDON_HOME/.env, not overwriting it."
+  ok "Keeping your existing environment file."
 else
   if [ -f "$REPO_DIR/examples/.env.example" ]; then
     cp "$REPO_DIR/examples/.env.example" "$AIDON_HOME/.env"
-    echo "Created $AIDON_HOME/.env from examples/.env.example."
+    ok "Created a starting environment file from examples/.env.example."
   else
-    echo "WARNING: examples/.env.example not found, no .env created." >&2
+    warn "examples/.env.example was not found; no .env was created."
   fi
 fi
 # Secrets file, owner-only, whether it was just created or already there.
@@ -137,9 +160,9 @@ open(path, 'w', encoding='utf-8').write('\n'.join(out) + '\n')
 ask_key() {
   if [ "$NONINTERACTIVE" = 1 ]; then return 0; fi
   cur=$(dotenv_get "$1")
-  if [ -n "$cur" ]; then echo "$1: already set"; return 0; fi
+  if [ -n "$cur" ]; then ok "$1 is already set."; return 0; fi
   val=""
-  printf '%s (empty = skip): ' "$2" >&2
+  printf '%s%s%s %s%s%s ' "$CYAN" "$2" "$RESET" "$DIM" "(leave blank to skip):" "$RESET" >&2
   read -r val || true
   [ -z "$val" ] && return 0
   dotenv_set "$1" "$val"
@@ -149,7 +172,7 @@ ask_setting() {
   cur=$(dotenv_get "$1")
   if [ -z "$cur" ]; then cur="${3:-}"; fi
   val=""
-  printf '%s [%s]: ' "$2" "$cur" >&2
+  printf '%s%s%s %s[%s]%s: ' "$CYAN" "$2" "$RESET" "$DIM" "$cur" "$RESET" >&2
   read -r val || true
   [ -z "$val" ] && val="$cur"
   dotenv_set "$1" "$val"
@@ -157,7 +180,7 @@ ask_setting() {
 ask_yes_no() {
   if [ "$NONINTERACTIVE" = 1 ]; then return 1; fi
   yn=""
-  printf '%s [y/N]: ' "$1" >&2
+  printf '%s%s%s %s[y/N]%s: ' "$CYAN" "$1" "$RESET" "$DIM" "$RESET" >&2
   read -r yn || true
   case "${yn:-n}" in
     y|Y|yes|YES) return 0 ;;
@@ -183,25 +206,25 @@ install_package() {
     else
       (cd "$REPO_DIR" && uv add "$pkg") && return 0
     fi
-    echo "  uv add of $pkg failed, trying uv pip install..."
+    warn "uv add of $pkg failed; trying the project environment instead."
   fi
   if command -v uv >/dev/null 2>&1; then
     uv pip install "$pkg" && return 0
-    echo "  uv pip install of $pkg failed, trying pip..."
+    warn "uv pip install of $pkg failed; trying pip instead."
   fi
   if python3 -m pip --version >/dev/null 2>&1; then
-    python3 -m pip install "$pkg" || echo "  install of $pkg failed"
+    python3 -m pip install "$pkg" || warn "Could not install $pkg; its feature will stay off."
   else
-    echo "  no pip and no uv found, install $pkg yourself, then rerun ./setup.sh"
+    warn "No pip or uv found. Install $pkg yourself, then run ./setup.sh again."
   fi
 }
 
 if [ "$NONINTERACTIVE" = 0 ]; then
-  echo ""
-  echo "Model backend - Aidon needs an LLM:"
-  echo "  1) Meta Model API (the hackathon API, needs a key)"
-  echo "  2) Native chat endpoint (local or hosted, no API key required by Aidon)"
-  echo "  3) Another OpenAI-compatible endpoint"
+  section "Choosing your model"
+  info "Aidon needs a model backend. Choose the one you want to use:"
+  info "1) Meta Model API (requires a key)"
+  info "2) Native chat endpoint (local or hosted)"
+  info "3) Another compatible endpoint"
   cur_backend=$(dotenv_get "AIDON_BACKEND")
   cur_endpoint=$(dotenv_get "AIDON_API_ENDPOINT")
   default_choice=1
@@ -210,13 +233,13 @@ if [ "$NONINTERACTIVE" = 0 ]; then
     *localhost:11434*|*127.0.0.1:11434*) default_choice=2 ;;
   esac
   choice=""
-  printf 'Choose a backend [1/2/3, default %s]: ' "$default_choice" >&2
+  printf '%sChoose a backend [1/2/3, default %s]%s: ' "$CYAN" "$default_choice" "$RESET" >&2
   read -r choice || true
   [ -z "$choice" ] && choice="$default_choice"
   case "$choice" in
     2)
       dotenv_set "AIDON_BACKEND" "native"
-      echo "Native endpoint: no API key is required by Aidon."
+      ok "Native endpoint selected; Aidon will not ask for an API key."
       # A Meta model name left over from .env.example is not a native
       # model; clear it so Enter does not keep it by accident.
       case "$(dotenv_get "AIDON_MODEL")" in
@@ -241,18 +264,16 @@ if [ "$NONINTERACTIVE" = 0 ]; then
       ask_key "AIDON_API_KEY" "Meta Model API key"
       backend_key=$(dotenv_get "AIDON_API_KEY")
       if [ -z "$backend_key" ]; then
-        echo "WARNING: Meta backend selected but no Meta API key is set;"
-        echo "Aidon cannot call an LLM until AIDON_API_KEY is added."
+        warn "Meta backend selected without an API key. Add AIDON_API_KEY before running a real goal."
       fi
       ;;
   esac
-  echo ""
-  echo "Embeddings - changing this later needs a fresh memory store."
+  section "Memory and research"
+  info "Changing the embedding model later requires a fresh memory store."
   ask_setting "AIDON_EMBED_MODEL" "Embedding model" "google/embeddinggemma-2"
   ask_setting "AIDON_RESEARCH_ALLOWLIST" "Research allowlist, comma domains (empty = unrestricted)"
-  echo ""
-  echo "API keys - each one enables one optional feature, and each can"
-  echo "be added later in .env or on the /settings page."
+  section "Optional connections"
+  info "Each key enables one feature. Leave it blank to configure it later."
   ask_key "TAVILY_API_KEY" "Tavily API key (web search; empty = SearXNG)"
   ask_key "AIDON_FISH_API_KEY" "Fish Audio API key (voice playback)"
   ask_key "SLACK_BOT_TOKEN" "Slack bot token (xoxb-*)"
@@ -271,12 +292,9 @@ if [ "$NONINTERACTIVE" = 0 ]; then
   ask_key "GITHUB_TOKEN" "GitHub token"
   ask_key "AIDON_TRANSCRIBE_API_KEY" "Transcribe API key"
   ask_key "AIDON_WEBUI_TOKEN" "WebUI token (empty = localhost only)"
-  echo ""
-  echo "Accounts and addresses - the ids and addresses the keys above"
-  echo "belong to. A token without its account id is half a setup:"
-  echo "Threads and Instagram need the account/user id to publish,"
-  echo "Slack needs a channel to listen in, and owner email is where"
-  echo "drafts and reports to you go."
+  section "Accounts and delivery"
+  info "Add the account IDs and destinations connected to the keys above."
+  info "This is where reports, approvals, and incoming messages can reach you."
   ask_key "AIDON_THREADS_ACCOUNT_ID" "Threads account ID (for publishing)"
   ask_key "AIDON_IG_USER_ID" "Instagram user ID (for publishing)"
   ask_key "AIDON_OWNER_EMAIL" "Owner email (you, for drafts and reports to you)"
@@ -295,42 +313,36 @@ if [ "$NONINTERACTIVE" = 0 ]; then
   ask_key "AIDON_MCP_TOKEN" "MCP server token (required when another app calls Aidon's MCP server)"
   ask_key "AIDON_HUB_TOKEN" "Remote hub token (for hub serve / hub push)"
   ask_setting "AIDON_MCP_URL" "MCP HTTP endpoint to call (empty = no external MCP server)"
-  echo ""
-  echo "About Aidon's own email: there is no separate Aidon email"
-  echo "setting in Aidon. Gmail send uses the Gmail"
-  echo "account that granted the refresh token above, so Aidon"
-  echo "sends from that account. Owner email, asked above, is the"
-  echo "address drafts and reports to you are addressed to."
-  echo "keeping secrets in .env only - never in chat, source, or skills."
+  section "One last note"
+  info "Gmail sends from the account that granted the refresh token."
+  info "Keep secrets in .env only; setup never prints them back."
 fi
 
 if command -v bwrap >/dev/null 2>&1; then
-  echo "bubblewrap: available, sandbox backend is isolated."
+  ok "Sandbox ready: bubblewrap is available."
 else
-  echo "bubblewrap: not installed, sandbox fallback runs in the workdir and is labeled not isolated."
+  warn "bubblewrap is not installed; the fallback sandbox will run in the workdir."
   if [ "$NONINTERACTIVE" = 0 ] && command -v apt-get >/dev/null 2>&1; then
     if ask_yes_no "Install bubblewrap now via apt (needs sudo)?"; then
-      sudo apt-get install -y bubblewrap || echo "  bubblewrap install failed, install it yourself."
+      sudo apt-get install -y bubblewrap || warn "bubblewrap installation failed; install it yourself when convenient."
     fi
   fi
 fi
 
 if command -v docker >/dev/null 2>&1; then
-  echo "Docker: available ($(docker --version 2>&1 | head -n 1)). Set AIDON_EXECUTION_BACKEND=docker in .env to use it."
+  ok "Docker is available: $(docker --version 2>&1 | head -n 1)."
+  info "Set AIDON_EXECUTION_BACKEND=docker in .env when you want to use it."
 else
-  echo "Docker: not installed. Docker is needed only if you want the Docker backend."
-  echo "  macOS: install Docker Desktop, or: brew install --cask docker"
-  echo "  Ubuntu: sudo apt install docker.io, then: sudo usermod -aG docker \$USER, then log out and back in."
-  echo "  Windows: install Docker Desktop."
-  echo "  Until Docker is installed, use the bubblewrap sandbox backend, which is the default."
+  info "Docker is not installed; it is only needed for the Docker backend."
+  info "macOS: install Docker Desktop, or use brew install --cask docker."
+  info "Ubuntu: install docker.io, then add your user to the docker group."
+  info "Until then, Aidon will use the bubblewrap backend when available."
 fi
 
-echo "VM: not installed, and not installed by setup.sh. A VM is post-hackathon, future only."
+info "No virtual machine is installed; setup keeps the host configuration unchanged."
 
-echo ""
-echo "Optional packages - each one enables one feature, and each is"
-echo "offered on its own. A package you skip is not installed, and"
-echo "its feature simply stays off until you install it."
+section "Optional capabilities"
+info "Each package enables one feature. Skip anything you do not need today."
 for spec in \
   "qdrant-client:qdrant_client:Qdrant vector memory:memory" \
   "sentence-transformers:sentence_transformers:real semantic embeddings:embed" \
@@ -348,35 +360,21 @@ for spec in \
   what=$(printf '%s' "$spec" | cut -d: -f3)
   extra=$(printf '%s' "$spec" | cut -d: -f4)
   if python3 -c "import $mod" 2>/dev/null; then
-    echo "optional package $pkg: present ($what)"
+    ok "$pkg is ready — $what."
   else
-    echo "optional package $pkg: missing ($what)"
+    warn "$pkg is not installed — $what."
     if [ "$WITH_OPTIONAL" = 1 ]; then
-      echo "  installing $pkg with uv add (--with-optional)..."
+      info "Installing $pkg because --with-optional was requested."
       install_package "$pkg" "$extra"
     elif [ "$NONINTERACTIVE" = 0 ] && ask_yes_no "Install $pkg ($what)?"; then
       install_package "$pkg" "$extra"
     else
-      echo "  skipped, $what stays off until $pkg is installed."
+      info "Skipped; $what will stay off until $pkg is installed."
     fi
   fi
 done
 
-echo ""
-echo "Setup done. Next: fill in anything you skipped in $AIDON_HOME/.env, then ./launch.sh"
-echo ""
-echo "Keys and setup, by you, after this script, names only, no values here:"
-echo "  Model: AIDON_BACKEND (native | meta | http | fake), AIDON_API_ENDPOINT, AIDON_API_KEY, AIDON_MODEL"
-echo "  Native backend: AIDON_BACKEND=native, AIDON_API_ENDPOINT=<endpoint>,"
-echo "    AIDON_MODEL=<model name>, AIDON_FAST_MODEL=<small model>"
-echo "  WhatsApp: AIDON_WHATSAPP_TOKEN, AIDON_WHATSAPP_PHONE_ID, AIDON_WHATSAPP_VERIFY_TOKEN, AIDON_WHATSAPP_APP_SECRET, AIDON_WHATSAPP_OWNER"
-echo "  Slack: SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, or polling with SLACK_BOT_TOKEN and a channel"
-echo "  Gmail: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN"
-echo "  Search/YouTube/voice/social/GitHub/Tavily: TAVILY_API_KEY, AIDON_YOUTUBE_API_KEY, AIDON_FISH_API_KEY, AIDON_THREADS_ACCESS_TOKEN, AIDON_IG_ACCESS_TOKEN, GITHUB_TOKEN"
-echo "  Tunnel: put a webhook-only listener in front, never tunnel the full WebUI unauthenticated:"
-echo "    ./launch.sh webui serve --webhook-only"
-echo "  Steer and cancel, while a run is running, any surface, same run id:"
-echo "    WebUI: POST /api/cancel {run_id}, POST /api/steer {run_id, note}, GET /api/runs"
-echo "    WhatsApp/Slack: cancel <run_id>, steer <run_id> <note>"
-echo "    CLI: ./launch.sh control cancel <run_id>, ./launch.sh control steer <run_id> <note>"
-echo "  Demo, live testing, and Meta API key claim are after work, not in setup.sh."
+section "You are ready"
+ok "Setup is complete. Your environment is at $AIDON_HOME/.env."
+info "Review anything you skipped, then start Aidon with ./launch.sh."
+info "For help configuring messages, approvals, or the WebUI, use the settings page."

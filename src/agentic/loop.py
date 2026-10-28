@@ -38,6 +38,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -507,7 +508,8 @@ class GoalRunner:
             from .think_effort import sampling_for
             sampling = sampling_for(
                 phase,
-                escalate=self._effort_escalated and str(phase) in ("repair", "verify"))
+                escalate=self._effort_escalated and str(phase) in ("repair", "verify"),
+                creative=bool(getattr(self, "_creative_mode", False)))
         except Exception:
             sampling = None
         has_image = False
@@ -802,6 +804,13 @@ class GoalRunner:
     def run(self, goal: str, spec=None, research_report=None,
             live_actions=None) -> RunReport:
         self._elapsed_timer = ElapsedTimer().start()
+        # Creative requests get a wider response distribution. Keep this
+        # narrow and phrase-based so ordinary tasks remain deterministic;
+        # callers can still use AIDON_TEMP_* and AIDON_TOP_P_* overrides.
+        self._creative_mode = bool(re.search(
+            r"\b(creative writing|write (?:a|an|the) (?:story|poem|scene|script)|"
+            r"short story|fiction|poem|poetry|screenplay|song lyrics)\b",
+            str(goal), re.IGNORECASE))
         # Sandbox network-on announcement, one line on
         # stderr at run start. Unknown (None) or off says
         # nothing.

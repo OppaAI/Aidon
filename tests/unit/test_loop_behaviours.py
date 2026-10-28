@@ -101,6 +101,9 @@ def test_think_effort_table_and_escalation():
     assert sampling_for("verify")["think"] is True
     assert sampling_for("verify", escalate=True)["think"] is True
     assert sampling_for("respond")["temperature"] > sampling_for("verify")["temperature"]
+    creative = sampling_for("respond", creative=True)
+    assert creative["temperature"] == 1.0
+    assert creative["top_p"] == 0.98
     assert resolve_effort("verify", escalate=True) == "medium"
     assert resolve_effort("verify", requested="high", escalate=True) == "high"
     with pytest.raises(ValueError):

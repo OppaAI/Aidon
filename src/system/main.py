@@ -410,6 +410,36 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
 
     tools["notify"] = notify
 
+    # Desktop control is opt-in and never a raw shell. Kernel mode keeps it
+    # unavailable; the demo must explicitly run with AIDON_KERNEL=0.
+    if getattr(config, "computer_driver", "") == "x11" and not getattr(config, "kernel_mode", False):
+        try:
+            from ..capabilities.computer_use import run_computer_use
+            from ..capabilities.x11_driver import X11Driver
+
+            _desktop_driver = X11Driver()
+
+            def computer_use(actions, screenshot_dir="computer-screenshots"):
+                def approve(kind, detail):
+                    ok, why = _approval(
+                        "live_execute", "Approve desktop action",
+                        f"Run X11 computer action {kind}: {detail}",
+                        force_ask=True,
+                    )
+                    return ok
+
+                target = _confined(screenshot_dir)
+                result = run_computer_use(
+                    actions, approve=approve, driver=_desktop_driver,
+                    screenshot_dir=target,
+                )
+                return json.dumps(result, ensure_ascii=False)
+
+            tools["computer_use"] = computer_use
+        except Exception:
+            # A missing display or driver leaves the capability unavailable.
+            pass
+
     # MCP client tools from Aidon. Connections live for this goal run;
     # every new stdio connection is approval-gated before third-party code
     # is started. Server tools are exposed with a namespaced name so they
@@ -713,7 +743,9 @@ class _LazyMemory:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="aidon")
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument("--cli", action="store_true",
+                        help="Open the conversational terminal interface")
+    sub = parser.add_subparsers(dest="command", required=False)
     goal_parser = sub.add_parser("goal", aliases=["run"], help="Run a goal")
     goal_parser.add_argument("text", help="Goal in plain language")
     goal_parser.add_argument("--project", default="default",
@@ -760,8 +792,8 @@ def main(argv: list[str] | None = None) -> int:
     webui_parser.add_argument("action", nargs="?", default="serve",
                               choices=["serve"],
                               help="Serve the WebUI, localhost only")
-    webui_parser.add_argument("--port", type=int, default=8002,
-                              help="Port for WebUI serve, default 8002, localhost only")
+    webui_parser.add_argument("--port", type=int, default=8765,
+                              help="Port for WebUI serve, default 8765, localhost only")
     webui_parser.add_argument("--webhook-only", action="store_true",
                               help="Serve only /webhook/whatsapp and /webhook/slack, no chat, settings, or library, for a tunnel front")
     scheduler_parser = sub.add_parser("scheduler", help="Scheduler daemon and pre-approval")
@@ -930,6 +962,10 @@ def main(argv: list[str] | None = None) -> int:
     think_parser.add_argument("--level", default="", help="Requested effort level: off, low, medium, high")
     think_parser.add_argument("--escalate", action="store_true", help="Raise one level (verifier rejection only)")
     args = parser.parse_args(argv)
+    if args.cli:
+        args.command = "chat"
+    elif not args.command:
+        parser.error("a command is required (or use --cli for conversational mode)")
     # This surface is called `run`; keep the spelling while using
     # the new goal runner and its current state/control implementation.
     if args.command == "run":
@@ -1452,15 +1488,21 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result.get("ok") else 2
         return 2
     if args.command == "chat":
-        print("Aidon chat, type a goal, empty line to exit. This is a terminal chat, not the WebUI, approval is asked on the console.")
-        while True:
+        from ..interface.repl import Repl
+        from .model_client import Message
+        from ..agentic.think_effort import sampling_for
+        messages = []
+
+        def _chat_handler(text: str) -> str:
+            messages.append(Message("user", text))
             try:
-                line = input("You: ").strip()
-            except EOFError:
-                break
-            if not line:
-                break
-            print(f"Aidon: received goal {line!r}, run it with goal command for a full sandbox run, chat here is a direct reply only, no pipeline, no approval gate for a chat reply.")
+                reply = client.chat(messages, sampling=sampling_for("respond"))
+            except TypeError:
+                reply = client.chat(messages)
+            messages.append(Message("assistant", str(reply)))
+            return str(reply)
+
+        Repl(_chat_handler, title="Aidon Chat", on_clear=messages.clear).run()
         return 0
     if args.command == "computer":
         from ..capabilities.computer_use import capture_screenshot, run_computer_use

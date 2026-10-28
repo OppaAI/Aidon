@@ -81,8 +81,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 # pages shipped no <head> at all, so they rendered as plain white text.
 # No external assets: everything here is inline, so pages work offline.
 BASE_CSS = """
-:root{--bg:#070b16;--surface:#0d1424;--surface2:#141d33;--text:#e9eef8;--muted:#8b96b3;--border:#1e2a45;--accent:#0082fb;--accent2:#7c5cff;--green:#3ecf8e;--amber:#f5a623;--red:#f0564f}
-body.light{--bg:#eef1f7;--surface:#ffffff;--surface2:#e6ebf4;--text:#131a2c;--muted:#5f6b87;--border:#d9e0ee;--accent:#0064e0;--accent2:#6a4dff;--green:#1f9d63;--amber:#c47b12;--red:#d43d36}
+:root{--bg:#030b1c;--surface:#07152d;--surface2:#0c2040;--text:#e9eef8;--muted:#8b96b3;--border:#1e2a45;--accent:#0082fb;--accent2:#7c5cff;--green:#3ecf8e;--amber:#f5a623;--red:#f0564f}
+body.light{--bg:#edf3fc;--surface:#fbfdff;--surface2:#e4eefb;--text:#131a2c;--muted:#5f6b87;--border:#d9e0ee;--accent:#0064e0;--accent2:#6a4dff;--green:#1f9d63;--amber:#c47b12;--red:#d43d36}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0 auto;padding:24px;max-width:980px;line-height:1.5}
 body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:56px 56px;opacity:.14}
 h1{font-family:Rajdhani,"Segoe UI",system-ui,sans-serif;font-size:1.8em;color:var(--text);margin:0 0 0.5em;text-transform:uppercase;letter-spacing:.12em}
@@ -132,7 +132,7 @@ body.chat-page h1{display:inline-block;margin-right:12px;vertical-align:middle}
 def _page_html(title, body):
     """Wrap a handler-built fragment in a full styled page."""
     return ("<!doctype html><html><head><meta charset=\"utf-8\"><title>" + title +
-            "</title><style>" + BASE_CSS + "</style></head><body><script>try{if(localStorage.getItem('aidon-theme')==='light'){document.body.classList.add('light')}}catch(e){}</script>" + body + "</body></html>")
+            "</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/favicon.svg\"><style>" + BASE_CSS + "</style></head><body><script>try{if(localStorage.getItem('aidon-theme')==='light'){document.body.classList.add('light')}}catch(e){}</script>" + body + "</body></html>")
 
 
 CHAT_HTML = """<!doctype html>
@@ -194,7 +194,7 @@ CHAT_HTML = """<!doctype html>
 <div id="sidebar">
 <h2>Projects</h2><div id="projects"></div>
 <h2>Library</h2><a href="/library">Library tab</a>
-<h2>Settings</h2><a href="/">Settings and keys</a>
+<h2>Settings</h2><a href="/settings">Settings and keys</a>
 <h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a> <a href="/replay">Replay</a> <a href="/avatar-vrm">Open VRM avatar</a> <a href="/capabilities">Capabilities</a> <a href="/memory">Memory</a> <a href="/knowledge">Knowledge</a> <a href="/reports">Reports</a>
 <div id="stage-pills"><p>Stages: recall, interpret, research, plan, sandbox, verify, approval, live, learn</p><div id="pills"></div></div>
 </div>
@@ -731,8 +731,8 @@ HUB_MAX_EVENTS = 500
 CHAT_HTML = CHAT_HTML.replace("</style></head>", "</style><style>" + BASE_CSS + "</style></head>", 1)
 DAG_HTML = DAG_HTML.replace("</head>", "<style>" + BASE_CSS + "</style></head>", 1)
 REPLAY_HTML = REPLAY_HTML.replace("</head>", "<style>" + BASE_CSS + "</style></head>", 1)
-VRM_HTML = VRM_HTML.replace("</head>", "<style>" + BASE_CSS + "</style></head>", 1)
-FACTORY_HTML = FACTORY_HTML.replace("</head>", "<style>" + BASE_CSS + "</style></head>", 1)
+VRM_HTML = VRM_HTML.replace("</head>", "<link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/favicon.svg\"><style>" + BASE_CSS + "</style></head>", 1)
+FACTORY_HTML = FACTORY_HTML.replace("</head>", "<link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/favicon.svg\"><style>" + BASE_CSS + "</style></head>", 1)
 
 
 class WebUIServer:
@@ -1310,6 +1310,7 @@ class WebUIServer:
         "research_allowlist": "AIDON_RESEARCH_ALLOWLIST",
         "router_fast_phases": "AIDON_ROUTER_FAST_PHASES",
         "kernel": "AIDON_KERNEL",
+        "computer_driver": "AIDON_COMPUTER_DRIVER",
         # Historical spelling remains writable for old installations.
         # New configuration uses the canonical Slack variable below.
         "AIDON_SLACK_SIGNING_SECRET": "AIDON_SLACK_SIGNING_SECRET",
@@ -1363,6 +1364,7 @@ class WebUIServer:
             {"key": "AIDON_SANDBOX_NETWORK", "label": "Sandbox network", "type": "bool", "default": "0", "desc": "Allow network access inside sandbox commands.", "secret": False},
             {"key": "AIDON_SANDBOX_REQUIRE_ISOLATION", "label": "Require isolation", "type": "bool", "default": "0", "desc": "Refuse sandbox commands when bubblewrap isolation is unavailable.", "secret": False},
             {"key": "AIDON_KERNEL", "label": "Kernel mode", "type": "bool", "default": "0", "desc": "Kernel mode: write/read/list/shell only, no calculate, no plugins.", "secret": False},
+            {"key": "AIDON_COMPUTER_DRIVER", "label": "Computer driver", "type": "enum", "default": "", "desc": "Opt-in desktop driver; requires a graphical session and kernel mode off.", "secret": False, "options": ["", "x11"]},
         ]},
         {"group": "Memory", "settings": [
             {"key": "AIDON_FORGET_HALF_LIFE_DAYS", "label": "Forget half-life days", "type": "string", "default": "21", "desc": "Forgetting-curve half-life, in days.", "secret": False},
@@ -1463,8 +1465,8 @@ class WebUIServer:
     def settings_catalog(self) -> dict:
         """Catalog + current values. Secrets come back masked.
 
-        A secret entry returns value "" and is_set, never the
-        value itself. A non-secret returns its .env value, else
+    A secret entry returns a fixed ``****`` mask when set and
+    is_set, never the value itself. A non-secret returns its .env value, else
         its process-environment value, else its default, with
         from_file saying whether .env set it.
         """
@@ -1484,8 +1486,8 @@ class WebUIServer:
                     raw = os.environ.get(entry["key"])
                 item["from_file"] = entry["key"] in file_vals
                 if entry.get("secret"):
-                    item["value"] = ""
                     item["is_set"] = bool(raw)
+                    item["value"] = "****" if item["is_set"] else ""
                 else:
                     item["value"] = raw if raw is not None else entry.get("default", "")
                 items.append(item)
@@ -1505,7 +1507,7 @@ class WebUIServer:
         number. A secret key with an empty value is a no-op
         ("don't change") and must never clear the key; a secret
         with a value is written, write-only — the catalog never
-        returns it back (value "" plus is_set). Unknown keys and
+        returns it back (value "****" plus is_set when set). Unknown keys and
         newline values are refused. The value is never printed or
         returned: the result carries only the key name.
         The .env file is created if missing and kept owner-only.
@@ -2033,6 +2035,21 @@ class WebUIServer:
                      "audio_bytes": len(result.get("audio", b"")),
                      "_audio": result.get("audio", b"")}
 
+    def open_tts_stream(self, body: dict):
+        """Open a progressive Fish response for the WebUI audio player."""
+        import re
+        text = str(body.get("text", "")).strip()
+        if not getattr(self, "tts_key", None):
+            raise ValueError("TTS key not configured")
+        if not text:
+            raise ValueError("empty text")
+        text = text[:2000]
+        text = re.sub(r"[#>*`_\[\]()|]", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        from ..capabilities.voice import open_tts_stream as _open_tts_stream
+        return _open_tts_stream(text, self.tts_key,
+                                str(body.get("voice_id", "") or self.tts_voice_id))
+
     def handle_goal_with_images(self, body: dict) -> dict:
         import base64 as _b64
         goal = str(body.get("goal", ""))
@@ -2388,6 +2405,58 @@ class WebUIServer:
                 elif parsed.path in ("/dag", "/capabilities", "/memory", "/knowledge",
                                      "/reports"):
                     self._send_static(parsed.path.lstrip("/") + ".html")
+                elif parsed.path == "/settings":
+                    keys = server.auth_store.list_keys() if server.auth_store else []
+                    html = """<h1>Settings</h1>
+<p>Every configuration knob is shown here. Changes are written to <span id="env-path"></span>.
+Secret values are shown only as set or unset; type a new value to replace one.
+Restart Aidon for changes to take effect.</p>
+<div id="settings-groups"></div>
+<p><button id="settings-save">Save settings</button> <span id="settings-status"></span></p>
+<h2>Keys, hash prefixes only</h2>"""
+                    for key in keys:
+                        html += f"<p>{key['name']} {key['scope']} {key['key_hash_prefix']}</p>"
+                    html += """<script>
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+async function loadSettings(){
+  const r = await fetch('/api/settings/catalog'); const data = await r.json();
+  document.getElementById('env-path').textContent = data.env_file || '';
+  let out = '';
+  (data.groups || []).forEach(function(g){
+    out += '<h2>' + esc(g.group) + '</h2>';
+    g.settings.forEach(function(s){
+      out += '<p><label>' + esc(s.label) + ' (' + esc(s.key) + ')</label><br>';
+      if (s.type === 'bool') {
+        out += '<input type="checkbox" data-key="' + esc(s.key) + '"' + ((s.value === '1' || s.value === 'true') ? ' checked' : '') + '>';
+      } else if (s.type === 'enum') {
+        out += '<select data-key="' + esc(s.key) + '">' + (s.options || []).map(function(o){ return '<option' + (o === s.value ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>';
+      } else if (s.secret) {
+        out += '<input type="password" data-key="' + esc(s.key) + '" placeholder="' + (s.is_set ? '******** (set - leave empty to keep, type to replace)' : 'not set - type a value to set') + '">';
+      } else {
+        out += '<input type="text" data-key="' + esc(s.key) + '" value="' + esc(s.value) + '">';
+      }
+      if (s.desc) { out += '<br><small>' + esc(s.desc) + '</small>'; }
+      out += '</p>';
+    });
+  });
+  document.getElementById('settings-groups').innerHTML = out;
+}
+async function saveSettings(){
+  const status = document.getElementById('settings-status'); status.textContent = 'Saving...';
+  const fields = document.querySelectorAll('[data-key]'); let failed = 0;
+  for (const f of fields) {
+    let v = (f.type === 'checkbox') ? (f.checked ? '1' : '0') : f.value;
+    if (f.type === 'password' && (!v || v === '****')) { continue; }
+    const r = await fetch('/api/settings/env', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: f.getAttribute('data-key'), value: v})});
+    const d = await r.json();
+    if (!d.ok) { failed++; status.textContent = 'Failed: ' + (d.error || 'unknown'); }
+  }
+  if (!failed) { status.textContent = 'Saved. Restart Aidon for changes to take effect.'; }
+}
+document.getElementById('settings-save').addEventListener('click', saveSettings);
+loadSettings();
+</script>"""
+                    self._send_html(200, _page_html("Settings", html))
                 elif parsed.path == "/library":
                     files = server._library_files()
                     html = "<h1>Library</h1>"
@@ -2866,6 +2935,28 @@ class WebUIServer:
                             return
                     else:
                         self._send_json(status, payload)
+                elif parsed.path == "/api/tts/stream":
+                    try:
+                        response = server.open_tts_stream(body)
+                    except Exception as exc:
+                        self._send_json(500, {"error": type(exc).__name__})
+                    else:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "audio/mpeg")
+                        self.send_header("Cache-Control", "no-store")
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+                        try:
+                            while True:
+                                chunk = response.read(4 * 1024)
+                                if not chunk:
+                                    break
+                                self.wfile.write(chunk)
+                                self.wfile.flush()
+                        except (BrokenPipeError, ConnectionResetError):
+                            pass
+                        finally:
+                            response.close()
                 elif parsed.path == "/api/goals/with-images":
                     self._send_json(200, server.handle_goal_with_images(body))
                 elif parsed.path == "/api/plugins/adopt":

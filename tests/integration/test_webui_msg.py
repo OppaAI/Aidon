@@ -84,8 +84,8 @@ def test_webui_chat_library_settings_no_real_key(tmp_path):
         assert payload["reply"] == "WebUI got: Plan a dinner"
         status, payload = _get(base, "/api/library")
         assert any(f["name"] == "note.txt" for f in payload["files"])
-        status, payload = _get(base, "/settings")
-        assert status == 404
+        status, html = _get(base, "/settings")
+        assert status == 200 and "settings-groups" in html
     finally:
         httpd.shutdown()
 

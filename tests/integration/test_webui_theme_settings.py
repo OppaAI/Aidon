@@ -21,15 +21,15 @@ from src.interface.webui import (
 
 
 def test_theme_variables_and_toggle():
-    assert "--bg:#070b16" in BASE_CSS  # Aidon dark default
+    assert "--bg:#030b1c" in BASE_CSS  # deep blue dark default
     assert "--accent:#0082fb" in BASE_CSS
-    assert "body.light{--bg:#eef1f7" in BASE_CSS  # light override
+    assert "body.light{--bg:#edf3fc" in BASE_CSS  # light override
     assert 'id="theme-toggle"' in CHAT_HTML
     assert "aidon-theme" in CHAT_HTML
     assert "aidon-theme" in _page_html("X", "<p>y</p>")
 
 
-def test_settings_api_remains_available_without_page_route():
+def test_settings_page_and_api_are_available():
     with TemporaryDirectory() as td:
         home = Path(td)
         srv = WebUIServer(home, None, None)
@@ -37,12 +37,9 @@ def test_settings_api_remains_available_without_page_route():
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         try:
             base = f"http://127.0.0.1:{httpd.server_address[1]}"
-            try:
-                urllib.request.urlopen(base + "/settings")
-            except urllib.error.HTTPError as exc:
-                assert exc.code == 404
-            else:
-                raise AssertionError("/settings route must be removed")
+            with urllib.request.urlopen(base + "/settings") as response:
+                page = response.read().decode()
+            assert "settings-groups" in page
         finally:
             httpd.shutdown()
 
@@ -63,6 +60,6 @@ def test_settings_api_remains_available_without_page_route():
         catalog = srv.settings_catalog()
         key_entry = [s for g in catalog["groups"] for s in g["settings"]
                      if s["key"] == "AIDON_API_KEY"]
-        assert key_entry and key_entry[0]["value"] == "" and key_entry[0]["is_set"] is True
+        assert key_entry and key_entry[0]["value"] == "****" and key_entry[0]["is_set"] is True
         kept = srv.settings_set_env("AIDON_API_KEY", "")
         assert kept == {"ok": True, "key": "AIDON_API_KEY", "unchanged": True}

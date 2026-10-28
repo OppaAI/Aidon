@@ -45,6 +45,29 @@ def tts(text: str, fish_key: str, voice_id: str = "", post=None) -> dict:
         return {"ok": False, "error": type(exc).__name__, "audio": b""}
 
 
+def open_tts_stream(text: str, fish_key: str, voice_id: str = ""):
+    """Open Fish TTS and return its response for progressive reads.
+
+    The caller owns the returned response and must close it. Keeping the
+    response open lets the WebUI forward audio chunks as Fish produces them,
+    instead of waiting for ``response.read()`` to collect the full MP3.
+    """
+    if not fish_key:
+        raise ValueError("AIDON_FISH_API_KEY not set")
+    if not text.strip():
+        raise ValueError("empty text")
+    payload = {"text": text, "format": "mp3"}
+    if voice_id:
+        payload["reference_id"] = voice_id
+    request = urllib.request.Request(
+        "https://api.fish.audio/v1/tts", data=json.dumps(payload).encode(),
+        method="POST",
+        headers={"Authorization": f"Bearer {fish_key}",
+                 "model": "s2.1-pro-free",
+                 "Content-Type": "application/json"})
+    return urllib.request.urlopen(request, timeout=60)
+
+
 def transcribe(audio_bytes: bytes, transcribe_key: str, post=None) -> dict:
     if not transcribe_key:
         return {"ok": False, "error": "AIDON_TRANSCRIBE_API_KEY not set", "text": ""}

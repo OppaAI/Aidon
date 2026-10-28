@@ -113,9 +113,30 @@
     return d;
   }
 
+  function finalMessageParts(text) {
+    const value = String(text || "");
+    const lines = value.split("\n");
+    const index = lines.findIndex((line) => /^\s*⏱️?\s/.test(line));
+    if (index < 0) return { body: value, stats: "" };
+    return {
+      body: lines.slice(0, index).join("\n").replace(/\s+$/, ""),
+      stats: lines.slice(index).join(" ").replace(/^\s*⏱️?\s*/, "").trim(),
+    };
+  }
+
+  function renderFinalMessage(text) {
+    const parts = finalMessageParts(text);
+    let html = md(parts.body);
+    if (parts.stats) {
+      html += '<div class="run-stats"><span class="run-stats-icon" aria-hidden="true">◷</span>' +
+        '<span>' + esc(parts.stats) + "</span></div>";
+    }
+    return html;
+  }
+
   // Typewriter reveal: streams text into the message char-by-char,
   // karaoke style. Returns the element; callers can append buttons after.
-  function addMsgTyped(kind, text, t) {
+  function addMsgTyped(kind, text, t, final = false) {
     const d = document.createElement("div");
     d.className = "msg " + kind;
     if (t) {
@@ -143,7 +164,10 @@
         body.innerHTML = md(full.slice(0, i));
         thread.scrollTop = thread.scrollHeight;
         if (i < full.length) requestAnimationFrame(tick);
-        else resolve();
+        else {
+          body.innerHTML = final ? renderFinalMessage(full) : md(full);
+          resolve();
+        }
       })();
     });
     return d;
@@ -363,6 +387,7 @@
 
   let stopKaraokeActive = null;  // cancels the rAF loop of the current voice
   let currentAudioUrl = null;    // blob URL to revoke when playback ends
+  let currentAudioCancel = null;
   function resetSpeakBtn() {
     // Every stop path (ended, error, toggled off, replaced by a newer
     // message) must land here: pause() fires no "ended", so the rAF
@@ -375,6 +400,10 @@
       try { URL.revokeObjectURL(currentAudioUrl); } catch (e) { /* noop */ }
       currentAudioUrl = null;
     }
+    if (currentAudioCancel) {
+      try { currentAudioCancel(); } catch (e) { /* noop */ }
+      currentAudioCancel = null;
+    }
     if (currentBtn) {
       currentBtn.textContent = "▶";
       currentBtn.classList.remove("playing");
@@ -386,6 +415,80 @@
   }
 
   let speakGen = 0;   // playback generation: only the newest wins
+
+  // Fish can send MP3 bytes progressively. MediaSource lets the browser
+  // start playback after the first audio chunk while the rest is arriving;
+  // unsupported browsers use the buffered endpoint below.
+  async function progressiveAudio(response) {
+    const mime = "audio/mpeg";
+    if (!window.MediaSource || !response.body ||
+        !MediaSource.isTypeSupported(mime)) {
+      try { if (response.body) await response.body.cancel(); } catch (e) {}
+      return null;
+    }
+    const mediaSource = new MediaSource();
+    const url = URL.createObjectURL(mediaSource);
+    const audio = new Audio(url);
+    const reader = response.body.getReader();
+    const queue = [];
+    let sourceBuffer = null;
+    let ended = false;
+    let firstChunk = null;
+    const firstAudio = new Promise((resolve, reject) => {
+      firstChunk = { resolve, reject };
+    });
+    const pump = () => {
+      if (!sourceBuffer || sourceBuffer.updating || !queue.length) {
+        if (ended && sourceBuffer && !sourceBuffer.updating && !queue.length &&
+            mediaSource.readyState === "open") {
+          try { mediaSource.endOfStream(); } catch (e) {}
+        }
+        return;
+      }
+      try { sourceBuffer.appendBuffer(queue.shift()); }
+      catch (e) { if (firstChunk) firstChunk.reject(e); }
+    };
+    mediaSource.addEventListener("sourceopen", () => {
+      try {
+        sourceBuffer = mediaSource.addSourceBuffer(mime);
+        sourceBuffer.addEventListener("updateend", () => {
+          if (firstChunk) {
+            firstChunk.resolve({ audio, url, cancel: () => reader.cancel() });
+            firstChunk = null;
+          }
+          pump();
+        });
+        pump();
+      } catch (e) { if (firstChunk) firstChunk.reject(e); }
+    }, { once: true });
+    (async () => {
+      try {
+        while (true) {
+          const item = await reader.read();
+          if (item.done) break;
+          if (item.value && item.value.byteLength) {
+            queue.push(item.value.slice().buffer);
+            pump();
+          }
+        }
+        ended = true;
+        pump();
+        if (firstChunk && !queue.length) {
+          firstChunk.reject(new Error("empty TTS stream"));
+          firstChunk = null;
+        }
+      } catch (e) {
+        if (firstChunk) firstChunk.reject(e);
+      }
+    })();
+    try { return await firstAudio; }
+    catch (e) {
+      try { reader.cancel(); } catch (ignored) {}
+      URL.revokeObjectURL(url);
+      return null;
+    }
+  }
+
   async function speak(el, text, btn) {
     const gen = ++speakGen;
     if (currentBtn === btn && currentAudio) {  // toggle: stop
@@ -409,17 +512,39 @@
       // no link syntax, and the words match the highlight exactly.
       // The clock line is stripped - it is for the eye.
       const spoken = spokenText(body ? body.textContent : (text || ""));
-      const r = await fetch("/api/tts", {
+      const request = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: spoken }),
-      });
-      if (!r.ok) throw new Error("tts " + r.status);
-      const url = URL.createObjectURL(await r.blob());
+      };
+      const streamResponse = await fetch("/api/tts/stream", request);
+      if (!streamResponse.ok) throw new Error("tts " + streamResponse.status);
+      const progressive = await progressiveAudio(streamResponse);
+      let audio;
+      let url;
+      if (progressive) {
+        audio = progressive.audio;
+        url = progressive.url;
+        currentAudioCancel = progressive.cancel;
+      } else {
+        // Safari, older browsers, and unusual MP3 implementations use the
+        // complete-response path without changing user behavior.
+        const r = await fetch("/api/tts", request);
+        if (!r.ok) throw new Error("tts " + r.status);
+        url = URL.createObjectURL(await r.blob());
+        audio = new Audio(url);
+        currentAudioCancel = null;
+      }
       // A newer playback started while this one was downloading: drop
       // it, or the two voices talk over each other.
-      if (gen !== speakGen) { URL.revokeObjectURL(url); return; }
-      const audio = new Audio(url);
+      if (gen !== speakGen) {
+        if (currentAudioCancel) {
+          try { currentAudioCancel(); } catch (e) { /* noop */ }
+          currentAudioCancel = null;
+        }
+        URL.revokeObjectURL(url);
+        return;
+      }
       // Route through the analyser for lip sync + waveform (no-op if
       // Web Audio is unavailable — falls back to plain playback).
       try {
@@ -496,10 +621,18 @@
   function renderStages(stage) {
     stagesEl.innerHTML = "";
     const idx = STAGES.indexOf(stage);
+    const icons = {
+      interpret: "⌁", research: "⌕", recall: "◈", plan: "◇",
+      sandbox: "□", approval: "◌", live: "▶", learn: "✦", done: "✓",
+    };
     STAGES.forEach((s, i) => {
       const p = document.createElement("span");
       p.className = "stage" + (i === idx ? " active" : "") + (i < idx ? " done" : "");
-      p.textContent = s;
+      const icon = document.createElement("span");
+      icon.className = "stage-ico";
+      icon.textContent = icons[s] || "·";
+      p.appendChild(icon);
+      p.appendChild(document.createTextNode(s));
       stagesEl.appendChild(p);
     });
   }
@@ -686,7 +819,7 @@
             addMsg("user", e.text, e.t);
         }
         else if (e.kind === "aidon" || e.kind === "aidon-final") {
-          const m = addMsgTyped("aidon", e.text, e.t);
+          const m = addMsgTyped("aidon", e.text, e.t, e.kind === "aidon-final");
           const btn = playButton(e.text || "", m);
           m.appendChild(btn);
           if (e.kind === "aidon-final") {

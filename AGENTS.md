@@ -178,7 +178,7 @@ policy); one-way social publishing ALWAYS needs human approval.
   API setup (phone-number ID), System User with whatsapp_business_messaging
   (permanent token), webhook config: callback URL = public URL +
   /webhook/whatsapp (needs a tunnel on AIVA: `cloudflared tunnel --url
-  http://localhost:8002` — the WebUI port, which is serve()'s default), verify token, subscribe to
+  http://localhost:8765` — the WebUI port, which is serve()'s default), verify token, subscribe to
   `messages`.
   SECURITY NOTE: NEVER tunnel the full WebUI — /api/goals and
   /api/settings are unauthenticated (localhost-only by default). Instead

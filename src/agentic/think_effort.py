@@ -49,7 +49,8 @@ def effort_for(phase: str, overrides: dict | None = None) -> str:
     return _EFFORT_TABLE.get(phase, "low")
 
 
-def sampling_for(phase: str, *, escalate: bool = False) -> dict:
+def sampling_for(phase: str, *, escalate: bool = False,
+                 creative: bool = False) -> dict:
     """Sampling parameters for a phase with graceful effort degradation.
 
     Backends that expose only a thinking on/off switch receive ``think``.
@@ -58,6 +59,11 @@ def sampling_for(phase: str, *, escalate: bool = False) -> dict:
     """
     level = resolve_effort(phase, escalate=escalate)
     result = dict(_SAMPLING_TABLE.get(phase, _DEFAULT_SAMPLING))
+    if creative and str(phase).lower() in {"respond", "learn"}:
+        # Open-ended writing benefits from a wider distribution than
+        # operational answers, while planning and verification remain
+        # conservative and machine-readable.
+        result.update(temperature=1.0, top_p=0.98)
     # Preserve old per-phase .env overrides, e.g.
     # AIDON_TEMP_VERIFY=0.0 and AIDON_TOP_P_RESPOND=0.95.
     temp = os.environ.get(f"AIDON_TEMP_{str(phase).upper()}")

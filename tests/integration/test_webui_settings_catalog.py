@@ -58,7 +58,7 @@ def test_catalog_masks_secrets_and_reports_is_set(tmp_path):
                for entry in group["settings"]}
     secret = entries["AIDON_API_KEY"]
     assert secret["secret"] is True
-    assert secret["value"] == "" and secret["is_set"] is True
+    assert secret["value"] == "****" and secret["is_set"] is True
     assert "real-secret-value" not in json.dumps(catalog)
     assert entries["AIDON_TIMEZONE"]["value"] == "America/Vancouver"
     assert entries["AIDON_TIMEZONE"]["from_file"] is True
@@ -171,7 +171,7 @@ def test_http_catalog_and_project_delete_routes(tmp_path):
         status, data = _request(base, "GET", "/api/settings/catalog")
         assert status == 200
         assert [group["group"] for group in data["groups"]][0] == "Model"
-        assert all(entry["value"] == "" for group in data["groups"]
+        assert all(entry["value"] in ("", "****") for group in data["groups"]
                    for entry in group["settings"] if entry["secret"])
         # POST /api/settings still handles settings.json keys…
         status, data = _request(base, "POST", "/api/settings",

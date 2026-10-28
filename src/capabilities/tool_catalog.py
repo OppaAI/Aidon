@@ -15,6 +15,7 @@ GOAL_TOOL_NAMES = (
     "write_file", "notify", "sam_segment", "uv_venv",
     "install_python_package", "apt_install", "adopt_tool_plugin",
     "mcp_connect", "mcp_disconnect",
+    "computer_use",
 )
 
 

@@ -176,6 +176,7 @@ class Config:
     sam_model: str = "meta-sam"
     router_fast_phases: str = "interpret,learn,respond"
     kernel_mode: bool = False
+    computer_driver: str = ""
 
     @classmethod
     def load(cls, home: Path | None = None) -> "Config":
@@ -278,6 +279,7 @@ class Config:
             sam_model=os.environ.get("AIDON_SAM_MODEL", "meta-sam"),
             router_fast_phases=os.environ.get("AIDON_ROUTER_FAST_PHASES", "interpret,learn,respond"),
             kernel_mode=os.environ.get("AIDON_KERNEL", "0") not in ("0", "false", "no"),
+            computer_driver=os.environ.get("AIDON_COMPUTER_DRIVER", "").strip().lower(),
         )
 
     @property
