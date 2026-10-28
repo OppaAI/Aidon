@@ -1217,6 +1217,7 @@
     if (!goal || sendBtn.disabled) return;
     const previousRun = currentRun;
     const guidance = guidanceInput.value.trim();
+    const forceWeb = document.getElementById("web-btn")?.classList.contains("active") || false;
     const imgs = pendingImages.slice();
     const fls = pendingFiles.slice();
     const files = imgs.concat(fls);
@@ -1243,6 +1244,7 @@
         const fd = new FormData();
         fd.append("goal", goal);
         fd.append("guidance", guidance);
+        if (forceWeb) fd.append("force_web", "true");
         if (convCtx.conversation_id)
           fd.append("conversation_id", convCtx.conversation_id);
         if (convCtx.project_id) fd.append("project_id", convCtx.project_id);
@@ -1258,7 +1260,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            goal, guidance,
+            goal, guidance, force_web: forceWeb,
             conversation_id: convCtx.conversation_id || "",
             project_id: convCtx.project_id || "",
           }),
@@ -1375,6 +1377,12 @@
   }
 
   sendBtn.addEventListener("click", startRun);
+  const webBtn = document.getElementById("web-btn");
+  if (webBtn) webBtn.addEventListener("click", () => {
+    const active = webBtn.classList.toggle("active");
+    webBtn.title = active ? "Web search forced (click to turn off)" : "Force web search";
+    webBtn.setAttribute("aria-pressed", active ? "true" : "false");
+  });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !(e.ctrlKey || e.metaKey)) {
       e.preventDefault();

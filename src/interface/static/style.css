@@ -595,7 +595,7 @@ body:has(.settings-app) { overflow: auto; }
 /* Composer attach/camera buttons: square, on-theme, hover-accented.
    The camera button disables (no webcam / no API / denied) with a clear
    title instead of silently degrading to a file picker. */
-#attach-btn, #camera-btn {
+#attach-btn, #camera-btn, #web-btn {
   width: 44px; height: 44px; flex: none; align-self: center;
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0; font-size: 19px; line-height: 1;
@@ -606,16 +606,17 @@ body:has(.settings-app) { overflow: auto; }
   cursor: pointer;
   transition: border-color .15s, box-shadow .15s, opacity .15s;
 }
-#attach-btn:hover:not(:disabled), #camera-btn:hover:not(:disabled) {
+#attach-btn:hover:not(:disabled), #camera-btn:hover:not(:disabled), #web-btn:hover:not(:disabled) {
   border-color: var(--accent);
   box-shadow: 0 0 12px var(--accent-glow);
 }
-#attach-btn:disabled, #camera-btn:disabled {
+#attach-btn:disabled, #camera-btn:disabled, #web-btn:disabled {
   opacity: .35;
   cursor: not-allowed;
   box-shadow: none;
 }
 #camera-btn[aria-disabled="true"] { color: var(--muted); }
+#web-btn.active { color: var(--accent); border-color: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
 
 /* Webcam capture modal (colours follow the same theme variables) */
 #cam-overlay {
