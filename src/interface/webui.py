@@ -1005,7 +1005,9 @@ class WebUIServer:
         if not message:
             return {"reply": "Usage: /web <question>"}
         message, delivery = extract_result_delivery(message)
-        project_id = str(body.get("project_id", "default"))
+        # A plain chat is global/unassigned unless the user explicitly
+        # selected a project. Do not silently put it in "default".
+        project_id = str(body.get("project_id", "") or "")
         replies: list[str] = []
         event = TriggerEvent(source="webui", kind="chat", goal=message,
                              project_id=project_id,
@@ -1030,7 +1032,9 @@ class WebUIServer:
             return {"error": "a web question is required"}
         force_web = force_web or bool(body.get("force_web", False))
         goal, delivery = extract_result_delivery(goal)
-        project_id = str(body.get("project_id", "default") or "default")
+        # Keep ordinary chats outside projects. A project id is supplied
+        # only when the user selected one in the WebUI.
+        project_id = str(body.get("project_id", "") or "")
         conversation_id = str(body.get("conversation_id", "") or "")
         conversation_db = None
         try:
