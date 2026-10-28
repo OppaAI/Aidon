@@ -157,11 +157,13 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         pass
     try:
         from ..capabilities.docgen import build_ebook, generate_document, write_document_file
-        def _generate_document(title, sections, filename="", path="", format=""):
+        def _generate_document(title, sections, filename="", path="",
+                               input_path="", output="", output_path="",
+                               format=""):
             # Models have historically called the destination ``path`` or
             # requested ``format`` explicitly. Accept those aliases so a
             # valid document plan is not rejected by a naming mismatch.
-            destination = str(filename or path or "")
+            destination = str(filename or path or input_path or output or output_path or "")
             if destination:
                 if format and "." not in Path(destination).name:
                     destination += "." + str(format).lstrip(".")
@@ -282,15 +284,18 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
     if "instagram_publish" in tools:
         tools["instagram_post"] = tools["instagram_publish"]
 
-    def read_file(name):
+    def read_file(name="", path="", input_path="", file=""):
+        name = str(name or path or input_path or file)
         path = _confined(name)
         if not path.is_file():
             return f"file not found: {name}"
         return path.read_text(encoding="utf-8", errors="replace")
 
-    def write_file(name, text):
+    def write_file(name="", text="", input_path="", path="", file="",
+                   content=""):
+        name = str(name or input_path or path or file)
         path = _confined(name)
-        path.write_text(str(text), encoding="utf-8")
+        path.write_text(str(text if text != "" else content), encoding="utf-8")
         return f"wrote {path}"
 
     tools["read_file"] = read_file

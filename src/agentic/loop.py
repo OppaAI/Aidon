@@ -648,6 +648,22 @@ class GoalRunner:
             if not result.ok:
                 raise ValueError(f"shell failed: {result.stderr[:200]}")
             return result.stdout
+        # Normalize harmless model naming variations at the execution
+        # boundary. Deterministic validation still rejects missing paths or
+        # empty shell commands before they reach this point.
+        if isinstance(args, dict):
+            args = dict(args)
+            if name in ("write", "write_file"):
+                if not args.get("file"):
+                    for alias in ("name", "path", "input_path", "filename"):
+                        if args.get(alias):
+                            args["file"] = args[alias]
+                            break
+                if "text" not in args and "content" in args:
+                    args["text"] = args["content"]
+            elif name == "shell" and isinstance(args.get("command"), str):
+                import shlex
+                args["command"] = shlex.split(args["command"])
         try:
             return self.tools.call(name, args)
         except ValueError as exc:

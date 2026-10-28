@@ -32,6 +32,22 @@ def validate_plan(plan, allowed_tools: set[str] | None = None) -> list[str]:
             failures.append(f"step {index}: tool {tool} is not allowed")
         if not isinstance(args, dict):
             failures.append(f"step {index}: args must be a dict")
+        elif tool in {"write", "write_file"}:
+            if not any(str(args.get(key, "")).strip()
+                       for key in ("file", "name", "path", "input_path", "filename")):
+                failures.append(f"step {index}: {tool} needs a destination file")
+        elif tool == "shell":
+            command = args.get("command", args.get("cmd", []))
+            if isinstance(command, str):
+                command = command.strip()
+            if not command or (isinstance(command, list) and not any(command)):
+                failures.append(f"step {index}: shell needs a non-empty command")
+        elif tool == "generate_document":
+            if not str(args.get("title", "")).strip():
+                failures.append(f"step {index}: generate_document needs a title")
+            if not any(str(args.get(key, "")).strip()
+                       for key in ("filename", "path", "input_path", "output", "output_path")):
+                failures.append(f"step {index}: generate_document needs an output path")
         if not deliverable and tool == "write":
             failures.append(f"step {index}: write step deliverable is empty")
         if not deliverable:
