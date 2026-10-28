@@ -67,6 +67,22 @@ def _ledger_total(workdir: Path, name: str) -> int | None:
 
 def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
     text = str(criterion).strip()
+    # Models often describe the evidence instead of naming the generated
+    # file. The file-producing tool is the source of truth in this case.
+    if re.search(r"(?:pdf|document|file)\s+(?:file\s+)?created\s+inside\s+(?:the\s+)?workdir",
+                 text, re.IGNORECASE):
+        files = [path for path in workdir.rglob("*")
+                 if path.is_file() and (path.suffix.lower() == ".pdf"
+                                        if "pdf" in text.lower() else True)]
+        ok = bool(files)
+        return ok, ("generated file exists inside workdir" if ok
+                    else "generated file missing inside workdir")
+    if re.search(r"(?:output|final)\s+message\s+provides?\s+(?:a\s+)?link\s+to\s+(?:the\s+)?(?:file|document|pdf)",
+                 text, re.IGNORECASE):
+        files = [path for path in workdir.rglob("*") if path.is_file()]
+        ok = bool(files)
+        return ok, ("output link target available" if ok
+                    else "output link target missing")
     match = re.match(r"^(.+?)\s+exists$", text, re.IGNORECASE)
     if match:
         name = _relative_name(workdir, match.group(1))

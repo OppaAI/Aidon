@@ -77,6 +77,28 @@ def test_loop_executes_real_steps_and_verifies(tmp_path):
     assert (tmp_path / "home" / "work" / "out.md").read_text() == "done"
 
 
+def test_generated_file_path_replaces_prose_deliverable(tmp_path):
+    plan = {"steps": [{
+        "tool": "generate_document",
+        "args": {"title": "Aidon introduction", "filename": "intro.pdf"},
+        "deliverable": "Aidon introduction PDF",
+        "criteria": "PDF file created inside workdir",
+    }], "deliverables": ["Aidon introduction PDF"],
+            "criteria": ["Output message provides link to the PDF"]}
+
+    def generate_document(title, filename):
+        path = tmp_path / "home" / "work" / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"%PDF-1.4")
+        return str(path)
+
+    runner = _runner(tmp_path, FakeClient(json.dumps(plan)))
+    runner.extra_tools = {"generate_document": generate_document}
+    report = runner.run("Create an introduction PDF")
+    assert report.status == "done"
+    assert report.files == ["intro.pdf"]
+
+
 def test_loop_repair_keeps_passed_files(tmp_path):
     # First plan: good file + bad criterion (ledger total wrong).
     # Repair plan: fixes only the ledger, good file must survive untouched.

@@ -1318,7 +1318,15 @@ class GoalRunner:
                         # supplied a prose deliverable such as
                         # "Aidon introduction PDF" instead of a filename.
                         if step.tool in {"generate_document", "write_file"}:
-                            candidate = Path(str(tool_result).strip())
+                            raw_result = str(tool_result).strip()
+                            # write_file returns a human-readable prefix;
+                            # document generation returns the actual path.
+                            raw_path = (raw_result[6:].strip()
+                                        if raw_result.lower().startswith("wrote ")
+                                        else raw_result)
+                            candidate = Path(raw_path)
+                            if not candidate.is_absolute():
+                                candidate = self.sandbox.workdir / candidate
                             if candidate.is_file():
                                 try:
                                     actual = candidate.resolve().relative_to(
@@ -1328,6 +1336,18 @@ class GoalRunner:
                                     current_plan.deliverables = [
                                         str(actual) if item == old else item
                                         for item in current_plan.deliverables]
+                                    # Criteria are model-authored too. Replace
+                                    # a prose filename with the path proven by
+                                    # the tool, so verification cannot ask for
+                                    # a non-existent label after a successful
+                                    # generation.
+                                    current_plan.criteria = [
+                                        str(item).replace(str(old), str(actual))
+                                        if old else item
+                                        for item in current_plan.criteria]
+                                    if step.criteria and old:
+                                        step.criteria = str(step.criteria).replace(
+                                            str(old), str(actual))
                                 except ValueError:
                                     pass
                     from .step_lines import record_attempt
