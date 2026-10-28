@@ -1403,7 +1403,9 @@
 
   async function startRun(goalOverride = "") {
     const goal = (goalOverride || input.value).trim();
-    if (!goal || sendBtn.disabled) return;
+    // A restored conversation can leave the button's visual disabled flag
+    // stale even though no run is active. Only block a real active run.
+    if (!goal || (sendBtn.disabled && currentRun)) return;
     const previousRun = currentRun;
     const guidance = guidanceInput.value.trim();
     const forceWeb = document.getElementById("web-btn")?.classList.contains("active") || false;
