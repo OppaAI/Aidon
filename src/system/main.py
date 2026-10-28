@@ -320,6 +320,42 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         except Exception as exc:
             return False, f"approval failed: {exc}"
 
+    # The WebUI goal runner receives this dictionary as its extra toolset.
+    # Keep desktop control here as well as in the CLI tool builder; otherwise
+    # the status panel can say x11 while the planner cannot select
+    # computer_use for a WebUI goal.
+    # Prefer explicit configuration, but also discover an installed X11
+    # driver automatically. Discovery is read-only; every actual desktop
+    # action remains approval-gated below.
+    _computer_requested = getattr(config, "computer_driver", "") == "x11"
+    if not getattr(config, "kernel_mode", False) and (_computer_requested or
+                                                       os.environ.get("DISPLAY")):
+        try:
+            from ..capabilities.computer_use import run_computer_use
+            from ..capabilities.x11_driver import X11Driver, x11_available
+            if not _computer_requested and not x11_available():
+                raise RuntimeError("no discoverable X11 driver")
+            desktop_driver = X11Driver()
+
+            def computer_use(actions, screenshot_dir="computer-screenshots"):
+                def approve(kind, detail):
+                    ok, _ = _approval(
+                        "live_execute", "Approve desktop action",
+                        f"Run X11 computer action {kind}: {detail}",
+                        force_ask=True,
+                    )
+                    return ok
+                target = _confined(screenshot_dir)
+                result = run_computer_use(
+                    actions, approve=approve, driver=desktop_driver,
+                    screenshot_dir=target)
+                return json.dumps(result, ensure_ascii=False)
+
+            tools["computer_use"] = computer_use
+        except Exception:
+            # A missing xdotool or DISPLAY must not make other tools vanish.
+            pass
+
     # Recording host audio is a sensitive side effect. Keep the old
     # mandatory approval boundary even though the recorder itself lives in
     # capabilities/audio.py.

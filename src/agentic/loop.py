@@ -670,6 +670,11 @@ class GoalRunner:
             # extra tools are advertised only outside kernel mode.
             system += (" Extra tools available to plan steps: "
                        + ", ".join(sorted(self.extra_tools)) + ".")
+            if "computer_use" in self.extra_tools:
+                system += (" For GUI tasks such as opening an application or "
+                           "typing into it, use computer_use with validated "
+                           "click/type/key actions; do not substitute a "
+                           "file-only plan.")
         user = goal
         # Recall both prior experiences and ingested knowledge.
         # before planning. Keep the block bounded so memory cannot crowd

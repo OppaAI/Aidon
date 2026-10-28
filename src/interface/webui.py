@@ -2724,7 +2724,7 @@ loadSettings();
                     self._send_html(200, FACTORY_HTML)
                 elif parsed.path == "/api/factory":
                     self._send_json(200, {"stages": server.factory_stages()})
-                elif parsed.path == "/dag":
+                elif parsed.path in ("/dag", "/studio/dag"):
                     self._send_html(200, DAG_HTML)
                 elif parsed.path == "/api/dags":
                     self._send_json(200, server.handle_dags_list())
@@ -2732,7 +2732,7 @@ loadSettings();
                     dag_id = parsed.path[len("/api/dags/"):]
                     data = server.handle_dag_get(dag_id)
                     self._send_json(200 if "error" not in data else 404, data)
-                elif parsed.path == "/capabilities":
+                elif parsed.path in ("/capabilities", "/studio/capabilities"):
                     from ..capabilities.plugins import PluginRegistry as _PR
                     _reg = _PR(server.home); _reg.load_all()
                     html = "<h1>Capabilities</h1><p>What Aidon can do, what it has learned, and the evidence.</p>"
@@ -2741,7 +2741,7 @@ loadSettings();
                     html += "<h2>Capabilities studio</h2><p>Record a skill success or failure, or probe a plugin dir, or edit a skill's description, via POST /api/studio/capabilities with JSON {action: success|failure|probe|edit, name, path, description}.</p>"
                     html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/capabilities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('cap_action').value,name:document.getElementById('cap_name').value,path:document.getElementById('cap_path').value,description:document.getElementById('cap_desc').value})}).then(r=>r.json()).then(d=>document.getElementById('cap_result').textContent=JSON.stringify(d));\"><select id=\"cap_action\"><option>success</option><option>failure</option><option>probe</option></select> <input id=\"cap_name\" placeholder=\"skill name\"> <input id=\"cap_path\" placeholder=\"plugin dir for probe\"> <button>Run</button></form><pre id=\"cap_result\"></pre>"
                     self._send_html(200, _page_html("Capabilities", html))
-                elif parsed.path == "/memory":
+                elif parsed.path in ("/memory", "/studio/memory"):
                     html = "<h1>Memory</h1><p>Episodes Aidon remembers from past work, by collection, no secret values.</p>"
                     if server.memory is not None:
                         for coll in ("working", "episodic", "semantic", "experience", "knowledge"):
@@ -2755,7 +2755,7 @@ loadSettings();
                     html += "<h2>Memory studio</h2><p>Forget a point, prune a collection, or promote an episodic point, or edit a point's text, via POST /api/studio/memory with JSON {action: forget|prune|promote|edit, collection, point_id, text}.</p>"
                     html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/memory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('mem_action').value,collection:document.getElementById('mem_coll').value,point_id:document.getElementById('mem_id').value,text:document.getElementById('mem_text').value})}).then(r=>r.json()).then(d=>document.getElementById('mem_result').textContent=JSON.stringify(d));\"><select id=\"mem_action\"><option>forget</option><option>prune</option><option>promote</option></select> <input id=\"mem_coll\" value=\"episodic\"> <input id=\"mem_id\" placeholder=\"point id\"> <button>Run</button></form><pre id=\"mem_result\"></pre>"
                     self._send_html(200, _page_html("Memory", html))
-                elif parsed.path == "/knowledge":
+                elif parsed.path in ("/knowledge", "/studio/knowledge"):
                     html = "<h1>Knowledge</h1><p>Documents and facts Aidon has ingested, from the knowledge collection and library.</p>"
                     if server.memory is not None:
                         try:
@@ -2768,7 +2768,7 @@ loadSettings();
                     html += "<h2>Knowledge studio</h2><p>Recall, record, edit, or delete knowledge, via POST /api/studio/knowledge with JSON {action: recall|ingest|edit|delete, query, text, point_id}.</p>"
                     html += "<form onsubmit=\"event.preventDefault(); fetch('/api/studio/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:document.getElementById('kb_action').value,query:document.getElementById('kb_query').value,text:document.getElementById('kb_text').value})}).then(r=>r.json()).then(d=>document.getElementById('kb_result').textContent=JSON.stringify(d));\"><select id=\"kb_action\"><option>recall</option><option>ingest</option></select> <input id=\"kb_query\" placeholder=\"query\"> <input id=\"kb_text\" placeholder=\"text to ingest\"> <button>Run</button></form><pre id=\"kb_result\"></pre>"
                     self._send_html(200, _page_html("Knowledge", html))
-                elif parsed.path == "/reports":
+                elif parsed.path in ("/reports", "/studio/reports"):
                     from ..interface.scheduler_loop import daily_report as _daily
                     html = "<h1>Reports</h1><p>Daily reports, from learned last run and trace files, never invented.</p>"
                     html += f"<pre>{_daily(server.home)}</pre>"
