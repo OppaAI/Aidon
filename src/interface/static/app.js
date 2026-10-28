@@ -14,9 +14,20 @@
   const steerBtn = document.getElementById("steer-send");
   const cancelBtn = document.getElementById("cancel-run");
   const stagesEl = document.getElementById("stages");
+  const middleStatus = document.getElementById("middle-status");
   const approvalSlot = document.getElementById("approval-slot");
   const statusDot = document.getElementById("status-dot");
   const statusText = document.getElementById("status-text");
+
+  let middleStatusTimer = null;
+  function showMiddleStatus(text, kind = "info") {
+    if (!middleStatus) return;
+    middleStatus.textContent = text;
+    middleStatus.className = kind;
+    middleStatus.hidden = false;
+    if (middleStatusTimer) clearTimeout(middleStatusTimer);
+    middleStatusTimer = setTimeout(() => { middleStatus.hidden = true; }, 7000);
+  }
   function loadDashboardStatus() {
     fetch("/api/status").then((r) => r.json()).then((data) => {
       document.querySelectorAll("[data-status]").forEach((node) => {
@@ -1327,7 +1338,7 @@
       if (!r.ok || !data.ok) throw new Error(data.error || ("HTTP " + r.status));
       preapproveBtn.classList.toggle("active", !active);
       preapproveBtn.title = active ? "Approve for me" : "Live actions approved for 8 hours; click to deactivate";
-      addMsg("stage-line", active
+      showMiddleStatus(active
         ? "Approve for me deactivated for " + specId + "."
         : "Reversible live actions approved for " + specId + " for 8 hours.");
     } catch (e) {
