@@ -152,6 +152,8 @@ class Config:
     corrected_subject: bool = True
     # Old routing / kernel keys, only, no new duplicates.
     fast_model: str = ""
+    fast_api_endpoint: str = ""
+    fast_api_key: str = ""
     verifier_model: str = ""
     voice_announce: bool = False
     sam_base_url: str = "https://api.meta.ai/v1"
@@ -258,6 +260,8 @@ class Config:
             owner_email=os.environ.get("AIDON_OWNER_EMAIL", ""),
             corrected_subject=os.environ.get("AIDON_CORRECTED_SUBJECT", "1") not in ("0", "false", "no"),
             fast_model=os.environ.get("AIDON_FAST_MODEL", ""),
+            fast_api_endpoint=os.environ.get("AIDON_FAST_API_ENDPOINT", ""),
+            fast_api_key=os.environ.get("AIDON_FAST_API_KEY", ""),
             verifier_model=os.environ.get("AIDON_VERIFIER_MODEL", ""),
             voice_announce=os.environ.get("AIDON_VOICE_ANNOUNCE", "0") not in ("0", "false", "no", ""),
             sam_base_url=os.environ.get("AIDON_SAM_BASE_URL", "https://api.meta.ai/v1"),

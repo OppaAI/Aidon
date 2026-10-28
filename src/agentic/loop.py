@@ -492,8 +492,14 @@ class GoalRunner:
         """Ask the owner while excluding human wait from active elapsed time."""
         # Natural framing, varied per approval; the title and body keep
         # their exact content, so the owner still sees what is asked.
-        from ..interface.phrasing import approval_lead_in
-        body = f"{approval_lead_in()}\n\n{body}"
+        # The framing comes from the fast respond phase when one is
+        # configured (a small model writes one sentence), else from
+        # the rotation. Facts stay in the body, never in the model.
+        from ..interface.phrasing import approval_lead_in, phrase_with_model
+        lead = phrase_with_model(
+            "approval",
+            lambda prompt: self._chat("respond", [Message("user", prompt)]))
+        body = f"{lead or approval_lead_in()}\n\n{body}"
         timer = getattr(self, "_elapsed_timer", None)
         if timer is None:
             return self.gate.ask(kind, title, body, **kwargs)

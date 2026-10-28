@@ -115,20 +115,84 @@ def files_sentence(files: list[str]) -> str:
     return f"{', '.join(names[:-1])} and {names[-1]} are ready."
 
 
+# Prompts for the model-written framings. The model writes ONLY the
+# framing: facts (action, files, error, ids, instructions) are always
+# inserted by code, never by the model, so a fanciful reply cannot
+# garble what is being asked or delivered.
+PHRASE_PROMPTS = {
+    "approval": ("Write one short sentence asking the owner to approve "
+                 "the next step, under 15 words. Do not describe the "
+                 "step itself, just ask for the decision."),
+    "report-done": ("Write a short opening phrase for a task-completion "
+                    "message, under 10 words, like 'All done:' or "
+                    "'Wrapped up:'. Do not name any files or results."),
+    "report-failed": ("Write a short opening phrase for a task-failure "
+                      "message, under 10 words, like 'That run failed:'. "
+                      "Do not name the error."),
+    "report-rejected": ("Write one short sentence saying the run was "
+                       "left as-is and no live action was taken, under "
+                       "15 words."),
+    "report-cancelled": ("Write one short sentence saying the run was "
+                        "stopped and no further steps ran, under 15 "
+                        "words."),
+}
+
+
+def phrase_with_model(kind: str, say, timeout_s: float = 10.0) -> str | None:
+    """One framing from a model, or None to fall back to rotation.
+
+    ``say`` is a caller-supplied ``prompt -> text`` callable (the
+    loop's respond-phase chat, or the handler's router chat), so this
+    module never owns a model client. The call runs in a daemon thread
+    with a short join timeout: a slow or hung model must never stall
+    an approval card or a completion message. The reply is cleaned to
+    a single short line; anything empty, overlong, or unusable falls
+    back to the rotation instead of being shown.
+    """
+    import threading
+
+    prompt = PHRASE_PROMPTS.get(kind)
+    if prompt is None or say is None:
+        return None
+    result: list[str] = []
+
+    def _run():
+        try:
+            result.append(str(say(prompt)))
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout_s)
+    if not result:
+        return None
+    line = ""
+    for candidate in result[0].splitlines():
+        candidate = candidate.strip().strip("\"'").strip()
+        if candidate:
+            line = candidate
+            break
+    if not line or len(line) > 160:
+        return None
+    return line
+
+
 def report_text(status: str, files: list[str], error: str,
-                run_id: str, stats_line: str) -> str:
+                run_id: str, stats_line: str, phrase: str | None = None) -> str:
     """Full completion message for a run, in natural language.
 
     The stats line (elapsed, tokens) is kept verbatim as the trailing
     line, so the WebUI stats display keeps working; only the human
-    sentence above it varies.
+    sentence above it varies. ``phrase`` is a model-written framing
+    when one was produced, else the rotation is used.
     """
     if status == "done":
-        head = f"{report_done_opener(run_id)} {files_sentence(files)}"
+        head = f"{phrase or report_done_opener(run_id)} {files_sentence(files)}"
     elif status == "rejected":
-        head = report_rejected(run_id)
+        head = phrase or report_rejected(run_id)
     elif status == "cancelled":
-        head = report_cancelled(run_id)
+        head = phrase or report_cancelled(run_id)
     else:
-        head = f"{report_failed_opener(run_id)} {error}"
+        head = f"{phrase or report_failed_opener(run_id)} {error}"
     return f"{head}\n{stats_line}" if stats_line else head

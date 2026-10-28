@@ -70,6 +70,10 @@ def test_ask_for_approval_prepends_lead_in(tmp_path):
     gate = ApprovalGate(decide)
     runner = GoalRunner(FakeClient("hi"), Sandbox(tmp_path / "work"),
                         gate, tmp_path)
+    # No model phrasing here: the model call fails, so the rotation
+    # lead-in is used (the model-phrase path has its own test).
+    runner._chat = lambda phase, messages: (_ for _ in ()).throw(
+        RuntimeError("no model"))
     runner._ask_for_approval("live", "Execute live", "Run the plan now.")
     assert seen["body"].startswith(tuple(APPROVAL_LEAD_INS))
     assert seen["body"].endswith("Run the plan now.")
@@ -157,3 +161,101 @@ def test_whatsapp_answer_is_not_a_new_goal(tmp_path):
     assert sent and sent[0][1] in QUESTION_ACKS
     thread.join(timeout=5)
     assert answers == ["Email me"]
+
+
+# --- fast-model phrasing (wired in the next change) ---
+
+from src.interface.phrasing import phrase_with_model
+from src.system.config import Config
+
+
+def test_phrase_with_model_cleans_and_falls_back():
+    assert phrase_with_model("approval", lambda p: '  "One quick check:"\nSecond line\n') == "One quick check:"
+    assert phrase_with_model("approval", lambda p: (_ for _ in ()).throw(RuntimeError("down"))) is None
+    assert phrase_with_model("approval", lambda p: "   ") is None
+    assert phrase_with_model("approval", lambda p: "x" * 200) is None
+    assert phrase_with_model("unknown-kind", lambda p: "hi") is None
+
+
+def test_phrase_with_model_timeout_does_not_hang():
+    import time
+
+    def slow(prompt):
+        time.sleep(2)
+        return "too late"
+
+    started = time.time()
+    assert phrase_with_model("approval", slow, timeout_s=0.05) is None
+    assert time.time() - started < 1.0
+
+
+def test_report_text_phrase_override():
+    text = report_text("done", ["a.pdf"], "", "r", "stats",
+                       phrase="Freshly finished:")
+    assert text.startswith("Freshly finished: a.pdf is ready.")
+    assert text.endswith("stats")
+    text = report_text("rejected", [], "", "r", "",
+                       phrase="Leaving that one alone.")
+    assert text == "Leaving that one alone."
+
+
+def test_ask_for_approval_uses_model_phrase_then_falls_back(tmp_path):
+    seen = {}
+
+    def decide(kind, title, body):
+        seen["body"] = body
+        return Decision("approved")
+
+    gate = ApprovalGate(decide)
+    runner = GoalRunner(FakeClient("hi"), Sandbox(tmp_path / "work"),
+                        gate, tmp_path)
+    runner._chat = lambda phase, messages: "A quick nod before we go:"
+    runner._ask_for_approval("live", "Execute live", "Run the plan now.")
+    assert seen["body"].startswith("A quick nod before we go:")
+    assert seen["body"].endswith("Run the plan now.")
+
+    def failing_chat(phase, messages):
+        raise RuntimeError("no model")
+
+    runner._chat = failing_chat
+    runner._ask_for_approval("live", "Execute live", "Run the plan now.")
+    assert seen["body"].startswith(tuple(APPROVAL_LEAD_INS))
+    assert seen["body"].endswith("Run the plan now.")
+
+
+def test_extra_tool_approval_uses_phrase_param(tmp_path):
+    seen = {}
+
+    def decide(kind, title, body):
+        seen["body"] = body
+        return Decision("approved")
+
+    class _Config2:
+        home = tmp_path
+        github_token = ""
+        threads_account_id = ""
+        threads_access_token = ""
+        ig_user_id = ""
+        ig_access_token = ""
+        fish_api_key = ""
+        tts_voice_id = ""
+        transcribe_api_key = ""
+        owner_email = "owner@example.com"
+
+    tools = _goal_extra_tools(_Config2(), tmp_path / "work",
+                              gate=ApprovalGate(decide),
+                              phrase=lambda kind: "Please give the nod:")
+    tools["write_file"](name="y.txt", text="first")
+    tools["write_file"](name="y.txt", text="second", overwrite=True)
+    assert seen["body"].startswith("Please give the nod:")
+    assert "Replace the existing file" in seen["body"]
+
+
+def test_config_fast_endpoint_and_key(monkeypatch, tmp_path):
+    monkeypatch.setenv("AIDON_FAST_MODEL", "llama-3.1-8b-instruct")
+    monkeypatch.setenv("AIDON_FAST_API_ENDPOINT", "http://localhost:11434/v1")
+    monkeypatch.setenv("AIDON_FAST_API_KEY", "local-key")
+    cfg = Config.load(home=tmp_path)
+    assert cfg.fast_model == "llama-3.1-8b-instruct"
+    assert cfg.fast_api_endpoint == "http://localhost:11434/v1"
+    assert cfg.fast_api_key == "local-key"

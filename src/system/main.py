@@ -117,7 +117,7 @@ def _promotion_ask(point) -> bool:
     return answer in ("y", "yes")
 
 
-def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None) -> dict:
+def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     The loop approval-gates any extra tool whose name contains
@@ -422,8 +422,16 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             return False, "no approval gate configured"
         try:
             from ..interface.phrasing import approval_lead_in
+            lead = None
+            if phrase is not None:
+                try:
+                    lead = phrase("approval")
+                except Exception:
+                    lead = None
+            if not lead:
+                lead = approval_lead_in()
             decision = gate.ask(
-                kind, title, f"{approval_lead_in()}\n\n{body}",
+                kind, title, f"{lead}\n\n{body}",
                 action_class=action_class,
                 force_ask=force_ask,
             )
@@ -1174,8 +1182,8 @@ def main(argv: list[str] | None = None) -> int:
     # Count every model call in the workflow, including planning, research,
     # verification, repairs, learning, and the final response.
     client = CountingClient(client)
-    # Fast model, same backend, different model name. This is how a
-    # local small model works too: set the endpoint to a local
+    # Fast model, different model name, optionally its own endpoint.
+    # This is how a local small model works too: set the endpoint to a local
     # native server, AIDON_MODEL to the strong model, and AIDON_FAST_MODEL
     # to the small local model. No Native-specific branch in the loop.
     main_client = client
@@ -1184,9 +1192,18 @@ def main(argv: list[str] | None = None) -> int:
     if config.fast_model and config.fast_model != config.model:
         from dataclasses import replace
         from ..agentic.router import RoutedClient
+        # The fast model may live on its own endpoint (e.g. main on the
+        # Meta API, fast Llama on a local server). When a fast endpoint
+        # is set, backend is re-inferred from it; otherwise the main
+        # backend, endpoint, and key carry over unchanged.
+        _fast_endpoint = (getattr(config, "fast_api_endpoint", "") or "").strip()
+        _fast_key = getattr(config, "fast_api_key", "") or ""
         fast_config = replace(
             config, model=config.fast_model,
-            model_num_ctx=config.fast_num_ctx or config.model_num_ctx)
+            model_num_ctx=config.fast_num_ctx or config.model_num_ctx,
+            api_base=_fast_endpoint or config.api_base,
+            api_key=_fast_key or config.api_key,
+            backend="" if _fast_endpoint else config.backend)
         fast_client = CountingClient(client_for_config(fast_config))
         fast_phases = {s.strip() for s in config.router_fast_phases.split(",") if s.strip()}
         client = RoutedClient(fast_client, client, fast_phases=fast_phases)
@@ -2021,6 +2038,20 @@ def main(argv: list[str] | None = None) -> int:
                         except Exception:
                             pass
                     return server.ask_question(run_id, _key, question)
+            def _say(prompt):
+                from ..system.model_client import Message as _Message
+                messages = [_Message("user", prompt)]
+                if model_router is not None:
+                    try:
+                        return model_router.chat("respond", messages)
+                    except TypeError:
+                        return model_router.chat(messages)
+                return client.chat(messages)
+
+            def _phrase(kind):
+                from ..interface.phrasing import phrase_with_model as _pwm
+                return _pwm(kind, _say)
+
             runner = GoalRunner(client, run_sandbox, _gate,
                                 config.home, memory=memory,
                                 project_id=event.project_id, plugins=plugins,
@@ -2030,7 +2061,7 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"))
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"))
             def _surface_reply(text):
                 # The WebUI already displays and polls the run ID. Keep the
                 # ID in Slack/WhatsApp replies where it is needed for
@@ -2066,10 +2097,14 @@ def main(argv: list[str] | None = None) -> int:
             if report.status == "chat":
                 _surface_reply((report.chat_reply or "Received.") + "\n" + format_run_stats(report))
             else:
-                from ..interface.phrasing import report_text as _report_text
+                from ..interface.phrasing import (
+                    phrase_with_model as _pwm, report_text as _report_text)
+                _phrase = (_pwm("report-" + report.status, _say)
+                           if report.status in ("done", "failed", "rejected",
+                                                "cancelled") else None)
                 _surface_reply(_report_text(
                     report.status, report.files, report.error, run_id,
-                    format_run_stats(report)))
+                    format_run_stats(report), phrase=_phrase))
 
         dispatcher.register("webui", _goal_handler)
         dispatcher.register("whatsapp", _goal_handler)

@@ -1662,6 +1662,8 @@ class WebUIServer:
             {"key": "AIDON_EMBED_MODEL", "label": "Embed model", "type": "string", "default": "google/embeddinggemma-2", "desc": "Embedding model for memory.", "secret": False},
             {"key": "AIDON_SPARSE_MODEL", "label": "Sparse memory model", "type": "string", "default": "prithivida/Splade_PP_en_v1", "desc": "Learned sparse model for hybrid memory recall; empty uses keyword sparse weights.", "secret": False},
             {"key": "AIDON_FAST_MODEL", "label": "Fast model", "type": "string", "default": "", "desc": "Small model for fast phases, else the main model.", "secret": False},
+            {"key": "AIDON_FAST_API_ENDPOINT", "label": "Fast model endpoint", "type": "string", "default": "", "desc": "Endpoint for the fast model; empty uses the main API endpoint.", "secret": False},
+            {"key": "AIDON_FAST_API_KEY", "label": "Fast model API key", "type": "string", "default": "", "desc": "API key for the fast model endpoint; empty uses the main API key.", "secret": True},
             {"key": "AIDON_FAST_NUM_CTX", "label": "Fast model context", "type": "int", "default": "0", "desc": "Context window for the fast model, 0 = backend default.", "secret": False},
             {"key": "AIDON_MODEL_THINK", "label": "Model thinking", "type": "bool", "default": "0", "desc": "Enable server-side thinking when supported.", "secret": False},
             {"key": "AIDON_MODEL_NUM_CTX", "label": "Model context", "type": "int", "default": "0", "desc": "Context window for the native backend, 0 = server default.", "secret": False},
