@@ -1002,6 +1002,16 @@ class WebUIServer:
             # A run must still work if the optional conversation store is
             # unavailable; the durable run record remains authoritative.
             conversation_db = None
+        if self.memory is not None:
+            try:
+                self.memory.record_stm(
+                    "user", goal,
+                    attachments=body.get("image_paths") or [],
+                    project_id=project_id,
+                    conversation_id=conversation_id,
+                )
+            except Exception:
+                pass
         run_id = new_run_id()
         if self.run_control is not None:
             self.run_control.register(run_id, goal, project_id)
@@ -1014,6 +1024,13 @@ class WebUIServer:
             if conversation_db is not None:
                 try:
                     conversation_db.record_exchange(conversation_id, "assistant", str(text))
+                except Exception:
+                    pass
+            if self.memory is not None:
+                try:
+                    self.memory.record_stm(
+                        "assistant", str(text), project_id=project_id,
+                        conversation_id=conversation_id)
                 except Exception:
                     pass
 
@@ -1859,6 +1876,43 @@ class WebUIServer:
         if graph is None:
             return {"entity": entity, "related": []}
         return {"entity": entity, "related": graph.points_for(entity)}
+
+    def handle_memory_graph(self, collections=None, limit: int = 500) -> dict:
+        """Return a graph-ready view of memory and KB points.
+
+        Point nodes connect to shared entity nodes. The same entity graph is
+        used for episodic memory and knowledge-base records, so cross-links
+        are visible without inventing relationships with another model call.
+        """
+        if self.memory is None:
+            return {"nodes": [], "edges": [], "error": "memory unavailable"}
+        wanted = set(collections or ("working", "episodic", "semantic", "experience", "knowledge"))
+        nodes = []
+        edges = []
+        seen_entities = set()
+        count = 0
+        for collection in wanted:
+            if collection not in {"working", "episodic", "semantic", "experience", "knowledge"}:
+                continue
+            for point in self.memory.store.iter_points(collection):
+                if count >= max(1, min(int(limit), 2000)):
+                    break
+                point_id = str(point.id)
+                node_id = f"point:{collection}:{point_id}"
+                nodes.append({"id": node_id, "type": "memory", "collection": collection,
+                              "label": str(point.text or "")[:100]})
+                graph = getattr(self.memory, "entity_graph", None)
+                entities = graph.entities_for_point(collection, point_id) if graph else []
+                for entity in entities:
+                    entity_id = f"entity:{entity}"
+                    if entity not in seen_entities:
+                        nodes.append({"id": entity_id, "type": "entity", "label": entity})
+                        seen_entities.add(entity)
+                    edges.append({"source": node_id, "target": entity_id})
+                count += 1
+            if count >= max(1, min(int(limit), 2000)):
+                break
+        return {"nodes": nodes, "edges": edges}
 
     # -- Additional WebUI surfaces: tools, conversations, briefs, ideas, hub runs,
     #    reports, TTS, and goals with images. These are new routes only;
@@ -2818,6 +2872,14 @@ loadSettings();
                     query = parse_qs(parsed.query)
                     entity = query.get("entity", [""])[0]
                     self._send_json(200, server.handle_entities(entity))
+                elif parsed.path == "/api/memory/graph":
+                    query = parse_qs(parsed.query)
+                    collections = query.get("collection", []) or None
+                    try:
+                        limit = int(query.get("limit", ["500"])[0])
+                    except ValueError:
+                        limit = 500
+                    self._send_json(200, server.handle_memory_graph(collections, limit))
                 elif parsed.path == "/api/tools":
                     self._send_json(200, server.handle_tools())
                 elif parsed.path.startswith("/api/runs/") and "/" not in parsed.path[len("/api/runs/"):]:
