@@ -101,15 +101,22 @@ SIDE_EFFECT_TOOL_WORDS = (
 )
 
 
-def plan_is_reversible(plan: Plan) -> bool:
+def plan_is_reversible(plan: Plan, allowed_tools=None) -> bool:
     """True when every step stays inside the run's own workdir.
 
     Used by the pre-approval gate: a pre-approved "live" card is
     honoured only for a plan that cannot send, publish, spend,
-    delete, or install anything.
+    delete, or install anything. allowed_tools names steps a
+    caller has already made safe — practice tools, whose
+    destinations are forced to the owner and whose files are
+    confined to the practice folder — so they do not trip
+    the trigger-word check.
     """
+    allowed = {str(t).lower() for t in (allowed_tools or ())}
     for step in plan.normalized_steps():
         name = str(getattr(step, "tool", "") or "").lower()
+        if name in allowed:
+            continue
         if any(word in name for word in SIDE_EFFECT_TOOL_WORDS):
             return False
     return True
@@ -323,7 +330,8 @@ class GoalRunner:
                  network_available: bool | None = None,
                  guidance: str = "", image_paths=None, force_web: bool = False,
                  stream_callback=None, conversation_context: str = "",
-                 route_callback=None, trace_callback=None):
+                 route_callback=None, trace_callback=None,
+                 allowed_side_effect_tools=None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -357,6 +365,8 @@ class GoalRunner:
                               **_registry_kwargs)
         self.plugins = plugins
         self.execution_backend = execution_backend
+        self.allowed_side_effect_tools = frozenset(
+            str(t).lower() for t in (allowed_side_effect_tools or ()))
         self.budget = budget
         self.trace = trace
         self.model_verifier = model_verifier
@@ -1908,7 +1918,8 @@ class GoalRunner:
             "live", "Approve live execution?",
             self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"),
             force_ask=True,
-            reversible=plan_is_reversible(current_plan),
+            reversible=plan_is_reversible(
+                current_plan, self.allowed_side_effect_tools),
         )
         # edited means "change the proposal" — not approve the original.
         # Live card has no apply-edit path; require a clean approved.

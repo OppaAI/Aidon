@@ -1754,18 +1754,40 @@ def main(argv: list[str] | None = None) -> int:
             from ..agentic.trace import TraceRecorder as _PT
             from ..agentic.verifier_model import ModelVerifier as _PMV
             from ..capabilities.plugins import PluginRegistry as _PPR
-            from ..interface.practice import PracticeGate, coerce_preapprove
+            from ..capabilities.sandbox import Sandbox as _PSB
+            from ..interface.practice import (PRACTICE_TOOL_NAMES, PracticeGate,
+                                              coerce_preapprove, practice_tools)
+            import os as _pos
+            import re as _pre
+            _pdir = config.home / "practice" / _pre.sub(
+                r"[^A-Za-z0-9_-]+", "-", schedule["name"]).strip("-")
+            _pdir.mkdir(parents=True, exist_ok=True)
+            _psandbox = _PSB(_pdir, config.sandbox_timeout_seconds,
+                             mem_mb=config.sandbox_mem_mb, nproc=config.sandbox_nproc,
+                             fsize_mb=config.sandbox_fsize_mb,
+                             cpu_seconds=config.sandbox_cpu_seconds,
+                             backend=config.sandbox_backend,
+                             allow_network=config.sandbox_network,
+                             require_isolation=config.sandbox_require_isolation)
             _pplugins = _PPR(config.home); _pplugins.load_all()
             try:
                 from ..capabilities.execution import make_backend as _pmb
-                _pbackend = _pmb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
+                _pbackend = _pmb(config.execution_backend, _psandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _pbackend = None
             if coerce_preapprove(schedule.get("preapprove", True)):
-                _pgate = PracticeGate()
+                _pgate = PracticeGate(_pdir, sandboxed=_pbackend is not None)
             else:
                 _pgate = _cli_gate(config.home, config.approval_timeout_seconds)
-            _prunner = GoalRunner(client, sandbox, _pgate, config.home, memory=memory, project_id="default", plugins=_pplugins, execution_backend=_pbackend, budget=_PB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_PT(config.home, project_id="default"), model_verifier=_PMV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_pbackend, sandbox))
+            from ..interface.messaging import MessagingConfig as _PMC
+            _pmcfg = _PMC.from_env()
+            _prunner = GoalRunner(client, _psandbox, _pgate, config.home, memory=memory, project_id="default", plugins=_pplugins, execution_backend=_pbackend, budget=_PB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_PT(config.home, project_id="default"), model_verifier=_PMV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_pbackend, _psandbox),
+                                  extra_tools=practice_tools(
+                                      _pdir, _pmcfg, owner_email=config.owner_email,
+                                      gmail_client_id=_pos.environ.get("GMAIL_CLIENT_ID", ""),
+                                      gmail_client_secret=_pos.environ.get("GMAIL_CLIENT_SECRET", ""),
+                                      gmail_refresh_token=_pos.environ.get("GMAIL_REFRESH_TOKEN", "")),
+                                  allowed_side_effect_tools=set(PRACTICE_TOOL_NAMES))
 
             def _p_run_goal(goal_text, spec):
                 _report = _prunner.run(goal_text, spec=spec)
@@ -1796,7 +1818,9 @@ def main(argv: list[str] | None = None) -> int:
                                            on_progress=lambda live: print(
                                                f"Practice live: {live['goal']} "
                                                f"(attempt {live['attempt']})")
-                                           if live else None)
+                                           if live else None,
+                                           preapprove=coerce_preapprove(
+                                               schedule.get("preapprove", True)))
             record_session(config.home, schedule["name"], summary)
             print(f"Practice session {schedule['name']}: "
                   f"{'passed: ' + summary['goal'] if summary['passed'] else 'no pass'} "
@@ -2774,11 +2798,53 @@ def main(argv: list[str] | None = None) -> int:
         if _slack_ts_path.is_file():
             _slack_last_ts = _slack_ts_path.read_text().strip()
         # Practice sessions: the serve daemon owns the window tick
-        # and the report delivery. A pre-approved schedule's gate
-        # auto-approves reversible steps and rejects destructive
-        # ones at once (PracticeGate); a schedule with preapprove
-        # off uses the WebUI gate, so it stops for approval like
-        # any other run, which is that setting's expected behaviour.
+        # and the report delivery. Each schedule gets its own
+        # practice folder in the sandbox, and a runner built for
+        # it: core tools live in that folder, the gate is the
+        # PracticeGate for pre-approved schedules (the WebUI
+        # gate otherwise, so it stops for approval), and the
+        # only extra tools are the owner-only practice tools.
+        def _practice_runner(schedule):
+            from ..agentic.budgets import Budget as _B3
+            from ..agentic.trace import TraceRecorder as _T3
+            from ..agentic.verifier_model import ModelVerifier as _M3
+            from ..capabilities.plugins import PluginRegistry as _P3
+            from ..capabilities.sandbox import Sandbox as _S3
+            from ..interface.practice import (PRACTICE_TOOL_NAMES, PracticeGate,
+                                              coerce_preapprove, practice_tools)
+            import os as _os3
+            practice_dir = config.home / "practice" / server._safe_name(schedule["name"])
+            practice_dir.mkdir(parents=True, exist_ok=True)
+            _psandbox = _S3(practice_dir, config.sandbox_timeout_seconds,
+                            mem_mb=config.sandbox_mem_mb, nproc=config.sandbox_nproc,
+                            fsize_mb=config.sandbox_fsize_mb,
+                            cpu_seconds=config.sandbox_cpu_seconds,
+                            backend=config.sandbox_backend,
+                            allow_network=config.sandbox_network,
+                            require_isolation=config.sandbox_require_isolation)
+            _pl = _P3(config.home); _pl.load_all()
+            try:
+                from ..capabilities.execution import make_backend as _mb3
+                _be = _mb3(config.execution_backend, _psandbox, image=config.docker_image, allow_network=config.docker_network)
+            except Exception:
+                _be = None
+            if coerce_preapprove(schedule.get("preapprove", True)):
+                _gate = PracticeGate(practice_dir, sandboxed=_be is not None)
+            else:
+                _gate = server.webui_gate.gate
+            return GoalRunner(client, _psandbox, _gate, config.home, memory=memory,
+                              project_id="default", plugins=_pl, execution_backend=_be,
+                              budget=_B3(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
+                              trace=_T3(config.home, project_id="default"), model_verifier=_M3(client),
+                              kernel_mode=config.kernel_mode,
+                              network_available=_network_available(_be, _psandbox),
+                              extra_tools=practice_tools(
+                                  practice_dir, msg, owner_email=config.owner_email,
+                                  gmail_client_id=_os3.environ.get("GMAIL_CLIENT_ID", ""),
+                                  gmail_client_secret=_os3.environ.get("GMAIL_CLIENT_SECRET", ""),
+                                  gmail_refresh_token=_os3.environ.get("GMAIL_REFRESH_TOKEN", "")),
+                              allowed_side_effect_tools=set(PRACTICE_TOOL_NAMES))
+
         def _practice_deliver(text, goal, result):
             try:
                 server._conversations_db().record_exchange("practice", "assistant", text)
@@ -2798,17 +2864,13 @@ def main(argv: list[str] | None = None) -> int:
                 pass
 
         def _practice_session_sync(schedule, end):
-            from ..interface.practice import (PracticeGate, coerce_preapprove,
+            from ..interface.practice import (coerce_preapprove,
                                               run_practice_session as _rps,
                                               record_session as _rec,
                                               update_live as _live)
 
             def _run_goal(goal_text, spec):
-                _runner = _full_scheduler_runner()
-                if coerce_preapprove(schedule.get("preapprove", True)):
-                    _runner.gate = PracticeGate()
-                else:
-                    _runner.gate = server.webui_gate.gate
+                _runner = _practice_runner(schedule)
                 _report = _runner.run(goal_text, spec=spec)
                 return {"status": _report.status, "files": list(_report.files or []),
                         "error": _report.error or "",
@@ -2824,7 +2886,8 @@ def main(argv: list[str] | None = None) -> int:
                     pass
 
             summary = _rps(schedule, _run_goal, end, home=config.home,
-                           on_report=_practice_deliver, on_progress=_on_progress)
+                           on_report=_practice_deliver, on_progress=_on_progress,
+                           preapprove=coerce_preapprove(schedule.get("preapprove", True)))
             _rec(config.home, schedule["name"], summary)
             if not summary["passed"]:
                 # Window closed with no pass: WebUI-only summary,

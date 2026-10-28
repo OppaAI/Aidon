@@ -21,7 +21,9 @@
     Every pass gets a practice report in the WebUI, on Slack, and on WhatsApp;
     a window that closes with no pass gets a WebUI-only summary.
     Live progress shows below; results live in the practice conversation,
-    on Slack and WhatsApp, and in each schedule's session list.</p>
+    on Slack and WhatsApp, and in each schedule's session list. Each run works
+    in its own practice folder in the sandbox, so deletes and installs stay
+    there; messages go only to you (your email, WhatsApp, Slack).</p>
 
     <h2>New schedule</h2>
     <form id="form">
@@ -35,9 +37,10 @@
       <label>Goals, one per line (a goal may name a spec after ||, e.g. "Write a haiku || dinner")
         <textarea id="f-goals" rows="5" required></textarea></label><br>
       <label><input id="f-preapprove" type="checkbox" checked>
-        Pre-approved (default): reversible steps auto-approve, destructive steps
-        (send, publish, spend, delete, install, non-reversible plans) are
-        rejected, never run. Untick to stop for approval like any other run.</label><br>
+        Pre-approved (default): reversible steps auto-approve; messages go only
+        to you (email, WhatsApp, Slack); deletes/installs stay inside the
+        practice folder. Anything else destructive is rejected, never run.
+        Untick to stop for approval like any other run.</label><br>
       <button type="submit" class="dag-btn dag-btn-primary">Save schedule</button>
       <span id="form-status"></span>
     </form>
