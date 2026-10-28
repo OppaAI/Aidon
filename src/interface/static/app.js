@@ -62,6 +62,7 @@
   let lastTraceCount = 0;
   let lastTracePhase = null;
   let routeShownFor = null;
+  let runTraceHistory = [];
   let cardShownFor = null;
   const streamMessages = {};
 
@@ -1076,6 +1077,7 @@
       lastEventCount = (typeof run.event_total === "number")
         ? run.event_total : lastEventCount + run.events.length;
       if (run.trace && run.trace.length) {
+        runTraceHistory = runTraceHistory.concat(run.trace);
         // Skip interpret/respond phases in the thinking panel — that's
         // routing noise for casual chat, not real thinking. Pipeline runs
         // (research, plan, ...) still show their trace.
@@ -1120,6 +1122,14 @@
           : defaultGoalPlaceholder;
       }
       if (run.status !== "running") {
+        try {
+          const key = currentConversationId
+            ? "aidon-run-state-" + currentConversationId : "";
+          if (key) localStorage.setItem(key, JSON.stringify({
+            status: run.status, stage: run.stage || "done",
+            route: run.route || null, trace: runTraceHistory,
+          }));
+        } catch (e) {}
         clearInterval(pollTimer);
         pollTimer = null;
         sendBtn.disabled = false;
@@ -1496,6 +1506,7 @@
     lastEventCount = 0;
     lastTraceCount = 0;
     lastTracePhase = null;
+    runTraceHistory = [];
     routeShownFor = null;
     // keep previous messages in the thread — just scroll to the latest
     document.getElementById("thinking-list").innerHTML = "";
@@ -1636,6 +1647,29 @@
   });
 
   renderStages("interpret");
+
+  // Restore the last terminal phase when a stored conversation is opened.
+  // Otherwise the global stage bar resets to Interpret after a refresh.
+  window.aidonRestoreRunState = (conversationId) => {
+    try {
+      const raw = localStorage.getItem("aidon-run-state-" + conversationId);
+      if (!raw) return;
+      const state = JSON.parse(raw);
+      renderStages(state.stage || "done");
+      setStatus(state.status === "failed" ? "error" : "ok",
+                state.status === "failed" ? "failed" : (state.status || "done"));
+      if (state.route) {
+        routeShownFor = "__history__";
+        renderRoute(state.route);
+      }
+      const list = document.getElementById("thinking-list");
+      list.innerHTML = "";
+      lastTracePhase = null;
+      const trace = (state.trace || []).filter((e) =>
+        e.phase !== "interpret" && e.phase !== "respond");
+      if (trace.length) renderTrace(trace);
+    } catch (e) {}
+  };
 
   // ── theme: dark / light chooser, persisted ──────────────────────────
   const rootEl = document.documentElement;
@@ -2075,6 +2109,7 @@
       });
     }
     if (window.aidonScrollThread) window.aidonScrollThread();
+    if (window.aidonRestoreRunState) window.aidonRestoreRunState(conv.id);
     input.disabled = false;
     input.focus();
   }

@@ -1,10 +1,10 @@
-"""Memory and knowledge framework, Qdrant for all.
+"""Memory and knowledge framework, Qdrant preferred with SQLite fallback.
 
-One database, Qdrant, no second database dependency. One
-Qdrant instance, local mode under the Aidon home by default,
-or a server URL if AIDON_QDRANT_URL is set. Different
-collections, same instance, so forget, recall, and promotion
-can be scoped by collection without a second store.
+One Qdrant instance is used in normal installations, local mode under
+the Aidon home by default or a server URL if AIDON_QDRANT_URL is set.
+If qdrant-client is not installed, the same collections use the
+dependency-free SQLiteStore so memory remains durable instead of being
+silently discarded at process exit.
 
 Taxonomy, as defined for Aidon:
 - Working memory (STM): chat history. Recent exchanges, kept
@@ -95,6 +95,8 @@ from __future__ import annotations
 
 import atexit
 import math
+import json
+import sqlite3
 import os
 import threading
 import time
@@ -279,6 +281,112 @@ class InMemoryStore:
         sparse_ranked = sorted(points, key=sparse_score, reverse=True)
         over = max(limit * 2, 4)
         return _rrf(dense_ranked[:over], sparse_ranked[:over], limit)
+
+
+class SQLiteStore(InMemoryStore):
+    """Dependency-free persistent fallback for the memory collections.
+
+    Qdrant remains the preferred vector store when installed.  This
+    fallback keeps memory durable on a minimal installation, rather than
+    silently losing every point when the process exits.  Search uses the
+    same dense+sparse ranking as ``InMemoryStore``; it is intentionally a
+    reliability fallback, not a replacement for Qdrant at scale.
+    """
+
+    def __init__(self, home: Path):
+        self._db_path = Path(home) / "memory.sqlite3"
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._db = sqlite3.connect(str(self._db_path), check_same_thread=False)
+        self._db.row_factory = sqlite3.Row
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS memory_points ("
+            "collection TEXT NOT NULL, id TEXT NOT NULL, text TEXT NOT NULL, "
+            "vector TEXT NOT NULL, sparse TEXT NOT NULL, payload TEXT NOT NULL, "
+            "PRIMARY KEY(collection, id))")
+        self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_created "
+            "ON memory_points(collection, id)")
+        self._db.commit()
+
+    @staticmethod
+    def _point(row) -> Point:
+        return Point(
+            id=str(row["id"]), text=str(row["text"]),
+            vector=list(json.loads(row["vector"])),
+            sparse=tuple(json.loads(row["sparse"])),
+            payload=dict(json.loads(row["payload"])),
+        )
+
+    def upsert(self, collection: str, point: Point) -> None:
+        self._db.execute(
+            "INSERT INTO memory_points(collection,id,text,vector,sparse,payload) "
+            "VALUES(?,?,?,?,?,?) ON CONFLICT(collection,id) DO UPDATE SET "
+            "text=excluded.text, vector=excluded.vector, sparse=excluded.sparse, "
+            "payload=excluded.payload",
+            (collection, point.id, point.text, json.dumps(point.vector),
+             json.dumps([list(point.sparse[0]), list(point.sparse[1])]),
+             json.dumps(point.payload)),
+        )
+        self._db.commit()
+
+    def get(self, collection: str, point_id: str) -> Point | None:
+        row = self._db.execute(
+            "SELECT * FROM memory_points WHERE collection=? AND id=?",
+            (collection, str(point_id))).fetchone()
+        return self._point(row) if row else None
+
+    def delete(self, collection: str, point_id: str) -> bool:
+        cur = self._db.execute(
+            "DELETE FROM memory_points WHERE collection=? AND id=?",
+            (collection, str(point_id)))
+        self._db.commit()
+        return cur.rowcount > 0
+
+    def set_payload(self, collection: str, point_id: str,
+                    payload: dict) -> None:
+        point = self.get(collection, point_id)
+        if point is None:
+            return
+        point.payload.update(payload)
+        self.upsert(collection, point)
+
+    def _rows(self, collection: str, limit: int = 100000,
+              filters: dict | None = None):
+        rows = self._db.execute(
+            "SELECT * FROM memory_points WHERE collection=?",
+            (collection,)).fetchall()
+        points = [self._point(row) for row in rows]
+        if filters:
+            points = [p for p in points if all(
+                p.payload.get(k) == v for k, v in filters.items())]
+        points.sort(key=lambda p: p.payload.get("created_at", ""))
+        return points[:limit]
+
+    def delete_where(self, collection: str, filters: dict) -> int:
+        doomed = [p.id for p in self._rows(collection) if all(
+            p.payload.get(k) == v for k, v in filters.items())]
+        for point_id in doomed:
+            self.delete(collection, point_id)
+        return len(doomed)
+
+    def delete_by_project(self, collection: str, project_id: str) -> int:
+        return self.delete_where(collection, {"project_id": project_id})
+
+    def list_points(self, collection: str, limit: int = 50) -> list[Point]:
+        return self._rows(collection, limit)
+
+    def iter_points(self, collection: str):
+        yield from self._rows(collection)
+
+    def list_filtered(self, collection: str, filters: dict,
+                      limit: int = 1000) -> list[Point]:
+        return self._rows(collection, limit, filters)
+
+    def search(self, collection: str, vector: list[float], query_text: str,
+               limit: int = 5,
+               sparse: tuple[list[int], list[float]] | None = None) -> list[Hit]:
+        return InMemoryStore.search(self, collection, vector, query_text,
+                                    limit, sparse)
 
 
 def _sparse_from_text(text: str):
@@ -532,11 +640,11 @@ class QdrantStore:
 
 
 def make_store(home: Path, dim: int = 768):
-    """Real Qdrant if qdrant_client is installed, else in-memory."""
+    """Real Qdrant if installed, otherwise a durable SQLite fallback."""
     try:
         import qdrant_client  # noqa: F401
     except ImportError:
-        return InMemoryStore()
+        return SQLiteStore(home)
     url = os.environ.get("AIDON_QDRANT_URL", "").strip()
     return QdrantStore(home, url=url, dim=dim)
 

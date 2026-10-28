@@ -157,9 +157,15 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         pass
     try:
         from ..capabilities.docgen import build_ebook, generate_document, write_document_file
-        def _generate_document(title, sections, filename=""):
-            if filename:
-                return write_document_file(title, sections, _confined(filename))
+        def _generate_document(title, sections, filename="", path="", format=""):
+            # Models have historically called the destination ``path`` or
+            # requested ``format`` explicitly. Accept those aliases so a
+            # valid document plan is not rejected by a naming mismatch.
+            destination = str(filename or path or "")
+            if destination:
+                if format and "." not in Path(destination).name:
+                    destination += "." + str(format).lstrip(".")
+                return write_document_file(title, sections, _confined(destination))
             return generate_document(title, sections)
         tools["generate_document"] = _generate_document
         tools["build_ebook"] = build_ebook
@@ -763,15 +769,15 @@ def _make_memory(config: Config):
         from ..memory.memory import Memory
         return Memory(config.home, embedder=HashEmbedder())
     except Exception as exc:
-        # A broken Qdrant install must not make every command fail.
-        # The in-process store keeps the run working for this process,
-        # and says so, rather than pretending it persisted anything.
-        print(f"warning: Qdrant unavailable ({exc}), using in-process "
-              "memory for this run, nothing persists", file=sys.stderr)
+        # A broken vector-store install must not make every command fail.
+        # SQLite keeps memory durable without pretending it is a vector
+        # database; Qdrant can still be installed later for larger stores.
+        print(f"warning: Qdrant unavailable ({exc}), using persistent "
+              "SQLite memory fallback", file=sys.stderr)
         from ..memory.embedder import HashEmbedder
-        from ..memory.memory import InMemoryStore, Memory
+        from ..memory.memory import Memory, SQLiteStore
         return Memory(config.home, embedder=HashEmbedder(),
-                      store=InMemoryStore())
+                      store=SQLiteStore(config.home))
 
 
 class _LazyMemory:
@@ -1998,6 +2004,17 @@ def main(argv: list[str] | None = None) -> int:
             _startup_style("warn", "Slack sending is not configured: SLACK_BOT_TOKEN is not set.")
         if args.webhook_only and not msg.slack_signing_secret:
             _startup_style("warn", "Slack signature verification is off: AIDON_SLACK_SIGNING_SECRET is not set.")
+        try:
+            import importlib.util
+            qdrant_available = importlib.util.find_spec("qdrant_client") is not None
+        except Exception:
+            qdrant_available = False
+        if not qdrant_available:
+            _startup_style("warn", "Qdrant client is not installed; using persistent SQLite memory fallback.")
+        elif os.environ.get("AIDON_QDRANT_URL", "").strip():
+            _startup_style("info", "Qdrant remote store configured; connection checked when memory is first used.")
+        else:
+            _startup_style("info", "Qdrant local store available under the Aidon home.")
         _startup_style("section", "WebUI")
         if args.webhook_only:
             _startup_style("ok", f"Webhook listener: http://127.0.0.1:{args.port}/ (WhatsApp and Slack only)")

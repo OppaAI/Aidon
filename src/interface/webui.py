@@ -1179,9 +1179,12 @@ class WebUIServer:
             return None
         out = dict(record or {})
         if control:
+            terminal = control.get("status") in {
+                "done", "failed", "rejected", "cancelled"}
             out.update({"status": control.get("status", out.get("status", "running")),
                         "goal": control.get("goal", out.get("goal", "")),
-                        "stage": control.get("stage", out.get("stage", "interpret"))})
+                        "stage": ("done" if terminal else
+                                   control.get("stage", out.get("stage", "interpret")))})
         out.setdefault("events", [])
         out.setdefault("trace", [])
         # The browser polls incrementally. Returning the complete history on
@@ -2521,11 +2524,18 @@ class WebUIServer:
         backend = str(getattr(config, "backend", "") or "auto")
         memory = self.memory
         if getattr(memory, "_memory", None) is not None:
-            memory_name = type(memory._memory.embedder).__name__
+            store_name = type(memory._memory.store).__name__
+            memory_name = f"{type(memory._memory.embedder).__name__} · {store_name}"
         elif os.environ.get("AIDON_EMBEDDER", "").strip().lower() == "hash":
             memory_name = "Hash memory"
         else:
-            memory_name = "Semantic memory (on demand)"
+            try:
+                import importlib.util
+                memory_name = ("SQLite memory (persistent fallback)"
+                               if importlib.util.find_spec("qdrant_client") is None
+                               else "Semantic memory (on demand)")
+            except Exception:
+                memory_name = "SQLite memory (persistent fallback)"
         msg = self.messaging_config
         sandbox = str(getattr(config, "execution_backend", "bubblewrap"))
         computer = str(getattr(config, "computer_driver", "") or "off")
@@ -2706,14 +2716,20 @@ class WebUIServer:
             return {"points": []}
         try:
             points = self.memory.list_points(collection, limit=limit)
-        except Exception:
-            return {"points": []}
+        except Exception as exc:
+            return {"points": [], "total": 0,
+                    "error": f"{type(exc).__name__}: {exc}"}
         out = []
         for point in points:
             out.append({"id": getattr(point, "id", ""),
                         "text": getattr(point, "text", ""),
                         "payload": dict(getattr(point, "payload", {}) or {})})
-        return {"points": out}
+        # Keep the compact empty response compatible with older clients;
+        # the studio already derives zero from an empty points list.
+        if not out:
+            return {"points": []}
+        return {"points": out, "total": len(out),
+                "mode": type(getattr(self.memory, "store", None)).__name__}
 
     def handle_memory_point_delete(self, collection: str, point_id: str) -> dict:
         """Forget one point, via the same forget path the studio

@@ -912,6 +912,16 @@ class GoalRunner:
         # is never answered by a path with no write tools, even if the
         # router said chat, because that would silently miss the task.
         _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
+        # Classification is advisory.  If the request reaches the
+        # executable pipeline (especially because it writes a file), expose
+        # the effective route, not the discarded low-confidence chat guess.
+        if (_write_intent and self.last_route and
+                self.last_route[0] in ("chat", "webchat")):
+            self.last_route = ("agentic", 1.0)
+            self._trace("interpret", "done",
+                        "agentic route selected because the request changes state")
+            if callable(self.route_callback):
+                self.route_callback(self.last_route)
         if self.force_web and self.researcher is not None and spec is None and not _write_intent:
             from ..capabilities.webchat import webchat_reply
             reply = webchat_reply(goal, self.researcher, self.client,
@@ -933,6 +943,10 @@ class GoalRunner:
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
+        if self.last_route is None:
+            self.last_route = ("agentic", 1.0)
+            if callable(self.route_callback):
+                self.route_callback(self.last_route)
         self._start_mission(goal)
         if spec is not None:
             spec_deliverables = spec.deliverables if hasattr(spec, "deliverables") else spec.get("deliverables", [])

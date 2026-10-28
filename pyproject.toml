@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "An autonomous agent that works from a plain-language goal."
 requires-python = ">=3.11"
 dependencies = [
+    "qdrant-client>=1.20.0",
 ]
 
 [project.scripts]
