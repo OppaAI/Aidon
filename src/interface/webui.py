@@ -991,6 +991,17 @@ class WebUIServer:
             return {"error": "goal is required"}
         goal, delivery = extract_result_delivery(goal)
         project_id = str(body.get("project_id", "default") or "default")
+        conversation_id = str(body.get("conversation_id", "") or "")
+        conversation_db = None
+        try:
+            conversation_db = self._conversations_db()
+            if not conversation_id:
+                conversation_id = conversation_db.create_conversation(project_id)["id"]
+            conversation_db.record_exchange(conversation_id, "user", goal)
+        except Exception:
+            # A run must still work if the optional conversation store is
+            # unavailable; the durable run record remains authoritative.
+            conversation_db = None
         run_id = new_run_id()
         if self.run_control is not None:
             self.run_control.register(run_id, goal, project_id)
@@ -1000,6 +1011,11 @@ class WebUIServer:
 
         def reply(text):
             record["events"].append({"kind": "aidon-final", "text": str(text)})
+            if conversation_db is not None:
+                try:
+                    conversation_db.record_exchange(conversation_id, "assistant", str(text))
+                except Exception:
+                    pass
 
         payload = {"run_id": run_id,
                    "guidance": str(body.get("guidance", "")),
@@ -1010,7 +1026,7 @@ class WebUIServer:
             payload["image_paths"] = image_paths
         event = TriggerEvent(source="webui", kind="goal", goal=goal,
                              project_id=project_id,
-                             payload=payload,
+                             payload={**payload, "conversation_id": conversation_id},
                              reply=reply)
 
         def dispatch():
@@ -1024,7 +1040,7 @@ class WebUIServer:
 
         threading.Thread(target=dispatch, daemon=True,
                          name=f"aidon-run-{run_id}").start()
-        return {"run_id": run_id, "conversation_id": body.get("conversation_id", ""),
+        return {"run_id": run_id, "conversation_id": conversation_id,
                 "goal": goal}
 
     def run_snapshot(self, run_id: str) -> dict | None:

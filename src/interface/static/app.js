@@ -553,22 +553,19 @@
     }
     btn.textContent = "…";
     try {
-      // Wait for the typewriter to finish before touching the DOM: it
-      // re-renders the body every frame, which would wipe the karaoke
-      // spans. The voice then starts exactly when the text is complete.
+      // Start the network request immediately. Waiting for the typewriter
+      // first made TTS feel several seconds late on long answers.
       const body = (el && el._body) || null;
-      if (el && el._typing) { try { await el._typing; } catch (e) {} }
-      if (gen !== speakGen) return;
-      // Speak what is ON SCREEN, not the markdown source: no "**" and
-      // no link syntax, and the words match the highlight exactly.
-      // The clock line is stripped - it is for the eye.
-      const spoken = spokenText(body ? body.textContent : (text || ""));
+      const spoken = spokenText(text || (body ? body.textContent : ""));
       const request = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: spoken }),
       };
-      const streamResponse = await fetch("/api/tts/stream", request);
+      const streamRequest = fetch("/api/tts/stream", request);
+      if (el && el._typing) { try { await el._typing; } catch (e) {} }
+      if (gen !== speakGen) return;
+      const streamResponse = await streamRequest;
       if (!streamResponse.ok) throw new Error("tts " + streamResponse.status);
       const progressive = await progressiveAudio(streamResponse);
       let audio;
@@ -1297,6 +1294,10 @@
       steerRow.hidden = true;
       return;
     }
+    // Show the user's message immediately; the server may not emit an
+    // event until the runner has begun, which otherwise leaves the chat
+    // visually empty after the composer clears.
+    addMsg("user", goal);
     if (data.conversation_id && window.aidonSetConversation)
       window.aidonSetConversation(data.conversation_id);
     if (previousRun && data.run_id === previousRun) {
@@ -1509,7 +1510,7 @@
           input.focus();
           // Voice input is a complete goal: send it immediately after
           // transcription instead of requiring a second click.
-          startRun();
+          setTimeout(() => startRun(), 300);
         } else {
           showMiddleStatus(data.error || data.detail || "Transcription failed", "error");
         }
@@ -1541,13 +1542,15 @@
   const input = document.getElementById("goal-input");
 
   let currentProjectId = localStorage.getItem("aidon-project") || "";
-  let currentConversationId = "";
+  let currentConversationId = localStorage.getItem("aidon-conversation") || "";
   window.aidonConversation = () => ({
     conversation_id: currentConversationId,
     project_id: currentProjectId,
   });
   window.aidonSetConversation = (id) => {
     currentConversationId = id || "";
+    if (currentConversationId) localStorage.setItem("aidon-conversation", currentConversationId);
+    else localStorage.removeItem("aidon-conversation");
     markActiveConversation();
   };
 
@@ -1771,7 +1774,7 @@
       if (!r.ok) return;
     } catch (e) { return; }
     if (id === currentConversationId) {
-      currentConversationId = "";
+      window.aidonSetConversation("");
       thread.innerHTML = "";
     }
     loadHistory();
@@ -1811,6 +1814,7 @@
       conv = await r.json();
     } catch (e) { return; }
     currentConversationId = conv.id;
+    localStorage.setItem("aidon-conversation", currentConversationId);
     if (window.aidonStopPolling) window.aidonStopPolling();
     if (conv.project_id) {
       currentProjectId = conv.project_id;
@@ -1847,22 +1851,40 @@
       }
       thread.appendChild(d);
     };
-    (conv.exchanges || []).forEach((ex) => {
-      if (ex.user_text) {
+    const turns = conv.turns || [];
+    if (turns.length) {
+      turns.forEach((turn) => {
+        const role = turn.role || "user";
+        if (role === "user") {
         const u = document.createElement("div");
         u.className = "msg user";
-        u.textContent = ex.user_text;
-        thread.appendChild(u);
-      }
-      (byImport[ex.exchange_no] || []).forEach(renderAtt);
-      if (ex.assistant_text) {
-        const a = document.createElement("div");
-        a.className = "msg aidon";
-        a.textContent = ex.assistant_text;
-        thread.appendChild(a);
-      }
-      (outputsByRun[ex.run_id] || []).forEach(renderAtt);
-    });
+          u.textContent = turn.text || "";
+          thread.appendChild(u);
+        } else if (role === "assistant") {
+          const a = document.createElement("div");
+          a.className = "msg aidon";
+          a.textContent = turn.text || "";
+          thread.appendChild(a);
+        }
+      });
+    } else {
+      (conv.exchanges || []).forEach((ex) => {
+        if (ex.user_text) {
+          const u = document.createElement("div");
+          u.className = "msg user";
+          u.textContent = ex.user_text;
+          thread.appendChild(u);
+        }
+        (byImport[ex.exchange_no] || []).forEach(renderAtt);
+        if (ex.assistant_text) {
+          const a = document.createElement("div");
+          a.className = "msg aidon";
+          a.textContent = ex.assistant_text;
+          thread.appendChild(a);
+        }
+        (outputsByRun[ex.run_id] || []).forEach(renderAtt);
+      });
+    }
     thread.scrollTop = thread.scrollHeight;
     input.disabled = false;
     input.focus();
@@ -2046,5 +2068,6 @@
     loadHistory();
     loadIdeas();
     loadLibrary();
+    if (currentConversationId) openConversation(currentConversationId);
   });
 })();

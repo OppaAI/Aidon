@@ -223,8 +223,10 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
 .msg .md-table tbody tr:nth-child(even) td { background: rgba(127, 127, 127, .06); }
 .msg a { color: var(--accent); text-decoration: underline; }
 .msg del { color: var(--muted); }
-.msg.user { align-self: flex-end; background: var(--accent); color: #fff;
+.msg.user { align-self: flex-end;
+  background: color-mix(in srgb, var(--accent) 48%, var(--surface2)); color: #fff;
   border-bottom-right-radius: 4px; }
+html[data-theme="light"] .msg.user { background: #c7dcf4; color: #102343; }
 .msg.aidon { align-self: flex-start; background: var(--surface);
   border: 1px solid var(--border); border-bottom-left-radius: 4px; }
 .msg.stage-line { align-self: center; background: none; border: none;
