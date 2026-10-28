@@ -49,6 +49,20 @@ def test_router_cache_ignored_for_different_embedder(tmp_path):
     assert data["embedder"] == "OtherEmbedder"
 
 
+def test_natural_online_request_routes_to_webchat():
+    router = SemanticRouter(HashEmbedder())
+    goal = (
+        "We are doing a demo video for a hackathon. Can you chat online "
+        "to see if I qualify for the hackathon?"
+    )
+    assert router.classify(goal)[0] == "webchat"
+
+
+def test_greeting_does_not_route_to_webchat():
+    router = SemanticRouter(HashEmbedder())
+    assert router.classify("Hey Aiden, how are you doing today?")[0] == "chat"
+
+
 def test_image_model_env_default_and_override(monkeypatch, tmp_path):
     monkeypatch.setenv("AIDON_HOME", str(tmp_path))
     monkeypatch.delenv("AIDON_IMAGE_MODEL", raising=False)

@@ -43,6 +43,8 @@ CHAT_EXAMPLES = [
     "thanks", "thank you", "bye", "goodbye",
     "what do you think about AI?", "tell me a joke",
     "what's the meaning of life?", "do you like music?",
+    "hey how are you doing today?", "how are you doing today?",
+    "good morning how are you?", "hey what are you up to?",
 ]
 
 WEBCHAT_EXAMPLES = [
@@ -74,6 +76,17 @@ WEB_INTENT_EXAMPLES = [
     "look into the web",
     "search the internet",
     "browse online",
+    "can you chat online",
+    "can you go online and check",
+    "can you check online whether this is true",
+    "see if this is true online",
+    "see if I qualify online",
+    "check whether I qualify",
+    "look up whether I qualify",
+    "use the internet to verify this",
+    "please use the web",
+    "can you verify this online",
+    "check the current rules online",
     "verify this on the web",
     "find this online",
     "research this online",
@@ -162,7 +175,10 @@ class SemanticRouter:
             self._webchat_vecs = example_vectors["webchat"]
             self._agentic_vecs = example_vectors["agentic"]
             self._artifact_vecs = example_vectors["artifact"]
-            self._web_intent_vecs = example_vectors.get("web_intent", self._webchat_vecs)
+            # Older callers may provide only the four category vectors. Do
+            # not treat their generic webchat examples as the separate,
+            # topic-free web-intent signal.
+            self._web_intent_vecs = example_vectors.get("web_intent", [])
             return
         cached = self._load_cache(cache_path) if cache_path else None
         if cached is not None:
@@ -219,12 +235,7 @@ class SemanticRouter:
 
     def classify(self, text: str) -> tuple[str, float]:
         vec = self._embed([text])[0]
-        web_intent_score = max(_cosine(vec, v) for v in self._web_intent_vecs)
-        # This is semantic similarity to a topic-free lookup intent, not a
-        # regex or a hard-coded subject. It lets “check the web” govern the
-        # rest of the request, whatever topic follows it.
-        if web_intent_score >= 0.55:
-            return "webchat", min(1.0, web_intent_score)
+        web_intent_score = max((_cosine(vec, v) for v in self._web_intent_vecs), default=0.0)
         scores = [
             ("chat", max(_cosine(vec, v) for v in self._chat_vecs)),
             ("webchat", max(_cosine(vec, v) for v in self._webchat_vecs)),
@@ -234,6 +245,18 @@ class SemanticRouter:
         scores.sort(key=lambda x: x[1], reverse=True)
         best_cat, best_score = scores[0]
         second_score = scores[1][1]
+        chat_score = next(score for category, score in scores if category == "chat")
+        # Semantic similarity to the topic-free lookup intent wins only when
+        # it is stronger than ordinary-chat similarity. This prevents words
+        # such as “today” in a greeting from becoming a web lookup, while
+        # “check online” still governs any topic that follows it.
+        # The learned embedder can spread a long request's intent across its
+        # topic and its action, so a natural request such as “chat online to
+        # see if I qualify” may score below the short example “check the web”.
+        # Keep the chat margin so greetings stay chat, but allow that valid
+        # semantic lookup signal through at 0.50.
+        if web_intent_score >= 0.50 and web_intent_score > chat_score + 0.05:
+            return "webchat", min(1.0, web_intent_score)
         confidence = min(1.0, (best_score - second_score) * 5.0)
         if confidence < 0.15:
             return "agentic", confidence
