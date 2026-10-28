@@ -77,7 +77,7 @@ post-hackathon, NOT built, NOT demoed, at the end.
   real Qdrant run are still owed.
 - Demo video, 3 minutes, required for submission.
 
-## 🆕 Built since the earlier roadmap, now in the repo
+## 🆕 Built after implementation period, now in the repo
 
 - Adaptive DAG, steer and cancel across WebUI,
   WhatsApp, Slack, CLI, v1, and MCP, with RunControl.
