@@ -61,6 +61,7 @@
   let lastEventCount = 0;
   let lastTraceCount = 0;
   let lastTracePhase = null;
+  let routeShownFor = null;
   let cardShownFor = null;
   const streamMessages = {};
 
@@ -878,6 +879,24 @@
     list.scrollTop = list.scrollHeight;
   }
 
+  function renderRoute(route) {
+    if (!route || !route.group || routeShownFor === currentRun) return;
+    const list = document.getElementById("thinking-list");
+    if (!list) return;
+    const labels = { chat: "Local chat", webchat: "Web chat",
+                     agentic: "Agentic", artifact: "Artifact" };
+    const confidence = Math.round(
+      Math.max(0, Math.min(1, Number(route.confidence) || 0)) * 100);
+    const item = document.createElement("div");
+    item.className = "think-item route-item";
+    item.innerHTML = '<div class="think-head-row"><div class="think-title">' +
+      esc(labels[route.group] || route.group) +
+      '</div><div class="think-meta">' + confidence +
+      '% confidence</div></div>';
+    list.prepend(item);
+    routeShownFor = currentRun;
+  }
+
   document.getElementById("thinking-toggle-all").addEventListener("click", () => {
     const items = document.querySelectorAll(".think-item");
     const anyClosed = [...items].some((i) => !i.classList.contains("open"));
@@ -987,6 +1006,7 @@
         "?since=" + lastEventCount + "&trace_since=" + lastTraceCount);
       if (!r.ok) return;
       const run = await r.json();
+      renderRoute(run.route);
       renderStages(run.stage);
       setStatus(run.status === "running" ? "busy" : "ok",
                 run.status === "running" ? stageLabel(run.stage) : run.status);
@@ -1475,6 +1495,7 @@
     lastEventCount = 0;
     lastTraceCount = 0;
     lastTracePhase = null;
+    routeShownFor = null;
     // keep previous messages in the thread — just scroll to the latest
     document.getElementById("thinking-list").innerHTML = "";
     document.getElementById("thinking-count").textContent = "";

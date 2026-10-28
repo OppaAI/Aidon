@@ -261,7 +261,8 @@ class GoalRunner:
                  versioned_writes: bool = False,
                  network_available: bool | None = None,
                  guidance: str = "", image_paths=None, force_web: bool = False,
-                 stream_callback=None, conversation_context: str = ""):
+                 stream_callback=None, conversation_context: str = "",
+                 route_callback=None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -316,6 +317,7 @@ class GoalRunner:
         self.force_web = bool(force_web)
         self.stream_callback = stream_callback
         self.conversation_context = str(conversation_context or "")
+        self.route_callback = route_callback
 
     def _trace(self, kind: str, status: str, detail: str = "") -> None:
         # Attribute to this runner's own run id: sub-runners share
@@ -884,6 +886,8 @@ class GoalRunner:
             try:
                 self.last_route = self.semantic_router.classify(goal)
                 self._trace("interpret", "done", f"semantic route {self.last_route[0]} {self.last_route[1]:.2f}")
+                if callable(self.route_callback):
+                    self.route_callback(self.last_route)
             except Exception:
                 self.last_route = None
         # Write-intent guard, from Aidon: the router is a hint, not a
