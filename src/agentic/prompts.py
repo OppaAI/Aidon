@@ -45,6 +45,16 @@ SYSTEM_LINE = ("You are Aidon, an autonomous agent that learns from the web"
                " and from its own experience.")
 
 
+def current_time_line() -> str:
+    """Return the configured local clock for prompts, with timezone name."""
+    tz_name = os.environ.get("AIDON_TIMEZONE", "America/Vancouver")
+    try:
+        now = datetime.now(ZoneInfo(tz_name)) if ZoneInfo else datetime.now()
+    except Exception:
+        now = datetime.now()
+    return f"Current local time: {now.strftime('%Y-%m-%d %H:%M %Z')} ({tz_name})."
+
+
 def runtime_model_inventory() -> str:
     """Return the configured, non-secret model inventory for the agent.
 
@@ -63,6 +73,7 @@ def runtime_model_inventory() -> str:
     verifier = env("AIDON_VERIFIER_MODEL", "same as main")
     return (
         "# Runtime model inventory\n"
+        f"{current_time_line()}\n"
         "These are the configured model and service identifiers for this run; "
         "they are not proof of current availability or hackathon eligibility.\n"
         f"- Agent model: {main}\n"
@@ -150,13 +161,8 @@ def build_digest_prompt(manual: str = "", user_text: str = "") -> str:
 def build_minimal_prompt(phase: str = "", user_text: str = "") -> str:
     """Slim prompt for high-frequency rounds: identity line, the
     current time and phase, and the user — no persona, no manual."""
-    tz = os.environ.get("AIDON_TIMEZONE", "America/Vancouver")
-    try:
-        now = datetime.now(ZoneInfo(tz)) if ZoneInfo else datetime.now()
-    except Exception:
-        now = datetime.now()
     parts = [SYSTEM_LINE]
-    parts.append(f"Current time: {now.strftime('%Y-%m-%d %H:%M %Z')}.")
+    parts.append(current_time_line())
     if phase:
         parts.append(f"You are in the {phase} phase.")
     user_text = user_text or _read_doc("USER.md")

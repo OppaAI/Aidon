@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.system.config import Config
 from src.memory.embedder import HashEmbedder
 from src.agentic.semantic_router import SemanticRouter
-from src.agentic.prompts import runtime_model_inventory
+from src.agentic.prompts import current_time_line, runtime_model_inventory
 
 
 class CountingEmbedder(HashEmbedder):
@@ -84,3 +84,10 @@ def test_runtime_model_inventory_is_non_secret_and_configured(monkeypatch):
     assert "muse-fast" in block
     assert "do-not-print-this" not in block
     assert "muse-voice-transcribe-1.0" in block
+
+
+def test_runtime_prompt_includes_local_time(monkeypatch):
+    monkeypatch.setenv("AIDON_TIMEZONE", "America/Vancouver")
+    line = current_time_line()
+    assert "Current local time:" in line
+    assert "America/Vancouver" in line
