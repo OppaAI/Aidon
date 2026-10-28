@@ -51,6 +51,24 @@ from .verify import verify_plan
 from .elapsed import ElapsedTimer
 
 MAX_ATTEMPTS = 3
+MAX_REPLANS = 1
+MAX_PLAN_REPAIRS = 2
+
+
+def _resolve_count(env_name: str, default: int, minimum: int) -> int:
+    """Resolve a "how many times" knob: env var, else default, clamped.
+
+    Invalid values fall back to the default, never to 0 for
+    attempts (a run with zero attempts could never execute)
+    or below the given minimum. Settings and .env.example
+    carry the same names; the loop reads them per run, so a
+    changed value applies to the next run.
+    """
+    try:
+        value = int(os.environ.get(env_name, "") or default)
+    except ValueError:
+        return default
+    return max(minimum, value)
 
 
 @dataclass
@@ -200,8 +218,8 @@ def format_run_stats(report: RunReport) -> str:
     return f"⏱️ {elapsed_text}{waiting} · {tokens:,} total workflow tokens (estimated)"
 
 
-def run_react(client, messages: list, tools, *, max_rounds: int = 8,
-              phase: str = "live", budgets=None) -> dict:
+def run_react(client, messages: list, tools, *, max_rounds: int | None = None,
+              phase: str = "live", budgets=None, max_workers: int | None = None) -> dict:
     """Optional compatibility ReAct loop for native model tool calls.
 
     Plan-first execution remains the default. This helper restores the old
@@ -209,10 +227,26 @@ def run_react(client, messages: list, tools, *, max_rounds: int = 8,
     ``chat_response`` method returning ``ChatResponse.tool_calls`` (or a
     compatible response object). A JSON response containing ``tool_calls``
     is accepted as a fallback for simple model adapters.
+
+    Rounds are sequential by nature: each round's model call
+    depends on the previous round's tool results. Tool calls
+    within one round run concurrently (AIDON_REACT_MAX_WORKERS,
+    default 3): the model emits them without knowing any
+    result, so they are independent by construction, and
+    results are appended in call order, never completion
+    order, like swarm's merge. A failing call propagates
+    like the sequential version, though already-started
+    calls finish first. Tools that share mutable state
+    should use max_workers=1. Round count is
+    AIDON_REACT_MAX_ROUNDS (default 8).
     """
     history = list(messages or [])
     total_calls = 0
     total_rounds = 0
+    rounds = (_resolve_count("AIDON_REACT_MAX_ROUNDS", 8, 1)
+              if max_rounds is None else max(1, int(max_rounds)))
+    workers = (_resolve_count("AIDON_REACT_MAX_WORKERS", 3, 1)
+               if max_workers is None else max(1, int(max_workers)))
 
     def _message(role, content):
         return Message(role, str(content))
@@ -224,7 +258,16 @@ def run_react(client, messages: list, tools, *, max_rounds: int = 8,
             return tools[name](**arguments) if isinstance(arguments, dict) else tools[name](arguments)
         raise ValueError(f"unknown tool: {name}")
 
-    for _ in range(max(1, int(max_rounds))):
+    def _run_call(call):
+        name = getattr(call, "name", "")
+        if not name and isinstance(call, dict):
+            name = call.get("name", "")
+        arguments = getattr(call, "arguments", None)
+        if isinstance(call, dict) and arguments is None:
+            arguments = call.get("arguments", {})
+        return _call_tool(str(name), arguments or {})
+
+    for _ in range(rounds):
         total_rounds += 1
         if budgets is not None and hasattr(budgets, "add_step"):
             budgets.add_step()
@@ -252,14 +295,13 @@ def run_react(client, messages: list, tools, *, max_rounds: int = 8,
             return {"text": str(text or ""), "messages": history,
                     "tool_calls": total_calls - 1, "rounds": total_rounds}
         history.append(_message("assistant", text or ""))
-        for call in calls:
-            name = getattr(call, "name", "")
-            if not name and isinstance(call, dict):
-                name = call.get("name", "")
-            arguments = getattr(call, "arguments", None)
-            if arguments is None and isinstance(call, dict):
-                arguments = call.get("arguments", {})
-            result = _call_tool(str(name), arguments or {})
+        if len(calls) > 1 and workers > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(workers, len(calls))) as pool:
+                results = list(pool.map(_run_call, calls))
+        else:
+            results = [_run_call(call) for call in calls]
+        for result in results:
             if budgets is not None and hasattr(budgets, "add_tokens"):
                 budgets.add_tokens(str(result))
             history.append(_message("tool", result))
@@ -954,50 +996,56 @@ class GoalRunner:
 
     def _research_and_replan(self, plan: Plan, goal: str,
                              spec=None) -> Plan:
-        """One plan-first research + replan pass, before execution.
+        """Up to AIDON_MAX_REPLANS research + replan passes (default 1).
 
-        When the plan names open questions (needs_research), each
-        one is researched through the loop's researcher callable,
-        then the planner is called exactly once more with those
-        notes as context, and the replanned plan replaces the
-        original. Exactly one pass, never a loop: a replanned
-        plan's own needs_research is not researched again.
+        Each pass researches the current plan's open questions
+        (needs_research), then calls the planner once more with
+        those notes as context, and the replanned plan replaces
+        the original. At the default of 1 this is exactly the
+        old single pass: a replanned plan's own needs_research
+        is not researched again. Above 1, each further pass
+        researches the replanned plan's new open questions.
         No researcher means no research: the original plan is
-        kept. A failed or invalid replan keeps the original
-        plan and records the failure in _replan_note (copied
-        onto the report by _finalize); it never fails the run.
+        kept. A failed or invalid replan keeps the plan it
+        started that pass from and records the failure in
+        _replan_note (copied onto the report by _finalize);
+        it never fails the run.
         """
-        items = [str(x) for x in (getattr(plan, "needs_research", None) or [])]
-        if not items or self.researcher is None:
-            return plan
-        notes = []
-        for item in items:
+        max_replans = _resolve_count("AIDON_MAX_REPLANS", MAX_REPLANS, 0)
+        current = plan
+        for _ in range(max_replans):
+            items = [str(x) for x in (getattr(current, "needs_research", None) or [])]
+            if not items or self.researcher is None:
+                return current
+            notes = []
+            for item in items:
+                try:
+                    result = self.researcher(item)
+                except Exception as exc:
+                    notes.append(f"{item}: research failed ({exc})")
+                    continue
+                if isinstance(result, (list, tuple)):
+                    notes.append(f"{item}: " + "; ".join(str(r) for r in result))
+                elif isinstance(result, str):
+                    notes.append(f"{item}: {result}")
+                else:
+                    notes.append(f"{item}: {result!r}")
             try:
-                result = self.researcher(item)
+                replanned = self._plan(
+                    goal, spec=spec,
+                    research_context="\n".join(notes))
             except Exception as exc:
-                notes.append(f"{item}: research failed ({exc})")
-                continue
-            if isinstance(result, (list, tuple)):
-                notes.append(f"{item}: " + "; ".join(str(r) for r in result))
-            elif isinstance(result, str):
-                notes.append(f"{item}: {result}")
-            else:
-                notes.append(f"{item}: {result!r}")
-        try:
-            replanned = self._plan(
-                goal, spec=spec,
-                research_context="\n".join(notes))
-        except Exception as exc:
-            self._replan_note = (f"replan after research failed ({exc}), "
-                                 "keeping the original plan")
-            return plan
-        if not isinstance(replanned, Plan) or (not replanned.steps
-                                               and not replanned.deliverables):
-            self._replan_note = ("replan after research returned an invalid "
-                                 "plan (no steps or deliverables), keeping "
-                                 "the original plan")
-            return plan
-        return replanned
+                self._replan_note = (f"replan after research failed ({exc}), "
+                                     "keeping the original plan")
+                return current
+            if not isinstance(replanned, Plan) or (not replanned.steps
+                                                   and not replanned.deliverables):
+                self._replan_note = ("replan after research returned an invalid "
+                                     "plan (no steps or deliverables), keeping "
+                                     "the original plan")
+                return current
+            current = replanned
+        return current
 
     def run(self, goal: str, spec=None, research_report=None,
             live_actions=None) -> RunReport:
@@ -1655,7 +1703,7 @@ class GoalRunner:
             # steps. Give it a bounded repair pass before rejecting the run.
             failure_text = "; ".join(plan_failures)
             repaired = None
-            for _ in range(2):
+            for _ in range(_resolve_count("AIDON_MAX_PLAN_REPAIRS", MAX_PLAN_REPAIRS, 0)):
                 try:
                     candidate = self._plan(
                         goal,
@@ -1740,7 +1788,8 @@ class GoalRunner:
             self._trace("checkpoint", "resumed",
                         f"phase={resume.phase} passed={len(passed)}")
         current_plan = plan
-        for attempt in range(1, MAX_ATTEMPTS + 1):
+        max_attempts = _resolve_count("AIDON_MAX_ATTEMPTS", MAX_ATTEMPTS, 1)
+        for attempt in range(1, max_attempts + 1):
             failures: list[str] = []
             # Cancellation, checked before every attempt, and steer,
             # applied to the next repair attempt, not to passed work.
@@ -1814,7 +1863,7 @@ class GoalRunner:
                     "verified", goal, current_plan, passed,
                     verified=verified, attempt=attempt)
                 break
-            if attempt == MAX_ATTEMPTS:
+            if attempt == max_attempts:
                 return RunReport("failed", goal, current_plan, False, False,
                                  files=sorted(passed),
                                  error="; ".join(failures)[:500],
@@ -1851,7 +1900,7 @@ class GoalRunner:
                                  error="repair plan has no deliverables",
                                  attempts=attempt)
         else:
-            attempt = MAX_ATTEMPTS
+            attempt = max_attempts
         files = sorted(passed) if passed else list(current_plan.deliverables)
         self._mission_prepare_review(goal, current_plan, files, sorted(verified))
         self._trace("approval", "started", "live approval requested")

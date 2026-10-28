@@ -1770,6 +1770,13 @@ class WebUIServer:
             {"key": "AIDON_WEBUI_ALLOWED_HOSTS", "label": "WebUI allowed hosts", "type": "string", "default": "", "desc": "Additional Host names accepted by the WebUI.", "secret": False},
             {"key": "AIDON_VRM_PATH", "label": "Avatar VRM path", "type": "string", "default": "", "desc": "Optional absolute path to the avatar VRM model.", "secret": False},
         ]},
+        {"group": "Loop", "settings": [
+            {"key": "AIDON_MAX_ATTEMPTS", "label": "Repair attempts per run", "type": "int", "default": "3", "desc": "Execute, verify, repair, up to this many tries.", "secret": False},
+            {"key": "AIDON_MAX_REPLANS", "label": "Research-plus-replan passes", "type": "int", "default": "1", "desc": "Replan passes before execution; 0 skips replanning.", "secret": False},
+            {"key": "AIDON_MAX_PLAN_REPAIRS", "label": "Plan repair tries", "type": "int", "default": "2", "desc": "Repair tries when the validator rejects a plan; 0 fails immediately.", "secret": False},
+            {"key": "AIDON_REACT_MAX_ROUNDS", "label": "ReAct max rounds", "type": "int", "default": "8", "desc": "Max rounds for the ReAct compatibility loop.", "secret": False},
+            {"key": "AIDON_REACT_MAX_WORKERS", "label": "ReAct parallel workers", "type": "int", "default": "3", "desc": "Parallel tool workers within one ReAct round; 1 = sequential.", "secret": False},
+        ]},
     ]
     _CATALOG_FLOAT_KEYS = frozenset({
         "AIDON_MODEL_TIMEOUT_S", "AIDON_FORGET_HALF_LIFE_DAYS",
@@ -1841,6 +1848,11 @@ class WebUIServer:
             "AIDON_MAX_STUCK_ITERATIONS": (0, 100, 1),
             "AIDON_PARALLEL_TOOLS": (1, 32, 1),
             "AIDON_PARALLEL_WORKERS": (1, 32, 1),
+            "AIDON_MAX_ATTEMPTS": (1, 100, 1),
+            "AIDON_MAX_REPLANS": (0, 10, 1),
+            "AIDON_MAX_PLAN_REPAIRS": (0, 10, 1),
+            "AIDON_REACT_MAX_ROUNDS": (1, 100, 1),
+            "AIDON_REACT_MAX_WORKERS": (1, 32, 1),
             "AIDON_SLACK_POLL_SECONDS": (3, 3600, 1),
             "AIDON_SLACK_ACK_AFTER_SECONDS": (0, 3600, 1),
             "AIDON_APPROVAL_NUDGE_MIN": (0, 1440, 1),

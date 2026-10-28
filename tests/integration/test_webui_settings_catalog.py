@@ -31,7 +31,7 @@ def test_catalog_groups_and_dead_keys_absent(tmp_path):
     server = _server(tmp_path)
     catalog = server.settings_catalog()
     assert [group["group"] for group in catalog["groups"]] == [
-        "Model", "Sandbox", "Memory", "Research", "Messaging", "WebUI"]
+        "Model", "Sandbox", "Memory", "Research", "Messaging", "WebUI", "Loop"]
     keys = _catalog_keys(server)
     assert "AIDON_MODEL" in keys and "AIDON_BACKEND" in keys
     assert "AIDON_QDRANT_URL" in keys and "AIDON_WEBUI_TOKEN" in keys
