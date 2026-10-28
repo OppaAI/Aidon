@@ -262,7 +262,7 @@ class GoalRunner:
                  network_available: bool | None = None,
                  guidance: str = "", image_paths=None, force_web: bool = False,
                  stream_callback=None, conversation_context: str = "",
-                 route_callback=None):
+                 route_callback=None, trace_callback=None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -318,6 +318,7 @@ class GoalRunner:
         self.stream_callback = stream_callback
         self.conversation_context = str(conversation_context or "")
         self.route_callback = route_callback
+        self.trace_callback = trace_callback
 
     def _trace(self, kind: str, status: str, detail: str = "") -> None:
         # Attribute to this runner's own run id: sub-runners share
@@ -327,7 +328,23 @@ class GoalRunner:
         # the recorder's own run id, so unregistered runs behave
         # exactly as before.
         if self.trace is not None:
-            self.trace.record(kind, status, detail, run_id=self.run_id)
+            event = self.trace.record(kind, status, detail, run_id=self.run_id)
+            if callable(self.trace_callback):
+                self.trace_callback({
+                    "phase": kind, "status": status, "title": detail,
+                    "detail": detail, "seconds": 0,
+                    "tokens_in": 0, "tokens_out": 0,
+                })
+        if self.run_control is not None and self.run_id:
+            stage_map = {
+                "interpret": "interpret", "research": "research",
+                "recall": "recall", "plan": "plan", "sandbox": "sandbox",
+                "verify": "sandbox", "approval": "approval",
+                "live": "live", "learn": "learn",
+            }
+            stage = stage_map.get(kind)
+            if stage:
+                self.run_control.set_stage(self.run_id, stage)
 
     def _approval_body(self, body: str) -> str:
         """Approval-card body, with the network-on line when

@@ -845,23 +845,24 @@
     if (!items || !items.length) return;
     const list = document.getElementById("thinking-list");
     items.forEach((e) => {
-      if (e.phase !== lastTracePhase) {
-        lastTracePhase = e.phase;
+      const phase = e.phase || e.kind || "thinking";
+      if (phase !== lastTracePhase) {
+        lastTracePhase = phase;
         const h = document.createElement("div");
         h.className = "think-phase";
-        h.textContent = e.phase;
+        h.textContent = phase;
         list.appendChild(h);
       }
       const item = document.createElement("div");
       item.className = "think-item " + (e.kind || "note");
-      const meta = e.seconds + "s · " + e.tokens_in + "→" + e.tokens_out + " tok";
+      const meta = e.status || ((e.seconds || 0) + "s");
       // Expandable: whole header row toggles; title + token count always visible
       item.innerHTML =
         '<div class="think-head-row" title="' + (e.thinking ? "expand thinking" : "") + '">' +
         (e.thinking
           ? '<button class="think-toggle" title="expand">›</button>'
           : '<span class="think-toggle" style="visibility:hidden">›</span>') +
-        '<div class="think-title">' + esc(e.title) + "</div>" +
+        '<div class="think-title">' + esc(e.title || e.detail || e.status || phase) + "</div>" +
         '<div class="think-meta">' + esc(meta) + "</div></div>" +
         (e.thinking
           ? '<div class="think-body"><div class="think-detail">' + esc(e.title) +

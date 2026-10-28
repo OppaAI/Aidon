@@ -1122,6 +1122,10 @@ class WebUIServer:
             record["route"] = {"group": str(route[0]),
                                "confidence": round(float(route[1]), 3)}
 
+        def trace_update(item):
+            if isinstance(item, dict):
+                record["trace"].append(dict(item))
+
         def reply(text):
             record["events"].append({"kind": "aidon-final", "text": str(text),
                                      "stream_id": run_id if stream_state["active"] else ""})
@@ -1143,6 +1147,7 @@ class WebUIServer:
                    "force_web": force_web,
                    "_stream_callback": stream_delta,
                    "_route_callback": route_update,
+                   "_trace_callback": trace_update,
                    "result_delivery": delivery.__dict__ if delivery else {}}
         image_paths = [str(path) for path in (body.get("image_paths") or [])
                        if str(path).strip()]
