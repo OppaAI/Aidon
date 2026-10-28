@@ -55,6 +55,7 @@ is a real part of what Aidon runs, not just a build-time choice.
 ./setup.sh
 # Fill in your own endpoint, key, and model name in $AIDON_HOME/.env
 ./launch.sh            # WebUI at http://127.0.0.1:8765/
+./launch.sh --cli      # conversational command-line chat
 ./launch.sh goal "Plan a dinner for two"
 ```
 

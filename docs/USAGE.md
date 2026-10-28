@@ -11,6 +11,10 @@
   prefixes only, never real keys, and approval cards
   in the UI, fail-closed on timeout. With arguments,
   `./launch.sh goal "..."` still runs the CLI.
+- Conversational CLI: `./launch.sh --cli` (or
+  `python -m src.system.main --cli`) opens a lightweight chat
+  interface with the same model configuration. It is not a full-screen
+  terminal UI; use `/help`, `/clear`, `/history`, and `/quit` there.
 - WhatsApp and Slack, both two-way, no Telegram,
   with the Aidon key names:
   `AIDON_WHATSAPP_TOKEN`, `AIDON_WHATSAPP_PHONE_ID`,
@@ -77,6 +81,29 @@ python -m src.system.main scheduler revoke --spec dinner --kind all
 All four read and write one file, `<Aidon home>/preapprovals.json`,
 so a grant made on your phone is the grant the WebUI panel
 shows, and a CLI run or a scheduled job honours it too.
+
+## 🎙️ Voice, themes, and run status
+
+- Fish Audio playback has a progressive WebUI path at
+  `/api/tts/stream`; supported browsers begin playback as audio chunks
+  arrive. The existing buffered endpoint remains the fallback when
+  streaming audio is unavailable. Karaoke text follows the same audio
+  element, so it stays aligned with playback.
+- The WebUI has dark and light themes, a robot avatar fallback, an
+  optional VRM avatar viewer, and a compact final-run footer showing
+  elapsed time and token usage.
+
+## 📎 Attachments
+
+- The WebUI currently accepts up to three combined image/document
+  selections per import. Document selection is intended for files up to
+  25 MiB each. The browser does not enforce an image-size limit yet.
+- Image/document upload storage is available through the JSON API, but
+  the browser multipart path and model-aware image inference are not yet
+  complete. Do not treat an uploaded file as evidence that a goal has
+  used or understood it.
+- Video is supported by the separate CLI video-editing pipeline, not as
+  a general chat attachment or model-inference input.
 
 ## 🔁 Core, in order
 

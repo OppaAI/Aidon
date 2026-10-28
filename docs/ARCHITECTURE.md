@@ -83,6 +83,10 @@ flowchart TB
   OpenAI-compatible chat completions, stdlib urllib,
   FakeClient for tests. No model vendor is hardcoded
   into the run logic.
+- Presentation: the WebUI and conversational CLI share the same
+  model/configuration path. WebUI TTS can stream Fish Audio chunks,
+  while the final response footer reports elapsed time and token usage.
+  These are presentation features, not a separate execution backend.
 - Memory: Qdrant for all collections, working,
   episodic, semantic, experience, and knowledge, with
   hybrid dense plus sparse recall, forgetting curve,

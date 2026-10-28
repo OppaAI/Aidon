@@ -42,9 +42,10 @@ class Repl:
             self.violet = "\033[38;5;141m"
             self.green = "\033[38;5;78m"
             self.amber = "\033[38;5;220m"
+            self.red = "\033[38;5;203m"
         else:
             self.reset = self.bold = self.blue = self.cyan = ""
-            self.violet = self.green = self.amber = ""
+            self.violet = self.green = self.amber = self.red = ""
 
     def _paint(self, colour: str, text: str) -> str:
         return f"{colour}{text}{self.reset}" if colour else text
@@ -136,6 +137,11 @@ class Repl:
                 continue
             except Exception as exc:
                 reply = f"Error: {type(exc).__name__}: {exc}"
+                if self.red:
+                    self.output_fn(self._paint(self.red, f"✗ {reply}"))
+                    self.staged.clear()
+                    self.history.append(line)
+                    continue
             finally:
                 self.staged.clear()
             self.history.append(line)

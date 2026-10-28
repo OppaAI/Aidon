@@ -36,6 +36,22 @@ from .model_client import FakeClient
 from ..capabilities.sandbox import Sandbox
 
 
+def _startup_style(kind: str, text: str) -> None:
+    """Print compact, terminal-friendly startup diagnostics."""
+    if sys.stderr.isatty():
+        colors = {
+            "section": "\033[38;5;141m\033[1m",
+            "info": "\033[38;5;51m",
+            "warn": "\033[38;5;220m",
+            "ok": "\033[38;5;78m",
+            "error": "\033[38;5;203m",
+        }
+        prefix = {"section": "◆", "info": "·", "warn": "!", "ok": "✓", "error": "✗"}[kind]
+        print(f"{colors[kind]}{prefix} {text}\033[0m", file=sys.stderr)
+    else:
+        print(text, file=sys.stderr)
+
+
 def _cli_gate(home, timeout_seconds: int = 180,
               project_id: str = "default") -> ApprovalGate:
     from ..interface.autonomy import policy_for
@@ -978,12 +994,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         client = client_for_config(config)
     except ValueError as exc:
-        print(f"model backend error: {exc}", file=sys.stderr)
+        _startup_style("error", f"Model backend error: {exc}")
         return 2
     if isinstance(client, FakeClient):
-        print("warning: no model backend configured, using FakeClient; "
-              "set AIDON_BACKEND and AIDON_API_ENDPOINT / AIDON_API_KEY "
-              "in .env for a real run", file=sys.stderr)
+        _startup_style("warn", "No model backend configured; using FakeClient. "
+                       "Set AIDON_BACKEND, AIDON_API_ENDPOINT, and "
+                       "AIDON_API_KEY in .env for a real run.")
     # Count every model call in the workflow, including planning, research,
     # verification, repairs, learning, and the final response.
     client = CountingClient(client)
@@ -1917,21 +1933,24 @@ def main(argv: list[str] | None = None) -> int:
                 _slack_thread.start()
                 print("Slack inbound polling auto-started")
         missing = msg.whatsapp_missing()
+        _startup_style("section", "Messaging")
         if missing:
-            print(f"WhatsApp not fully configured, missing: {', '.join(missing)}")
+            _startup_style("warn", f"WhatsApp incomplete; missing: {', '.join(missing)}")
         if not msg.whatsapp_owner:
-            print("WhatsApp inbound disabled: AIDON_WHATSAPP_OWNER not set, owner only, fail closed.")
+            _startup_style("warn", "WhatsApp inbound disabled: AIDON_WHATSAPP_OWNER is not set (owner-only, fail-closed).")
         if not msg.whatsapp_app_secret:
-            print("Warning: AIDON_WHATSAPP_APP_SECRET not set, webhook signature check is off.")
+            _startup_style("warn", "WhatsApp signature verification is off: AIDON_WHATSAPP_APP_SECRET is not set.")
         if not msg.slack_bot_token:
-            print("Slack send not configured: SLACK_BOT_TOKEN not set.")
+            _startup_style("warn", "Slack sending is not configured: SLACK_BOT_TOKEN is not set.")
         if args.webhook_only and not msg.slack_signing_secret:
-            print("Warning: AIDON_SLACK_SIGNING_SECRET not set; Slack webhook signature check is off (Slack polling does not need it).")
+            _startup_style("warn", "Slack signature verification is off: AIDON_SLACK_SIGNING_SECRET is not set.")
+        _startup_style("section", "WebUI")
         if args.webhook_only:
-            print(f"Webhook listener on http://127.0.0.1:{args.port}/, WhatsApp and Slack only")
+            _startup_style("ok", f"Webhook listener: http://127.0.0.1:{args.port}/ (WhatsApp and Slack only)")
         else:
-            print(f"WebUI on http://127.0.0.1:{args.port}/, localhost only, WhatsApp and Slack webhooks at /webhook/whatsapp and /webhook/slack")
-            print("Public reachability still needs a tunnel, localhost alone is not reachable by Meta or Slack.")
+            _startup_style("ok", f"WebUI: http://127.0.0.1:{args.port}/ (localhost only)")
+            _startup_style("info", "Webhooks: /webhook/whatsapp and /webhook/slack")
+            _startup_style("info", "External services need a tunnel; localhost is not publicly reachable.")
         server.serve(port=args.port)
         return 0
     if args.command == "v1":

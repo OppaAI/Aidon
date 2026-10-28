@@ -79,6 +79,11 @@ post-hackathon, NOT built, NOT demoed, at the end.
 
 ## 🆕 Built after implementation period, now in the repo
 
+- Conversational `--cli` mode, dark/light WebUI theme refresh, robot
+  avatar fallback and favicon, icon-based run stages, final elapsed-time
+  and token-usage display, and progressive Fish Audio playback with a
+  buffered fallback.
+
 - Adaptive DAG, steer and cancel across WebUI,
   WhatsApp, Slack, CLI, v1, and MCP, with RunControl.
 - WebUI avatar and mic, DAG editor, entity graph,
@@ -181,6 +186,13 @@ post-hackathon, NOT built, NOT demoed, at the end.
   missing optional package.
 
 ## 🔮 Post-hackathon, NOT built, NOT demoed
+
+The VM remains intentionally out of the current setup. Adding it is a
+separate isolation project: it needs a disposable image, lifecycle and
+resource limits, network and file-mount policy, persistence rules, and
+explicit boundaries for display, audio, credentials, and computer
+control. The current UI, CLI, and voice changes do not require a VM and
+will be available inside a future VM once that backend exists.
 
 - Full VM backend: disposable VM running Docker
   inside it, for untrusted code and separate-kernel work.
