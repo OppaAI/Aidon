@@ -45,9 +45,10 @@ def validate_plan(plan, allowed_tools: set[str] | None = None) -> list[str]:
         elif tool == "generate_document":
             if not str(args.get("title", "")).strip():
                 failures.append(f"step {index}: generate_document needs a title")
-            if not any(str(args.get(key, "")).strip()
-                       for key in ("filename", "path", "input_path", "output", "output_path")):
-                failures.append(f"step {index}: generate_document needs an output path")
+            # The document tool derives a timestamped, safe filename when
+            # the user did not specify one. Requiring a model-invented path
+            # here caused otherwise valid document requests to fail before
+            # execution and encouraged arbitrary ``workdir/`` names.
         if not deliverable and tool == "write":
             failures.append(f"step {index}: write step deliverable is empty")
         if not deliverable:
