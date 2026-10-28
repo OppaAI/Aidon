@@ -1347,12 +1347,14 @@ class GoalRunner:
                         # supplied a prose deliverable such as
                         # "Aidon introduction PDF" instead of a filename.
                         if step.tool in {"generate_document", "write_file"}:
+                            artifact_path = getattr(tool_result, "path", "")
                             raw_result = str(tool_result).strip()
-                            # write_file returns a human-readable prefix;
-                            # document generation returns the actual path.
-                            raw_path = (raw_result[6:].strip()
-                                        if raw_result.lower().startswith("wrote ")
-                                        else raw_result)
+                            # Structured ToolResult is authoritative. Keep
+                            # the prose fallback for older plugins/tools.
+                            raw_path = artifact_path or (
+                                raw_result[6:].strip()
+                                if raw_result.lower().startswith("wrote ")
+                                else raw_result)
                             candidate = Path(raw_path)
                             if not candidate.is_absolute():
                                 candidate = self.sandbox.workdir / candidate

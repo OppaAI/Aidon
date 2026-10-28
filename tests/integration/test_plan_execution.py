@@ -14,6 +14,7 @@ from src.memory.memory import InMemoryStore, Memory
 from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
 from src.capabilities.tools import ToolRegistry
+from src.capabilities.tools import ToolResult
 from src.agentic.verify import check_criterion, verify_plan
 
 
@@ -40,6 +41,15 @@ def test_tools_write_read_calculate_ledger(tmp_path):
         assert False, "should have raised"
     except ValueError:
         pass
+
+
+def test_tool_result_keeps_text_and_artifact_metadata(tmp_path):
+    result = ToolResult("wrote /tmp/report.pdf", path=tmp_path / "report.pdf",
+                        kind="document")
+    assert str(result) == "wrote /tmp/report.pdf"
+    assert result.path.endswith("report.pdf")
+    assert result.kind == "document"
+    assert result.status == "ok"
 
 
 def test_verify_criteria_and_ledger(tmp_path):

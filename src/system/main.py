@@ -141,6 +141,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
     never raises out of the tool.
     """
     from pathlib import Path
+    from ..capabilities.tools import ToolResult
     workdir = Path(workdir)
     tools: dict = {}
 
@@ -223,7 +224,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
                         force_ask=True)
                     if not ok:
                         return f"overwrite rejected for {destination}: {why}"
-                return write_document_file(title, sections, target)
+                result = write_document_file(title, sections, target)
+                return ToolResult(result, path=target, kind="document")
             return generate_document(title, sections)
         tools["generate_document"] = _generate_document
         tools["build_ebook"] = build_ebook
@@ -361,7 +363,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
             if not ok:
                 return f"overwrite rejected for {name}: {why}"
         path.write_text(str(text if text != "" else content), encoding="utf-8")
-        return f"wrote {path}"
+        return ToolResult(f"wrote {path}", path=path, kind="file")
 
     tools["read_file"] = read_file
     tools["write_file"] = write_file
