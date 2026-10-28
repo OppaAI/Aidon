@@ -1076,6 +1076,15 @@ def main(argv: list[str] | None = None) -> int:
                                  help="Job kind; chain uses JSON in --goal")
     schedule_parser.add_argument("--schedule", default="0 9 * * *", help="Cron schedule for add, default daily 9am")
     schedule_parser.add_argument("--project", default="default", help="Project id for add")
+    practice_parser = sub.add_parser("practice", help="Free-time practice windows, same store as the Practice page")
+    practice_parser.add_argument("action", choices=["add", "list", "remove", "run"], help="add = add a schedule, list = list schedules, remove = remove one, run = run one now (60 min)")
+    practice_parser.add_argument("--name", default="", help="Schedule name")
+    practice_parser.add_argument("--date", default="", help="One date YYYY-MM-DD; empty means days/every day")
+    practice_parser.add_argument("--days", default="", help="Weekdays, comma separated, e.g. Mon,Wed,Fri; empty means every day")
+    practice_parser.add_argument("--start", default="21:00", help="Window start HH:MM")
+    practice_parser.add_argument("--end", default="22:00", help="Window end HH:MM")
+    practice_parser.add_argument("--goal", action="append", default=[], help="Goal text, repeatable")
+    practice_parser.add_argument("--spec", action="append", default=[], help="Spec name per goal, positionally paired with --goal")
     sandbox_parser = sub.add_parser("sandbox", help="Sandbox isolation boundary")
     sandbox_parser.add_argument("action", choices=["check"], help="check = report sandbox backend and workdir, fail closed if backend missing")
     chain_parser = sub.add_parser("chain", help="Declarative tool chains, zero-LLM scheduled jobs")
@@ -1667,6 +1676,93 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Removed {args.name}" if len(scheduler.jobs) < before else f"No job {args.name}")
             return 0 if len(scheduler.jobs) < before else 2
         return 2
+    if args.command == "practice":
+        from ..interface.practice import (add_schedule, get_schedule,
+                                          load_schedules, remove_schedule)
+        if args.action == "list":
+            for s in load_schedules(config.home):
+                goals = "; ".join(g["goal"] for g in s.get("goals", []))
+                when = s.get("date") or ",".join(
+                    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d]
+                    for d in s.get("days", [])) or "every day"
+                print(f"{s['name']}: {when} {s.get('start')}-{s.get('end')} goals=[{goals}]")
+            return 0
+        if args.action == "add":
+            if not args.name or not args.goal:
+                print("practice add needs --name and at least one --goal"); return 2
+            goals = []
+            for i, g in enumerate(args.goal):
+                # "goal || spec" splits like the Practice page; an
+                # explicit --spec in the same position wins.
+                text, _, inline_spec = g.partition("||")
+                spec = (args.spec[i] if i < len(args.spec) else ""
+                        ) or inline_spec.strip()
+                goals.append({"goal": text.strip(), "spec": spec})
+            schedule, error = add_schedule(config.home, {
+                "name": args.name, "date": args.date,
+                "days": [d.strip() for d in args.days.split(",") if d.strip()],
+                "start": args.start, "end": args.end, "goals": goals})
+            if error is not None:
+                print(f"practice add failed: {error}"); return 2
+            print(f"Added practice schedule {args.name}")
+            return 0
+        if args.action == "remove":
+            removed = remove_schedule(config.home, args.name)
+            print(f"Removed {args.name}" if removed else f"No practice schedule {args.name}")
+            return 0 if removed else 2
+        if args.action == "run":
+            from datetime import datetime, timedelta
+            from ..interface.practice import (get_schedule, record_session,
+                                              run_practice_session)
+            schedule = get_schedule(config.home, args.name)
+            if schedule is None:
+                print(f"No practice schedule {args.name}"); return 2
+            from ..agentic.budgets import Budget as _PB
+            from ..agentic.trace import TraceRecorder as _PT
+            from ..agentic.verifier_model import ModelVerifier as _PMV
+            from ..capabilities.plugins import PluginRegistry as _PPR
+            from ..interface.approval import ApprovalGate as _PAG, Decision as _PDec
+            _pplugins = _PPR(config.home); _pplugins.load_all()
+            try:
+                from ..capabilities.execution import make_backend as _pmb
+                _pbackend = _pmb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
+            except Exception:
+                _pbackend = None
+            _pgate = _PAG(lambda kind, title, body: _PDec("approved", "practice schedule"))
+            _prunner = GoalRunner(client, sandbox, _pgate, config.home, memory=memory, project_id="default", plugins=_pplugins, execution_backend=_pbackend, budget=_PB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_PT(config.home, project_id="default"), model_verifier=_PMV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_pbackend, sandbox))
+
+            def _p_run_goal(goal_text, spec):
+                _report = _prunner.run(goal_text, spec=spec)
+                return {"status": _report.status, "files": list(_report.files or []),
+                        "error": _report.error or "",
+                        "elapsed_seconds": getattr(_report, "elapsed_seconds", 0),
+                        "tokens": _report.model_tokens_estimated,
+                        "run_id": getattr(_prunner, "run_id", "") or "",
+                        "dag": _report.dag_summary or {}}
+
+            def _p_deliver(text, goal, result):
+                print(text)
+                try:
+                    from ..interface.messaging import (MessagingConfig as _MC,
+                                                        send_slack as _ss,
+                                                        send_whatsapp as _sw)
+                    _mcfg = _MC.from_env()
+                    if _mcfg.slack_outbound_channel:
+                        _ss(_mcfg, _mcfg.slack_outbound_channel, text)
+                    if _mcfg.whatsapp_owner:
+                        _sw(_mcfg, _mcfg.whatsapp_owner, text)
+                except Exception as exc:
+                    print(f"Practice report delivery failed: {exc}")
+
+            summary = run_practice_session(schedule, _p_run_goal,
+                                           datetime.now() + timedelta(minutes=60),
+                                           home=config.home, on_report=_p_deliver)
+            record_session(config.home, schedule["name"], summary)
+            print(f"Practice session {schedule['name']}: "
+                  f"{'passed: ' + summary['goal'] if summary['passed'] else 'no pass'} "
+                  f"({len(summary['attempts'])} attempts)")
+            return 0
+        return 2
     if args.command == "sandbox":
         from ..capabilities.execution import make_backend
         try:
@@ -2023,14 +2119,44 @@ def main(argv: list[str] | None = None) -> int:
                 _qkey = "whatsapp:" + str(event.payload.get("from", ""))
             if _qkey and not _qkey.endswith(":"):
                 def _question_callback(question, _key=_qkey):
-                    if event.source == "slack" and slack_sender is not None:
+                    from ..interface.surfaces import waiter_keys_for_slack
+                    also: list[str] = []
+                    if event.source == "slack":
+                        if slack_sender is not None:
+                            try:
+                                slack_sender(
+                                    str(event.payload.get("channel", "")),
+                                    str(question),
+                                    event.payload.get("thread_ts"))
+                            except Exception:
+                                pass
+                        # The thread is visible in WebUI under
+                        # slack:<channel>, question included.
                         try:
-                            slack_sender(
-                                str(event.payload.get("channel", "")),
-                                str(question),
-                                event.payload.get("thread_ts"))
+                            server._conversations_db().record_exchange(
+                                "slack:" + str(event.payload.get("channel", "")),
+                                "assistant", str(question))
                         except Exception:
                             pass
+                        also = waiter_keys_for_slack(
+                            config.home, str(event.payload.get("channel", "")),
+                            str(msg.whatsapp_owner or ""))
+                        # A linked WebUI conversation shows the
+                        # question, so the owner can answer there.
+                        for key in also:
+                            if key.startswith("whatsapp:"):
+                                continue
+                            try:
+                                server._conversations_db().record_exchange(
+                                    key, "assistant", str(question))
+                            except Exception:
+                                pass
+                        for key in also:
+                            if key.startswith("whatsapp:") and whatsapp_sender is not None:
+                                try:
+                                    whatsapp_sender(key[len("whatsapp:"):], str(question))
+                                except Exception:
+                                    pass
                     elif event.source == "whatsapp" and whatsapp_sender is not None:
                         try:
                             whatsapp_sender(
@@ -2038,7 +2164,7 @@ def main(argv: list[str] | None = None) -> int:
                                 str(question))
                         except Exception:
                             pass
-                    return server.ask_question(run_id, _key, question)
+                    return server.ask_question(run_id, _key, question, also_keys=tuple(also))
             def _say(prompt):
                 from ..system.model_client import Message as _Message
                 messages = [_Message("user", prompt)]
@@ -2070,6 +2196,40 @@ def main(argv: list[str] | None = None) -> int:
                 rendered = str(text) if event.source == "webui" \
                     else f"[{run_id}] {text}"
                 event.send_reply(rendered)
+                # Unified surfaces: a linked surface gets the same
+                # result, so WebUI and Slack stay in sync no matter
+                # where the run started. WhatsApp only when mirrored
+                # (or specified via result delivery, below).
+                try:
+                    from ..interface.surfaces import (
+                        conversation_for_slack, slack_for_conversation,
+                        whatsapp_mirrored_for_conversation,
+                        whatsapp_mirrored_for_slack)
+                    _cid = str(event.payload.get("conversation_id", "") or "")
+                    _slack_ch = (slack_for_conversation(config.home, _cid)
+                                 if _cid else None)
+                    if _slack_ch and event.source != "slack" and slack_sender is not None:
+                        slack_sender(_slack_ch, rendered)
+                    if event.source == "slack":
+                        _linked = conversation_for_slack(
+                            config.home, str(event.payload.get("channel", "")))
+                        if _linked:
+                            try:
+                                server._conversations_db().record_exchange(
+                                    _linked, "assistant", rendered)
+                            except Exception:
+                                pass
+                    _wa_mirrored = False
+                    if _cid:
+                        _wa_mirrored = whatsapp_mirrored_for_conversation(config.home, _cid)
+                    elif event.source == "slack":
+                        _wa_mirrored = whatsapp_mirrored_for_slack(
+                            config.home, str(event.payload.get("channel", "")))
+                    if (_wa_mirrored and event.source != "whatsapp"
+                            and whatsapp_sender is not None and msg.whatsapp_owner):
+                        whatsapp_sender(msg.whatsapp_owner, rendered)
+                except Exception:
+                    pass
                 delivery = event.payload.get("result_delivery") or {}
                 channel = str(delivery.get("channel", "")).lower()
                 if not channel or event.source != "webui":
@@ -2515,6 +2675,58 @@ def main(argv: list[str] | None = None) -> int:
         _slack_ts_path = config.home / "slack_last_ts.txt"
         if _slack_ts_path.is_file():
             _slack_last_ts = _slack_ts_path.read_text().strip()
+        # Practice sessions: the serve daemon owns the window tick
+        # and the report delivery. Practice runs are unattended,
+        # so their gate auto-approves: creating the schedule IS
+        # the owner's approval for those goals in that window.
+        def _practice_run_goal(goal_text, spec):
+            _runner = _full_scheduler_runner()
+            from ..interface.approval import ApprovalGate as _PAG2, Decision as _PDec2
+            _runner.gate = _PAG2(lambda kind, title, body: _PDec2("approved", "practice schedule"))
+            _report = _runner.run(goal_text, spec=spec)
+            return {"status": _report.status, "files": list(_report.files or []),
+                    "error": _report.error or "",
+                    "elapsed_seconds": getattr(_report, "elapsed_seconds", 0),
+                    "tokens": _report.model_tokens_estimated,
+                    "run_id": getattr(_runner, "run_id", "") or "",
+                    "dag": _report.dag_summary or {}}
+
+        def _practice_deliver(text, goal, result):
+            try:
+                server._conversations_db().record_exchange("practice", "assistant", text)
+            except Exception:
+                pass
+            try:
+                if msg.slack_outbound_channel:
+                    slack_sender(msg.slack_outbound_channel, text)
+            except Exception:
+                pass
+            # Practice reports are explicitly specified outputs,
+            # so WhatsApp delivery here follows the owner's rule.
+            try:
+                if msg.whatsapp_owner:
+                    whatsapp_sender(msg.whatsapp_owner, text)
+            except Exception:
+                pass
+
+        def _practice_session_sync(schedule, end):
+            from ..interface.practice import run_practice_session as _rps, record_session as _rec
+            summary = _rps(schedule, _practice_run_goal, end, home=config.home,
+                           on_report=_practice_deliver)
+            _rec(config.home, schedule["name"], summary)
+            if not summary["passed"]:
+                # Window closed with no pass: WebUI-only summary,
+                # so a silent failure never looks like a pass.
+                try:
+                    server._conversations_db().record_exchange(
+                        "practice", "assistant",
+                        f"Practice session {schedule['name']}: no pass in this window "
+                        f"({len(summary['attempts'])} attempts).")
+                except Exception:
+                    pass
+            print(f"Practice session {schedule['name']}: "
+                  f"{'passed' if summary['passed'] else 'no pass'}")
+        server.practice_session_runner = _practice_session_sync
         while True:
             scheduler = Scheduler(config.home)
             # Tick wiring: SchedulerLoop carries the outbox drain
@@ -2666,6 +2878,28 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"Slack poll job: {_poll_report.status}")
             except Exception as exc:
                 print(f"Slack poll error: {exc}")
+            # Practice windows, same loop: start at most one session
+            # per schedule per day while its window is open.
+            try:
+                from ..interface.practice import (due_for_session, load_schedules,
+                                                  save_schedules, window_end)
+                from datetime import datetime as _dt
+                _now = _dt.now()
+                _schedules = load_schedules(config.home)
+                _changed = False
+                for _sched in _schedules:
+                    if due_for_session(_sched, _now):
+                        _sched["last_session_date"] = _now.strftime("%Y-%m-%d")
+                        _changed = True
+                        _end = window_end(_sched, _now)
+                        import threading as _th
+                        _th.Thread(target=_practice_session_sync, args=(_sched, _end),
+                                   daemon=True, name=f"practice-{_sched.get('name')}").start()
+                        print(f"Practice session started: {_sched.get('name')}")
+                if _changed:
+                    save_schedules(config.home, _schedules)
+            except Exception as exc:
+                print(f"Practice tick error: {exc}")
             import time as _sleep
             _sleep.sleep(60)
     if args.command == "benchmark":

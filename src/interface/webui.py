@@ -835,6 +835,11 @@ class WebUIServer:
         self.media_downloader = media_downloader
         self.run_control = run_control
         self._web_runs: dict[str, dict] = {}
+        # Set by the serve daemon: practice_session_runner(schedule, end)
+        # runs one practice session synchronously (report delivery and
+        # session recording included). None without the daemon, so the
+        # Practice page's run-now honestly reports it is unavailable.
+        self.practice_session_runner = None
         # Runs blocked in ask_user, by run id and by conversation id.
         # A question is a chat turn, not an approval card: no clock.
         self._question_waiters: dict[str, dict] = {}
@@ -1090,21 +1095,28 @@ class WebUIServer:
             return {"reply": f"Error: {exc}"}
         return {"reply": replies[0] if replies else "Received."}
 
-    def ask_question(self, run_id: str, conversation_id: str, question: str) -> str:
+    def ask_question(self, run_id: str, conversation_id: str, question: str,
+                     also_keys: tuple[str, ...] = ()) -> str:
         """Block the run thread until the owner answers in chat.
 
         The question is posted as a chat event so the owner sees it,
         and run_snapshot reports it as waiting_question so the
         composer stays usable. Questions carry no 180s clock (chat
         is for conversation, cards are for decisions); the wait ends
-        on an answer or on run cancellation.
+        on an answer or on run cancellation. also_keys registers
+        the same waiter under linked surfaces, so an answer from
+        Slack or WhatsApp resolves a WebUI run's question and
+        vice versa (see surfaces.waiter_keys_*).
         """
         event = threading.Event()
+        keys = [conversation_id] + [key for key in also_keys if key and key != conversation_id]
         waiter = {"run_id": run_id, "conversation_id": conversation_id,
-                  "question": str(question), "event": event, "answer": None}
+                  "question": str(question), "event": event, "answer": None,
+                  "keys": keys}
         with self._question_lock:
             self._question_waiters[run_id] = waiter
-            self._question_by_conversation[conversation_id] = waiter
+            for key in keys:
+                self._question_by_conversation[key] = waiter
         record = self._web_runs.get(run_id)
         if record is not None:
             record["events"].append({"kind": "aidon", "text": str(question)})
@@ -1119,8 +1131,9 @@ class WebUIServer:
             with self._question_lock:
                 if self._question_waiters.get(run_id) is waiter:
                     del self._question_waiters[run_id]
-                if self._question_by_conversation.get(conversation_id) is waiter:
-                    del self._question_by_conversation[conversation_id]
+                for key in waiter.get("keys", [conversation_id]):
+                    if self._question_by_conversation.get(key) is waiter:
+                        del self._question_by_conversation[key]
 
     def answer_question(self, conversation_id: str, answer: str) -> str | None:
         """Deliver a chat answer to the waiting run in this conversation."""
@@ -1136,6 +1149,50 @@ class WebUIServer:
         with self._question_lock:
             waiter = self._question_waiters.get(run_id)
             return waiter["question"] if waiter else None
+
+    def _mirror_command(self, conversation_id: str, goal: str,
+                        project_id: str) -> dict | None:
+        """Handle a /mirror command in WebUI chat; None when not one."""
+        from .surfaces import (link_slack, unlink_slack, set_whatsapp_mirror,
+                               mirror_status_text, parse_mirror_command)
+        command = parse_mirror_command(goal)
+        if command is None:
+            return None
+        action = command["action"]
+        if action == "link_slack":
+            link_slack(self.home, conversation_id, command["channel"])
+            text = f"Linked this conversation to Slack #{command['channel']}."
+        elif action == "unlink_slack":
+            removed = unlink_slack(self.home, conversation_id)
+            text = ("Slack link removed." if removed
+                    else "No Slack link to remove.")
+        elif action == "whatsapp":
+            set_whatsapp_mirror(self.home, conversation_id, command["enabled"])
+            text = ("WhatsApp mirror on for this conversation."
+                    if command["enabled"]
+                    else "WhatsApp mirror off for this conversation.")
+        elif action == "link_webui":
+            text = ("You are already in this conversation; from Slack, "
+                    "use /mirror webui <id> to link a channel here.")
+        else:
+            text = mirror_status_text(self.home, conversation_id=conversation_id)
+        try:
+            self._conversations_db().record_exchange(conversation_id, "assistant", text)
+        except Exception:
+            pass
+        if self.memory is not None:
+            try:
+                self.memory.record_stm("assistant", text, project_id=project_id,
+                                       conversation_id=conversation_id)
+            except Exception:
+                pass
+        from .run_control import new_run_id
+        run_id = new_run_id()
+        self._web_runs[run_id] = {"run_id": run_id, "goal": goal,
+                                  "project_id": project_id, "status": "done",
+                                  "events": [{"kind": "aidon-final", "text": text,
+                                              "stream_id": ""}], "trace": []}
+        return {"run_id": run_id, "conversation_id": conversation_id, "goal": goal}
 
     def start_goal(self, body: dict) -> dict:
         """Start the same dispatcher path used by messaging triggers."""
@@ -1181,6 +1238,9 @@ class WebUIServer:
         if answered_run is not None:
             return {"run_id": answered_run, "conversation_id": conversation_id,
                     "goal": goal}
+        mirror_response = self._mirror_command(conversation_id, goal, project_id)
+        if mirror_response is not None:
+            return mirror_response
         run_id = new_run_id()
         if self.run_control is not None:
             self.run_control.register(run_id, goal, project_id)
@@ -1209,7 +1269,32 @@ class WebUIServer:
                 record["trace"].append(dict(item))
 
         def question_callback(question):
-            return self.ask_question(run_id, conversation_id, question)
+            # Fan out to linked surfaces now, and register the
+            # waiter under their keys, so an answer from Slack or
+            # WhatsApp resolves this WebUI run's question.
+            from .surfaces import (slack_for_conversation,
+                                   waiter_keys_for_conversation,
+                                   whatsapp_mirrored_for_conversation)
+            owner = ""
+            try:
+                owner = str(self.messaging_config.whatsapp_owner or "")
+            except Exception:
+                pass
+            channel = slack_for_conversation(self.home, conversation_id)
+            if channel and self.slack_sender is not None:
+                try:
+                    self.slack_sender(channel, str(question))
+                except Exception:
+                    pass
+            if (owner and whatsapp_mirrored_for_conversation(self.home, conversation_id)
+                    and self.whatsapp_sender is not None):
+                try:
+                    self.whatsapp_sender(owner, str(question))
+                except Exception:
+                    pass
+            return self.ask_question(run_id, conversation_id, question,
+                                     also_keys=tuple(waiter_keys_for_conversation(
+                                         self.home, conversation_id, owner)))
 
         def reply(text):
             record["events"].append({"kind": "aidon-final", "text": str(text),
@@ -1381,6 +1466,42 @@ class WebUIServer:
             return 200, {"error": str(exc)}
         return 200, {"replies": replies}
 
+    def _record_surface_exchange(self, conversation_id: str, role: str, text: str) -> None:
+        """Best-effort conversation-store record for a non-WebUI surface."""
+        try:
+            self._conversations_db().record_exchange(conversation_id, role, text)
+        except Exception:
+            pass
+
+    def _slack_mirror_command(self, channel: str, text: str) -> str | None:
+        """Handle a /mirror command from Slack; None when not one."""
+        from .surfaces import (conversation_for_slack, link_slack, unlink_slack,
+                               mirror_status_text, parse_mirror_command,
+                               set_whatsapp_mirror)
+        command = parse_mirror_command(text)
+        if command is None:
+            return None
+        action = command["action"]
+        if action == "link_webui":
+            link_slack(self.home, command["conversation"], channel)
+            return (f"Linked this channel to WebUI conversation "
+                    f"{command['conversation']}.")
+        if action == "unlink_slack":
+            conversation = conversation_for_slack(self.home, channel)
+            if conversation and unlink_slack(self.home, conversation):
+                return "Slack link removed."
+            return "No Slack link to remove."
+        if action == "whatsapp":
+            conversation = (conversation_for_slack(self.home, channel)
+                            or ("slack:" + channel))
+            set_whatsapp_mirror(self.home, conversation, command["enabled"])
+            return ("WhatsApp mirror on for this channel."
+                    if command["enabled"]
+                    else "WhatsApp mirror off for this channel.")
+        if action == "link_slack":
+            return "From Slack, link with /mirror webui <conversation-id>."
+        return mirror_status_text(self.home, channel=channel)
+
     def handle_slack_post(self, raw: bytes, headers: dict, body: dict) -> tuple[int, dict]:
         # Verify signature before parsing any event as a goal.
         if self.slack_signing_secret:
@@ -1412,6 +1533,13 @@ class WebUIServer:
                 decision_reply = self._resolve_preapproval(text)
             if decision_reply is None:
                 decision_reply = self._resolve_memory_command(text)
+            mirror_reply = self._slack_mirror_command(channel, text)
+            if mirror_reply is not None:
+                if self.slack_sender is not None:
+                    self.slack_sender(channel, mirror_reply, thread_ts)
+                self._record_surface_exchange("slack:" + channel, "user", text)
+                self._record_surface_exchange("slack:" + channel, "assistant", mirror_reply)
+                return 200, {"replies": [mirror_reply]}
             force_web = False
             if decision_reply is None:
                 text, force_web = self._force_web_prefix(text)
@@ -1425,6 +1553,8 @@ class WebUIServer:
                     ack = _qack()
                     if self.slack_sender is not None:
                         self.slack_sender(channel, ack, thread_ts)
+                    self._record_surface_exchange("slack:" + channel, "user", text)
+                    self._record_surface_exchange("slack:" + channel, "assistant", ack)
                     return 200, {"replies": [ack]}
             if decision_reply is not None:
                 if self.slack_sender is not None:
@@ -1495,6 +1625,9 @@ class WebUIServer:
             if self.slack_sender is not None:
                 for reply in replies:
                     self.slack_sender(channel, reply, thread_ts)
+            self._record_surface_exchange("slack:" + channel, "user", text)
+            for reply in replies:
+                self._record_surface_exchange("slack:" + channel, "assistant", reply)
             return 200, {"replies": replies}
         return 200, {"ok": True}
 
@@ -2359,6 +2492,55 @@ class WebUIServer:
         path.unlink()
         return {"ok": True}
 
+    def handle_practice_list(self) -> dict:
+        """All practice schedules, with their session history."""
+        from .practice import load_schedules
+        return {"schedules": load_schedules(self.home)}
+
+    def handle_practice_create(self, body: dict) -> dict:
+        """Create a practice schedule from the Practice page or CLI shape."""
+        from .practice import add_schedule
+        schedule, error = add_schedule(self.home, body or {})
+        if error is not None:
+            return {"error": error}
+        return {"schedule": schedule}
+
+    def handle_practice_delete(self, body: dict) -> dict:
+        """Delete a practice schedule by name."""
+        from .practice import remove_schedule
+        return {"deleted": remove_schedule(self.home, str((body or {}).get("name", "")))}
+
+    def handle_practice_run(self, body: dict) -> dict:
+        """Start a practice session now, in the background.
+
+        Run-now uses a 60-minute window from now, not the
+        schedule's window, and does not consume the day's
+        scheduled session. It needs the serve daemon's
+        practice_session_runner; without the daemon it
+        reports that honestly instead of silently doing
+        nothing.
+        """
+        from datetime import datetime, timedelta
+        from .practice import get_schedule
+        if self.practice_session_runner is None:
+            return {"error": "practice runs need the serve daemon (launch.sh serve)"}
+        schedule = get_schedule(self.home, str((body or {}).get("name", "")))
+        if schedule is None:
+            return {"error": "no such practice schedule"}
+        end = datetime.now() + timedelta(minutes=60)
+        runner = self.practice_session_runner
+
+        def _run():
+            try:
+                runner(schedule, end)
+            except Exception as exc:
+                print(f"Practice session {schedule.get('name')} failed: {exc}")
+
+        threading.Thread(target=_run, daemon=True,
+                         name=f"practice-{schedule.get('name')}").start()
+        return {"started": True, "name": schedule.get("name"),
+                "window_minutes": 60}
+
     def handle_brief_get(self, project_id: str):
         return self._read_json_file(
             self.home / "project_briefs" / f"{self._safe_name(project_id)}.json")
@@ -2982,7 +3164,7 @@ class WebUIServer:
                 elif parsed.path == "/":
                     self._send_static("index.html")
                 elif parsed.path in ("/dag", "/capabilities", "/memory", "/knowledge",
-                                     "/reports"):
+                                     "/reports", "/practice"):
                     self._send_static(parsed.path.lstrip("/") + ".html")
                 elif parsed.path == "/settings":
                     keys = server.auth_store.list_keys() if server.auth_store else []
@@ -3210,6 +3392,8 @@ loadSettings();
                                                trace_since=trace_since)
                     self._send_json(200 if data is not None else 404,
                                     data or {"error": "run not found"})
+                elif parsed.path == "/api/practice":
+                    self._send_json(200, server.handle_practice_list())
                 elif parsed.path == "/api/conversations":
                     self._send_json(200, server.handle_conversations_list())
                 elif parsed.path.startswith("/api/conversations/"):
@@ -3599,6 +3783,14 @@ loadSettings();
                 elif parsed.path == "/api/plugins/adopt":
                     result = server.handle_plugin_adopt(str(body.get("path", "")))
                     self._send_json(200 if result.get("ok") else 400, result)
+                elif parsed.path == "/api/practice":
+                    result = server.handle_practice_create(body)
+                    self._send_json(200 if "schedule" in result else 400, result)
+                elif parsed.path == "/api/practice/delete":
+                    self._send_json(200, server.handle_practice_delete(body))
+                elif parsed.path == "/api/practice/run":
+                    result = server.handle_practice_run(body)
+                    self._send_json(200 if result.get("started") else 400, result)
                 elif parsed.path in ("/webhook/whatsapp", "/webhooks/whatsapp"):
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     status, payload = server.handle_whatsapp_post(body, raw, headers)

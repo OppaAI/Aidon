@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aidon — Practice</title>
+<link rel="stylesheet" href="/static/style.css?v=__ASSET_V__">
+</head>
+<body class="dag-body">
+
+<header class="dag-top">
+  <a class="dag-brand" href="/">◈ Aidon</a>
+  <span class="dag-title">Practice</span>
+  <div class="dag-status" id="status">free-time practice windows</div>
+</header>
+
+<main class="dag-main">
+  <section style="max-width:760px;padding:16px">
+    <p>While a window is open, Aidon picks your goals at random and runs each one
+    like a usual run, until the first successful pass or the window closes.
+    Every pass gets a practice report in the WebUI, on Slack, and on WhatsApp.
+    Practice runs are auto-approved by the schedule itself — schedule only
+    goals you are happy to have run unattended.</p>
+
+    <h2>New schedule</h2>
+    <form id="form">
+      <label>Name <input id="f-name" type="text" required></label><br>
+      <label>Date (optional, YYYY-MM-DD; a set date runs that day only)
+        <input id="f-date" type="text" placeholder="2026-11-02"></label><br>
+      <label>Days of week (optional; empty means every day)
+        <input id="f-days" type="text" placeholder="Mon,Wed,Fri"></label><br>
+      <label>Start <input id="f-start" type="text" value="21:00" required></label>
+      <label>End <input id="f-end" type="text" value="22:00" required></label><br>
+      <label>Goals, one per line (a goal may name a spec after ||, e.g. "Write a haiku || dinner")
+        <textarea id="f-goals" rows="5" required></textarea></label><br>
+      <button type="submit" class="dag-btn dag-btn-primary">Save schedule</button>
+      <span id="form-status"></span>
+    </form>
+
+    <h2>Schedules</h2>
+    <div id="list"></div>
+  </section>
+</main>
+
+<script>
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+async function load(){
+  const r = await fetch('/api/practice');
+  const data = await r.json();
+  const list = document.getElementById('list');
+  if(!data.schedules || !data.schedules.length){
+    list.innerHTML = '<p>No practice schedules yet.</p>';
+    return;
+  }
+  list.innerHTML = data.schedules.map(function(s){
+    const sessions = (s.sessions || []).slice(-5).reverse().map(function(x){
+      return '<li>' + esc(x.date) + ' — ' + (x.passed ? 'passed: ' + esc(x.goal) : 'no pass')
+        + ' (' + x.attempts.length + ' attempts)</li>';
+    }).join('');
+    return '<div class="dag-card"><h3>' + esc(s.name) + '</h3>'
+      + '<p>' + (s.date ? esc(s.date) : (s.days && s.days.length ? 'days ' + s.days.map(function(d){return ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d];}).join(',') : 'every day'))
+      + ' ' + esc(s.start) + '–' + esc(s.end) + '</p>'
+      + '<ul>' + s.goals.map(function(g){return '<li>' + esc(g.goal) + (g.spec ? ' <em>spec: ' + esc(g.spec) + '</em>' : '') + '</li>';}).join('') + '</ul>'
+      + '<p>Recent sessions:</p><ul>' + (sessions || '<li>none yet</li>') + '</ul>'
+      + '<button class="dag-btn" data-run="' + esc(s.name) + '">Run now (60 min)</button> '
+      + '<button class="dag-btn dag-btn-danger" data-del="' + esc(s.name) + '">Delete</button></div>';
+  }).join('');
+  list.querySelectorAll('[data-run]').forEach(function(b){
+    b.onclick = async function(){
+      const r = await fetch('/api/practice/run', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: b.dataset.run})});
+      const d = await r.json();
+      document.getElementById('status').textContent = d.started ? 'session started' : ('error: ' + (d.error || 'unknown'));
+      load();
+    };
+  });
+  list.querySelectorAll('[data-del]').forEach(function(b){
+    b.onclick = async function(){
+      await fetch('/api/practice/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: b.dataset.del})});
+      load();
+    };
+  });
+}
+document.getElementById('form').onsubmit = async function(ev){
+  ev.preventDefault();
+  const goals = document.getElementById('f-goals').value.split('\n').map(function(line){
+    const parts = line.split('||');
+    const goal = parts[0].trim();
+    if(!goal) return null;
+    return {goal: goal, spec: (parts[1] || '').trim()};
+  }).filter(Boolean);
+  const body = {
+    name: document.getElementById('f-name').value.trim(),
+    date: document.getElementById('f-date').value.trim(),
+    days: document.getElementById('f-days').value.split(',').map(function(x){return x.trim();}).filter(Boolean),
+    start: document.getElementById('f-start').value.trim(),
+    end: document.getElementById('f-end').value.trim(),
+    goals: goals
+  };
+  const r = await fetch('/api/practice', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const d = await r.json();
+  document.getElementById('form-status').textContent = d.error ? ('error: ' + d.error) : 'saved';
+  if(!d.error) load();
+};
+load();
+</script>
+</body>
+</html>
