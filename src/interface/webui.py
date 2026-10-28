@@ -894,6 +894,16 @@ class WebUIServer:
         except Exception as exc:
             return f"Could not remember that: {exc}"
 
+    @staticmethod
+    def _force_web_prefix(text: str) -> tuple[str, bool]:
+        """Strip the explicit /web command and return its force flag."""
+        stripped = str(text or "").strip()
+        if stripped == "/web":
+            return "", True
+        if stripped.lower().startswith("/web "):
+            return stripped[5:].strip(), True
+        return stripped, False
+
     def handle_preapprovals(self) -> dict:
         """Active grants, the kind menu, and the help text, for the UI."""
         from .preapproval import HELP_TEXT, KINDS
@@ -991,13 +1001,18 @@ class WebUIServer:
         memory_reply = self._resolve_memory_command(message)
         if memory_reply is not None:
             return {"reply": memory_reply}
+        message, force_web = self._force_web_prefix(message)
+        if not message:
+            return {"reply": "Usage: /web <question>"}
         message, delivery = extract_result_delivery(message)
         project_id = str(body.get("project_id", "default"))
         replies: list[str] = []
         event = TriggerEvent(source="webui", kind="chat", goal=message,
                              project_id=project_id,
-                             payload={"result_delivery": delivery.__dict__}
-                             if delivery else {}, reply=replies.append)
+                             payload={**({"result_delivery": delivery.__dict__}
+                                         if delivery else {}),
+                                      "force_web": force_web},
+                             reply=replies.append)
         try:
             self.dispatcher.dispatch(event)
         except Exception as exc:
@@ -1010,6 +1025,10 @@ class WebUIServer:
         goal = str(body.get("goal", "")).strip()
         if not goal:
             return {"error": "goal is required"}
+        goal, force_web = self._force_web_prefix(goal)
+        if not goal:
+            return {"error": "a web question is required"}
+        force_web = force_web or bool(body.get("force_web", False))
         goal, delivery = extract_result_delivery(goal)
         project_id = str(body.get("project_id", "default") or "default")
         conversation_id = str(body.get("conversation_id", "") or "")
@@ -1057,6 +1076,7 @@ class WebUIServer:
 
         payload = {"run_id": run_id,
                    "guidance": str(body.get("guidance", "")),
+                   "force_web": force_web,
                    "result_delivery": delivery.__dict__ if delivery else {}}
         image_paths = [str(path) for path in (body.get("image_paths") or [])
                        if str(path).strip()]
@@ -1154,6 +1174,12 @@ class WebUIServer:
                             decision_reply = self._resolve_preapproval(text)
                         if decision_reply is None:
                             decision_reply = self._resolve_memory_command(text)
+                        if decision_reply is None:
+                            text, force_web = self._force_web_prefix(text)
+                            if not text:
+                                decision_reply = "Usage: /web <question>"
+                            else:
+                                decision_reply = None
                         if decision_reply is not None:
                             replies.append(decision_reply)
                             if self.whatsapp_sender is not None:
@@ -1161,7 +1187,8 @@ class WebUIServer:
                             continue
                         local_replies: list[str] = []
                         event = TriggerEvent(source="whatsapp", kind="message",
-                                             goal=text, payload={"from": sender},
+                                             goal=text, payload={"from": sender,
+                                                                 "force_web": force_web},
                                              reply=local_replies.append)
                         self.dispatcher.dispatch(event)
                         for reply in local_replies:
@@ -1203,6 +1230,11 @@ class WebUIServer:
                 decision_reply = self._resolve_preapproval(text)
             if decision_reply is None:
                 decision_reply = self._resolve_memory_command(text)
+            force_web = False
+            if decision_reply is None:
+                text, force_web = self._force_web_prefix(text)
+                if not text:
+                    decision_reply = "Usage: /web <question>"
             if decision_reply is not None:
                 if self.slack_sender is not None:
                     self.slack_sender(channel, decision_reply, thread_ts)
@@ -1259,6 +1291,7 @@ class WebUIServer:
                         image["downloaded"] = True
                     except Exception:
                         continue
+            payload["force_web"] = force_web
             event = TriggerEvent(source="slack", kind="message", goal=text,
                                  payload=payload,
                                  reply=replies.append)
