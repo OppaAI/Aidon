@@ -16,6 +16,14 @@
   const approvalSlot = document.getElementById("approval-slot");
   const statusDot = document.getElementById("status-dot");
   const statusText = document.getElementById("status-text");
+  const chatSearch = document.getElementById("chat-search");
+
+  if (chatSearch) chatSearch.addEventListener("input", () => {
+    const needle = chatSearch.value.trim().toLowerCase();
+    thread.querySelectorAll(".msg").forEach((message) => {
+      message.hidden = !!needle && !message.textContent.toLowerCase().includes(needle);
+    });
+  });
 
   function loadDashboardStatus() {
     fetch("/api/status").then((r) => r.json()).then((data) => {
@@ -319,6 +327,7 @@
   let ttsMouthLevel = 0, ttsMouthLoop = false, ttsPlaying = false;
   let micCtx = null, micAnalyser = null, micAnalyserData = null;
   const waveCvs = document.getElementById("voice-wave");
+  const avatarWaveCvs = document.getElementById("avatar-wave");
   const WAVE_BARS = 26;
   const waveLevels = new Array(WAVE_BARS).fill(0);
   let waveFreq = null;
@@ -336,10 +345,7 @@
   }
 
   function drawWave() {
-    if (!waveCvs) return;
-    const ctx = waveCvs.getContext("2d");
-    const W = waveCvs.width, H = waveCvs.height;
-    ctx.clearRect(0, 0, W, H);
+    if (!waveCvs && !avatarWaveCvs) return;
     let freq = null;
     let micTime = null;
     if (recorder && micAnalyser) {
@@ -353,30 +359,35 @@
       ttsAnalyser.getByteFrequencyData(waveFreq);
       freq = waveFreq;
     }
-    const mid = H / 2, bw = W / WAVE_BARS;
     const lt = document.documentElement.dataset.theme === "light";
-    for (let i = 0; i < WAVE_BARS; i++) {
-      let target = 0.06; // idle floor
-      if (micTime) {
-        const stride = Math.max(1, Math.floor(micTime.length / WAVE_BARS));
-        let peak = 0;
-        for (let j = i * stride; j < Math.min(micTime.length, (i + 1) * stride); j++)
-          peak = Math.max(peak, Math.abs(micTime[j] - 128) / 128);
-        target = 0.08 + Math.min(1, peak * 2.4);
-      } else if (freq) {
-        const b0 = 2 + Math.floor(i * 44 / WAVE_BARS);
-        const v = ((freq[b0] || 0) + (freq[b0 + 1] || 0)) / 2 / 255;
-        target = 0.06 + Math.min(1, v * 1.7);
+    [waveCvs, avatarWaveCvs].filter(Boolean).forEach((canvas) => {
+      const ctx = canvas.getContext("2d");
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+      const mid = H / 2, bw = W / WAVE_BARS;
+      for (let i = 0; i < WAVE_BARS; i++) {
+        let target = 0.06;
+        if (micTime) {
+          const stride = Math.max(1, Math.floor(micTime.length / WAVE_BARS));
+          let peak = 0;
+          for (let j = i * stride; j < Math.min(micTime.length, (i + 1) * stride); j++)
+            peak = Math.max(peak, Math.abs(micTime[j] - 128) / 128);
+          target = 0.08 + Math.min(1, peak * 2.4);
+        } else if (freq) {
+          const b0 = 2 + Math.floor(i * 44 / WAVE_BARS);
+          const v = ((freq[b0] || 0) + (freq[b0 + 1] || 0)) / 2 / 255;
+          target = 0.06 + Math.min(1, v * 1.7);
+        }
+        const lv = waveLevels[i];
+        waveLevels[i] = lv + (target - lv) * (target > lv ? 0.55 : 0.3);
+        const h = Math.max(1.5, waveLevels[i] * (H - 2));
+        const grad = ctx.createLinearGradient(0, mid - h / 2, 0, mid + h / 2);
+        grad.addColorStop(0, lt ? "#4d9fff" : "#7de9ff");
+        grad.addColorStop(1, lt ? "#0064e0" : "#1a9ec4");
+        ctx.fillStyle = grad;
+        ctx.fillRect(i * bw + bw * 0.22, mid - h / 2, Math.max(1, bw * 0.56), h);
       }
-      const lv = waveLevels[i];
-      waveLevels[i] = lv + (target - lv) * (target > lv ? 0.55 : 0.3);
-      const h = Math.max(1.5, waveLevels[i] * (H - 2));
-      const grad = ctx.createLinearGradient(0, mid - h / 2, 0, mid + h / 2);
-      grad.addColorStop(0, lt ? "#4d9fff" : "#7de9ff");
-      grad.addColorStop(1, lt ? "#0064e0" : "#1a9ec4");
-      ctx.fillStyle = grad;
-      ctx.fillRect(i * bw + bw * 0.22, mid - h / 2, Math.max(1, bw * 0.56), h);
-    }
+    });
     if (recorder) requestAnimationFrame(drawWave);
   }
 
@@ -1301,7 +1312,7 @@
 
   sendBtn.addEventListener("click", startRun);
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    if (e.key === "Enter" && !(e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       startRun();
     }
@@ -1310,18 +1321,23 @@
   if (preapproveBtn) preapproveBtn.addEventListener("click", async () => {
     const project = window.aidonConversation ? window.aidonConversation() : {};
     const specId = project.project_id || "default";
-    if (!window.confirm("Preapprove reversible live actions for " + specId + " for 8 hours?")) return;
+    const active = preapproveBtn.classList.contains("active");
+    if (!active && !window.confirm("Approve reversible live actions for " + specId + " for 8 hours?")) return;
     preapproveBtn.disabled = true;
     try {
-      const r = await fetch("/api/preapprovals", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spec_id: specId, kind: "live", hours: 8 }),
-      });
+      const r = await fetch(active
+        ? "/api/preapprovals/" + encodeURIComponent(specId) + "/live"
+        : "/api/preapprovals", active ? { method: "DELETE" } : {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ spec_id: specId, kind: "live", hours: 8 }),
+        });
       const data = await r.json().catch(() => ({}));
       if (!r.ok || !data.ok) throw new Error(data.error || ("HTTP " + r.status));
-      preapproveBtn.classList.add("active");
-      preapproveBtn.title = "Live actions preapproved for 8 hours";
-      addMsg("stage-line", "Reversible live actions preapproved for " + specId + " for 8 hours.");
+      preapproveBtn.classList.toggle("active", !active);
+      preapproveBtn.title = active ? "Approve for me" : "Live actions approved for 8 hours; click to deactivate";
+      addMsg("stage-line", active
+        ? "Approve for me deactivated for " + specId + "."
+        : "Reversible live actions approved for " + specId + " for 8 hours.");
     } catch (e) {
       addMsg("stage-line", "Preapproval failed: " + e.message);
     } finally {
