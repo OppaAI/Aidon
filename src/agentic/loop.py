@@ -984,6 +984,18 @@ class GoalRunner:
         report.adapted_from = str(self._adapted_from)
         report.dag_summary = dict(self._dag_summary)
         report.replan_note = str(getattr(self, "_replan_note", "") or "")
+        # A direct chat/webchat answer is a successful completed exchange,
+        # even though it has no file plan. Keep it in episodic memory so
+        # ordinary conversation is learnable too; working memory contains
+        # the verbatim turn, while this point is the durable summary hook.
+        if report.status == "chat" and self.memory is not None:
+            try:
+                self.memory.record_episodic(
+                    self.project_id, report.goal,
+                    {"kind": "chat", "outcome": report.chat_reply or "",
+                     "status": "done"})
+            except Exception:
+                pass
         # Proven-run DAG learn, successful runs only, best
         # effort: a learn failure must never fail the run.
         if report.status == "done":

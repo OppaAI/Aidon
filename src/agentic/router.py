@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from ..system.model_client import Message, ModelClient
 
-DEFAULT_FAST_PHASES = {"interpret", "learn", "respond"}
+DEFAULT_FAST_PHASES = {"interpret", "learn", "respond", "webchat"}
 
 
 def parse_fast_phases(value: str) -> set[str]:

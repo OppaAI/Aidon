@@ -60,12 +60,23 @@ def _named_file(goal: str):
 
 def _call_model(client, prompt: str) -> str:
     message = _make_message(prompt)
+    try:
+        from ..agentic.think_effort import sampling_for
+        sampling = sampling_for("webchat")
+    except Exception:
+        sampling = None
     if hasattr(client, "chat_phase"):
         try:
-            return str(client.chat_phase("webchat", [message]))
+            return str(client.chat_phase("webchat", [message], sampling=sampling))
         except TypeError:
-            return str(client.chat([message]))
-    return str(client.chat([message]))
+            try:
+                return str(client.chat([message], sampling=sampling))
+            except TypeError:
+                return str(client.chat([message]))
+    try:
+        return str(client.chat([message], sampling=sampling))
+    except TypeError:
+        return str(client.chat([message]))
 
 
 def webchat_reply_with_local(goal: str, researcher, client,

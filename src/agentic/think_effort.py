@@ -25,6 +25,9 @@ _EFFORT_TABLE = {
     "verify": "low",
     "learn": "low",
     "respond": "off",
+    # Web answers need a little synthesis to reconcile retrieved sources,
+    # but do not need the full planning/reasoning budget of an agentic run.
+    "webchat": "low",
     "compact": "low",
 }
 
@@ -36,6 +39,7 @@ _SAMPLING_TABLE = {
     "learn": {"temperature": 0.3, "top_p": 0.95},
     "compact": {"temperature": 0.1, "top_p": 0.95},
     "respond": {"temperature": 0.8, "top_p": 0.95},
+    "webchat": {"temperature": 0.2, "top_p": 0.95},
     "execute": {"temperature": 0.2, "top_p": 0.95},
 }
 
