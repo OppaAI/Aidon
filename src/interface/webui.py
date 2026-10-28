@@ -1180,7 +1180,8 @@ class WebUIServer:
         out = dict(record or {})
         if control:
             out.update({"status": control.get("status", out.get("status", "running")),
-                        "goal": control.get("goal", out.get("goal", ""))})
+                        "goal": control.get("goal", out.get("goal", "")),
+                        "stage": control.get("stage", out.get("stage", "interpret"))})
         out.setdefault("events", [])
         out.setdefault("trace", [])
         # The browser polls incrementally. Returning the complete history on

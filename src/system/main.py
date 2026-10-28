@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import threading
 
@@ -155,8 +156,12 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
     except Exception:
         pass
     try:
-        from ..capabilities.docgen import build_ebook, generate_document
-        tools["generate_document"] = generate_document
+        from ..capabilities.docgen import build_ebook, generate_document, write_document_file
+        def _generate_document(title, sections, filename=""):
+            if filename:
+                return write_document_file(title, sections, _confined(filename))
+            return generate_document(title, sections)
+        tools["generate_document"] = _generate_document
         tools["build_ebook"] = build_ebook
     except Exception:
         pass
