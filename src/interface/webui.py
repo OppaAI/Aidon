@@ -1160,7 +1160,7 @@ class WebUIServer:
         return {"run_id": run_id, "conversation_id": conversation_id,
                 "goal": goal}
 
-    def run_snapshot(self, run_id: str) -> dict | None:
+    def run_snapshot(self, run_id: str, since: int = 0, trace_since: int = 0) -> dict | None:
         record = self._web_runs.get(run_id)
         control = self.run_control.get(run_id) if self.run_control is not None else None
         if record is None and control is None:
@@ -1171,8 +1171,15 @@ class WebUIServer:
                         "goal": control.get("goal", out.get("goal", ""))})
         out.setdefault("events", [])
         out.setdefault("trace", [])
-        out["event_total"] = len(out["events"])
-        out["trace_total"] = len(out["trace"])
+        # The browser polls incrementally. Returning the complete history on
+        # every poll caused each old assistant event to be rendered again,
+        # which looked like an infinite model loop.
+        all_events = out["events"]
+        all_trace = out["trace"]
+        out["event_total"] = len(all_events)
+        out["trace_total"] = len(all_trace)
+        out["events"] = all_events[max(0, int(since)):]
+        out["trace"] = all_trace[max(0, int(trace_since)):]
         pending = self.webui_gate.pending_cards()
         out["pending"] = pending[0] if pending else None
         return out
@@ -3004,7 +3011,17 @@ loadSettings();
                     self._send_json(200, server.handle_tools())
                 elif parsed.path.startswith("/api/runs/") and "/" not in parsed.path[len("/api/runs/"):]:
                     run_id = parsed.path[len("/api/runs/"):]
-                    data = server.run_snapshot(run_id)
+                    query = parse_qs(parsed.query)
+                    try:
+                        since = max(0, int(query.get("since", ["0"])[0]))
+                    except (TypeError, ValueError):
+                        since = 0
+                    try:
+                        trace_since = max(0, int(query.get("trace_since", ["0"])[0]))
+                    except (TypeError, ValueError):
+                        trace_since = 0
+                    data = server.run_snapshot(run_id, since=since,
+                                               trace_since=trace_since)
                     self._send_json(200 if data is not None else 404,
                                     data or {"error": "run not found"})
                 elif parsed.path == "/api/conversations":

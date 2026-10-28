@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.system.config import Config
 from src.memory.embedder import HashEmbedder
 from src.agentic.semantic_router import SemanticRouter
+from src.agentic.prompts import runtime_model_inventory
 
 
 class CountingEmbedder(HashEmbedder):
@@ -71,3 +72,15 @@ def test_image_model_env_default_and_override(monkeypatch, tmp_path):
     monkeypatch.setenv("AIDON_IMAGE_MODEL", "muse-image-2.0")
     config2 = Config.load()
     assert config2.image_model == "muse-image-2.0"
+
+
+def test_runtime_model_inventory_is_non_secret_and_configured(monkeypatch):
+    monkeypatch.setenv("AIDON_MODEL", "muse-spark-1.3-contributor")
+    monkeypatch.setenv("AIDON_BACKEND", "meta")
+    monkeypatch.setenv("AIDON_FAST_MODEL", "muse-fast")
+    monkeypatch.setenv("AIDON_API_KEY", "do-not-print-this")
+    block = runtime_model_inventory()
+    assert "muse-spark-1.3-contributor" in block
+    assert "muse-fast" in block
+    assert "do-not-print-this" not in block
+    assert "muse-voice-transcribe-1.0" in block

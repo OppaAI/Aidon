@@ -50,6 +50,7 @@ def test_webchat_reply_uses_researcher_facts():
     sent = client.calls[0][0].content
     assert "It rains in Vancouver in October." in sent
     assert "October is autumn." in sent
+    assert "Runtime model inventory" in sent
 
 
 def test_webchat_reply_empty_facts_says_not_found_and_does_not_call_model():

@@ -45,6 +45,44 @@ SYSTEM_LINE = ("You are Aidon, an autonomous agent that learns from the web"
                " and from its own experience.")
 
 
+def runtime_model_inventory() -> str:
+    """Return the configured, non-secret model inventory for the agent.
+
+    Model names are configuration facts, not eligibility evidence. Keeping
+    this block in the runtime prompt lets Aidon compare its actual stack with
+    a requirement it finds in official rules without exposing endpoints or
+    credentials.
+    """
+    def env(name: str, default: str) -> str:
+        value = os.environ.get(name, "").strip()
+        return value or default
+
+    backend = env("AIDON_BACKEND", "auto/inferred")
+    main = env("AIDON_MODEL", "muse-spark")
+    fast = env("AIDON_FAST_MODEL", "same as main")
+    verifier = env("AIDON_VERIFIER_MODEL", "same as main")
+    return (
+        "# Runtime model inventory\n"
+        "These are the configured model and service identifiers for this run; "
+        "they are not proof of current availability or hackathon eligibility.\n"
+        f"- Agent model: {main}\n"
+        f"- Fast model: {fast}\n"
+        f"- Verifier model: {verifier}\n"
+        f"- Model backend: {backend}\n"
+        f"- Memory embedding model: {env('AIDON_EMBED_MODEL', 'google/embeddinggemma-2')}\n"
+        f"- Image model: {env('AIDON_IMAGE_MODEL', 'muse-image-1.0')}\n"
+        f"- Segmentation model: {env('AIDON_SAM_MODEL', 'meta-sam')}\n"
+        "- Speech-to-text model: muse-voice-transcribe-1.0\n"
+        "- Text-to-speech model: Fish Audio s2.1-pro-free\n"
+        f"- Web search provider: {env('AIDON_SEARCH_BACKEND', 'tavily')}\n"
+        "There is no separately configured code model unless one of the model "
+        "tiers above is explicitly used for code. When checking a competition "
+        "or integration requirement, browse the official rules, list the exact "
+        "required models/APIs, and compare them with this inventory. Do not "
+        "claim qualification from a brand resemblance or from this inventory alone."
+    )
+
+
 def _read_doc(name: str) -> str:
     """Read a repository doc when present, '' when absent."""
     candidates = [os.path.join(os.getcwd(), name),
@@ -133,6 +171,7 @@ def build_identity_prompt(phase: str = "", user_text: str = "",
     parts = [SYSTEM_LINE]
     if phase:
         parts.append(f"You are in the {phase} phase.")
+    parts.append(runtime_model_inventory())
     persona = persona or _read_doc("SOUL.md")
     if persona:
         parts.append("\n# Persona\n" + persona)

@@ -1875,29 +1875,9 @@ def main(argv: list[str] | None = None) -> int:
                 if not result.get("ok"):
                     event.send_reply(f"Result delivery to {channel} failed: "
                                      f"{result.get('error', 'unknown error')}")
-            # Swarm, Aidon decides: if the goal genuinely splits,
-            # run the subgoals in parallel and merge, else single run.
-            try:
-                from ..agentic.swarm import run_swarm
-                def _swarm_runner(subgoal):
-                    import uuid as _sw_uuid
-                    sub_runner = GoalRunner(client, sandbox, server.webui_gate.gate,
-                                            config.home, memory=memory,
-                                            project_id=event.project_id, plugins=plugins,
-                                            budget=budget, trace=trace,
-                                            model_verifier=ModelVerifier(client),
-                                            kernel_mode=config.kernel_mode,
-                                            semantic_router=semantic_router,
-                                            use_semantic_router_skip=True,
-                                            run_id=f"{run_id}-{_sw_uuid.uuid4().hex[:8]}", run_control=run_control, researcher=_web_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=server.webui_gate.gate, researcher=_web_researcher), router=model_router, versioned_writes=True, network_available=_network_available(None, sandbox))
-                    sub_report = sub_runner.run(subgoal)
-                    return f"[{sub_report.status}] {', '.join(sub_report.files)} {sub_report.error}".strip()
-                swarm_result = run_swarm(event.goal, client, _swarm_runner)
-                if swarm_result.get("swarmed"):
-                    _surface_reply(f"Swarm, subgoals: {', '.join(swarm_result['subgoals'])}\n{swarm_result['merged']}")
-                    return
-            except Exception:
-                pass
+            # WebUI goals run once. Swarm remains an explicit CLI option;
+            # automatically splitting ordinary chat made conversational
+            # questions appear multiple times and multiplied model calls.
             report = runner.run(event.goal)
             run_control.set_status(run_id, report.status)
             if report.status == "chat":

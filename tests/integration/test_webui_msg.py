@@ -90,6 +90,21 @@ def test_webui_chat_library_settings_no_real_key(tmp_path):
         httpd.shutdown()
 
 
+def test_run_snapshot_returns_only_unseen_events(tmp_path):
+    server = WebUIServer(tmp_path)
+    server._web_runs["run-1"] = {
+        "run_id": "run-1", "status": "running",
+        "events": [{"kind": "aidon", "text": "one"},
+                    {"kind": "aidon", "text": "two"}],
+        "trace": [{"phase": "interpret"}, {"phase": "respond"}],
+    }
+    snapshot = server.run_snapshot("run-1", since=1, trace_since=1)
+    assert snapshot["event_total"] == 2
+    assert [event["text"] for event in snapshot["events"]] == ["two"]
+    assert snapshot["trace_total"] == 2
+    assert len(snapshot["trace"]) == 1
+
+
 def test_whatsapp_verify_and_message_two_way(tmp_path):
     server, httpd, base, _, replies, _ = _start_server(tmp_path)
     try:

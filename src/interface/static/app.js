@@ -19,6 +19,19 @@
   const statusDot = document.getElementById("status-dot");
   const statusText = document.getElementById("status-text");
 
+  function scrollThreadToLatest() {
+    if (!thread) return;
+    // The composer and streamed markdown can change layout after the first
+    // scroll. Two animation frames make the newest exchange reliably land
+    // above the composer instead of leaving the viewport at the old offset.
+    const move = () => { thread.scrollTop = thread.scrollHeight; };
+    requestAnimationFrame(() => {
+      move();
+      requestAnimationFrame(move);
+    });
+  }
+  window.aidonScrollThread = scrollThreadToLatest;
+
   let middleStatusTimer = null;
   function showMiddleStatus(text, kind = "info") {
     if (!middleStatus) return;
@@ -136,7 +149,7 @@
     d.className = "msg " + kind;
     d.innerHTML = (t ? '<div class="t">' + esc(t) + "</div>" : "") + md(text);
     thread.appendChild(d);
-    thread.scrollTop = thread.scrollHeight;
+    scrollThreadToLatest();
     return d;
   }
 
@@ -189,7 +202,7 @@
         // markdown as it streams: unfinished fences/asterisks are harmless
         // (they simply render literally until the closing token arrives)
         body.innerHTML = md(full.slice(0, i));
-        thread.scrollTop = thread.scrollHeight;
+        scrollThreadToLatest();
         if (i < full.length) requestAnimationFrame(tick);
         else {
           body.innerHTML = final ? renderFinalMessage(full) : md(full);
@@ -300,7 +313,7 @@
     img.alt = "attached image";
     d.appendChild(img);
     thread.appendChild(d);
-    thread.scrollTop = thread.scrollHeight;
+    scrollThreadToLatest();
     return d;
   }
   function renderMaybeImage(kind, text, t) {
@@ -468,6 +481,110 @@
 
   let speakGen = 0;   // playback generation: only the newest wins
 
+  // Streaming answers are spoken sentence-by-sentence. The LLM stream can
+  // split anywhere, so keep an incomplete tail and send only complete
+  // sentences to Fish. This starts voice output before the final answer
+  // event arrives and keeps sentence audio in order.
+  const streamSpeech = new Map();
+  let streamSpeechGeneration = 0;
+
+  function completeSpeechSentences(buffer, flush = false) {
+    const found = [];
+    let rest = String(buffer || "");
+    const sentence = /^\s*(.+?[.!?](?:["'»”\])}]*)?)(?=\s|$)/s;
+    while (true) {
+      const match = rest.match(sentence);
+      if (!match) break;
+      const text = match[1].trim();
+      if (text) found.push(text);
+      rest = rest.slice(match[0].length);
+    }
+    if (flush && rest.trim()) {
+      found.push(rest.trim());
+      rest = "";
+    }
+    return { found, rest };
+  }
+
+  async function fetchSpeechAudio(text) {
+    const request = {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: spokenText(text).slice(0, 2000) }),
+    };
+    const response = await fetch("/api/tts/stream", request);
+    if (!response.ok) throw new Error("tts " + response.status);
+    const progressive = await progressiveAudio(response);
+    if (progressive) return progressive;
+    const fallback = await fetch("/api/tts", request);
+    if (!fallback.ok) throw new Error("tts " + fallback.status);
+    const url = URL.createObjectURL(await fallback.blob());
+    return { audio: new Audio(url), url, cancel: null };
+  }
+
+  async function pumpStreamSpeech(state) {
+    if (state.playing || !state.queue.length) return;
+    state.playing = true;
+    const item = state.queue.shift();
+    try {
+      const progressive = await fetchSpeechAudio(item);
+      if (state.generation !== streamSpeechGeneration) {
+        if (progressive.cancel) progressive.cancel();
+        if (progressive.url) URL.revokeObjectURL(progressive.url);
+        return;
+      }
+      const audio = progressive.audio;
+      currentAudio = audio;
+      currentAudioUrl = progressive.url;
+      currentAudioCancel = progressive.cancel;
+      ttsPlaying = true;
+      startMouthLoop();
+      try {
+        const analyser = getTtsAnalyser();
+        const source = ttsCtx.createMediaElementSource(audio);
+        source.connect(analyser);
+      } catch (e) { /* plain playback remains valid */ }
+      await audio.play();
+      await new Promise((resolve) => {
+        audio.addEventListener("ended", resolve, { once: true });
+        audio.addEventListener("error", resolve, { once: true });
+      });
+      if (progressive.url) URL.revokeObjectURL(progressive.url);
+      currentAudio = null;
+      currentAudioUrl = null;
+      currentAudioCancel = null;
+      ttsPlaying = false;
+    } catch (e) {
+      ttsPlaying = false;
+    } finally {
+      state.playing = false;
+      if (state.done && !state.queue.length) streamSpeech.delete(state.id);
+      else pumpStreamSpeech(state);
+    }
+  }
+
+  function feedStreamSpeech(id, delta, done = false) {
+    if (!ttsAvailable) return false;
+    let state = streamSpeech.get(id);
+    if (!state) {
+      state = { id, buffer: "", queue: [], playing: false, done: false,
+                generation: ++streamSpeechGeneration };
+      streamSpeech.set(id, state);
+    }
+    state.buffer += String(delta || "");
+    const split = completeSpeechSentences(state.buffer, done);
+    state.buffer = split.rest;
+    state.queue.push(...split.found.map((part) => part.trim()).filter(Boolean));
+    if (done) state.done = true;
+    pumpStreamSpeech(state);
+    return true;
+  }
+
+  function stopStreamSpeech() {
+    streamSpeechGeneration++;
+    streamSpeech.clear();
+  }
+
   // Fish can send MP3 bytes progressively. MediaSource lets the browser
   // start playback after the first audio chunk while the rest is arriving;
   // unsupported browsers use the buffered endpoint below.
@@ -543,6 +660,7 @@
 
   async function speak(el, text, btn) {
     const gen = ++speakGen;
+    stopStreamSpeech();
     if (currentBtn === btn && currentAudio) {  // toggle: stop
       currentAudio.pause();
       resetSpeakBtn();
@@ -884,8 +1002,9 @@
               streamMessages[sid] = m;
             }
             m._streamText += String(e.delta || "");
+            feedStreamSpeech(sid, e.delta, false);
             m._body.innerHTML = md(m._streamText);
-            thread.scrollTop = thread.scrollHeight;
+            scrollThreadToLatest();
             return;
           }
           if (m) {
@@ -904,7 +1023,9 @@
             // words lighting up as they are spoken.
             setAvatarMood("happy");
             setTimeout(() => setAvatarMood("idle"), 7000);
-            announceImportant(m, e.text, btn);
+            const hadStreamedVoice = streamSpeech.has(sid);
+            const streamedVoice = hadStreamedVoice && feedStreamSpeech(sid, "", true);
+            if (!streamedVoice) announceImportant(m, e.text, btn);
           } else if (e.text) {
             // Running commentary: only when AIDON_VOICE_ANNOUNCE=1.
             maybeAnnounce(e.text, btn);
@@ -1922,7 +2043,7 @@
         (outputsByRun[ex.run_id] || []).forEach(renderAtt);
       });
     }
-    thread.scrollTop = thread.scrollHeight;
+    if (window.aidonScrollThread) window.aidonScrollThread();
     input.disabled = false;
     input.focus();
   }

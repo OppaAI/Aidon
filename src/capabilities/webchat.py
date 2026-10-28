@@ -59,6 +59,12 @@ def _named_file(goal: str):
 
 
 def _call_model(client, prompt: str, on_token=None) -> str:
+    try:
+        from ..agentic.prompts import runtime_model_inventory
+        prompt = runtime_model_inventory() + "\n\n" + prompt
+    except Exception:
+        # The fast path must remain usable with minimal test clients.
+        pass
     message = _make_message(prompt)
     try:
         from ..agentic.think_effort import sampling_for
