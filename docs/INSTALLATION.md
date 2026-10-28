@@ -36,6 +36,14 @@ The base install does not pull heavyweight ML packages. Use `uv sync --extra mem
 `--extra embed`, `--extra sparse`, `--extra vision`, `--extra kb`, or `--extra docs`
 for the corresponding capabilities. `./setup.sh --with-optional` installs all optional groups.
 
+Vector memory: embedded local mode works for one process. For shared memory
+across the WebUI, tick loop, and listeners, setup offers a Qdrant server
+(binary + systemd, no docker): answer yes at the prompt, or run
+`./setup.sh --with-qdrant`. It installs the pinned binary, starts the
+`aidon-qdrant` service, health-checks port 6333, and sets
+`AIDON_QDRANT_URL=http://127.0.0.1:6333` in `.env`. Without a server,
+the dashboard shows a memory-fallback warning instead of failing silently.
+
 Setup and launch, in that order, are the entry points, as in the Aidon guides.
 
 ```sh

@@ -200,6 +200,7 @@ CHAT_HTML = """<!doctype html>
 </style></head>
 <body class="chat-page">
 <h1>Aidon</h1><button id="theme-toggle" title="Toggle dark / light theme">Theme</button>
+<div id="memory-warning" style="display:none;border:2px solid #f5a623;padding:8px 12px;margin:8px 0"></div>
 <div id="layout">
 <div id="sidecol">
 <div id="avatar" aria-label="Aidon robot avatar, default; VRM is available separately">
@@ -383,7 +384,18 @@ async function refreshPills() {
     document.getElementById('pills').innerHTML = kinds.map((k) => '<span>' + k + '=' + (latest[k] || 'idle') + '</span> ').join('');
   } catch (e) {}
 }
-setInterval(refreshPills, 2000); refreshPills();
+async function refreshMemoryWarning() {
+  try {
+    const r = await fetch('/api/status');
+    const data = await r.json();
+    const box = document.getElementById('memory-warning');
+    if (box && data.memory_warning) {
+      box.textContent = data.memory_warning;
+      box.style.display = 'block';
+    }
+  } catch (e) {}
+}
+setInterval(refreshPills, 2000); refreshPills(); refreshMemoryWarning();
 async function refreshApprovals() {
   try {
     const r = await fetch('/api/approvals');
@@ -2523,19 +2535,35 @@ class WebUIServer:
             "AIDON_MODEL", "muse-spark"))
         backend = str(getattr(config, "backend", "") or "auto")
         memory = self.memory
+        memory_warning = ""
         if getattr(memory, "_memory", None) is not None:
             store_name = type(memory._memory.store).__name__
             memory_name = f"{type(memory._memory.embedder).__name__} · {store_name}"
+            warnings = []
+            if store_name == "SQLiteStore":
+                warnings.append("Memory is on the SQLite fallback, not Qdrant — "
+                                "run ./setup.sh --with-qdrant for shared vector memory.")
+            if type(memory._memory.embedder).__name__ == "HashEmbedder":
+                warnings.append("Memory uses hash embeddings, not semantic embeddings — "
+                                "install the embedding packages with ./setup.sh for real recall.")
+            memory_warning = " ".join(warnings)
         elif os.environ.get("AIDON_EMBEDDER", "").strip().lower() == "hash":
             memory_name = "Hash memory"
+            memory_warning = ("Memory uses hash embeddings, not semantic embeddings — "
+                              "install the embedding packages with ./setup.sh for real recall.")
         else:
             try:
                 import importlib.util
-                memory_name = ("SQLite memory (persistent fallback)"
-                               if importlib.util.find_spec("qdrant_client") is None
-                               else "Semantic memory (on demand)")
+                if importlib.util.find_spec("qdrant_client") is None:
+                    memory_name = "SQLite memory (persistent fallback)"
+                    memory_warning = ("Memory is on the SQLite fallback, not Qdrant — "
+                                      "run ./setup.sh --with-qdrant for shared vector memory.")
+                else:
+                    memory_name = "Semantic memory (on demand)"
             except Exception:
                 memory_name = "SQLite memory (persistent fallback)"
+                memory_warning = ("Memory is on the SQLite fallback, not Qdrant — "
+                                  "run ./setup.sh --with-qdrant for shared vector memory.")
         msg = self.messaging_config
         sandbox = str(getattr(config, "execution_backend", "bubblewrap"))
         computer = str(getattr(config, "computer_driver", "") or "off")
@@ -2543,6 +2571,7 @@ class WebUIServer:
             "model": model,
             "backend": backend,
             "memory": memory_name,
+            "memory_warning": memory_warning,
             "whatsapp": "Online" if msg.whatsapp_configured() else "Not configured",
             "slack": "Online" if msg.slack_configured() else "Not configured",
             "web_search": str(getattr(config, "search_backend", "tavily")),
@@ -3084,7 +3113,10 @@ loadSettings();
                     self._send_json(200, server.handle_status())
                 elif parsed.path == "/api/health":
                     runs = server.run_control.list_runs() if server.run_control else []
-                    self._send_json(200, {"ok": True, "runs": len(runs)})
+                    _status = server.handle_status()
+                    self._send_json(200, {"ok": True, "runs": len(runs),
+                                          "memory": _status.get("memory"),
+                                          "memory_warning": _status.get("memory_warning", "")})
                 elif parsed.path == "/api/avatar/status":
                     vrm_path = server._avatar_path()
                     self._send_json(200, {"present": vrm_path is not None,

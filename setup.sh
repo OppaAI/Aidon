@@ -20,6 +20,9 @@
 #   only if it does not already exist, never overwriting it.
 # Install every optional package without asking:
 #   ./setup.sh --with-optional
+# Install the Qdrant vector-memory server (binary + systemd)
+# without asking:
+#   ./setup.sh --with-qdrant
 #
 # What it does, besides asking:
 # - Checks python3, reports the version, does not install python.
@@ -34,7 +37,7 @@
 # - Secrets live in $AIDON_HOME/.env only, never in chat, source,
 #   or skills. Setup never prints a key back.
 #
-# Usage: ./setup.sh [--non-interactive] [--with-optional]
+# Usage: ./setup.sh [--non-interactive] [--with-optional] [--with-qdrant]
 set -eu
 
 # Meta-inspired terminal palette: deep blue, cyan, violet, green, amber.
@@ -63,12 +66,14 @@ REPO_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 AIDON_HOME=${AIDON_HOME:-$HOME/.aidon}
 NONINTERACTIVE=0
 WITH_OPTIONAL=0
+WITH_QDRANT=0
 for arg in "$@"; do
   case "$arg" in
     --non-interactive) NONINTERACTIVE=1 ;;
     --with-optional) WITH_OPTIONAL=1 ;;
+    --with-qdrant) WITH_QDRANT=1 ;;
     -h|--help)
-      say "usage: ./setup.sh [--non-interactive] [--with-optional]"
+      say "usage: ./setup.sh [--non-interactive] [--with-optional] [--with-qdrant]"
       exit 0 ;;
     *) fail "I don't recognize '$arg'. Try --help."; exit 1 ;;
   esac
@@ -230,6 +235,105 @@ install_package() {
   fi
 }
 
+install_qdrant_server() {
+  # Qdrant vector-memory server, binary + systemd, ported from the old
+  # Aidon setup. Embedded local mode allows only ONE Aidon process at
+  # a time; the WebUI + tick loop + listeners need a server. Pinned
+  # version for reproducible installs. No docker: the binary starts
+  # faster and idles lighter than a container + daemon.
+  # Returns 0 when the binary is installed, 1 when it cannot be.
+  qver="v1.19.1"
+  arch=""
+  case "$(uname -m)" in
+    x86_64) arch="x86_64-unknown-linux-gnu" ;;
+    aarch64|arm64) arch="aarch64-unknown-linux-gnu" ;;
+    *) warn "Unsupported arch $(uname -m) for the Qdrant binary — install Qdrant yourself."; return 1 ;;
+  esac
+  if ! command -v curl >/dev/null 2>&1; then
+    warn "curl is required to download Qdrant; install curl, then run ./setup.sh again."
+    return 1
+  fi
+  bindir="$AIDON_HOME/bin"
+  datadir="$AIDON_HOME/qdrant-server"
+  mkdir -p "$bindir" "$datadir"
+  download_qdrant() {
+    info "Downloading Qdrant $qver ($arch)."
+    curl -sL -o /tmp/qdrant-aidon.tar.gz \
+      "https://github.com/qdrant/qdrant/releases/download/$qver/qdrant-$arch.tar.gz" || return 1
+    tar -xzf /tmp/qdrant-aidon.tar.gz -C /tmp qdrant || return 1
+    install -m 0755 /tmp/qdrant "$bindir/qdrant" || return 1
+    rm -f /tmp/qdrant-aidon.tar.gz /tmp/qdrant
+  }
+  upgraded=0
+  if [ ! -x "$bindir/qdrant" ]; then
+    download_qdrant || return 1
+    upgraded=1
+  else
+    have_ver="$("$bindir/qdrant" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+    if [ -n "$have_ver" ] && [ "$have_ver" != "${qver#v}" ]; then
+      info "Upgrading Qdrant $have_ver -> ${qver#v}."
+      download_qdrant || return 1
+      upgraded=1
+    else
+      ok "Qdrant present: $bindir/qdrant${have_ver:+ ($have_ver)}."
+    fi
+  fi
+  if command -v systemctl >/dev/null 2>&1; then
+    unit_dir="$HOME/.config/systemd/user"
+    unit="$unit_dir/aidon-qdrant.service"
+    mkdir -p "$unit_dir"
+    cat > "$unit" <<EOF
+[Unit]
+Description=Aidon Qdrant vector memory server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$datadir
+ExecStart=$bindir/qdrant
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+EOF
+    systemctl --user daemon-reload
+    if [ "$upgraded" = 1 ] && systemctl --user is-active --quiet aidon-qdrant.service 2>/dev/null; then
+      systemctl --user restart aidon-qdrant.service
+      ok "Restarted aidon-qdrant.service (binary installed/upgraded)."
+    else
+      systemctl --user enable --now aidon-qdrant.service
+      ok "Installed + started: $unit."
+    fi
+    i=0
+    healthy=0
+    while [ "$i" -lt 20 ]; do
+      if curl -sf http://127.0.0.1:6333/healthz >/dev/null 2>&1; then
+        healthy=1
+        break
+      fi
+      sleep 1
+      i=$((i + 1))
+    done
+    if [ "$healthy" = 1 ]; then
+      ok "Qdrant healthy: http://127.0.0.1:6333."
+    else
+      warn "Qdrant not healthy after 20s — check its log (systemctl --user status aidon-qdrant)."
+    fi
+  else
+    info "No systemctl — start it yourself:"
+    info "  cd $datadir && nohup $bindir/qdrant >/tmp/qdrant.log 2>&1 &"
+  fi
+  if [ -z "$(dotenv_get AIDON_QDRANT_URL)" ]; then
+    dotenv_set AIDON_QDRANT_URL "http://127.0.0.1:6333"
+    ok "Set AIDON_QDRANT_URL=http://127.0.0.1:6333 in .env."
+  else
+    info "AIDON_QDRANT_URL already set — leaving it."
+  fi
+  return 0
+}
+
 if [ "$NONINTERACTIVE" = 0 ]; then
   section "Choosing your model"
   info "Aidon needs a model backend. Choose the one you want to use:"
@@ -317,7 +421,17 @@ if [ "$NONINTERACTIVE" = 0 ]; then
   ask_key "AIDON_TTS_VOICE_ID" "Fish Audio TTS voice ID (empty = default voice)"
   ask_setting "AIDON_SEARCH_BACKEND" "Search backend, tavily or searxng" "tavily"
   ask_setting "AIDON_SEARXNG_URL" "SearXNG URL (only used when backend is searxng)" "http://localhost:8888"
-  ask_setting "AIDON_QDRANT_URL" "Qdrant server URL (empty = local mode under the Aidon home)"
+  section "Qdrant vector memory"
+  info "Local mode works for one process; a server shares memory across WebUI, tick loop, and listeners."
+  QDRANT_URL_DEFAULT=""
+  if [ "$WITH_QDRANT" = 1 ]; then
+    if install_qdrant_server; then QDRANT_URL_DEFAULT="http://127.0.0.1:6333"; fi
+  elif ask_yes_no "Install + run a local Qdrant server (binary + systemd)?"; then
+    if install_qdrant_server; then QDRANT_URL_DEFAULT="http://127.0.0.1:6333"; fi
+  else
+    info "Skipped; memory stays on local mode until a Qdrant server URL is set."
+  fi
+  ask_setting "AIDON_QDRANT_URL" "Qdrant server URL (empty = local mode under the Aidon home)" "$QDRANT_URL_DEFAULT"
   ask_setting "AIDON_EXECUTION_BACKEND" "Execution backend, bubblewrap or docker" "bubblewrap"
   ask_setting "AIDON_IMAGE_MODEL" "Image model" "muse-image-1.0"
   ask_setting "AIDON_SAM_MODEL" "SAM model" "meta-sam"
@@ -327,6 +441,13 @@ if [ "$NONINTERACTIVE" = 0 ]; then
   section "One last note"
   info "Gmail sends from the account that granted the refresh token."
   info "Keep secrets in .env only; setup never prints them back."
+fi
+
+# --with-qdrant on a non-interactive run: the interactive block above is
+# skipped, so install here instead (interactive runs already handled it).
+if [ "$WITH_QDRANT" = 1 ] && [ "$NONINTERACTIVE" = 1 ]; then
+  section "Qdrant vector memory"
+  install_qdrant_server || warn "Qdrant server install failed; continuing without it."
 fi
 
 if command -v bwrap >/dev/null 2>&1; then

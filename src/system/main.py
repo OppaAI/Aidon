@@ -832,14 +832,24 @@ def _make_memory(config: Config):
         from ..memory.entity_graph import EntityGraph
         from ..memory.memory import Memory
         embedder = make_embedder_cached()
-        return Memory(config.home, embedder=embedder, entity_graph=EntityGraph(config.home))
+        mem = Memory(config.home, embedder=embedder, entity_graph=EntityGraph(config.home))
+        if type(mem.store).__name__ == "SQLiteStore":
+            print("warning: Qdrant client not installed, using persistent "
+                  "SQLite memory fallback (run ./setup.sh --with-qdrant "
+                  "for a Qdrant server)", file=sys.stderr)
+        return mem
     except Exception as exc:
         print(f"warning: real embedder unavailable ({exc}), "
               "using HashEmbedder for this run", file=sys.stderr)
     try:
         from ..memory.embedder import HashEmbedder
         from ..memory.memory import Memory
-        return Memory(config.home, embedder=HashEmbedder())
+        mem = Memory(config.home, embedder=HashEmbedder())
+        if type(mem.store).__name__ == "SQLiteStore":
+            print("warning: Qdrant client not installed, using persistent "
+                  "SQLite memory fallback (run ./setup.sh --with-qdrant "
+                  "for a Qdrant server)", file=sys.stderr)
+        return mem
     except Exception as exc:
         # A broken vector-store install must not make every command fail.
         # SQLite keeps memory durable without pretending it is a vector
