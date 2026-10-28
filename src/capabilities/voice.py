@@ -25,6 +25,30 @@ import tempfile
 import uuid
 import urllib.request
 import urllib.error
+import re
+
+
+def correct_asr_text(text: str) -> str:
+    """Correct a high-confidence speech confusable in web-lookup requests.
+
+    The speech service can hear ``check online`` as ``chat online``.  Do not
+    rewrite every occurrence: ``chat online`` is also a legitimate request.
+    The correction is applied only when the surrounding utterance clearly
+    asks for verification, eligibility, current rules, or another lookup.
+    """
+    value = str(text or "").strip()
+    lowered = value.lower()
+    lookup_context = (
+        "see if", "qualif", "verify", "whether", "eligib", "current",
+        "rules", "look up", "research", "check", "latest",
+    )
+    if "chat online" not in lowered or not any(marker in lowered for marker in lookup_context):
+        return value
+
+    # Replace the ASR-confused phrase while retaining the user's casing.
+    return re.sub(r"\bchat online\b", lambda match: (
+        "Check online" if match.group(0)[0].isupper() else "check online"
+    ), value, flags=re.IGNORECASE)
 
 
 def tts(text: str, fish_key: str, voice_id: str = "", post=None) -> dict:
@@ -83,7 +107,8 @@ def transcribe(audio_bytes: bytes, transcribe_key: str, post=None,
     try:
         if post is not None:
             result = post("https://api.meta.ai/v1/asr/transcribe", transcribe_key, audio_bytes)
-            return {"ok": True, "text": result.get("text", "") if isinstance(result, dict) else str(result)}
+            raw_text = result.get("text", "") if isinstance(result, dict) else str(result)
+            return {"ok": True, "text": correct_asr_text(raw_text)}
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
             return {"ok": False,
@@ -141,7 +166,7 @@ def transcribe(audio_bytes: bytes, transcribe_key: str, post=None,
             if not text and isinstance(result.get("turns"), list):
                 text = " ".join(str(turn.get("text", "")) for turn in result["turns"]
                                 if isinstance(turn, dict)).strip()
-            return {"ok": True, "text": text}
+            return {"ok": True, "text": correct_asr_text(text)}
     except urllib.error.HTTPError as exc:
         # Preserve the provider's safe diagnostic so the WebUI can explain
         # an unsupported recording format or rejected credential instead of

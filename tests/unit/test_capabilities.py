@@ -46,6 +46,14 @@ def test_voice_tts_fish_and_transcribe_missing():
     assert voice_mod.transcribe(b"audio", "k", post=lambda url, key, data: {"text": "hi"})["text"] == "hi"
 
 
+def test_asr_corrects_contextual_check_online_confusion():
+    assert voice_mod.correct_asr_text(
+        "Can you chat online to see if I qualify for this hackathon?"
+    ) == "Can you check online to see if I qualify for this hackathon?"
+    # A genuine request to chat online must remain unchanged.
+    assert voice_mod.correct_asr_text("Can you chat online with me?") == "Can you chat online with me?"
+
+
 def test_social_publishing_approval_gated():
     assert social_mod.publish_threads("hi", "acct", "tok", approve=lambda kind, text: False)["ok"] is False
     assert social_mod.publish_threads("hi", "acct", "tok", approve=None)["ok"] is False
