@@ -111,8 +111,8 @@
   <main id="center">
     <header id="center-head">
       <div class="center-brand"><span class="center-mark">A</span><span>Aidon</span>
-        <span class="online-dot"></span><span class="online-label">Autonomous Agent</span></div>
-      <span class="version-label">v0.1.0</span>
+        <span class="version-label">v__AIDON_VERSION__</span><span class="online-dot"></span><span class="online-label">Autonomous Agent</span></div>
+      <input id="chat-search" type="search" placeholder="Search this chat…" aria-label="Search this chat">
     </header>
     <div id="stages"></div>
     <div id="thread"></div>
@@ -129,7 +129,7 @@
           <div id="composer-left">
             <button id="attach-btn" class="composer-icon" title="Attach image or document" aria-label="Attach image or document">&#128206;</button>
             <button id="camera-btn" class="composer-icon" title="Take photo" aria-label="Take photo">&#128247;</button>
-            <button id="preapprove-btn" class="composer-icon" title="Preapprove reversible live actions" aria-label="Preapprove reversible live actions">✓</button>
+            <button id="preapprove-btn" class="composer-icon preapprove-control" title="Approve for me" aria-label="Approve for me"><span class="preapprove-icon">✓</span><span>Approve for me</span></button>
           </div>
           <div id="composer-right">
             <button id="mic" title="Record voice input" aria-label="Record voice input"><span class="mic-icon">&#127908;</span></button>
@@ -170,6 +170,7 @@
         </svg>
       </div>
     </div>
+    <canvas id="avatar-wave" width="220" height="28" title="Aidon voice activity"></canvas>
     <div id="dashboard-stack">
       <section class="dash-card">
         <div class="dash-title"><span>▣</span> Current Project <span class="dash-chevron">›</span></div>

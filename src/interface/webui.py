@@ -62,6 +62,7 @@ import hashlib
 import hmac
 import json
 import mimetypes
+import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -75,6 +76,18 @@ from .result_delivery import extract_result_delivery
 from .triggers import TriggerDispatcher, TriggerEvent
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+def _app_version() -> str:
+    """Resolve the displayed release version without exposing repo details."""
+    override = os.environ.get("AIDON_VERSION", "").strip().lstrip("v")
+    if override:
+        return override
+    try:
+        from importlib.metadata import version
+        return version("aidon")
+    except Exception:
+        return "0.1.0"
 
 # Shared page style: every WebUI page gets the same base look. The chat
 # page previously shipped only avatar-animation CSS and the handler-built
@@ -2465,6 +2478,7 @@ class WebUIServer:
                             asset_times.append(asset.stat().st_mtime)
                     version = str(int(max(asset_times))).encode()
                     data = data.replace(b"__ASSET_V__", version)
+                data = data.replace(b"__AIDON_VERSION__", _app_version().encode())
                 content_type = mimetypes.guess_type(str(candidate))[0] or \
                     "application/octet-stream"
                 self._send_bytes(200, content_type, data)
