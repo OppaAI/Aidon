@@ -2031,6 +2031,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "repl":
         from ..interface.repl import Repl
+        _cli_think_state = {"on": False}
+
         def _repl_handler(goal: str) -> str:
             from ..agentic.budgets import Budget as _B2
             from ..agentic.trace import TraceRecorder as _T2
@@ -2042,7 +2044,13 @@ def main(argv: list[str] | None = None) -> int:
                 _backend = _mb2(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _backend = None
-            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox))
+            from ..interface.surfaces import parse_think_command as _cli_think
+            _cli_cmd = _cli_think(goal)
+            _cli_once = False
+            if _cli_cmd is not None and _cli_cmd["action"] == "once":
+                goal = _cli_cmd["goal"]
+                _cli_once = True
+            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), think_max=_cli_once or _cli_think_state["on"])
             report = runner.run(goal)
             if report.status == "chat":
                 return report.chat_reply or "Received."
@@ -2051,7 +2059,13 @@ def main(argv: list[str] | None = None) -> int:
             point = memory.remember(text, source="cli-command")
             return f"Remembered in long-term memory: {text} (id {point.id})"
 
-        Repl(_repl_handler, on_remember=_remember).run()
+        def _on_think() -> str:
+            _cli_think_state["on"] = not _cli_think_state["on"]
+            return ("Maximum thinking on for this REPL session."
+                    if _cli_think_state["on"]
+                    else "Maximum thinking off for this REPL session.")
+
+        Repl(_repl_handler, on_remember=_remember, on_think=_on_think).run()
         return 0
     if args.command == "webui":
         from ..interface.messaging import MessagingConfig, send_slack, send_whatsapp
@@ -2297,7 +2311,7 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context)
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context)
             def _deliver_files(files, target):
                 """Upload run deliverables as bytes to a Slack/WhatsApp target.
 

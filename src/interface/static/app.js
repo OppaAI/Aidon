@@ -1532,6 +1532,7 @@
     addMsg("user", goal);
     if (data.conversation_id && window.aidonSetConversation)
       window.aidonSetConversation(data.conversation_id);
+    refreshThinkBtn();
     if (previousRun && data.run_id === previousRun) {
       // Answer to a waiting question, not a new run: the server
       // delivered the message to the waiter and returned the same
@@ -1626,6 +1627,66 @@
       ? "Web search enforced for this request."
       : "Web search automatic — Aidon decides when needed.");
   });
+
+  // ── think button: same toggle shape as the globe button, but the
+  // state lives on the server per conversation (shared with typed
+  // /think), so the button, the command, and other surfaces agree.
+  // The mode chooser, when it lands, sits immediately right of this
+  // button in the composer row.
+  const thinkBtn = document.getElementById("think-btn");
+  function thinkConversationId() {
+    try {
+      return (window.aidonConversation ? window.aidonConversation().conversation_id : "") || "";
+    } catch (e) { return ""; }
+  }
+  function setThinkBtn(active) {
+    if (!thinkBtn) return;
+    thinkBtn.classList.toggle("active", active);
+    thinkBtn.title = active ? "Maximum thinking on (click to turn off)" : "Maximum thinking";
+    thinkBtn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+  async function refreshThinkBtn() {
+    try {
+      const r = await fetch("/api/think?conversation_id=" + encodeURIComponent(thinkConversationId()));
+      const data = await r.json().catch(() => ({}));
+      setThinkBtn(!!data.think_max);
+    } catch (e) {}
+  }
+  if (thinkBtn) thinkBtn.addEventListener("click", async () => {
+    try {
+      const r = await fetch("/api/think", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: thinkConversationId() }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+      setThinkBtn(!!data.think_max);
+      showMiddleStatus(data.think_max
+        ? "Maximum thinking on for this conversation."
+        : "Maximum thinking off for this conversation.");
+    } catch (e) {
+      showMiddleStatus("Think toggle failed: " + e.message, "error");
+    }
+  });
+  // The conversation setter is defined by a later script block, so
+  // wrap it once it exists: switching conversations refreshes the
+  // button, and the first refresh picks up the stored conversation.
+  function hookThinkRefresh() {
+    if (window.aidonSetConversation && !window.aidonSetConversation._thinkHooked) {
+      const orig = window.aidonSetConversation;
+      const wrapped = (id) => { orig(id); refreshThinkBtn(); };
+      wrapped._thinkHooked = true;
+      window.aidonSetConversation = wrapped;
+    }
+    refreshThinkBtn();
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", hookThinkRefresh);
+  } else {
+    hookThinkRefresh();
+  }
+  setTimeout(hookThinkRefresh, 500);
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !(e.ctrlKey || e.metaKey)) {
       e.preventDefault();

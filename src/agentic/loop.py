@@ -331,7 +331,8 @@ class GoalRunner:
                  guidance: str = "", image_paths=None, force_web: bool = False,
                  stream_callback=None, conversation_context: str = "",
                  route_callback=None, trace_callback=None,
-                 allowed_side_effect_tools=None, gate_context=None):
+                 allowed_side_effect_tools=None, gate_context=None,
+                 think_max: bool = False):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -390,6 +391,10 @@ class GoalRunner:
         self.researcher = researcher
         self.extra_tools = extra_tools or {}
         self.force_web = bool(force_web)
+        # /think or the 🧠 button: every phase at maximum thinking
+        # for this run (reasoning_effort xhigh on backends that take
+        # it, think=True on boolean backends).
+        self.think_max = bool(think_max)
         self.stream_callback = stream_callback
         self.conversation_context = str(conversation_context or "")
         self.route_callback = route_callback
@@ -624,7 +629,8 @@ class GoalRunner:
             sampling = sampling_for(
                 phase,
                 escalate=self._effort_escalated and str(phase) in ("repair", "verify"),
-                creative=bool(getattr(self, "_creative_mode", False)))
+                creative=bool(getattr(self, "_creative_mode", False)),
+                think_max=bool(getattr(self, "think_max", False)))
         except Exception:
             sampling = None
         if (self.stream_callback is not None

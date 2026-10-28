@@ -220,3 +220,94 @@ def mirror_status_text(home: Path, conversation_id: str = "",
         return (f"Mirror: WebUI conversation {conversation or 'not linked'}; "
                 f"WhatsApp {'on' if wa else 'off'}.")
     return "Mirror: no conversation or channel given."
+
+
+_THINK_FILE = "think_flags.json"
+
+_THINK_RE = re.compile(r"^/think(?:\s+(.*?))?\s*$", re.IGNORECASE)
+
+HELP_TEXT = (
+    "/think — toggle maximum thinking for this conversation (🧠 button does the same).\n"
+    "/think <goal> — run one goal with maximum thinking.\n"
+    "/web <question> — force a web answer for one question (🌐 button does the same).\n"
+    "/mirror slack #channel — link this conversation to a Slack channel.\n"
+    "/mirror slack off — remove the Slack link.\n"
+    "/mirror webui <conversation-id> — from Slack, link a channel here.\n"
+    "/mirror whatsapp on|off — mirror this conversation to WhatsApp.\n"
+    "/mirror — show the current mirror status.\n"
+    "/remember <fact> — save a fact to long-term memory.\n"
+    "approve <id> / reject <id> — decide a pending approval card."
+)
+
+CLI_HELP_TEXT = (
+    "/think — toggle maximum thinking for this REPL session.\n"
+    "/think <goal> — run one goal with maximum thinking.\n"
+    "/help — this list.\n"
+    "/history — past goals this session.\n"
+    "/clear — clear history.\n"
+    "/remember <fact> — save a fact to long-term memory.\n"
+    "/attach <path> — stage a file for the next goal.\n"
+    "/staged — list staged files.\n"
+    "/clear-staged — drop staged files.\n"
+    "/quit — leave."
+)
+
+
+def _think_path(home: Path) -> Path:
+    return Path(home) / _THINK_FILE
+
+
+def load_think_flags(home: Path) -> dict:
+    """Return the think-max flags, {} when the file is absent or broken."""
+    try:
+        data = json.loads(_think_path(home).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    flags = data.get("think", {}) if isinstance(data, dict) else {}
+    return {str(k): bool(v) for k, v in flags.items()
+            if isinstance(k, str)} if isinstance(flags, dict) else {}
+
+
+def _save_think_flags(home: Path, flags: dict) -> None:
+    path = _think_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"think": flags}, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def think_enabled(home: Path, key: str) -> bool:
+    """True when max thinking is on for a conversation key."""
+    return bool(load_think_flags(home).get(str(key or ""), False))
+
+
+def set_think(home: Path, key: str, enabled: bool) -> bool:
+    """Set max thinking for a conversation key; returns the new state."""
+    key = str(key or "")
+    flags = load_think_flags(home)
+    if enabled:
+        flags[key] = True
+    else:
+        flags.pop(key, None)
+    _save_think_flags(home, flags)
+    return bool(enabled)
+
+
+def toggle_think(home: Path, key: str) -> bool:
+    """Flip max thinking for a conversation key; returns the new state."""
+    return set_think(home, key, not think_enabled(home, key))
+
+
+def parse_think_command(text: str) -> dict | None:
+    """Parse a /think command; None when the text is not one.
+
+    Bare ``/think`` toggles the sticky flag; ``/think <goal>``
+    runs one goal with max thinking without changing the flag.
+    """
+    match = _THINK_RE.match(str(text or "").strip())
+    if not match:
+        return None
+    rest = (match.group(1) or "").strip()
+    if not rest:
+        return {"action": "toggle"}
+    return {"action": "once", "goal": rest}

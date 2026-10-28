@@ -187,6 +187,11 @@ class HttpModelClient(ModelClient):
                 payload["top_p"] = sampling["top_p"]
             if sampling.get("seed") is not None:
                 payload["seed"] = sampling["seed"]
+            if sampling.get("reasoning_effort") is not None:
+                # Meta chat completions: "none" is rejected by Muse
+                # Spark, the ladder tops at "xhigh"; other backends
+                # ignore an unknown field, like the think hint.
+                payload["reasoning_effort"] = sampling["reasoning_effort"]
         if tools:
             payload["tools"] = tools
         return payload

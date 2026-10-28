@@ -1276,6 +1276,22 @@ class WebUIServer:
         mirror_response = self._mirror_command(conversation_id, goal, project_id)
         if mirror_response is not None:
             return mirror_response
+        from .surfaces import (HELP_TEXT, parse_think_command, think_enabled,
+                               toggle_think)
+        if goal.strip() == "/help":
+            return self._simple_command_response(conversation_id, goal, project_id,
+                                                 HELP_TEXT)
+        think_max = False
+        think_cmd = parse_think_command(goal)
+        if think_cmd is not None:
+            if think_cmd["action"] == "toggle":
+                state = toggle_think(self.home, conversation_id)
+                return self._simple_command_response(
+                    conversation_id, goal, project_id,
+                    f"Maximum thinking {'on' if state else 'off'} for this conversation.")
+            goal = think_cmd["goal"]
+            think_max = True
+        think_max = think_max or think_enabled(self.home, conversation_id)
         run_id = new_run_id()
         if self.run_control is not None:
             self.run_control.register(run_id, goal, project_id)
@@ -1350,6 +1366,7 @@ class WebUIServer:
         payload = {"run_id": run_id,
                    "guidance": str(body.get("guidance", "")),
                    "force_web": force_web,
+                   "think_max": think_max,
                    "_stream_callback": stream_delta,
                    "_route_callback": route_update,
                    "_trace_callback": trace_update,
@@ -1502,6 +1519,25 @@ class WebUIServer:
                                 if self.whatsapp_sender is not None:
                                     self.whatsapp_sender(sender, ack)
                                 continue
+                        from .surfaces import (HELP_TEXT as _WA_HELP,
+                                                parse_think_command as _wa_think,
+                                                think_enabled as _wa_enabled,
+                                                toggle_think as _wa_toggle)
+                        wa_key = "whatsapp:" + str(sender)
+                        wa_think_max = False
+                        if decision_reply is None:
+                            wa_cmd = _wa_think(text)
+                            if wa_cmd is not None:
+                                if wa_cmd["action"] == "toggle":
+                                    state = _wa_toggle(self.home, wa_key)
+                                    decision_reply = (
+                                        f"Maximum thinking {'on' if state else 'off'} "
+                                        "for this chat.")
+                                else:
+                                    text = wa_cmd["goal"]
+                                    wa_think_max = True
+                            elif text.strip() == "/help":
+                                decision_reply = _WA_HELP
                         if decision_reply is None:
                             text, force_web = self._force_web_prefix(text)
                             if not text:
@@ -1516,7 +1552,8 @@ class WebUIServer:
                         local_replies: list[str] = []
                         event = TriggerEvent(source="whatsapp", kind="message",
                                              goal=text, payload={"from": sender,
-                                                                 "force_web": force_web},
+                                                                 "force_web": force_web,
+                                                                 "think_max": wa_think_max or _wa_enabled(self.home, wa_key)},
                                              reply=local_replies.append)
                         self.dispatcher.dispatch(event)
                         for reply in local_replies:
@@ -1533,6 +1570,32 @@ class WebUIServer:
             self._conversations_db().record_exchange(conversation_id, role, text)
         except Exception:
             pass
+
+    def _simple_command_response(self, conversation_id: str, goal: str,
+                               project_id: str, text: str) -> dict:
+        """Reply to a chat command without running a goal.
+
+        Same shape as a mirror-command reply: the assistant text is
+        recorded in the conversation and a done run carries it to the
+        frontend, so /think and /help behave like any other answer.
+        """
+        try:
+            self._conversations_db().record_exchange(conversation_id, "assistant", text)
+        except Exception:
+            pass
+        if self.memory is not None:
+            try:
+                self.memory.record_stm("assistant", text, project_id=project_id,
+                                       conversation_id=conversation_id)
+            except Exception:
+                pass
+        from .run_control import new_run_id
+        run_id = new_run_id()
+        self._web_runs[run_id] = {"run_id": run_id, "goal": goal,
+                                  "project_id": project_id, "status": "done",
+                                  "events": [{"kind": "aidon-final", "text": text,
+                                              "stream_id": ""}], "trace": []}
+        return {"run_id": run_id, "conversation_id": conversation_id, "goal": goal}
 
     def _slack_mirror_command(self, channel: str, text: str) -> str | None:
         """Handle a /mirror command from Slack; None when not one."""
@@ -1601,6 +1664,24 @@ class WebUIServer:
                 self._record_surface_exchange("slack:" + channel, "user", text)
                 self._record_surface_exchange("slack:" + channel, "assistant", mirror_reply)
                 return 200, {"replies": [mirror_reply]}
+            from .surfaces import (HELP_TEXT as _SL_HELP,
+                                    parse_think_command as _sl_think,
+                                    think_enabled as _sl_enabled,
+                                    toggle_think as _sl_toggle)
+            sl_key = "slack:" + channel
+            sl_think_max = False
+            if decision_reply is None:
+                sl_cmd = _sl_think(text)
+                if sl_cmd is not None:
+                    if sl_cmd["action"] == "toggle":
+                        state = _sl_toggle(self.home, sl_key)
+                        decision_reply = (f"Maximum thinking {'on' if state else 'off'} "
+                                          "for this channel.")
+                    else:
+                        text = sl_cmd["goal"]
+                        sl_think_max = True
+                elif text.strip() == "/help":
+                    decision_reply = _SL_HELP
             force_web = False
             if decision_reply is None:
                 text, force_web = self._force_web_prefix(text)
@@ -1706,6 +1787,7 @@ class WebUIServer:
                     except Exception:
                         continue
             payload["force_web"] = force_web
+            payload["think_max"] = sl_think_max or _sl_enabled(self.home, sl_key)
             payload["channel"] = channel
             payload["thread_ts"] = thread_ts
             event = TriggerEvent(source="slack", kind="message", goal=text,
@@ -3485,6 +3567,12 @@ loadSettings();
                                                trace_since=trace_since)
                     self._send_json(200 if data is not None else 404,
                                     data or {"error": "run not found"})
+                elif parsed.path == "/api/think":
+                    from .surfaces import think_enabled as _get_think
+                    from urllib.parse import parse_qs as _parse_qs_think
+                    _think_query = _parse_qs_think(parsed.query)
+                    conv = str(_think_query.get("conversation_id", [""])[0])
+                    self._send_json(200, {"think_max": _get_think(server.home, conv)})
                 elif parsed.path == "/api/practice":
                     self._send_json(200, server.handle_practice_list())
                 elif parsed.path == "/api/conversations":
@@ -3662,6 +3750,11 @@ loadSettings();
                 elif parsed.path == "/api/settings/env":
                     result = server.settings_set_env(str(body.get("key", "")), body.get("value", ""))
                     self._send_json(200 if result.get("ok") else 400, result)
+                elif parsed.path == "/api/think":
+                    from .surfaces import toggle_think as _post_think
+                    conv = str(body.get("conversation_id", ""))
+                    state = _post_think(server.home, conv)
+                    self._send_json(200, {"think_max": state})
                 elif parsed.path == "/api/transcribe_stream/start":
                     if not server.transcribe_key:
                         self._send_json(501, {"error": "transcribe key not configured"})

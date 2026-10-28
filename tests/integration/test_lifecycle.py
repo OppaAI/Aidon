@@ -291,7 +291,8 @@ def test_slack_handler_plain_text_unchanged(tmp_path):
     status, _payload = server.handle_slack_post(b"", {}, body)
     assert status == 200
     assert seen[0].goal == "hello"
-    assert seen[0].payload == {"force_web": False, "channel": "C1",
+    assert seen[0].payload == {"force_web": False, "think_max": False,
+                               "channel": "C1",
                                "thread_ts": None}
 
 
