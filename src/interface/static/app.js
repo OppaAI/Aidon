@@ -1503,9 +1503,13 @@
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(data.error || data.detail || ("HTTP " + r.status));
-        if (data.text) {
-          input.value = (input.value ? input.value + " " : "") + data.text;
+        const transcript = data.text || data.transcript || "";
+        if (transcript) {
+          input.value = (input.value ? input.value + " " : "") + transcript;
           input.focus();
+          // Voice input is a complete goal: send it immediately after
+          // transcription instead of requiring a second click.
+          startRun();
         } else {
           showMiddleStatus(data.error || data.detail || "Transcription failed", "error");
         }
