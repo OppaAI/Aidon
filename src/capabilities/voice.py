@@ -89,7 +89,8 @@ def transcribe(audio_bytes: bytes, transcribe_key: str, post=None,
             return {"ok": False,
                     "error": "ffmpeg is required to convert browser audio to mono 24 kHz WAV",
                     "text": ""}
-        suffix = ".wav" if (content_type or "").lower().startswith("audio/wav") else ".webm"
+        lowered_type = (content_type or "").lower()
+        suffix = ".wav" if lowered_type.startswith("audio/wav") else ".mp4" if lowered_type.startswith("audio/mp4") else ".webm"
         with tempfile.TemporaryDirectory(prefix="aidon-asr-") as work:
             source = os.path.join(work, "input" + suffix)
             target = os.path.join(work, "audio.wav")
@@ -136,7 +137,11 @@ def transcribe(audio_bytes: bytes, transcribe_key: str, post=None,
                      "Content-Type": f"multipart/form-data; boundary={boundary}"})
         with urllib.request.urlopen(request, timeout=60) as response:
             result = json.loads(response.read())
-            return {"ok": True, "text": result.get("text", "")}
+            text = result.get("text") or result.get("transcript") or ""
+            if not text and isinstance(result.get("turns"), list):
+                text = " ".join(str(turn.get("text", "")) for turn in result["turns"]
+                                if isinstance(turn, dict)).strip()
+            return {"ok": True, "text": text}
     except urllib.error.HTTPError as exc:
         # Preserve the provider's safe diagnostic so the WebUI can explain
         # an unsupported recording format or rejected credential instead of
