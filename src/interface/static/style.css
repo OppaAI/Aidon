@@ -202,6 +202,11 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
   border: 1px solid var(--border); border-bottom-left-radius: 4px; }
 .msg.stage-line { align-self: center; background: none; border: none;
   font-size: 11.5px; color: var(--muted); padding: 2px; }
+.run-stats { display: flex; align-items: center; gap: 6px; margin-top: 12px;
+  padding-top: 8px; border-top: 1px solid var(--border); color: var(--muted);
+  font-family: var(--font-mono); font-size: 10.5px; }
+.run-stats-icon { color: #fff; font-family: system-ui, sans-serif;
+  font-size: 14px; line-height: 1; }
 .msg .t { font-size: 10.5px; color: var(--muted); margin-bottom: 3px;
   font-family: var(--font-mono); }
 #approval-slot { padding-bottom: 10px; }

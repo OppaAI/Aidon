@@ -183,7 +183,10 @@
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     const nodes = [];
     let n;
-    while ((n = walker.nextNode())) nodes.push(n);
+    while ((n = walker.nextNode())) {
+      if (n.parentElement && n.parentElement.closest(".run-stats")) continue;
+      nodes.push(n);
+    }
     let offset = 0;
     let pastClock = false;   // the clock line is never spoken
     for (const node of nodes) {
@@ -601,12 +604,13 @@
   }
 
   function spokenText(text) {
-    // The clock line is always the LAST line ("⏱️ 2m 4s", optionally
+    // The metrics line is always the LAST line ("⏱️ 2m 4s" or the
+    // compact WebUI "◷ 2m 4s", optionally
     // with "(plus 3s waiting for you)"), so cut from the marker to the
     // end of that line.
-    return String(text || "")
-      .replace(/\n*[^\n]*\u23f1\ufe0f?[^\n]*$/i, "")
-      .trim();
+    const value = String(text || "");
+    const clock = Math.max(value.lastIndexOf("⏱"), value.lastIndexOf("◷"));
+    return (clock >= 0 ? value.slice(0, clock) : value).trim();
   }
 
   // Speak the two moments that MATTER: a decision is waiting for you,
