@@ -942,6 +942,10 @@ class GoalRunner:
             if skill_texts:
                 system += " Skills, follow them when relevant: " + " ".join(
                     f"{name}: {text[:200]}" for name, text in skill_texts.items())
+                system += (" Grounding rule: skills are guidance text, "
+                           "not callable tools — never put a skill name "
+                           "in a step's tool field, and never invent a "
+                           "skill name outside this list.")
         if self.extra_tools and not self.kernel_mode:
             # Kernel mode restricts _call_tool to seed tools, so
             # extra tools are advertised only outside kernel mode.
@@ -1780,7 +1784,20 @@ class GoalRunner:
                 _allowed.update(self.plugins.tool_names())
             except Exception:
                 pass
-        plan_failures = validate_plan(plan, allowed_tools=_allowed)
+        # Skill names for grounding: plugin skills ("plugin/skill")
+        # plus bare names, so a model writing either form in the
+        # tool slot gets the skill-not-tool rejection, not a
+        # generic unknown-tool failure.
+        _skill_names: set[str] = set()
+        if self.plugins is not None:
+            try:
+                _texts = self.plugins.skill_texts()
+                _skill_names = set(_texts) | \
+                    {name.rsplit("/", 1)[-1] for name in _texts}
+            except Exception:
+                pass
+        plan_failures = validate_plan(plan, allowed_tools=_allowed,
+                                      skill_names=_skill_names)
         if plan_failures:
             # A model can describe desired outputs while omitting executable
             # steps. Give it a bounded repair pass before rejecting the run.
@@ -1796,7 +1813,8 @@ class GoalRunner:
                                          "JSON plan with executable steps; "
                                          "each deliverable must match a step."))
                     candidate_failures = validate_plan(candidate,
-                                                       allowed_tools=_allowed)
+                                                       allowed_tools=_allowed,
+                                                       skill_names=_skill_names)
                     if not candidate_failures:
                         repaired = candidate
                         break
@@ -1809,6 +1827,48 @@ class GoalRunner:
                 return RunReport("failed", goal, plan, False, False,
                                  error=failure_text[:500])
             plan = repaired
+        # Critic (reflection) pass, after deterministic validation
+        # passes: one model judgment on coverage and ordering,
+        # before any step runs. Issues feed the same bounded
+        # repair path as validation failures. When rounds run
+        # out, the latest plan proceeds with the issues traced
+        # — the critic advises, never blocks.
+        if _resolve_count("AIDON_CRITIC_ENABLED", 1, 0):
+            from .critic import review_plan
+            for _ in range(_resolve_count("AIDON_CRITIC_MAX_ROUNDS", 1, 0)):
+                self._trace("critic", "started", "reviewing plan")
+                try:
+                    issues = review_plan(
+                        plan, goal, _allowed, skill_names=_skill_names,
+                        chat=lambda messages: self._chat("critic", messages))
+                except Exception:
+                    issues = []
+                self._trace("critic", "done",
+                            f"{len(issues)} issue(s)" if issues
+                            else "plan clean")
+                if not issues:
+                    break
+                try:
+                    candidate = self._plan(
+                        goal,
+                        failure_context=("The plan critic found these "
+                                         "gaps; fix them and return a "
+                                         "complete JSON plan: " +
+                                         "; ".join(issues)))
+                    candidate_failures = validate_plan(
+                        candidate, allowed_tools=_allowed,
+                        skill_names=_skill_names)
+                except Exception as exc:
+                    self._trace("critic", "failed",
+                                f"critic repair failed: {exc}"[:100])
+                    break
+                if candidate_failures:
+                    # The critic's repair broke validation: keep the
+                    # valid plan the critic reviewed, stop advising.
+                    self._trace("critic", "failed",
+                                "critic repair failed validation")
+                    break
+                plan = candidate
         # A document goal must have a document-producing step. A model can
         # occasionally substitute ``list`` and then claim that the listing
         # proves a PDF exists; that can never satisfy the user's request.

@@ -2084,6 +2084,8 @@ class WebUIServer:
             {"key": "AIDON_MAX_PLAN_REPAIRS", "label": "Plan repair tries", "type": "int", "default": "2", "desc": "Repair tries when the validator rejects a plan; 0 fails immediately.", "secret": False},
             {"key": "AIDON_REACT_MAX_ROUNDS", "label": "ReAct max rounds", "type": "int", "default": "8", "desc": "Max rounds for the ReAct compatibility loop.", "secret": False},
             {"key": "AIDON_REACT_MAX_WORKERS", "label": "ReAct parallel workers", "type": "int", "default": "3", "desc": "Parallel tool workers within one ReAct round; 1 = sequential.", "secret": False},
+            {"key": "AIDON_CRITIC_ENABLED", "label": "Plan critic on/off", "type": "int", "default": "1", "desc": "Reflection pass on each valid plan before execution; 0 skips it.", "secret": False},
+            {"key": "AIDON_CRITIC_MAX_ROUNDS", "label": "Critic repair rounds", "type": "int", "default": "1", "desc": "Critic-issue repair rounds; 0 runs the critic without repairing.", "secret": False},
         ]},
     ]
     _CATALOG_FLOAT_KEYS = frozenset({
@@ -2161,6 +2163,8 @@ class WebUIServer:
             "AIDON_MAX_PLAN_REPAIRS": (0, 10, 1),
             "AIDON_REACT_MAX_ROUNDS": (1, 100, 1),
             "AIDON_REACT_MAX_WORKERS": (1, 32, 1),
+            "AIDON_CRITIC_ENABLED": (0, 1, 1),
+            "AIDON_CRITIC_MAX_ROUNDS": (0, 5, 1),
             "AIDON_SLACK_POLL_SECONDS": (3, 3600, 1),
             "AIDON_SLACK_ACK_AFTER_SECONDS": (0, 3600, 1),
             "AIDON_APPROVAL_NUDGE_MIN": (0, 1440, 1),
