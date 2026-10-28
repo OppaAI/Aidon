@@ -367,7 +367,7 @@ html[data-theme="light"] #guidance-input::placeholder { color: #65758b; }
 @keyframes fallback-robot-blink { 0%,92%,98%,100% { transform: scaleY(1); }
   94%,96% { transform: scaleY(.1); } }
 #avatar-wrap.has-model #avatar-placeholder { display: none; }
-#voice-wave { width: 200px; height: 30px; margin: 0 auto 10px; display: block;
+#avatar-wave { width: 200px; height: 30px; margin: 0 auto 10px; display: block;
   flex: 0 0 auto; opacity: .9; }
 #thinking-head { display: flex; align-items: center; gap: 8px; padding: 8px 14px;
   font-size: 12px; text-transform: uppercase; letter-spacing: .08em;

@@ -2163,18 +2163,19 @@ class WebUIServer:
         upload_dir.mkdir(parents=True, exist_ok=True)
         image_paths: list[str] = []
         document_paths: list[str] = []
+        video_paths: list[str] = []
         for item in files:
             data = item.get("data", b"")
             if len(data) > MAX_ATTACHMENT_BYTES:
                 return {"error": f"{item.get('name', 'attachment')} exceeds the {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MiB per-file limit"}
             name = self._safe_name(item.get("name", "attachment"))
             mime = str(item.get("mime", "application/octet-stream")).lower()
-            if mime.startswith("video/"):
-                return {"error": "video attachments are not supported in chat; use the video workflow instead"}
             digest = hashlib.sha256(data).hexdigest()[:12]
             destination = upload_dir / f"{digest}-{name}"
             destination.write_bytes(data)
-            if mime.startswith("image/") or name.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
+            if mime.startswith("video/") or name.lower().endswith((".mp4", ".webm", ".mov", ".m4v", ".avi")):
+                video_paths.append(str(destination))
+            elif mime.startswith("image/") or name.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
                 image_paths.append(str(destination))
             else:
                 document_paths.append(str(destination))
@@ -2183,9 +2184,12 @@ class WebUIServer:
             return {"error": "goal is required"}
         if document_paths:
             goal += "\n\nAttached document paths (use the document reader when needed):\n" + "\n".join(document_paths)
+        if video_paths:
+            goal += "\n\nAttached video paths (use the video workflow when needed):\n" + "\n".join(video_paths)
         result = self.start_goal({**body, "goal": goal, "image_paths": image_paths})
         result.update({"images": [Path(path).name for path in image_paths],
-                      "documents": [Path(path).name for path in document_paths]})
+                      "documents": [Path(path).name for path in document_paths],
+                      "videos": [Path(path).name for path in video_paths]})
         return result
 
     def handle_goal_with_images(self, body: dict) -> dict:

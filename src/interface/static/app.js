@@ -332,7 +332,8 @@
   const waveCvs = document.getElementById("voice-wave");
   const avatarWaveCvs = document.getElementById("avatar-wave");
   const WAVE_BARS = 26;
-  const waveLevels = new Array(WAVE_BARS).fill(0);
+  const micWaveLevels = new Array(WAVE_BARS).fill(0);
+  const avatarWaveLevels = new Array(WAVE_BARS).fill(0);
   let waveFreq = null;
 
   function getTtsAnalyser() {
@@ -363,35 +364,39 @@
       freq = waveFreq;
     }
     const lt = document.documentElement.dataset.theme === "light";
-    [waveCvs, avatarWaveCvs].filter(Boolean).forEach((canvas) => {
+    function paint(canvas, signal, isMic) {
+      if (!canvas) return;
+      const levels = isMic ? micWaveLevels : avatarWaveLevels;
       const ctx = canvas.getContext("2d");
       const W = canvas.width, H = canvas.height;
       ctx.clearRect(0, 0, W, H);
       const mid = H / 2, bw = W / WAVE_BARS;
       for (let i = 0; i < WAVE_BARS; i++) {
         let target = 0.06;
-        if (micTime) {
-          const stride = Math.max(1, Math.floor(micTime.length / WAVE_BARS));
+        if (signal && isMic) {
+          const stride = Math.max(1, Math.floor(signal.length / WAVE_BARS));
           let peak = 0;
-          for (let j = i * stride; j < Math.min(micTime.length, (i + 1) * stride); j++)
-            peak = Math.max(peak, Math.abs(micTime[j] - 128) / 128);
+          for (let j = i * stride; j < Math.min(signal.length, (i + 1) * stride); j++)
+            peak = Math.max(peak, Math.abs(signal[j] - 128) / 128);
           target = 0.08 + Math.min(1, peak * 2.4);
-        } else if (freq) {
+        } else if (signal && !isMic) {
           const b0 = 2 + Math.floor(i * 44 / WAVE_BARS);
-          const v = ((freq[b0] || 0) + (freq[b0 + 1] || 0)) / 2 / 255;
+          const v = ((signal[b0] || 0) + (signal[b0 + 1] || 0)) / 2 / 255;
           target = 0.06 + Math.min(1, v * 1.7);
         }
-        const lv = waveLevels[i];
-        waveLevels[i] = lv + (target - lv) * (target > lv ? 0.55 : 0.3);
-        const h = (micTime || freq) ? Math.max(1.5, waveLevels[i] * (H - 2)) : 0;
+        const lv = levels[i];
+        levels[i] = lv + (target - lv) * (target > lv ? 0.55 : 0.3);
+        const h = signal ? Math.max(1.5, levels[i] * (H - 2)) : 0;
         const grad = ctx.createLinearGradient(0, mid - h / 2, 0, mid + h / 2);
         grad.addColorStop(0, lt ? "#4d9fff" : "#7de9ff");
         grad.addColorStop(1, lt ? "#0064e0" : "#1a9ec4");
         ctx.fillStyle = grad;
         ctx.fillRect(i * bw + bw * 0.22, mid - h / 2, Math.max(1, bw * 0.56), h);
       }
-    });
-    if (recorder) requestAnimationFrame(drawWave);
+    }
+    paint(waveCvs, micTime, true);       // your microphone input
+    paint(avatarWaveCvs, freq, false);   // Aidon's voice output
+    if (recorder || ttsPlaying) requestAnimationFrame(drawWave);
   }
 
   function mouthLoop() {
@@ -1017,10 +1022,8 @@
         }
         if (f.type.startsWith("image/")) {
           pendingImages.push(f);
-        } else if (!f.type.startsWith("video/")) {
-          pendingFiles.push(f);
         } else {
-          showMiddleStatus("Video attachments are not supported in chat", "error");
+          pendingFiles.push(f);
         }
       }
       refreshPreview();
@@ -1037,6 +1040,10 @@
   const camBtn = document.getElementById("camera-btn");
   let camStream = null;
   let camVideo = null;
+  let camRecorder = null;
+  let camChunks = [];
+  let camRecordTimer = null;
+  const MAX_CAPTURE_MS = 30 * 1000;
 
   function stopCam() {
     if (camStream) {
@@ -1075,16 +1082,20 @@
     overlay.hidden = true;
     overlay.innerHTML =
       '<div class="cam-panel" role="dialog" aria-label="Take a photo">' +
-      '<div class="cam-title">Take a photo</div>' +
+      '<div class="cam-title">Camera</div>' +
       '<video id="cam-video" autoplay playsinline muted></video>' +
       '<div class="cam-actions">' +
       '<button id="cam-cancel" type="button">Cancel</button>' +
-      '<button id="cam-capture" type="button">Capture</button>' +
+      '<button id="cam-photo" type="button">Photo</button>' +
+      '<button id="cam-video-toggle" type="button">Record video</button>' +
+      '<button id="cam-capture" type="button" hidden>Stop recording</button>' +
       "</div></div>";
     document.body.appendChild(overlay);
     camVideo = overlay.querySelector("#cam-video");
     overlay.querySelector("#cam-cancel").addEventListener("click", closeCam);
-    overlay.querySelector("#cam-capture").addEventListener("click", shootCam);
+    overlay.querySelector("#cam-photo").addEventListener("click", shootCam);
+    overlay.querySelector("#cam-video-toggle").addEventListener("click", startCamRecording);
+    overlay.querySelector("#cam-capture").addEventListener("click", stopCamRecording);
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) closeCam();
     });
@@ -1092,6 +1103,8 @@
   }
 
   function closeCam() {
+    if (camRecorder && camRecorder.state === "recording") stopCamRecording();
+    if (camRecordTimer) clearTimeout(camRecordTimer);
     stopCam();
     const o = document.getElementById("cam-overlay");
     if (o) o.hidden = true;
@@ -1112,27 +1125,71 @@
     try {
       // rear camera first (phones), then any camera (desktops)
       camStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" }, audio: false,
+        video: { facingMode: "environment" }, audio: true,
       });
     } catch (first) {
       try {
         camStream = await navigator.mediaDevices.getUserMedia({
-          video: true, audio: false,
+          video: true, audio: true,
         });
       } catch (err) {
-        stopCam();
-        const reasons = {
-          NotAllowedError: "Camera blocked - allow access, then reload",
-          NotFoundError: "No webcam detected",
-          NotReadableError: "Webcam busy (another app is using it)",
-          SecurityError: "Camera needs https or localhost",
-        };
-        cameraUnavailable(reasons[err.name] || "Camera unavailable");
-        return;
+        // A webcam is still useful when microphone permission is denied;
+        // video recording simply has no audio track in that case.
+        try {
+          camStream = await navigator.mediaDevices.getUserMedia({
+            video: true, audio: false,
+          });
+        } catch (finalErr) {
+          stopCam();
+          const reasons = {
+            NotAllowedError: "Camera blocked - allow access, then reload",
+            NotFoundError: "No webcam detected",
+            NotReadableError: "Webcam busy (another app is using it)",
+            SecurityError: "Camera needs https or localhost",
+          };
+          cameraUnavailable(reasons[finalErr.name] || "Camera unavailable");
+          return;
+        }
       }
     }
     camVideo.srcObject = camStream;
     overlay.hidden = false;
+  }
+
+  function startCamRecording() {
+    if (!camStream || !window.MediaRecorder ||
+        pendingImages.length + pendingFiles.length >= 3) return;
+    const mime = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
+      .find((type) => MediaRecorder.isTypeSupported(type)) || "";
+    try {
+      camChunks = [];
+      camRecorder = new MediaRecorder(camStream, mime ? { mimeType: mime } : undefined);
+      camRecorder.ondataavailable = (event) => { if (event.data.size) camChunks.push(event.data); };
+      camRecorder.onstop = () => {
+        const blob = new Blob(camChunks, { type: camRecorder.mimeType || "video/webm" });
+        if (blob.size > 25 * 1024 * 1024) {
+          showMiddleStatus("The recording is larger than the 25 MiB attachment limit", "error");
+        } else if (blob.size) {
+          pendingFiles.push(new File([blob], "camera-" + Date.now() + ".webm",
+            { type: blob.type || "video/webm" }));
+          refreshPreview();
+        }
+        camRecorder = null;
+        closeCam();
+      };
+      camRecorder.start();
+      document.getElementById("cam-photo").hidden = true;
+      document.getElementById("cam-video-toggle").hidden = true;
+      document.getElementById("cam-capture").hidden = false;
+      camRecordTimer = setTimeout(stopCamRecording, MAX_CAPTURE_MS);
+    } catch (err) {
+      showMiddleStatus("Video recording is unavailable in this browser", "error");
+    }
+  }
+
+  function stopCamRecording() {
+    if (camRecordTimer) { clearTimeout(camRecordTimer); camRecordTimer = null; }
+    if (camRecorder && camRecorder.state === "recording") camRecorder.stop();
   }
 
   function shootCam() {

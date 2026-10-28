@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
+import urllib.error
 
 
 def tts(text: str, fish_key: str, voice_id: str = "", post=None) -> dict:
@@ -85,5 +86,15 @@ def transcribe(audio_bytes: bytes, transcribe_key: str, post=None,
         with urllib.request.urlopen(request, timeout=60) as response:
             result = json.loads(response.read())
             return {"ok": True, "text": result.get("text", "")}
+    except urllib.error.HTTPError as exc:
+        # Preserve the provider's safe diagnostic so the WebUI can explain
+        # an unsupported recording format or rejected credential instead of
+        # reducing every failure to "HTTP error".
+        try:
+            detail = exc.read().decode("utf-8", "replace")[:500]
+        except Exception:
+            detail = ""
+        suffix = f": {detail}" if detail else ""
+        return {"ok": False, "error": f"transcription provider HTTP {exc.code}{suffix}", "text": ""}
     except Exception as exc:
         return {"ok": False, "error": type(exc).__name__, "text": ""}

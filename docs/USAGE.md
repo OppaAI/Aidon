@@ -100,10 +100,10 @@ shows, and a CLI run or a scheduled job honours it too.
   75 MiB. Images are passed to the selected vision-capable model during
   interpretation/planning; documents are stored in the library uploads
   area and their paths are made available to the document-reading tools.
-- Video is not a general chat attachment. Use the separate CLI video
-  workflow for video editing and analysis.
-- Video is supported by the separate CLI video-editing pipeline, not as
-  a general chat attachment or model-inference input.
+- The camera dialog can capture a maximum 30-second video clip. Video is
+  stored with the goal and its path is available to the video workflow;
+  it is not sent directly to the chat model for frame-by-frame inference.
+  Use the separate CLI video workflow for video editing and analysis.
 
 ## 🔁 Core, in order
 
