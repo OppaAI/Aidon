@@ -38,6 +38,46 @@
   unauthenticated, use a webhook-only listener in
   front, as old Aidon did.
 
+## ✅ Pre-approvals, the same on every surface
+
+A pre-approval lets Aidon run **reversible** steps for one
+project without asking every time. It is not a blanket
+auto-approve: anything that sends to a third party,
+publishes, spends, deletes, installs, or adopts a plugin
+always gets a card, even if it was somehow ticked.
+
+Grant, list, and revoke from any of the four surfaces — the
+WebUI chat box, the WebUI Settings page (Pre-approvals
+panel), WhatsApp, or Slack — with the same words:
+
+- `preapprove <project> <kind> [hours]` — grant, 8 hours by
+  default. The kind can be a name or the number the menu
+  shows, so a phone reply can be `preapprove dinner 1 8`.
+- `preapprovals` — list what is active, with hours left.
+- `unpreapprove <project> <kind|all>` — revoke one kind or
+  everything for that project.
+
+Kinds: `live` (reversible runs only, the final card is
+skipped when the plan touches nothing but files), `spec`
+(accept the spec sheet), `semantic` (promote facts to
+long-term memory), `sandbox` (test steps in the isolated
+workdir). That menu is the closed list: a word that is not
+on it is refused with the menu, so an ordinary sentence
+that happens to start with "preapprove" cannot invent a
+grant.
+
+From the CLI, the same store:
+
+```bash
+python -m src.system.main scheduler preapprove --spec dinner --kind live --hours 8
+python -m src.system.main scheduler list
+python -m src.system.main scheduler revoke --spec dinner --kind all
+```
+
+All four read and write one file, `<Aidon home>/preapprovals.json`,
+so a grant made on your phone is the grant the WebUI panel
+shows, and a CLI run or a scheduled job honours it too.
+
 ## 🔁 Core, in order
 
 1. **Interpret** — the goal, in chat. Interview questions are

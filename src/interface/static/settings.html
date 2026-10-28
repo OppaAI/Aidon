@@ -29,7 +29,8 @@
       <code>preapprovals</code>, and you can grant or revoke from there too.</p>
     <div class="pre-form">
       <label>Project <input id="pre-project" type="text" placeholder="default" autocomplete="off"></label>
-      <label>Kind <select id="pre-kind"></select></label>
+      <label>Kind <input id="pre-kind" list="pre-kinds" placeholder="live" autocomplete="off">
+        <datalist id="pre-kinds"></datalist></label>
       <label>Hours <input id="pre-hours" type="number" min="0.5" step="0.5" value="8"></label>
       <button id="pre-grant" type="button">Pre-approve</button>
       <span id="pre-status"></span>

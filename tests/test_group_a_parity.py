@@ -127,6 +127,34 @@ def test_run_tests_pass_fail_and_trivial_rejection(tmp_path):
     assert report["passed"] is True
 
 
+def test_run_tests_reports_missing_dependencies(tmp_path):
+    """An unprovisioned skill is not a broken one."""
+    library = SkillLibrary(tmp_path)
+    library.add(_skill("needs_pkg", dependencies=["definitely_not_installed_pkg"]))
+    # The import probe fails, so the report says which package is
+    # missing and the skill is not marked passed.
+    report = library.run_tests("needs_pkg", FakeSandbox(
+        failing=['python3 -c "import definitely_not_installed_pkg"']))
+    assert report["passed"] is False
+    assert report["missing_dependencies"] == [
+        {"kind": "python", "name": "definitely_not_installed_pkg"}]
+    assert "install_python_package" in report["note"]
+
+    # A verified install is provisioned, so the tests decide.
+    library.add(_skill("installed", dependencies=[
+        {"kind": "python", "name": "json", "verified": True}]))
+    report = library.run_tests("installed", FakeSandbox())
+    assert report["passed"] is True
+    assert "missing_dependencies" not in report
+
+    # Unverified and non-python dependencies are hints, not requirements.
+    library.add(_skill("hints", dependencies=[
+        {"kind": "python", "name": "claimed_pkg"},
+        {"kind": "npm", "name": "left-pad", "verified": True}]))
+    assert library.get("hints").required_packages() == []
+    assert library.run_tests("hints", FakeSandbox())["passed"] is True
+
+
 def test_relevant_trusted_first_then_validated(tmp_path):
     library = SkillLibrary(tmp_path)
     library.add(_skill("cand", description="write a csv report"))

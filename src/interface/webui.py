@@ -844,8 +844,8 @@ class WebUIServer:
         """Grant from the WebUI form: project, kind (name or number), hours."""
         import time as _time
 
-        from .preapproval import (DEFAULT_HOURS, IRREVERSIBLE, MAX_HOURS,
-                                  kind_from_token)
+        from .preapproval import (DEFAULT_HOURS, IRREVERSIBLE, KIND_NAMES,
+                                  MAX_HOURS, grantable_kind, kind_from_token)
         spec_id = str(body.get("spec_id") or body.get("project")
                       or "default").strip()
         kind = kind_from_token(str(body.get("kind", "")))
@@ -857,6 +857,10 @@ class WebUIServer:
             return 400, {"ok": False,
                          "error": f"{kind} can never be pre-approved: it is "
                                   f"irreversible or leaves the machine"}
+        if not grantable_kind(kind):
+            return 400, {"ok": False,
+                         "error": f"unknown kind {kind!r}, choose one of: "
+                                  f"{', '.join(KIND_NAMES)}"}
         try:
             hours = float(body.get("hours") or DEFAULT_HOURS)
         except (TypeError, ValueError):

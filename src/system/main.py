@@ -765,10 +765,15 @@ def main(argv: list[str] | None = None) -> int:
     webui_parser.add_argument("--webhook-only", action="store_true",
                               help="Serve only /webhook/whatsapp and /webhook/slack, no chat, settings, or library, for a tunnel front")
     scheduler_parser = sub.add_parser("scheduler", help="Scheduler daemon and pre-approval")
-    scheduler_parser.add_argument("action", choices=["serve", "preapprove", "morning"],
-                                  help="Serve due jobs, grant a pre-approval, or list the morning report")
+    scheduler_parser.add_argument("action", choices=["serve", "preapprove", "morning",
+                                                     "list", "revoke"],
+                                  help="Serve due jobs, grant, list, or revoke a pre-approval, "
+                                       "or list the morning report")
     scheduler_parser.add_argument("--spec", default="default", help="Spec id for pre-approval")
-    scheduler_parser.add_argument("--kind", default="sandbox", help="Action kind for pre-approval, reversible only")
+    scheduler_parser.add_argument("--kind", default=None,
+                                  help="Action kind for pre-approval, by name or by the number "
+                                       "the menu shows (default sandbox when granting). "
+                                       "Omitted on revoke means every kind for that spec")
     scheduler_parser.add_argument("--hours", type=float, default=8.0, help="Pre-approval duration, hours")
     benchmark_parser = sub.add_parser("benchmark", help="Self-learning benchmark, canned, not live")
     benchmark_parser.add_argument("action", choices=["learn"], help="Snake to Worm, fresh vs adapted")
@@ -2091,13 +2096,57 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Steered {args.run_id}: {args.note}" if ok else f"No such run {args.run_id}")
             return 0 if ok else 2
     if args.command == "scheduler":
-        from ..interface.preapproval import PreapprovalStore
+        from ..interface.preapproval import (DEFAULT_HOURS, HELP_TEXT,
+                                             IRREVERSIBLE, MAX_HOURS,
+                                             PreapprovalStore, grantable_kind,
+                                             kind_from_token)
         import time as _time
         store = PreapprovalStore(config.home)
         if args.action == "preapprove":
-            ok = store.grant(args.spec, args.kind, _time.time() + args.hours * 3600, reversible=True)
-            print(f"Pre-approval {'granted' if ok else 'refused, irreversible or external email'}: {args.spec} {args.kind}")
-            return 0 if ok else 2
+            # Same kinds and same refusal as the WebUI, WhatsApp, and
+            # Slack surfaces: by name or by the menu number.
+            raw_kind = args.kind or "sandbox"
+            kind = kind_from_token(raw_kind)
+            if kind is None:
+                print(f"Unknown kind {raw_kind!r}.\n\n{HELP_TEXT}")
+                return 2
+            if kind not in IRREVERSIBLE and not grantable_kind(kind):
+                print(f"Unknown kind {kind!r}.\n\n{HELP_TEXT}")
+                return 2
+            hours = args.hours if args.hours and args.hours > 0 else DEFAULT_HOURS
+            hours = min(hours, MAX_HOURS)
+            ok = store.grant(args.spec, kind,
+                             _time.time() + hours * 3600, reversible=True)
+            if ok:
+                print(f"Pre-approved {kind} for {args.spec}, for the next {hours:g}h.")
+                print("Irreversible steps (send, publish, spend, delete, install) still ask.")
+                return 0
+            print(f"Refused: {kind} can never be pre-approved, it is irreversible "
+                  f"or leaves the machine.")
+            return 2
+        if args.action == "list":
+            rows = store.active()
+            if not rows:
+                print("No pre-approvals are active.")
+                return 0
+            now = _time.time()
+            for row in rows:
+                left = max(0.0, (float(row["until"]) - now) / 3600.0)
+                spec_id = row["spec_id"]
+                kind_name = row["action_kind"]
+                print(f"{spec_id} {kind_name} {left:.1f}h left")
+            return 0
+        if args.action == "revoke":
+            kind = None
+            if args.kind and args.kind.lower() not in ("all", "*"):
+                kind = kind_from_token(args.kind)
+                if kind is None:
+                    print(f"Unknown kind {args.kind!r}.\n\n{HELP_TEXT}")
+                    return 2
+            removed = store.revoke(args.spec, kind)
+            print(f"Revoked {removed} pre-approval(s) for {args.spec}."
+                  if removed else f"Nothing was pre-approved for {args.spec}.")
+            return 0 if removed else 2
         if args.action == "morning":
             for item in store.morning_report():
                 print(f"{item['spec_id']} {item['action_kind']}: undo: {item['undo']}")

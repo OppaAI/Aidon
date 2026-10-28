@@ -172,12 +172,41 @@ class Skill:
             lines += ["## Capabilities", ""] + [f"- {cap}" for cap in self.capabilities] + [""]
         if self.dependencies:
             lines += ["## Dependencies", ""] + [f"- {dep}" for dep in self.dependencies] + [""]
+        required = self.required_packages()
+        if required:
+            lines += ["## Requires (install before use, host-side, "
+                      "approval-gated)", ""] + [f"- {pkg}" for pkg in required] + [""]
         if self.provenance:
             lines += ["## Provenance", ""]
             for key, value in self.provenance.items():
                 lines.append(f"- {key}: {value}")
             lines.append("")
         return "\n".join(lines)
+
+    def required_packages(self) -> list[str]:
+        """The python packages this skill needs installed.
+
+        A plain string dependency is a declared package name. A dict
+        dependency is the old Aidon shape and only counts when it is a
+        verified python install: a model-claimed name is a hint, not a
+        requirement, and treating it as one would make a skill look
+        unprovisioned for a package nobody ever installed.
+        """
+        out: list[str] = []
+        for dep in self.dependencies or []:
+            if isinstance(dep, str):
+                name = dep
+            elif isinstance(dep, dict):
+                if dep.get("kind", "python") != "python" or not dep.get("verified"):
+                    continue
+                name = str(dep.get("name", ""))
+            else:
+                continue
+            name = name.split("==")[0].split("[")[0].strip()
+            if name and name not in out:
+                out.append(name)
+        return out
+
 
 
 class SkillLibrary:
@@ -357,6 +386,13 @@ class SkillLibrary:
         counted: a skill whose only tests are trivial has no
         tests. Passed needs at least one meaningful command
         and all meaningful commands ok.
+
+        The skill's verified python dependencies are pre-flighted
+        first. The sandbox is offline, so a skill that needs a
+        package can only be tested when that package is already
+        present; when it is not, the report says which package is
+        missing, because "test failed" hides the difference between
+        a broken skill and an unprovisioned one.
         """
         skill = self.get(name)
         if skill is None:
@@ -364,6 +400,7 @@ class SkillLibrary:
         results: list[dict] = []
         meaningful = 0
         meaningful_ok = True
+        missing = self._missing_dependencies(skill, sandbox)
         for cmd in skill.test_commands or []:
             if is_trivial_test(cmd):
                 results.append({"cmd": cmd, "ok": False, "trivial": True,
@@ -376,9 +413,53 @@ class SkillLibrary:
                 ok, output = False, f"{type(exc).__name__}: {exc}"
             results.append({"cmd": cmd, "ok": ok, "output": output[:500]})
             meaningful_ok = meaningful_ok and ok
-        passed = meaningful > 0 and meaningful_ok
-        return {"passed": passed, "results": results, "count": len(skill.test_commands or []),
-                "ran_at": _now()}
+        passed = meaningful > 0 and meaningful_ok and not missing
+        report = {"passed": passed, "results": results,
+                  "count": len(skill.test_commands or []), "ran_at": _now()}
+        if missing:
+            report["missing_dependencies"] = missing
+            report["note"] = (
+                "the skill needs packages that are not installed in this "
+                "sandbox (" + ", ".join(item["name"] for item in missing)
+                + "). It is not broken, it is unprovisioned: install them "
+                "with install_python_package (host-side, approval-gated) "
+                "and re-run its tests.")
+        return report
+
+    def _missing_dependencies(self, skill: Skill, sandbox) -> list[dict]:
+        """Which required python dependencies are unavailable here.
+
+        The mission venv (.venv in the run workdir) is checked first,
+        because that is where an approved install lands, then the
+        system interpreter.
+        """
+        packages = skill.required_packages()
+        if not packages:
+            return []
+        interpreters = []
+        workdir = getattr(sandbox, "workdir", None)
+        if workdir is not None:
+            venv_python = Path(workdir) / ".venv" / "bin" / "python"
+            if venv_python.exists():
+                interpreters.append(str(venv_python))
+        interpreters.append("python3")
+        missing: list[dict] = []
+        for package in packages:
+            module = package.replace("-", "_")
+            found = False
+            for interpreter in interpreters:
+                try:
+                    ok, _ = _sandbox_run(
+                        sandbox, f'{interpreter} -c "import {module}"')
+                except Exception:
+                    ok = False
+                if ok:
+                    found = True
+                    break
+            if not found:
+                missing.append({"kind": "python", "name": package})
+        return missing
+
 
     def relevant(self, goal: str, limit: int = 5) -> list[Skill]:
         """Skills for a goal: trusted first, then validated, then

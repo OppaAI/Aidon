@@ -48,9 +48,10 @@ IRREVERSIBLE = {
 
 # Kinds the owner is offered by name, with plain-language labels.
 # "live" is accepted only for a reversible run (the gate checks
-# the plan before honouring it). Any other kind the caller uses
-# can still be granted by typing it, as long as it is not in
-# IRREVERSIBLE, so a future kind does not need a code change here.
+# the plan before honouring it). This menu is the closed list a
+# grant may name: a chat message like "preapprove the budget for
+# the trip" must not invent a kind, so an unlisted word is
+# refused with the menu instead of being stored.
 KINDS: list[dict] = [
     {"name": "live",
      "label": "Go live, reversible runs only",
@@ -106,6 +107,11 @@ def kind_from_token(token: str) -> str | None:
 
 def kind_is_reversible(kind: str) -> bool:
     return bool(kind) and kind not in IRREVERSIBLE
+
+
+def grantable_kind(kind: str) -> bool:
+    """True when a grant may name this kind: on the menu, reversible."""
+    return bool(kind) and kind in KIND_NAMES and kind not in IRREVERSIBLE
 
 
 class PreapprovalStore:
@@ -263,14 +269,16 @@ def handle_command(store: PreapprovalStore, text: str,
         # project is the one the chat is already about.
         token = parts[0]
         kind = kind_from_token(token)
-        if kind is None:
+        if kind is None or (kind not in KIND_NAMES and kind not in IRREVERSIBLE):
             return HELP_TEXT
         return (f"Which project? Reply: preapprove <project> {kind} [hours]\n"
                 f"Example: preapprove dinner {kind} 8")
 
     spec = parts[0]
     kind = kind_from_token(parts[1])
-    if kind is None:
+    if kind is None or (kind not in KIND_NAMES and kind not in IRREVERSIBLE):
+        # Not on the menu and not a known irreversible kind: refuse
+        # rather than invent a grant from an ordinary sentence.
         return (f"Unknown kind {parts[1]!r}. Reply with a number 1-{len(KINDS)} "
                 f"or one of: {', '.join(KIND_NAMES)}.")
     hours = DEFAULT_HOURS

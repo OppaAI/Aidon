@@ -151,9 +151,13 @@
       preStatus.textContent = "could not load pre-approvals";
       return;
     }
-    preKind.innerHTML = (data.kinds || []).map((k, i) =>
+    // A datalist, not a closed select: pick a kind from the list or
+    // type its name or number, the same two ways the chat accepts.
+    preKind.setAttribute("list", "pre-kinds");
+    document.getElementById("pre-kinds").innerHTML = (data.kinds || []).map((k, i) =>
       '<option value="' + esc(k.name) + '">' + (i + 1) + ". " + esc(k.label) +
       "</option>").join("");
+    if (!preKind.value) preKind.value = ((data.kinds || [])[0] || {}).name || "";
     const grants = data.grants || [];
     preList.innerHTML = grants.length ? grants.map((g) =>
       '<li><span>' + esc(g.spec_id) + " · <strong>" + esc(g.action_kind) +
@@ -180,7 +184,7 @@
   if (preGrant) {
     preGrant.addEventListener("click", async () => {
       const spec = (document.getElementById("pre-project").value || "default").trim();
-      const kind = preKind.value;
+      const kind = (preKind.value || "").trim();
       const hours = Number(document.getElementById("pre-hours").value || 8);
       preStatus.textContent = "saving…";
       const r = await fetch("/api/preapprovals", {

@@ -85,6 +85,21 @@ def test_plain_text_is_not_a_command(tmp_path):
     assert handle_command(store, "") is None
 
 
+def test_a_sentence_that_starts_with_preapprove_invents_nothing(tmp_path):
+    """Only menu kinds are grantable, so chat cannot create a grant."""
+    store = PreapprovalStore(tmp_path)
+    reply = handle_command(store, "preapprove the budget for the trip")
+    assert "Unknown kind" in reply
+    assert store.grants == []
+    reply = handle_command(store, "preapprove dinner budget")
+    assert "Unknown kind" in reply
+    assert store.grants == []
+    # An irreversible kind is named as such, not as unknown.
+    reply = handle_command(store, "preapprove dinner publish")
+    assert "can never be pre-approved" in reply
+    assert store.grants == []
+
+
 # ── gate: reversible only ───────────────────────────────────────────
 
 class _Gate:
@@ -126,6 +141,45 @@ def test_reversible_grant_skips_the_card(tmp_path):
     wrapped = PreapprovalGate(gate, store, "dinner")
     assert wrapped.ask("spec", "Approve spec?", "body").verdict == "approved"
     assert gate.asked == []
+
+
+# ── loop integration: a grant covers a reversible run, nothing else ──
+
+class _RecordingGate:
+    """A gate that approves everything and remembers what it was asked."""
+
+    def __init__(self):
+        self.kinds = []
+
+    def ask(self, kind, title, body, **kwargs):
+        self.kinds.append(kind)
+        return Decision("approved")
+
+
+def _run(tmp_path, gate):
+    from src.agentic.loop import GoalRunner
+    from src.capabilities.sandbox import Sandbox
+    from src.system.model_client import FakeClient
+
+    home = tmp_path / "home"
+    home.mkdir()
+    runner = GoalRunner(FakeClient(""), Sandbox(home / "work"), gate, home,
+                        project_id="dinner")
+    return runner.run("Write a note")
+
+
+def test_loop_skips_the_live_card_only_for_a_reversible_run(tmp_path):
+    store = PreapprovalStore(tmp_path)
+    store.grant("dinner", "live", time.time() + 3600)
+    inner = _RecordingGate()
+    _run(tmp_path, PreapprovalGate(inner, store, "dinner"))
+    assert "live" not in inner.kinds, "a reversible run must not ask again"
+
+
+def test_loop_still_asks_without_a_grant(tmp_path):
+    inner = _RecordingGate()
+    _run(tmp_path, PreapprovalGate(inner, PreapprovalStore(tmp_path), "dinner"))
+    assert "live" in inner.kinds
 
 
 def test_wrapper_exposes_the_inner_gate(tmp_path):
@@ -251,3 +305,34 @@ def test_settings_page_has_the_preapproval_panel(tmp_path):
         assert "/api/preapprovals" in script
     finally:
         httpd.shutdown()
+
+
+def test_loop_asks_when_the_plan_is_not_reversible(tmp_path):
+    """A "live" grant never covers a plan that sends to a third party."""
+    from src.agentic.loop import GoalRunner
+    from src.capabilities.sandbox import Sandbox
+    from src.system.model_client import FakeClient
+
+    home = tmp_path / "home"
+    home.mkdir()
+    plan = json.dumps({
+        "steps": [
+            {"tool": "write", "args": {"file": "mail.txt", "text": "hi"},
+             "deliverable": "mail.txt"},
+            {"tool": "email_send",
+             "args": {"to": "a@example.com", "subject": "s", "body": "b"},
+             "deliverable": "sent.txt"},
+        ],
+        "deliverables": ["mail.txt"],
+        "criteria": [],
+    })
+    store = PreapprovalStore(tmp_path)
+    store.grant("dinner", "live", time.time() + 3600)
+    inner = _RecordingGate()
+    sent = []
+    runner = GoalRunner(
+        FakeClient(plan), Sandbox(home / "work"),
+        PreapprovalGate(inner, store, "dinner"), home, project_id="dinner",
+        extra_tools={"email_send": lambda **kwargs: sent.append(kwargs) or "sent"})
+    runner.run("Email the customer")
+    assert "live" in inner.kinds, "an irreversible plan must still get its card"
