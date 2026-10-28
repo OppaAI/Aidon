@@ -2,7 +2,7 @@
 
 Aidon reads runtime settings from a local `.env` file. Keep secrets local and never commit `.env`.
 
-Base installation is intentionally lightweight. Optional capabilities are installed with extras:
+Base installation is intentionally lightweight. Heavy ML and optional capabilities are installed only after setup asks for confirmation, or explicitly with `--with-optional`. They can also be installed with extras:
 
 ```sh
 uv sync --extra memory   # Qdrant vector storage

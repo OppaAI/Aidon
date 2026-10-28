@@ -125,6 +125,23 @@ th{background:var(--surface2)}
 body.chat-page{max-width:1200px}
 body.chat-page h1{display:inline-block;margin-right:12px;vertical-align:middle}
 #theme-toggle{padding:6px 12px;font-size:1.1em;vertical-align:middle}
+.settings-shell{max-width:980px;margin:0 auto;padding:8px 0 40px}
+.settings-top{display:flex;align-items:center;gap:14px;padding:8px 0 24px;border-bottom:1px solid var(--border)}
+.settings-top h1{flex:1;margin:0;font-size:1.65em}
+.settings-top a{font-size:.9em;text-decoration:none}
+.settings-intro{padding:18px 0 10px;color:var(--muted);font-size:.92em}
+.settings-intro code,.set-key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text)}
+.set-group{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:8px 20px 14px;margin:16px 0;box-shadow:0 12px 30px rgba(0,0,0,.12)}
+.set-group h2{color:var(--accent);font-size:1em;letter-spacing:.16em;text-transform:uppercase;margin:12px 0 4px}
+.set-row{display:flex;gap:22px;align-items:center;padding:14px 0;border-top:1px solid var(--border)}
+.set-row:first-of-type{border-top:0}
+.set-label{flex:1;min-width:0}.set-label label{font-weight:600}.set-key{display:block;font-size:.72em;color:var(--muted);margin-top:3px}.set-desc{font-size:.8em;color:var(--muted);line-height:1.4;margin-top:4px}
+.set-badge{font-size:.68em;color:var(--green);border:1px solid var(--green);border-radius:5px;padding:1px 5px;margin-left:5px}
+.set-input{flex:0 0 330px}.set-input input[type=text],.set-input input[type=password],.set-input input[type=number],.set-input select{width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:9px;background:var(--surface2);color:var(--text);outline:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.set-input input:focus,.set-input select:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow)}
+.range-control{display:grid;grid-template-columns:1fr 92px;gap:10px;align-items:center}.range-control input[type=range]{width:100%;accent-color:var(--accent)}.range-control input[type=number]{width:100%}.range-meta{display:flex;justify-content:space-between;margin-top:4px;color:var(--muted);font-size:.7em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.switch{position:relative;display:inline-block;width:46px;height:25px}.switch input{opacity:0;width:0;height:0}.switch span{position:absolute;inset:0;border-radius:13px;background:var(--surface2);border:1px solid var(--border);cursor:pointer}.switch span:before{content:"";position:absolute;width:17px;height:17px;left:3px;top:3px;border-radius:50%;background:var(--muted);transition:.15s}.switch input:checked+span{background:var(--accent);border-color:var(--accent)}.switch input:checked+span:before{transform:translateX(21px);background:#fff}
+#settings-footer{display:flex;align-items:center;gap:14px;padding:16px 0 28px}#settings-note{flex:1;color:var(--muted);font-size:.8em}#settings-save{padding:11px 24px;border:0;border-radius:10px;background:linear-gradient(92deg,var(--accent),var(--accent2));color:#fff;font-weight:700;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}
+@media(max-width:700px){.set-row{display:block}.set-input{width:100%;margin-top:10px}.settings-top{align-items:flex-start}.settings-shell{padding:0 4px 30px}}
 @media (max-width:700px){#layout{display:block}#sidecol{width:auto;margin-bottom:20px}}
 """
 
@@ -1471,6 +1488,36 @@ class WebUIServer:
         from_file saying whether .env set it.
         """
         import os
+        # Only expose a slider when the bound is meaningful and safe for
+        # the setting.  Unbounded or deployment-specific values remain
+        # ordinary inputs in the Settings page.
+        bounds = {
+            "AIDON_FAST_NUM_CTX": (0, 262144, 1024),
+            "AIDON_MODEL_NUM_CTX": (0, 262144, 1024),
+            "AIDON_MAX_TOKENS_PER_RUN": (1000, 1000000, 1000),
+            "AIDON_MAX_STEPS": (1, 200, 1),
+            "AIDON_MAX_WALLCLOCK_MIN": (1, 1440, 1),
+            "AIDON_APPROVAL_TIMEOUT_S": (30, 3600, 30),
+            "AIDON_MAX_SANDBOX_SECONDS": (1, 3600, 1),
+            "AIDON_SANDBOX_MEM_MB": (0, 32768, 128),
+            "AIDON_SANDBOX_NPROC": (0, 4096, 1),
+            "AIDON_SANDBOX_FSIZE_MB": (0, 102400, 512),
+            "AIDON_SANDBOX_CPU_S": (0, 86400, 60),
+            "AIDON_FORGET_GRACE_DAYS": (0, 3650, 1),
+            "AIDON_EPISODE_RECALL_LIMIT": (0, 100, 1),
+            "AIDON_KNOWLEDGE_RECALL_LIMIT": (0, 100, 1),
+            "AIDON_RECALL_MAX_TOKENS": (0, 100000, 100),
+            "AIDON_LEARN_MAX_SKILLS_PER_DAY": (0, 100, 1),
+            "AIDON_SKILL_MAX_FAILURES": (0, 100, 1),
+            "AIDON_RESEARCH_MAX_ROUNDS": (0, 100, 1),
+            "AIDON_MAX_STUCK_ITERATIONS": (0, 100, 1),
+            "AIDON_PARALLEL_TOOLS": (1, 32, 1),
+            "AIDON_SLACK_POLL_SECONDS": (3, 3600, 1),
+            "AIDON_SLACK_ACK_AFTER_SECONDS": (0, 3600, 1),
+            "AIDON_APPROVAL_NUDGE_MIN": (0, 1440, 1),
+            "AIDON_AUTONOMY_THRESHOLD": (0, 100, 1),
+            "AIDON_WEBUI_PORT": (1024, 65535, 1),
+        }
         file_vals = self._read_env_file()
         groups = []
         for group in self.SETTINGS_CATALOG:
@@ -1481,6 +1528,8 @@ class WebUIServer:
                         if k in entry}
                 if "options" in entry:
                     item["options"] = list(entry["options"])
+                if entry.get("type") == "int" and entry["key"] in bounds:
+                    item["min"], item["max"], item["step"] = bounds[entry["key"]]
                 raw = file_vals.get(entry["key"])
                 if raw is None:
                     raw = os.environ.get(entry["key"])
@@ -2376,7 +2425,15 @@ class WebUIServer:
                 data = candidate.read_bytes()
                 if candidate.name in {"index.html", "dag.html", "capabilities.html",
                                       "memory.html", "knowledge.html", "reports.html"}:
-                    version = str(int(candidate.stat().st_mtime)).encode()
+                    # Version the document against its dependent core assets
+                    # too.  Otherwise a CSS/JS edit made after index.html
+                    # keeps the browser's old cached files indefinitely.
+                    asset_times = [candidate.stat().st_mtime]
+                    for asset_name in ("style.css", "app.js", "avatar.js"):
+                        asset = STATIC_DIR / asset_name
+                        if asset.is_file():
+                            asset_times.append(asset.stat().st_mtime)
+                    version = str(int(max(asset_times))).encode()
                     data = data.replace(b"__ASSET_V__", version)
                 content_type = mimetypes.guess_type(str(candidate))[0] or \
                     "application/octet-stream"
@@ -2407,39 +2464,51 @@ class WebUIServer:
                     self._send_static(parsed.path.lstrip("/") + ".html")
                 elif parsed.path == "/settings":
                     keys = server.auth_store.list_keys() if server.auth_store else []
-                    html = """<h1>Settings</h1>
-<p>Every configuration knob is shown here. Changes are written to <span id="env-path"></span>.
-Secret values are shown only as set or unset; type a new value to replace one.
-Restart Aidon for changes to take effect.</p>
+                    html = """<div class="settings-shell">
+<div class="settings-top"><a href="/">← Back to WebUI</a><h1>Settings</h1><button id="theme-toggle" title="Toggle dark / light theme">◐</button></div>
+<div class="settings-intro">Tune Aidon in one place. Changes are written to <code id="env-path"></code> and take effect after restarting Aidon. Secrets are never displayed; <span class="set-badge">SET</span> means a value already exists.</div>
 <div id="settings-groups"></div>
-<p><button id="settings-save">Save settings</button> <span id="settings-status"></span></p>
-<h2>Keys, hash prefixes only</h2>"""
+<div id="settings-footer"><span id="settings-note">Use sliders where safe bounds are known; fields without bounds accept a value directly.</span><button id="settings-save">Save settings</button><span id="settings-status"></span></div>
+<div class="set-group"><h2>API access keys</h2>"""
                     for key in keys:
-                        html += f"<p>{key['name']} {key['scope']} {key['key_hash_prefix']}</p>"
-                    html += """<script>
+                        html += f"<div class=\"set-row\"><div class=\"set-label\"><label>{key['name']}</label><span class=\"set-key\">{key['scope']}</span></div><div class=\"set-input\"><span class=\"set-key\">hash {key['key_hash_prefix']}</span></div></div>"
+                    html += """</div></div><script>
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 async function loadSettings(){
   const r = await fetch('/api/settings/catalog'); const data = await r.json();
   document.getElementById('env-path').textContent = data.env_file || '';
   let out = '';
   (data.groups || []).forEach(function(g){
-    out += '<h2>' + esc(g.group) + '</h2>';
+    out += '<section class="set-group"><h2>' + esc(g.group) + '</h2>';
     g.settings.forEach(function(s){
-      out += '<p><label>' + esc(s.label) + ' (' + esc(s.key) + ')</label><br>';
+      out += '<div class="set-row"><div class="set-label"><label>' + esc(s.label) + '</label>' + (s.is_set ? '<span class="set-badge">SET</span>' : '') + '<span class="set-key">' + esc(s.key) + '</span>';
+      if (s.desc) out += '<div class="set-desc">' + esc(s.desc) + '</div>';
+      out += '</div><div class="set-input">';
       if (s.type === 'bool') {
-        out += '<input type="checkbox" data-key="' + esc(s.key) + '"' + ((s.value === '1' || s.value === 'true') ? ' checked' : '') + '>';
+        out += '<label class="switch"><input type="checkbox" data-key="' + esc(s.key) + '"' + ((s.value === '1' || s.value === 'true') ? ' checked' : '') + '><span></span></label>';
       } else if (s.type === 'enum') {
         out += '<select data-key="' + esc(s.key) + '">' + (s.options || []).map(function(o){ return '<option' + (o === s.value ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>';
+      } else if (s.type === 'int' && s.min !== undefined && s.max !== undefined) {
+        const n = Number(s.value); const safe = Number.isFinite(n) ? Math.min(s.max, Math.max(s.min, n)) : s.min;
+        out += '<div class="range-control"><input type="range" min="' + s.min + '" max="' + s.max + '" step="' + (s.step || 1) + '" value="' + safe + '" data-range-for="' + esc(s.key) + '"><input type="number" min="' + s.min + '" max="' + s.max + '" step="' + (s.step || 1) + '" data-key="' + esc(s.key) + '" value="' + esc(s.value) + '"></div><div class="range-meta"><span>' + s.min + '</span><span>' + s.max + '</span></div>';
+      } else if (s.type === 'int') {
+        out += '<input type="number" data-key="' + esc(s.key) + '" value="' + esc(s.value) + '">';
       } else if (s.secret) {
         out += '<input type="password" data-key="' + esc(s.key) + '" placeholder="' + (s.is_set ? '******** (set - leave empty to keep, type to replace)' : 'not set - type a value to set') + '">';
       } else {
         out += '<input type="text" data-key="' + esc(s.key) + '" value="' + esc(s.value) + '">';
       }
-      if (s.desc) { out += '<br><small>' + esc(s.desc) + '</small>'; }
-      out += '</p>';
+      out += '</div></div>';
     });
+    out += '</section>';
   });
   document.getElementById('settings-groups').innerHTML = out;
+  document.querySelectorAll('[data-range-for]').forEach(function(range){
+    const number = document.querySelector('[data-key="' + range.getAttribute('data-range-for') + '"]');
+    if (!number) return;
+    range.addEventListener('input', function(){ number.value = range.value; });
+    number.addEventListener('input', function(){ if (number.value !== '') range.value = number.value; });
+  });
 }
 async function saveSettings(){
   const status = document.getElementById('settings-status'); status.textContent = 'Saving...';
@@ -2454,6 +2523,9 @@ async function saveSettings(){
   if (!failed) { status.textContent = 'Saved. Restart Aidon for changes to take effect.'; }
 }
 document.getElementById('settings-save').addEventListener('click', saveSettings);
+document.getElementById('theme-toggle').addEventListener('click', function(){
+  const light = document.body.classList.toggle('light'); localStorage.setItem('aidon-theme', light ? 'light' : 'dark');
+});
 loadSettings();
 </script>"""
                     self._send_html(200, _page_html("Settings", html))

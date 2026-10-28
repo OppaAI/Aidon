@@ -25,7 +25,7 @@ only, not installed by setup, and not needed now.
 then starts the WebUI server with the same home, backend, and
 ingest path.
 
-At minimum, configure an endpoint, key, and model. Optional features can be installed separately:
+At minimum, configure an endpoint, key, and model. Heavy ML packages and optional features are offered interactively by `./setup.sh`; answer yes only for capabilities you need. Use `--with-optional` to accept every optional package without prompting:
 
 - `AIDON_API_ENDPOINT` — endpoint URL for the model API
 - `AIDON_API_KEY` — API key for that endpoint

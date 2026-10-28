@@ -83,7 +83,8 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 ok "Python ready: $(python3 --version 2>&1)"
 
-# Install the project itself and its declared base dependencies. The old
+# Install the project itself and its lightweight base dependencies. Heavy
+# ML and optional capability packages are offered below, one by one. The old
 # Aidon setup did this through uv; without this step a fresh machine falls
 # back to system Python and silently misses the installed package/runtime.
 if command -v uv >/dev/null 2>&1; then
@@ -96,6 +97,16 @@ else
   warn "uv is not installed; using the available Python environment."
   info "Install uv and rerun setup.sh for the declared dependencies."
 fi
+
+# All dependency checks and fallback installs must use the same interpreter
+# launch.sh will use.  Checking system python3 here can report a package as
+# missing even when it is already installed in the project's .venv.
+if [ -x "$REPO_DIR/.venv/bin/python" ]; then
+  PYTHON="$REPO_DIR/.venv/bin/python"
+else
+  PYTHON=python3
+fi
+info "Dependency environment: $PYTHON"
 
 if [ -f "$AIDON_HOME/.env" ]; then
   ok "Keeping your existing environment file."
@@ -209,11 +220,11 @@ install_package() {
     warn "uv add of $pkg failed; trying the project environment instead."
   fi
   if command -v uv >/dev/null 2>&1; then
-    uv pip install "$pkg" && return 0
+    uv pip install --python "$PYTHON" "$pkg" && return 0
     warn "uv pip install of $pkg failed; trying pip instead."
   fi
-  if python3 -m pip --version >/dev/null 2>&1; then
-    python3 -m pip install "$pkg" || warn "Could not install $pkg; its feature will stay off."
+  if "$PYTHON" -m pip --version >/dev/null 2>&1; then
+    "$PYTHON" -m pip install "$pkg" || warn "Could not install $pkg; its feature will stay off."
   else
     warn "No pip or uv found. Install $pkg yourself, then run ./setup.sh again."
   fi
@@ -359,7 +370,7 @@ for spec in \
   mod=$(printf '%s' "$spec" | cut -d: -f2)
   what=$(printf '%s' "$spec" | cut -d: -f3)
   extra=$(printf '%s' "$spec" | cut -d: -f4)
-  if python3 -c "import $mod" 2>/dev/null; then
+  if "$PYTHON" -c "import $mod" 2>/dev/null; then
     ok "$pkg is ready — $what."
   else
     warn "$pkg is not installed — $what."

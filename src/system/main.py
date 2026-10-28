@@ -747,10 +747,16 @@ class _LazyMemory:
     def __init__(self, config: Config):
         self._config = config
         self._memory = None
+        self._lock = threading.Lock()
 
     def _get(self):
         if self._memory is None:
-            self._memory = _make_memory(self._config)
+            # The WebUI loads several panels concurrently.  Without a
+            # lock, each first request can load the 440M embedder before
+            # the others see the cached Memory instance.
+            with self._lock:
+                if self._memory is None:
+                    self._memory = _make_memory(self._config)
         return self._memory
 
     def __getattr__(self, name):
