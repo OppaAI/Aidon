@@ -178,7 +178,11 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
 #middle-status { min-height: 22px; margin: 0 0 4px; padding: 4px 10px;
   border: 1px solid var(--border); border-radius: 7px; background: var(--surface2);
   color: var(--muted); text-align: center; font-family: var(--font-display);
-  font-size: 12px; }
+  font-size: 16px; }
+#middle-status.error { color: var(--red); border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 10%, var(--surface2)); }
+#middle-status.warning { color: var(--amber); border-color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 10%, var(--surface2)); }
 #middle-status[hidden] { display: none; }
 .stage { display: inline-flex; align-items: center; gap: 6px;
   font-family: var(--font-display); font-size: 12px; font-weight: 600;

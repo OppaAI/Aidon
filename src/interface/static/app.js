@@ -826,8 +826,7 @@
       });
       if (!r.ok) {
         const data = await r.json().catch(() => ({}));
-        addMsg("stage-line",
-          "approval failed: " + (data.detail || data.error || r.status));
+        showMiddleStatus("Approval failed: " + (data.detail || data.error || r.status), "error");
         if (r.status === 409) {
           // Server has no pending approval: this card is dead (the gate
           // failed closed on timeout, or it was already decided). Remove
@@ -838,7 +837,7 @@
         return;
       }
     } catch (e) {
-      addMsg("stage-line", "approval failed: " + e.message);
+      showMiddleStatus("Approval failed: " + e.message, "error");
       return;
     }
     // Decision accepted — drop the card and reset the shown-card tracking so
@@ -918,8 +917,7 @@
         cardShownFor = null;
         approvalSlot.innerHTML = "";
         if (!sawDecision) {
-          addMsg("stage-line",
-            "approval timed out, treated as rejected — card removed");
+          showMiddleStatus("Approval timed out, treated as rejected — card removed", "warning");
         }
       }
       if (run.status === "running") {
@@ -1214,8 +1212,8 @@
       // No failure path used to exist: the composer stayed disabled and
       // poll() bailed on the missing run id, so the page was dead until
       // a reload. Restore everything the user had.
-      addMsg("stage-line", "could not start the run: " +
-             (err && err.message ? err.message : err));
+      showMiddleStatus("Could not start the run: " +
+                       (err && err.message ? err.message : err), "error");
       pendingImages = imgs;
       pendingFiles = fls;
       refreshPreview();
@@ -1281,10 +1279,10 @@
       });
       if (!r.ok) {
         const data = await r.json().catch(() => ({}));
-        addMsg("stage-line", "steer rejected: " + (data.detail || r.status));
+        showMiddleStatus("Steer rejected: " + (data.detail || r.status), "error");
       }
     } catch (e) {
-      addMsg("stage-line", "steer failed: " + e.message);
+      showMiddleStatus("Steer failed: " + e.message, "error");
     }
     steerBtn.disabled = false;
     steerInput.focus();
@@ -1299,16 +1297,15 @@
       });
       if (!r.ok) {
         const data = await r.json().catch(() => ({}));
-        addMsg("stage-line", "cancel rejected: " +
-               (data.detail || r.status));
+        showMiddleStatus("Cancel rejected: " + (data.detail || r.status), "error");
       } else {
         // The next poll sees status "cancelled" (not "running") and
         // re-enables the composer itself; this line is the immediate
         // acknowledgement, not the re-enable.
-        addMsg("stage-line", "Run cancelled — chat re-enabled");
+        showMiddleStatus("Run cancelled — chat re-enabled");
       }
     } catch (e) {
-      addMsg("stage-line", "cancel failed: " + e.message);
+      showMiddleStatus("Cancel failed: " + e.message, "error");
     }
     cancelBtn.disabled = false;
   }
@@ -1342,7 +1339,7 @@
         ? "Approve for me deactivated for " + specId + "."
         : "Reversible live actions approved for " + specId + " for 8 hours.");
     } catch (e) {
-      addMsg("stage-line", "Preapproval failed: " + e.message);
+      showMiddleStatus("Preapproval failed: " + e.message, "error");
     } finally {
       preapproveBtn.disabled = false;
     }
@@ -1408,7 +1405,7 @@
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
-      addMsg("stage-line", "mic unavailable: " + (e.message || e));
+      showMiddleStatus("Mic unavailable: " + (e.message || e), "error");
       return;
     }
     const chunks = [];
@@ -1447,10 +1444,10 @@
           input.value = (input.value ? input.value + " " : "") + data.text;
           input.focus();
         } else {
-          addMsg("stage-line", data.error || data.detail || "transcription failed");
+          showMiddleStatus(data.error || data.detail || "Transcription failed", "error");
         }
       } catch (e) {
-        addMsg("stage-line", "transcription request failed: " + e.message);
+        showMiddleStatus("Transcription request failed: " + e.message, "error");
       }
     };
     recorder.start();
