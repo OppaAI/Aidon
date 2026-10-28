@@ -309,9 +309,41 @@ class DAG:
         return order
 
     def to_plan_steps(self) -> list[dict]:
-        return [{"tool": node.tool, "args": node.args, "deliverable": node.deliverable,
+        return [{"id": node.id, "tool": node.tool, "args": node.args,
+                 "deliverable": node.deliverable, "depends_on": list(node.depends_on),
                  "executor": route_executor(node)}
                 for node in self.topological_order()]
+
+
+def compute_levels(items: list[tuple[str, list[str]]]) -> list[list[str]]:
+    """Group step ids into dependency levels, for parallel execution.
+
+    Level 0 holds steps with no dependencies; each later level
+    holds steps whose dependencies all sit in earlier levels, so
+    every step in one level may run concurrently and every step
+    in a later level waits for its dependencies. Raises
+    ValueError on a missing dependency or a cycle: a parallel
+    schedule must never silently drop a step or loop forever.
+    """
+    deps = {step_id: list(step_deps) for step_id, step_deps in items}
+    for step_id, step_deps in deps.items():
+        for dep in step_deps:
+            if dep not in deps:
+                raise ValueError(f"step {step_id} depends on missing {dep}")
+    levels: list[list[str]] = []
+    placed: dict[str, int] = {}
+    remaining = dict(deps)
+    while remaining:
+        ready = [step_id for step_id, step_deps in remaining.items()
+                 if all(dep in placed for dep in step_deps)]
+        if not ready:
+            raise ValueError("cycle in dependencies, cannot schedule levels")
+        for step_id in ready:
+            placed[step_id] = len(levels)
+        levels.append(ready)
+        for step_id in ready:
+            del remaining[step_id]
+    return levels
 
 
 def dag_from_experience(experience) -> DAG:
@@ -490,3 +522,52 @@ def compose_dags(dags: list[DAG]) -> DAG | None:
     except ValueError:
         return None
     return composed
+
+
+def combine_dags(dags: list[DAG], join: DAGNode | None = None) -> DAG | None:
+    """Union several independent DAGs into one, for parallel execution.
+
+    Unlike compose_dags, which sequences workflows A-then-B,
+    combine adds NO dependencies between the source DAGs: each
+    node's id is prefixed with its source position ("0:",
+    "1:", ...) so identical ids cannot collide, and nodes
+    from different sources keep only their own dependencies.
+    The parallel executor then runs independent nodes
+    concurrently and dependent nodes after their dependencies.
+
+    When join is given, it is appended as a final node that
+    depends on every sink node of every source DAG — the
+    synthesis step that combines all the parallel outcomes
+    into one result, such as a forecast from three
+    independent checks. The joined graph is validated
+    strictly; any failure returns None, and the caller falls
+    back to the join-less union or a fresh plan.
+    """
+    if len(dags) < 2:
+        return None
+    if any(len(dag.nodes) == 0 for dag in dags):
+        return None
+    nodes: list[DAGNode] = []
+    all_sinks: list[str] = []
+    for index, dag in enumerate(dags):
+        prefix = f"{index}:"
+        depended_on = set()
+        for node in dag.nodes.values():
+            depended_on.update(node.depends_on)
+        for node in dag.nodes.values():
+            new_node = copy.deepcopy(node)
+            new_node.id = prefix + node.id
+            new_node.depends_on = [prefix + dep for dep in node.depends_on]
+            nodes.append(new_node)
+            if node.id not in depended_on:
+                all_sinks.append(new_node.id)
+    if join is not None:
+        join_node = copy.deepcopy(join)
+        join_node.depends_on = list(all_sinks)
+        nodes.append(join_node)
+    combined = DAG(nodes)
+    try:
+        combined.validate_strict()
+    except ValueError:
+        return None
+    return combined

@@ -60,6 +60,14 @@ class Step:
     deliverable: str = ""
     criteria: str = ""
     executor: str = "tool"
+    # DAG identity: steps from a DAG carry the node id and its
+    # declared dependencies, so the executor can schedule
+    # independent steps concurrently. Free-form model plans
+    # leave these empty and always run sequentially: an
+    # undeclared dependency must never be mistaken for
+    # independence.
+    id: str = ""
+    depends_on: list[str] = field(default_factory=list)
 
 
 # Tool-name fragments that mean the step leaves the workdir, touches a
@@ -95,11 +103,18 @@ class Plan:
     deliverables: list[str] = field(default_factory=list)
     criteria: list[str] = field(default_factory=list)
     needs_research: list[str] = field(default_factory=list)
+    # True only for plans built from a DAG, where every
+    # dependency is declared and undeclared means
+    # independent. The executor runs such a plan's levels
+    # concurrently; every other plan runs sequentially.
+    parallel_ok: bool = False
 
     def normalized_steps(self) -> list[Step]:
         out = []
-        for step in self.steps:
+        for index, step in enumerate(self.steps):
             if isinstance(step, Step):
+                if not step.id:
+                    step.id = f"step-{index}"
                 out.append(step)
             elif isinstance(step, dict):
                 out.append(Step(
@@ -107,11 +122,15 @@ class Plan:
                     args=dict(step.get("args", {})),
                     deliverable=str(step.get("deliverable", "")),
                     criteria=str(step.get("criteria", "")),
-                    executor=str(step.get("executor", "tool"))))
+                    executor=str(step.get("executor", "tool")),
+                    id=str(step.get("id", "") or f"step-{index}"),
+                    depends_on=[str(d) for d in step.get("depends_on", [])]
+                    if isinstance(step.get("depends_on", []), list) else []))
             else:
                 out.append(Step(tool="write", args={"file": "deliverable.md",
                                                     "text": str(step)},
-                                deliverable="deliverable.md"))
+                                deliverable="deliverable.md",
+                                id=f"step-{index}"))
         return out
 
 
@@ -1089,7 +1108,7 @@ class GoalRunner:
                 except ValueError:
                     recall_limit = 1
                 experiences = recall_experiences(
-                    self.memory, goal, limit=max(recall_limit, 3))
+                    self.memory, goal, limit=max(recall_limit, 5))
                 failure = matching_failure(self.memory, goal)
                 if failure is None:
                     # DAG composition first: when the goal spans
@@ -1130,7 +1149,7 @@ class GoalRunner:
                         plan = Plan(
                             steps=steps,
                             deliverables=[str(s["deliverable"]) for s in steps if s.get("deliverable")],
-                            criteria=[])
+                            criteria=[], parallel_ok=True)
                         # Adapted plans get the same plan-first
                         # research + replan pass as fresh and
                         # spec-bound plans. Neither adapt output
@@ -1183,19 +1202,77 @@ class GoalRunner:
         plan = self._research_and_replan(plan, goal)
         return self._finalize(self._execute_plan(goal, plan))
 
+    def _propose_join_step(self, goal, dags):
+        """One model call proposing a final combining step, or None.
+
+        The model sees the goal and the combined workflows'
+        deliverables and returns at most one step (tool, args,
+        deliverable) that combines or synthesizes them all, or
+        no step when no combining step is needed. The step's
+        dependencies are forced to every combined sink by
+        combine_dags, never taken from the model, so the
+        synthesis cannot run before its inputs exist. A
+        failed or unparseable reply keeps the join-less union.
+        """
+        if self.client is None:
+            return None
+        try:
+            import json as _json
+            from ..system.model_client import Message
+            workflows = [[n.deliverable for n in dag.topological_order()
+                          if n.deliverable] for dag in dags]
+            prompt = (
+                f"Goal: {goal}\nParallel workflows and their deliverables: "
+                f"{_json.dumps(workflows)}\nReturn JSON only, with key 'steps': "
+                "a list with at most one final step that combines or "
+                "synthesizes all the workflows' deliverables into one "
+                "result, or an empty list when no combining step is "
+                "needed. Each step is an object with tool, args, "
+                "deliverable. Do not invent tools.")
+            reply = self._chat("plan", [Message("system", "Return JSON only."),
+                                        Message("user", prompt)])
+            data = _json.loads(reply)
+            steps = data.get("steps", []) if isinstance(data, dict) else []
+            if not steps or not isinstance(steps[0], dict):
+                return None
+            first = steps[0]
+            if not first.get("deliverable"):
+                return None
+            from .dag import DAGNode
+            return DAGNode(
+                id="join", tool=str(first.get("tool", "write")),
+                args=dict(first.get("args", {}))
+                if isinstance(first.get("args", {}), dict) else {},
+                deliverable=str(first["deliverable"]))
+        except Exception:
+            return None
+
     def _composed_plan(self, experiences, goal):
-        """Build a plan by sequencing distinct recalled workflows, or None.
+        """Build a plan by combining distinct recalled workflows, or None.
 
         Trigger: at least two recalled experiences with DAG
         nodes, each matching the goal shape (>= 0.3, the adapt
         threshold) and pairwise distinct from each other
         (shape overlap < 0.5, the store-merge threshold, so
-        near-duplicate workflows are not sequenced twice).
-        A failed composition returns None and the caller falls
-        back to single-experience adapt or a fresh plan.
+        near-duplicate workflows are not combined twice).
+        Up to five recalled workflows are considered.
+
+        The union is parallel, not sequential: combined
+        workflows keep only their own dependencies, so
+        independent checks run concurrently and only a step
+        that declares a dependency waits. A sequential
+        A-then-B composition stays available as compose_dags
+        for callers that order workflows explicitly.
+
+        Join: one model call at most proposes the final
+        combining step (a synthesis node depending on every
+        combined sink, such as a forecast from three
+        independent checks). The model may return no step
+        when no combining step is needed; a failed join
+        keeps the join-less union.
         """
         from ..memory.experience import goal_shape_for
-        from .dag import compose_dags, dag_from_experience
+        from .dag import combine_dags, dag_from_experience
 
         def overlap(a: str, b: str) -> float:
             set_a, set_b = set(a.split()), set(b.split())
@@ -1213,22 +1290,25 @@ class GoalRunner:
                    for cand in candidates):
                 continue
             candidates.append(exp)
-            if len(candidates) >= 3:
+            if len(candidates) >= 5:
                 break
         if len(candidates) < 2:
             return None
-        composed = compose_dags([dag_from_experience(exp) for exp in candidates])
-        if composed is None:
+        dags = [dag_from_experience(exp) for exp in candidates]
+        combined = combine_dags(dags, join=self._propose_join_step(goal, dags))
+        if combined is None:
+            combined = combine_dags(dags)
+        if combined is None:
             return None
         try:
-            composed = composed.relativize(self.sandbox.workdir)
+            combined = combined.relativize(self.sandbox.workdir)
         except Exception:
             pass
-        steps = composed.to_plan_steps()
+        steps = combined.to_plan_steps()
         plan = Plan(
             steps=steps,
             deliverables=[str(s["deliverable"]) for s in steps if s.get("deliverable")],
-            criteria=[])
+            criteria=[], parallel_ok=True)
         plan = self._research_and_replan(plan, goal)
         if not plan.deliverables:
             return None
@@ -1358,6 +1438,200 @@ class GoalRunner:
             self._checkpoint_registry = None
         return report
 
+    def _run_plan_step(self, step, goal, current_plan, passed, verified,
+                       attempt, lock=None, save_checkpoint=True):
+        """Execute one plan step in the sandbox run.
+
+        Returns None on success, "cancelled" when cancellation
+        was requested, or a failure message. Shared by the
+        sequential loop and the parallel level driver, so both
+        paths run the same step semantics: budget, llm-tier
+        routing, deliverable binding, step lines, traces, and
+        the passed set. In the parallel path, shared mutations
+        go under the caller's lock, and per-step checkpoints
+        are skipped — the level driver checkpoints once per
+        level instead.
+        """
+        from contextlib import nullcontext
+        guard = lock if lock is not None else nullcontext()
+        if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
+            return "cancelled"
+        try:
+            if self.budget is not None:
+                self.budget.add_step()
+            if not hasattr(self, "_step_lines"):
+                self._step_lines = []
+            from .step_lines import record_attempt
+            with guard:
+                record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "started")
+            self._trace("sandbox", "started", step.tool)
+            if step.tool == "write" and not step.args:
+                step.args = {"file": step.deliverable,
+                             "text": f"Goal: {goal}\n"}
+            if step.tool == "llm":
+                # DAG tier routing: an llm node runs on the
+                # tier it declares — fast via the respond
+                # phase, strong via the plan phase — and its
+                # reply becomes the deliverable file.
+                _prompt = str(step.args.get("prompt", "") or step.args.get("text", ""))
+                _reply = self._chat("respond" if step.executor == "fast" else "plan",
+                                    [Message("user", _prompt)])
+                if step.deliverable:
+                    self._call_tool("write", {"file": step.deliverable, "text": _reply})
+            else:
+                tool_result = self._call_tool(step.tool, step.args)
+                # File-producing extra tools return their actual
+                # path. Bind that path to the step when the model
+                # supplied a prose deliverable such as
+                # "Aidon introduction PDF" instead of a filename.
+                if step.tool in {"generate_document", "write_file"}:
+                    artifact_path = getattr(tool_result, "path", "")
+                    raw_result = str(tool_result).strip()
+                    # Structured ToolResult is authoritative. Keep
+                    # the prose fallback for older plugins/tools.
+                    raw_path = artifact_path or (
+                        raw_result[6:].strip()
+                        if raw_result.lower().startswith("wrote ")
+                        else raw_result)
+                    candidate = Path(raw_path)
+                    if not candidate.is_absolute():
+                        candidate = self.sandbox.workdir / candidate
+                    if candidate.is_file():
+                        try:
+                            actual = candidate.resolve().relative_to(
+                                self.sandbox.workdir.resolve())
+                            with guard:
+                                old = step.deliverable
+                                step.deliverable = str(actual)
+                                current_plan.deliverables = [
+                                    str(actual) if item == old else item
+                                    for item in current_plan.deliverables]
+                                # Criteria are model-authored too. Replace
+                                # a prose filename with the path proven by
+                                # the tool, so verification cannot ask for
+                                # a non-existent label after a successful
+                                # generation.
+                                current_plan.criteria = [
+                                    str(item).replace(str(old), str(actual))
+                                    if old else item
+                                    for item in current_plan.criteria]
+                                if step.criteria and old:
+                                    step.criteria = str(step.criteria).replace(
+                                        str(old), str(actual))
+                        except ValueError:
+                            pass
+            with guard:
+                record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "done")
+            self._trace("sandbox", "done", step.tool)
+            if step.deliverable:
+                with guard:
+                    passed.add(step.deliverable)
+            if save_checkpoint:
+                self._save_checkpoint(
+                    "sandbox", goal, current_plan, passed,
+                    verified=verified, attempt=attempt)
+            return None
+        except Exception as exc:
+            msg = f"step {step.tool} failed: {exc}"
+            try:
+                from .step_lines import record_attempt
+                with guard:
+                    record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "failed", str(exc)[:100])
+            except Exception:
+                pass
+            self._trace("sandbox", "failed", str(exc)[:100])
+            return msg
+
+    def _run_plan_levels(self, goal, current_plan, passed, verified, attempt):
+        """Execute a DAG-derived plan level by level, concurrently.
+
+        Returns (failures, cancelled). Levels come from
+        compute_levels over the steps' declared dependencies:
+        a level runs only after every earlier level finished,
+        so a step never runs before its dependencies, and
+        steps in one level run together in a thread pool
+        (workers from AIDON_PARALLEL_WORKERS, default 3, the
+        same cap as swarm). A step whose dependency failed
+        is skipped with a failure message, and the skip
+        propagates to its dependents, so a failed check never
+        feeds a synthesis step. Streaming is suppressed for
+        the run of a level: parallel llm steps must not
+        interleave deltas into one chat stream.
+        """
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        from .dag import compute_levels
+
+        steps = current_plan.normalized_steps()
+        by_id = {step.id: step for step in steps}
+        try:
+            levels = compute_levels([(step.id, list(step.depends_on or []))
+                                     for step in steps])
+        except ValueError as exc:
+            return [f"parallel schedule failed: {exc}"], False
+        try:
+            workers = max(1, int(os.environ.get("AIDON_PARALLEL_WORKERS", "3") or "3"))
+        except ValueError:
+            workers = 3
+        lock = threading.Lock()
+        failures: list[str] = []
+        done_ids: set[str] = set()
+        failed_ids: set[str] = set()
+        skipped_ids: set[str] = set()
+        cancelled = False
+        saved_callback = self.stream_callback
+        if saved_callback is not None:
+            self.stream_callback = None
+        try:
+            for level in levels:
+                if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
+                    cancelled = True
+                    break
+                runnable = []
+                for step_id in level:
+                    step = by_id[step_id]
+                    if step.deliverable and step.deliverable in passed:
+                        done_ids.add(step_id)
+                        continue
+                    blocked = [d for d in step.depends_on
+                               if d in failed_ids or d in skipped_ids]
+                    if blocked:
+                        skipped_ids.add(step_id)
+                        failures.append(
+                            f"step {step.tool} skipped: dependency {blocked[0]} failed")
+                        continue
+                    runnable.append(step)
+                if not runnable:
+                    continue
+
+                def _one(step):
+                    return step.id, self._run_plan_step(
+                        step, goal, current_plan, passed, verified, attempt,
+                        lock=lock, save_checkpoint=False)
+
+                with ThreadPoolExecutor(max_workers=min(workers, len(runnable))) as pool:
+                    outcomes = list(pool.map(_one, runnable))
+                for step_id, error in outcomes:
+                    if error == "cancelled":
+                        cancelled = True
+                    elif error is not None:
+                        failed_ids.add(step_id)
+                        failures.append(error)
+                    else:
+                        done_ids.add(step_id)
+                try:
+                    self._save_checkpoint(
+                        "sandbox", goal, current_plan, passed,
+                        verified=verified, attempt=attempt)
+                except Exception as exc:
+                    failures.append(f"checkpoint failed: {exc}")
+                if cancelled:
+                    break
+        finally:
+            self.stream_callback = saved_callback
+        return failures, cancelled
+
     def _execute_plan(self, goal: str, plan: Plan) -> RunReport:
         if self.budget is not None:
             self.budget.start()
@@ -1478,91 +1752,26 @@ class GoalRunner:
                                  backend=self._backend_name())
             # Execute steps, skipping steps whose deliverable
             # already passed in an earlier attempt (repair rule).
-            for step in current_plan.normalized_steps():
-                if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
+            if current_plan.parallel_ok:
+                level_failures, level_cancelled = self._run_plan_levels(
+                    goal, current_plan, passed, verified, attempt)
+                if level_cancelled:
                     return RunReport("cancelled", goal, current_plan, False, False,
                                      files=sorted(passed), attempts=attempt,
                                      backend=self._backend_name())
-                if step.deliverable and step.deliverable in passed:
-                    continue
-                try:
-                    if self.budget is not None:
-                        self.budget.add_step()
-                    if not hasattr(self, "_step_lines"):
-                        self._step_lines = []
-                    from .step_lines import record_attempt
-                    record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "started")
-                    self._trace("sandbox", "started", step.tool)
-                    if step.tool == "write" and not step.args:
-                        step.args = {"file": step.deliverable,
-                                     "text": f"Goal: {goal}\n"}
-                    if step.tool == "llm":
-                        # DAG tier routing: an llm node runs on the
-                        # tier it declares — fast via the respond
-                        # phase, strong via the plan phase — and its
-                        # reply becomes the deliverable file.
-                        _prompt = str(step.args.get("prompt", "") or step.args.get("text", ""))
-                        _reply = self._chat("respond" if step.executor == "fast" else "plan",
-                                            [Message("user", _prompt)])
-                        if step.deliverable:
-                            self._call_tool("write", {"file": step.deliverable, "text": _reply})
-                    else:
-                        tool_result = self._call_tool(step.tool, step.args)
-                        # File-producing extra tools return their actual
-                        # path. Bind that path to the step when the model
-                        # supplied a prose deliverable such as
-                        # "Aidon introduction PDF" instead of a filename.
-                        if step.tool in {"generate_document", "write_file"}:
-                            artifact_path = getattr(tool_result, "path", "")
-                            raw_result = str(tool_result).strip()
-                            # Structured ToolResult is authoritative. Keep
-                            # the prose fallback for older plugins/tools.
-                            raw_path = artifact_path or (
-                                raw_result[6:].strip()
-                                if raw_result.lower().startswith("wrote ")
-                                else raw_result)
-                            candidate = Path(raw_path)
-                            if not candidate.is_absolute():
-                                candidate = self.sandbox.workdir / candidate
-                            if candidate.is_file():
-                                try:
-                                    actual = candidate.resolve().relative_to(
-                                        self.sandbox.workdir.resolve())
-                                    old = step.deliverable
-                                    step.deliverable = str(actual)
-                                    current_plan.deliverables = [
-                                        str(actual) if item == old else item
-                                        for item in current_plan.deliverables]
-                                    # Criteria are model-authored too. Replace
-                                    # a prose filename with the path proven by
-                                    # the tool, so verification cannot ask for
-                                    # a non-existent label after a successful
-                                    # generation.
-                                    current_plan.criteria = [
-                                        str(item).replace(str(old), str(actual))
-                                        if old else item
-                                        for item in current_plan.criteria]
-                                    if step.criteria and old:
-                                        step.criteria = str(step.criteria).replace(
-                                            str(old), str(actual))
-                                except ValueError:
-                                    pass
-                    from .step_lines import record_attempt
-                    record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "done")
-                    self._trace("sandbox", "done", step.tool)
-                    if step.deliverable:
-                        passed.add(step.deliverable)
-                    self._save_checkpoint(
-                        "sandbox", goal, current_plan, passed,
-                        verified=verified, attempt=attempt)
-                except Exception as exc:
-                    failures.append(f"step {step.tool} failed: {exc}")
-                    try:
-                        from .step_lines import record_attempt
-                        record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "failed", str(exc)[:100])
-                    except Exception:
-                        pass
-                    self._trace("sandbox", "failed", str(exc)[:100])
+                failures.extend(level_failures)
+            else:
+                for step in current_plan.normalized_steps():
+                    if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
+                        return RunReport("cancelled", goal, current_plan, False, False,
+                                         files=sorted(passed), attempts=attempt,
+                                         backend=self._backend_name())
+                    if step.deliverable and step.deliverable in passed:
+                        continue
+                    error = self._run_plan_step(
+                        step, goal, current_plan, passed, verified, attempt)
+                    if error is not None:
+                        failures.append(error)
             # Verify: deliverables + plan criteria + step criteria.
             criteria = list(current_plan.criteria)
             for step in current_plan.normalized_steps():

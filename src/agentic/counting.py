@@ -41,11 +41,16 @@ class CountingClient(ModelClient):
     """Wrap a client, count every call, by phase."""
 
     def __init__(self, inner: ModelClient):
+        import threading
         self.inner = inner
         self.calls = 0
         self.tokens_estimated = 0
         self.calls_by_phase: dict[str, int] = {}
         self.tokens_by_phase: dict[str, int] = {}
+        # Parallel LLM steps count through here concurrently;
+        # without a lock, increments from two threads can
+        # interleave and silently lose counts.
+        self._lock = threading.Lock()
 
     def chat(self, messages, phase: str = "chat", sampling=None) -> str:
         try:
@@ -53,10 +58,11 @@ class CountingClient(ModelClient):
         except TypeError:
             reply = self.inner.chat(messages)
         tokens = max(1, (len(_text_of(messages)) + len(reply)) // 4)
-        self.calls += 1
-        self.tokens_estimated += tokens
-        self.calls_by_phase[phase] = self.calls_by_phase.get(phase, 0) + 1
-        self.tokens_by_phase[phase] = self.tokens_by_phase.get(phase, 0) + tokens
+        with self._lock:
+            self.calls += 1
+            self.tokens_estimated += tokens
+            self.calls_by_phase[phase] = self.calls_by_phase.get(phase, 0) + 1
+            self.tokens_by_phase[phase] = self.tokens_by_phase.get(phase, 0) + tokens
         return reply
 
     def chat_phase(self, phase: str, messages, sampling=None) -> str:
@@ -74,10 +80,11 @@ class CountingClient(ModelClient):
             yield text
         reply = "".join(chunks)
         tokens = max(1, (len(_text_of(messages)) + len(reply)) // 4)
-        self.calls += 1
-        self.tokens_estimated += tokens
-        self.calls_by_phase["stream"] = self.calls_by_phase.get("stream", 0) + 1
-        self.tokens_by_phase["stream"] = self.tokens_by_phase.get("stream", 0) + tokens
+        with self._lock:
+            self.calls += 1
+            self.tokens_estimated += tokens
+            self.calls_by_phase["stream"] = self.calls_by_phase.get("stream", 0) + 1
+            self.tokens_by_phase["stream"] = self.tokens_by_phase.get("stream", 0) + tokens
 
     def report(self) -> dict:
         return {"model_calls": self.calls,

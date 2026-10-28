@@ -1053,6 +1053,7 @@ def main(argv: list[str] | None = None) -> int:
     dag_parser.add_argument("action", choices=["list", "show", "run"], help="list = list saved DAGs, show = show one DAG, run = execute one DAG's tool nodes")
     dag_parser.add_argument("id", nargs="?", default="", help="DAG id for show/run")
     dag_parser.add_argument("--run-id", default=None, help="Run id for dag run checkpoints; reuse it to resume a killed run")
+    dag_parser.add_argument("--parallel", action="store_true", help="Run independent DAG nodes concurrently instead of one at a time")
     mission_parser = sub.add_parser("mission", help="Mission lifecycle records")
     mission_parser.add_argument("action", choices=["list", "show", "discard", "create"], help="list = list missions, show = show one, discard = discard a rejected mission, create = create a draft mission")
     mission_parser.add_argument("id", nargs="?", default="", help="Project id")
@@ -1557,7 +1558,7 @@ def main(argv: list[str] | None = None) -> int:
                     return registry.call(node.tool, args_dict)
                 run_id = args.run_id or _dag_uuid.uuid4().hex[:12]
                 executor = DAGExecutor(dag, _run_node, state=Registry(config.home), run_id=run_id)
-                result = executor.execute()
+                result = executor.execute_parallel() if getattr(args, "parallel", False) else executor.execute()
             except Exception as exc:
                 print(f"dag run {args.id} failed: {exc}")
                 return 1

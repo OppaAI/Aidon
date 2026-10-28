@@ -174,6 +174,67 @@ class DAGExecutor:
             "failed": failed,
         }
 
+    def execute_parallel(self, max_workers: int = 3) -> dict:
+        """Run a DAG level by level, nodes in one level concurrently.
+
+        Levels come from compute_levels: a level runs only after
+        every earlier level finished, so a node never runs before
+        its dependencies, and independent nodes share a level and
+        run together. A failure in a level stops the run — later
+        levels never start — while completed nodes and their
+        checkpoints are preserved, exactly like the sequential
+        execute(). Checkpoints are written under a lock, so
+        concurrent completions cannot interleave.
+        """
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        from .dag import compute_levels
+
+        self._ensure_identity()
+        results = self.partial_results()
+        completed = list(results)
+        failed = None
+        lock = threading.Lock()
+        try:
+            levels = compute_levels([(node.id, list(node.depends_on or []))
+                                     for node in self.dag.nodes.values()])
+        except ValueError as exc:
+            return {"status": "failed", "results": results, "completed": completed,
+                    "failed": {"__schedule__": str(exc)}}
+        by_id = dict(self.dag.nodes)
+        workers = max(1, int(max_workers))
+
+        def _run(node_id):
+            try:
+                return node_id, str(self.run_node(by_id[node_id])), None
+            except Exception as exc:
+                if _is_transient(exc):
+                    try:
+                        return node_id, str(self.run_node(by_id[node_id])), None
+                    except Exception as retry_exc:
+                        return node_id, None, str(retry_exc)
+                return node_id, None, str(exc)
+
+        for level in levels:
+            pending = [node_id for node_id in level if node_id not in results]
+            if not pending:
+                continue
+            with ThreadPoolExecutor(max_workers=min(workers, len(pending))) as pool:
+                outcomes = list(pool.map(_run, pending))
+            for node_id, result, error in outcomes:
+                if error is not None:
+                    failed = {node_id: error}
+                else:
+                    with lock:
+                        self._set_checkpoint(node_id, result)
+                    results[node_id] = result
+                    completed.append(node_id)
+            if failed is not None:
+                break
+        return {"status": "failed" if failed is not None else "done",
+                "results": results, "completed": completed, "failed": failed}
+
     def resume(self) -> dict:
         """Continue a killed run: execute() already skips checkpoints."""
         return self.execute()
