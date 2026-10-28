@@ -874,7 +874,10 @@
         : (e.status || ((e.seconds || 0) + "s"));
       const detail = e.detail || e.title || e.error || "";
       const usefulDetail = detail && detail !== (e.title || "");
-      const expandable = !!(e.thinking || ((e.tokens_in || e.tokens_out) && usefulDetail));
+      // Token accounting alone is not expandable content. Only a trace
+      // event carrying actual thinking text gets the arrow and click
+      // handler; statuses, tool names, and errors stay static.
+      const expandable = !!(e.thinking && String(e.thinking).trim());
       const detailMarkup = failed
         ? (usefulDetail ? '<div class="think-error-detail">' + esc(detail) + "</div>" : "")
         : (expandable && (usefulDetail || e.thinking)
