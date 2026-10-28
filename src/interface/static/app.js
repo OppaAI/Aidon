@@ -872,17 +872,24 @@
       const meta = (e.tokens_in || e.tokens_out)
         ? ((e.tokens_in || 0) + " in · " + (e.tokens_out || 0) + " out")
         : (e.status || ((e.seconds || 0) + "s"));
-      // Every trace item with a detail, especially failures, is expandable.
       const detail = e.detail || e.title || e.error || "";
+      const usefulDetail = detail && detail !== (e.title || "");
+      const expandable = !!(e.thinking || ((e.tokens_in || e.tokens_out) && usefulDetail));
+      const detailMarkup = failed
+        ? (usefulDetail ? '<div class="think-error-detail">' + esc(detail) + "</div>" : "")
+        : (expandable && (usefulDetail || e.thinking)
+          ? '<div class="think-body"><div class="think-detail">' + esc(detail) +
+            (e.thinking ? '</div><pre class="think-thinking">' + esc(e.thinking) + "</pre>" : "</div>") +
+            "</div>"
+          : "");
       item.innerHTML =
-        '<div class="think-head-row" title="click to expand details">' +
-        '<button class="think-toggle" title="expand">›</button>' +
+        '<div class="think-head-row"' + (expandable ? ' title="click to expand details"' : '') + '>' +
+        (expandable ? '<button class="think-toggle" title="expand">›</button>' :
+          '<span class="think-toggle" style="visibility:hidden">›</span>') +
         '<div class="think-title">' + esc(e.title || e.detail || e.status || phase) + "</div>" +
         '<div class="think-meta">' + esc(meta) + "</div></div>" +
-        '<div class="think-body"><div class="think-detail">' + esc(detail) +
-        (e.thinking ? '</div><pre class="think-thinking">' + esc(e.thinking) + "</pre>" : "</div>") +
-        "</div>";
-      item.querySelector(".think-head-row").addEventListener("click", () => {
+        detailMarkup;
+      if (expandable) item.querySelector(".think-head-row").addEventListener("click", () => {
         item.classList.toggle("open");
       });
       list.appendChild(item);

@@ -404,6 +404,7 @@ html[data-theme="light"] [data-status="model"] { color: #193353; }
 .think-item.note { border-left: 2px solid var(--muted); }
 .think-item.think-failed { border-color: var(--red); }
 .think-item.think-failed .think-meta { color: var(--red); }
+.think-error-detail { padding: 0 9px 9px; color: var(--red); font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .think-head-row { display: flex; gap: 8px; align-items: center; padding: 7px 9px;
   cursor: pointer; user-select: none; }
 .think-head-row:hover { background: rgba(255,255,255,.02); }
