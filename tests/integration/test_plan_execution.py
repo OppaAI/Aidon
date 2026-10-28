@@ -55,6 +55,18 @@ def test_verify_criteria_and_ledger(tmp_path):
     assert not ok3
 
 
+def test_verify_normalizes_workdir_and_output_link_criteria(tmp_path):
+    work = tmp_path / "workdir"
+    work.mkdir()
+    (work / "aidon_intro.pdf").write_bytes(b"%PDF-1.4")
+    ok, failures, verified = verify_plan(
+        work, ["workdir/aidon_intro.pdf"],
+        ["PDF exists at workdir/aidon_intro.pdf",
+         "Output message provides link to the PDF"])
+    assert ok, failures
+    assert verified == ["workdir/aidon_intro.pdf"]
+
+
 def test_loop_executes_real_steps_and_verifies(tmp_path):
     plan = {"steps": [{"tool": "write", "args": {"file": "out.md", "text": "done"}, "deliverable": "out.md"}],
             "deliverables": ["out.md"], "criteria": ["out.md contains done"]}

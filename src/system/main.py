@@ -27,8 +27,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import threading
+from datetime import datetime
 
 from ..interface.approval import ApprovalGate, Decision
 from .config import Config
@@ -87,6 +89,25 @@ def _network_available(execution_backend, sandbox) -> bool:
     if execution_backend is not None:
         return bool(getattr(execution_backend, "allow_network", False))
     return False if getattr(sandbox, "bwrap", None) else True
+
+
+def _run_workspace(config: Config, run_id: str) -> Path:
+    """Create one timestamped workspace directory for a run."""
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
+    path = config.workdir / stamp
+    path.mkdir(parents=True, exist_ok=False)
+    return path
+
+
+def _run_sandbox(config: Config, run_id: str) -> Sandbox:
+    return Sandbox(
+        _run_workspace(config, run_id), config.sandbox_timeout_seconds,
+        mem_mb=config.sandbox_mem_mb, nproc=config.sandbox_nproc,
+        fsize_mb=config.sandbox_fsize_mb,
+        cpu_seconds=config.sandbox_cpu_seconds,
+        backend=config.sandbox_backend,
+        allow_network=config.sandbox_network,
+        require_isolation=config.sandbox_require_isolation)
 
 
 def _promotion_ask(point) -> bool:
@@ -160,7 +181,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         def _generate_document(title="Aidon document", sections=None,
                                content="", body="", filename="", path="",
                                input_path="", output="", output_path="",
-                               format="", **kwargs):
+                               format="", overwrite=False, **kwargs):
             # Models have historically called the destination ``path`` or
             # requested ``format`` explicitly. Accept those aliases so a
             # valid document plan is not rejected by a naming mismatch.
@@ -170,10 +191,33 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
                 sections = [{"heading": "", "body": str(raw)}]
             elif isinstance(sections, str):
                 sections = [{"heading": "", "body": sections}]
+            if not destination:
+                # Keep generated artifacts discoverable even when the model
+                # omits a filename: derive a safe contextual stem and add
+                # the run timestamp. The containing directory is already
+                # the timestamped workspace for this run.
+                stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(title)).strip("_.")
+                stem = stem[:80] or "aidon_document"
+                destination = f"{stem}_{Path(workdir).name}"
+                if format:
+                    destination += "." + str(format).lstrip(".")
+                else:
+                    destination += ".md"
             if destination:
                 if format and "." not in Path(destination).name:
                     destination += "." + str(format).lstrip(".")
-                return write_document_file(title, sections, _confined(destination))
+                target = _confined(destination)
+                if target.exists() and not overwrite:
+                    return (f"FILE_EXISTS: {destination}. Ask the user whether "
+                            "to overwrite it or choose a new filename.")
+                if target.exists() and overwrite:
+                    ok, why = _approval(
+                        "live", "Overwrite existing document",
+                        f"Replace the existing file {target}?",
+                        force_ask=True)
+                    if not ok:
+                        return f"overwrite rejected for {destination}: {why}"
+                return write_document_file(title, sections, target)
             return generate_document(title, sections)
         tools["generate_document"] = _generate_document
         tools["build_ebook"] = build_ebook
@@ -298,9 +342,18 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         return path.read_text(encoding="utf-8", errors="replace")
 
     def write_file(name="", text="", input_path="", path="", file="",
-                   content=""):
+                   content="", overwrite=False):
         name = str(name or input_path or path or file)
         path = _confined(name)
+        if path.exists() and not overwrite:
+            return (f"FILE_EXISTS: {name}. Ask the user whether to overwrite "
+                    "it or choose a new filename.")
+        if path.exists() and overwrite:
+            ok, why = _approval("live", "Overwrite existing file",
+                                f"Replace the existing file {path}?",
+                                force_ask=True)
+            if not ok:
+                return f"overwrite rejected for {name}: {why}"
         path.write_text(str(text if text != "" else content), encoding="utf-8")
         return f"wrote {path}"
 
@@ -1815,6 +1868,11 @@ def main(argv: list[str] | None = None) -> int:
             from ..interface.scheduler_loop import NudgeTracker
             run_id = str(event.payload.get("run_id", "")) or new_run_id()
             run_control.register(run_id, event.goal, event.project_id)
+            # Each goal gets its own timestamped workspace directory. This
+            # prevents unrelated runs from colliding on filenames and keeps
+            # the user-visible artifact path contextual instead of exposing
+            # a generic ``workdir`` directory.
+            run_sandbox = _run_sandbox(config, run_id)
             # Full runner, same as the CLI goal run, not a thin runner:
             # budget, trace, model verifier, plugins, execution backend,
             # semantic router skip, and autonomy plus nudge trackers
@@ -1839,7 +1897,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 from ..capabilities.execution import make_backend
                 execution_backend = make_backend(
-                    config.execution_backend, sandbox,
+                    config.execution_backend, run_sandbox,
                     image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 execution_backend = None
@@ -1878,7 +1936,7 @@ def main(argv: list[str] | None = None) -> int:
                     return [f"{x.get('title', '')}: {x.get('snippet', '')}" for x in _r.get("results", [])]
                 except Exception:
                     return []
-            runner = GoalRunner(client, sandbox, _gate,
+            runner = GoalRunner(client, run_sandbox, _gate,
                                 config.home, memory=memory,
                                 project_id=event.project_id, plugins=plugins,
                                 execution_backend=execution_backend, budget=budget,
@@ -1887,7 +1945,7 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_gate, researcher=_web_researcher), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"))
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"))
             def _surface_reply(text):
                 # The WebUI already displays and polls the run ID. Keep the
                 # ID in Slack/WhatsApp replies where it is needed for

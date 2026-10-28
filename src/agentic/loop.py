@@ -755,6 +755,12 @@ class GoalRunner:
                             "to import fpdf, reportlab, or install a PDF "
                             "library; the document tool already writes the "
                             "requested output file.")
+                system += (" Document and file tools refuse to overwrite an "
+                           "existing path unless overwrite=true is supplied "
+                           "and the human approves it. If they return "
+                           "FILE_EXISTS, ask the human to approve replacement "
+                           "or choose a new filename; do not retry the same "
+                           "path indefinitely.")
             if "install_python_package" in self.extra_tools:
                 system += (" If a genuinely required optional Python package "
                            "is unavailable and no built-in capability can "
