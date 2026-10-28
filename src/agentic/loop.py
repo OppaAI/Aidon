@@ -392,7 +392,7 @@ class GoalRunner:
         self.extra_tools = extra_tools or {}
         self.force_web = bool(force_web)
         # /think or the 🧠 button: every phase at maximum thinking
-        # for this run (reasoning_effort xhigh on backends that take
+        # for this run (reasoning_effort max on backends that take
         # it, think=True on boolean backends).
         self.think_max = bool(think_max)
         self.stream_callback = stream_callback
