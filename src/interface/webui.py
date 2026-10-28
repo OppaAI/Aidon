@@ -761,6 +761,7 @@ class WebUIServer:
                  media_downloader=None, run_control=None, webui_token=None, transcribe_key=None,
                  tts_key=None, config=None):
         self.home = Path(home)
+        self.config = config
         self.dispatcher = dispatcher or TriggerDispatcher()
         self.auth_store = auth_store
         self.memory = memory
@@ -2193,6 +2194,35 @@ class WebUIServer:
         return {"announce": bool(getattr(self, "voice_announce", False)),
                 "tts_available": bool(getattr(self, "tts_key", None))}
 
+    def handle_status(self) -> dict:
+        """Return safe, human-readable capability status for the dashboard."""
+        import os
+        config = self.config
+        model = str(getattr(config, "model", "") or os.environ.get(
+            "AIDON_MODEL", "muse-spark"))
+        backend = str(getattr(config, "backend", "") or "auto")
+        memory = self.memory
+        if getattr(memory, "_memory", None) is not None:
+            memory_name = type(memory._memory.embedder).__name__
+        elif os.environ.get("AIDON_EMBEDDER", "").strip().lower() == "hash":
+            memory_name = "Hash memory"
+        else:
+            memory_name = "Semantic memory (on demand)"
+        msg = self.messaging_config
+        sandbox = str(getattr(config, "execution_backend", "bubblewrap"))
+        computer = str(getattr(config, "computer_driver", "") or "off")
+        return {
+            "model": model,
+            "backend": backend,
+            "memory": memory_name,
+            "whatsapp": "Online" if msg.whatsapp_configured() else "Not configured",
+            "slack": "Online" if msg.slack_configured() else "Not configured",
+            "web_search": str(getattr(config, "search_backend", "tavily")),
+            "sandbox": sandbox,
+            "voice": "Ready" if self.tts_key or self.transcribe_key else "Not configured",
+            "computer": computer,
+        }
+
     def handle_reports_list(self) -> dict:
         directory = self._json_dir("reports")
         days = sorted(path.stem for path in directory.glob("*.md"))
@@ -2697,6 +2727,8 @@ loadSettings();
                     self._send_bytes(status, content_type, data)
                 elif parsed.path == "/api/voice":
                     self._send_json(200, server.handle_voice())
+                elif parsed.path == "/api/status":
+                    self._send_json(200, server.handle_status())
                 elif parsed.path == "/api/health":
                     runs = server.run_control.list_runs() if server.run_control else []
                     self._send_json(200, {"ok": True, "runs": len(runs)})

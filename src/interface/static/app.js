@@ -1286,7 +1286,32 @@
 
   sendBtn.addEventListener("click", startRun);
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") startRun();
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      startRun();
+    }
+  });
+  const preapproveBtn = document.getElementById("preapprove-btn");
+  if (preapproveBtn) preapproveBtn.addEventListener("click", async () => {
+    const project = window.aidonConversation ? window.aidonConversation() : {};
+    const specId = project.project_id || "default";
+    if (!window.confirm("Preapprove reversible live actions for " + specId + " for 8 hours?")) return;
+    preapproveBtn.disabled = true;
+    try {
+      const r = await fetch("/api/preapprovals", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spec_id: specId, kind: "live", hours: 8 }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) throw new Error(data.error || ("HTTP " + r.status));
+      preapproveBtn.classList.add("active");
+      preapproveBtn.title = "Live actions preapproved for 8 hours";
+      addMsg("stage-line", "Reversible live actions preapproved for " + specId + " for 8 hours.");
+    } catch (e) {
+      addMsg("stage-line", "Preapproval failed: " + e.message);
+    } finally {
+      preapproveBtn.disabled = false;
+    }
   });
   steerBtn.addEventListener("click", sendSteer);
   if (cancelBtn) cancelBtn.addEventListener("click", sendCancel);

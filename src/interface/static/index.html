@@ -118,21 +118,29 @@
     <div id="img-preview" hidden></div>
     <canvas id="voice-wave" width="520" height="34" title="Voice activity"></canvas>
     <footer id="composer">
-      <button id="attach-btn" title="Attach image" aria-label="Attach image">&#128206;</button>
-      <button id="camera-btn" title="Take photo" aria-label="Take photo">&#128247;</button>
-      <div id="composer-inputs">
-        <input id="goal-input" type="text" placeholder="Chat or give Aidon a goal…" autocomplete="off">
-        <input id="guidance-input" type="text" placeholder="Guidance (optional) — your steps or hints; Aidon follows them and fills the gaps…" autocomplete="off">
+      <div id="composer-row">
+        <div id="composer-left">
+          <button id="attach-btn" class="composer-icon" title="Attach image or document" aria-label="Attach image or document">&#128206;</button>
+          <button id="camera-btn" class="composer-icon" title="Take photo" aria-label="Take photo">&#128247;</button>
+          <button id="preapprove-btn" class="composer-icon" title="Preapprove reversible live actions" aria-label="Preapprove reversible live actions">✓</button>
+        </div>
+        <div id="composer-inputs">
+          <textarea id="goal-input" rows="3" placeholder="Chat or give Aidon a goal…" autocomplete="off"></textarea>
+          <input id="guidance-input" type="text" placeholder="Guidance (optional) — your steps or hints; Aidon follows them and fills the gaps…" autocomplete="off">
+        </div>
+        <div id="composer-right">
+          <button id="mic" title="Record voice input" aria-label="Record voice input"><span class="mic-icon">&#127908;</span></button>
+          <button id="send" title="Run" aria-label="Run">&#10148;</button>
+        </div>
       </div>
-      <button id="send">Run</button>
-      <button id="mic" title="Record voice input" aria-label="Record voice input"><span class="mic-icon">&#127908;</span></button>
     </footer>
     <div id="steer-row" hidden>
       <input id="steer-input" type="text" placeholder="Steer mid-run — Aidon finishes the current step, then follows…" autocomplete="off">
       <button id="steer-send">Steer</button>
       <button id="cancel-run">Cancel run</button>
     </div>
-    <div id="hint">Enter = run &nbsp;·&nbsp; approvals appear as cards above &nbsp;·&nbsp; click the mic to record, click stop to transcribe</div>
+    <div id="hint">Ctrl+Enter = run &nbsp;·&nbsp; Enter adds a new line &nbsp;·&nbsp; click the mic to record, click stop to transcribe</div>
+    <div id="disclaimer">Aidon can make mistakes. Check important information.</div>
   </main>
 
   <!-- ============ RIGHT SIDEBAR ============ -->
@@ -165,8 +173,14 @@
       </section>
       <section class="dash-card">
         <div class="dash-title"><span>✦</span> System Status</div>
-        <div class="dash-status"><span>Model</span><b class="status-ready">Configured</b></div>
-        <div class="dash-status"><span>Sandbox</span><b class="status-ready">Ready</b></div>
+        <div class="dash-status"><span>Model</span><b data-status="model">Loading…</b></div>
+        <div class="dash-status"><span>Memory</span><b data-status="memory">Loading…</b></div>
+        <div class="dash-status"><span>WhatsApp</span><b data-status="whatsapp">Loading…</b></div>
+        <div class="dash-status"><span>Slack</span><b data-status="slack">Loading…</b></div>
+        <div class="dash-status"><span>Web search</span><b data-status="web_search">Loading…</b></div>
+        <div class="dash-status"><span>Sandbox</span><b data-status="sandbox">Loading…</b></div>
+        <div class="dash-status"><span>Voice</span><b data-status="voice">Loading…</b></div>
+        <div class="dash-status"><span>Computer</span><b data-status="computer">Loading…</b></div>
       </section>
     </div>
     <div id="thinking-head">
