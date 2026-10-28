@@ -1,7 +1,7 @@
 #!/bin/sh
 # Aidon setup: first-time setup, idempotent, run it twice safely.
 #
-# Interactive by default, like the old Aidon setup: it asks for
+# Interactive by default, like the Aidon setup: it asks for
 # things one by one, and every answer is skippable.
 #   - A model backend first: Meta Model API (hackathon) or Ollama
 #     (local, no Meta key) or another OpenAI-compatible endpoint.
@@ -308,7 +308,7 @@ if [ "$NONINTERACTIVE" = 0 ]; then
   ask_setting "AIDON_MCP_URL" "MCP HTTP endpoint to call (empty = no external MCP server)"
   echo ""
   echo "About Aidon's own email: there is no separate Aidon email"
-  echo "setting, in old or new Aidon. Gmail send uses the Gmail"
+  echo "setting in Aidon. Gmail send uses the Gmail"
   echo "account that granted the refresh token above, so Aidon"
   echo "sends from that account. Owner email, asked above, is the"
   echo "address drafts and reports to you are addressed to."

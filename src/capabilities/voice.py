@@ -1,15 +1,15 @@
-"""Voice, old Aidon: Fish Audio TTS, and Muse Voice Transcribe.
+"""Voice, Aidon: Fish Audio TTS, and Muse Voice Transcribe.
 
 Old keys, only: AIDON_FISH_API_KEY, AIDON_TTS_VOICE_ID,
 AIDON_TRANSCRIBE_API_KEY. No new duplicate.
-TTS is Fish Audio S2.1 Pro, same as old Aidon, free tier
-through 2026-11-30 in old Aidon, no SLA, check the current
+TTS is Fish Audio S2.1 Pro, same as Aidon, free tier
+through 2026-11-30 in Aidon, no SLA, check the current
 terms before a demo. A missing Fish key is an error, never
 a silent fallback to another voice.
 Transcribe is Muse Voice Transcribe, via the Meta Model
 API, with AIDON_TRANSCRIBE_API_KEY, falling back to
 AIDON_API_KEY when the transcribe key is empty, as in
-old Aidon. A missing key, and a missing audio file, are
+Aidon. A missing key, and a missing audio file, are
 errors, never invented text.
 Post functions are injected for tests, production uses
 urllib, and the API error, never the key, is returned.

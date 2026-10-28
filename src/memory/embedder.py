@@ -254,7 +254,7 @@ def make_embedder(name: str | None = None) -> Embedder:
     Anything else, or empty -> EmbeddingGemma 2 440M, with
     AIDON_EMBED_MODEL overriding the model id, and
     AIDON_SPARSE_MODEL, when set, wrapping it in a HybridEmbedder
-    with SPLADE sparse. The default is the old Aidon SPLADE model;
+    with SPLADE sparse. The default is the Aidon SPLADE model;
     set AIDON_SPARSE_MODEL= (an explicitly empty value) to opt out
     and use the deterministic keyword sparse fallback instead.
     """

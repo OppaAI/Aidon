@@ -1,4 +1,4 @@
-"""Conversations, old Aidon conversations concept, rebuilt as a separate module.
+"""Conversations, Aidon conversations concept, rebuilt as a separate module.
 
 A conversation is a file under <home>/conversations/<id>.json, with turns, role, text, and time.
 This is separate from Memory short-term memory: it is the durable transcript of one chat,

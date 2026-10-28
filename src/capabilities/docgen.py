@@ -1,4 +1,4 @@
-"""Document generation, store, and ebook, old Aidon docgen/docstore/documents/ebook concepts, rebuilt.
+"""Document generation, store, and ebook, Aidon docgen/docstore/documents/ebook concepts, rebuilt.
 
 docgen: build a Markdown document from a title and sections, code only, no model call.
 docstore: save, list, and read documents under <home>/documents/, with safe filenames.

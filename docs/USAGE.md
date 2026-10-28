@@ -12,7 +12,7 @@
   in the UI, fail-closed on timeout. With arguments,
   `./launch.sh goal "..."` still runs the CLI.
 - WhatsApp and Slack, both two-way, no Telegram,
-  with the old Aidon key names:
+  with the Aidon key names:
   `AIDON_WHATSAPP_TOKEN`, `AIDON_WHATSAPP_PHONE_ID`,
   `AIDON_WHATSAPP_VERIFY_TOKEN`,
   `AIDON_WHATSAPP_APP_SECRET`, `AIDON_WHATSAPP_OWNER`,
@@ -36,7 +36,7 @@
   tunnel, localhost alone is not reachable by Meta
   or Slack, and the full WebUI must not be tunneled
   unauthenticated, use a webhook-only listener in
-  front, as old Aidon did.
+  front, as Aidon did.
 
 ## ✅ Pre-approvals, the same on every surface
 

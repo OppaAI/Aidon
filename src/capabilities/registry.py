@@ -1,4 +1,4 @@
-"""Full registry, old Aidon registry concept, rebuilt.
+"""Full registry, Aidon registry concept, rebuilt.
 
 The registry is the one list of everything Aidon can do: sandbox tools, plugin tools,
 and skill lifecycle states, plus a Markdown export, so a user can see the whole capability

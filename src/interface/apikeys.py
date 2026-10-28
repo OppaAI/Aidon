@@ -1,4 +1,4 @@
-"""API keys, old Aidon apikeys concept, rebuilt, hash-only storage, same rule as v1 keys.
+"""API keys, Aidon apikeys concept, rebuilt, hash-only storage, same rule as v1 keys.
 
 A key is generated once, shown once to the caller, and only its SHA256 hash is stored,
 in a 0600 file under <home>/apikeys/keys.json, with a name and scope. Verification is

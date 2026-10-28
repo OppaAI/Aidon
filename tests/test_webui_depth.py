@@ -50,7 +50,7 @@ def test_settings_set_env_writes_secrets_write_only(tmp_path):
     assert not any(line.startswith("AIDON_TIMEZONE=America") for line in lines)
     # Owner-only file.
     assert (tmp_path / "home" / ".env").stat().st_mode & 0o777 == 0o600
-    # Secrets are writable here, old-Aidon behaviour: write-only,
+    # Secrets are writable here: write-only,
     # never shown back, empty leaves the current value alone.
     for secret_key in ("AIDON_API_KEY", "AIDON_WHATSAPP_TOKEN",
                        "AIDON_SLACK_SIGNING_SECRET",

@@ -187,7 +187,7 @@ class Skill:
         """The python packages this skill needs installed.
 
         A plain string dependency is a declared package name. A dict
-        dependency is the old Aidon shape and only counts when it is a
+        dependency is the Aidon shape and only counts when it is a
         verified python install: a model-claimed name is a hint, not a
         requirement, and treating it as one would make a skill look
         unprovisioned for a package nobody ever installed.

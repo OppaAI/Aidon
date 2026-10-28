@@ -24,7 +24,7 @@ At most 3 attempts in total (1 initial + 2 repairs),
 then the run fails, it does not ask for approval, and
 it does not go live.
 
-Memory, blank by design: new Aidon starts with empty
+Memory, blank by design: a fresh Aidon starts with empty
 collections, no import from previous projects. When a
 memory is present, the loop recalls Experiences before
 planning fresh, records episodic memory scoped by
@@ -158,7 +158,7 @@ def format_duration(seconds: float | int | None) -> str:
 
 
 def format_elapsed(report: dict) -> str:
-    """Render the old-compatible elapsed footer for a report dictionary."""
+    """Render the compatible elapsed footer for a report dictionary."""
     elapsed = report.get("elapsed_seconds")
     if elapsed is None:
         return ""
@@ -662,7 +662,7 @@ class GoalRunner:
             system += (" Extra tools available to plan steps: "
                        + ", ".join(sorted(self.extra_tools)) + ".")
         user = goal
-        # Old Aidon recalled both prior experiences and ingested knowledge
+        # Recall both prior experiences and ingested knowledge.
         # before planning. Keep the block bounded so memory cannot crowd
         # out the actual goal or the plan schema.
         if self.memory is not None:
@@ -826,7 +826,7 @@ class GoalRunner:
                 self._trace("interpret", "done", f"semantic route {self.last_route[0]} {self.last_route[1]:.2f}")
             except Exception:
                 self.last_route = None
-        # Write-intent guard, from old Aidon: the router is a hint, not a
+        # Write-intent guard, from Aidon: the router is a hint, not a
         # safety boundary. A goal that asks for a write, a save, or a file
         # is never answered by a path with no write tools, even if the
         # router said chat, because that would silently miss the task.

@@ -32,7 +32,7 @@ Experience matches, plan fresh, and that fresh plan, if it
 succeeds, becomes the next Experience.
 
 This is the same idea the earlier design called Knowledge
-(approved skills + DAGs). In the new Aidon it is called
+(approved skills + DAGs). In this implementation it is called
 Experience, and it is procedural memory, unified, not a
 second knowledge store.
 """

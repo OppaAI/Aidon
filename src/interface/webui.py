@@ -9,7 +9,7 @@ WebUI, built now, after triggers, after v1 and MCP:
   a card, waits up to 180 seconds, fail-closed, and
   /api/approve sets the decision. A card is a decision,
   chat is conversation, same rule as everywhere else.
-- Settings and keys page, at /settings, showing
+- Settings APIs expose configuration and key metadata without exposing secrets.
   backend, ingest path, and key hash prefixes only,
   never a real key, never a secret, never a token.
 - Library tab, at /library, listing library files in
@@ -193,7 +193,7 @@ CHAT_HTML = """<!doctype html>
 <div id="sidebar">
 <h2>Projects</h2><div id="projects"></div>
 <h2>Library</h2><a href="/library">Library tab</a>
-<h2>Settings</h2><a href="/settings">Settings and keys</a>
+<h2>Settings</h2><a href="/">Settings and keys</a>
 <h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a> <a href="/replay">Replay</a> <a href="/avatar-vrm">Open VRM avatar</a> <a href="/capabilities">Capabilities</a> <a href="/memory">Memory</a> <a href="/knowledge">Knowledge</a> <a href="/reports">Reports</a>
 <div id="stage-pills"><p>Stages: recall, interpret, research, plan, sandbox, verify, approval, live, learn</p><div id="pills"></div></div>
 </div>
@@ -1486,7 +1486,7 @@ class WebUIServer:
     def settings_set_env(self, key: str, value) -> dict:
         """Write one setting to <home>/.env, secrets included.
 
-        Old-Aidon behaviour: the settings page can enter
+        The settings page can enter
         everything, keys included. Accepts the friendly settings
         name (e.g. "timezone") or the env var name itself (e.g.
         "AIDON_TIMEZONE"), for every catalog key plus the original
@@ -2041,7 +2041,7 @@ class WebUIServer:
                 "note": "JSON variant of the multipart goals-with-images endpoint; "
                         "no run is started by this route."}
 
-    # -- routes added for old-Aidon WebUI parity -------------------------
+    # -- WebUI routes -----------------------------------------------------
     # Each handler below is pure server logic (no socket), so tests
     # can call it directly; the do_GET/do_POST/do_DELETE branches
     # only map paths and status codes onto these results. Auth is
@@ -2341,7 +2341,7 @@ class WebUIServer:
                 self.wfile.write(data)
 
             def _send_static(self, relative: str):
-                """Serve only files from the bundled old-Aidon WebUI assets."""
+                """Serve only files from the bundled WebUI assets."""
                 candidate = (STATIC_DIR / relative).resolve()
                 root = STATIC_DIR.resolve()
                 if root not in candidate.parents or not candidate.is_file():
@@ -2349,8 +2349,7 @@ class WebUIServer:
                     return
                 data = candidate.read_bytes()
                 if candidate.name in {"index.html", "dag.html", "capabilities.html",
-                                      "memory.html", "knowledge.html", "reports.html",
-                                      "settings.html"}:
+                                      "memory.html", "knowledge.html", "reports.html"}:
                     version = str(int(candidate.stat().st_mtime)).encode()
                     data = data.replace(b"__ASSET_V__", version)
                 content_type = mimetypes.guess_type(str(candidate))[0] or \
@@ -2378,61 +2377,8 @@ class WebUIServer:
                 elif parsed.path == "/":
                     self._send_static("index.html")
                 elif parsed.path in ("/dag", "/capabilities", "/memory", "/knowledge",
-                                     "/reports", "/settings"):
+                                     "/reports"):
                     self._send_static(parsed.path.lstrip("/") + ".html")
-                elif parsed.path == "/settings":
-                    keys = server.auth_store.list_keys() if server.auth_store else []
-                    html = """<h1>Settings</h1>
-<p>Every knob, one page. Changes are written to <span id="env-path"></span>.
-Secret keys (API keys) are shown only as set or unset, never shown back —
-type a new value to set one, leave it empty to keep the current one.
-Restart the server for changes to take effect.</p>
-<div id="settings-groups"></div>
-<p><button id="settings-save">Save settings</button> <span id="settings-status"></span></p>
-<h2>Keys, hash prefixes only, never real keys</h2>"""
-                    for key in keys:
-                        html += f"<p>{key['name']} {key['scope']} {key['key_hash_prefix']}</p>"
-                    html += """<script>
-function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-async function loadSettings(){
-  const r = await fetch('/api/settings/catalog'); const data = await r.json();
-  document.getElementById('env-path').textContent = data.env_file || '';
-  let out = '';
-  (data.groups || []).forEach(function(g){
-    out += '<h2>' + esc(g.group) + '</h2>';
-    g.settings.forEach(function(s){
-      out += '<p><label>' + esc(s.label) + ' (' + esc(s.key) + ')</label><br>';
-      if (s.type === 'bool') {
-        out += '<input type="checkbox" data-key="' + esc(s.key) + '"' + ((s.value === '1' || s.value === 'true') ? ' checked' : '') + '>';
-      } else if (s.type === 'enum') {
-        out += '<select data-key="' + esc(s.key) + '">' + (s.options || []).map(function(o){ return '<option' + (o === s.value ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>';
-      } else if (s.secret) {
-        out += '<input type="password" data-key="' + esc(s.key) + '" placeholder="' + (s.is_set ? 'set - leave empty to keep, type to replace' : 'not set - type a value to set') + '">';
-      } else {
-        out += '<input type="text" data-key="' + esc(s.key) + '" value="' + esc(s.value) + '">';
-      }
-      if (s.desc) { out += '<br><small>' + esc(s.desc) + '</small>'; }
-      out += '</p>';
-    });
-  });
-  document.getElementById('settings-groups').innerHTML = out;
-}
-async function saveSettings(){
-  const status = document.getElementById('settings-status'); status.textContent = 'Saving...';
-  const fields = document.querySelectorAll('[data-key]'); let failed = 0;
-  for (const f of fields) {
-    let v = (f.type === 'checkbox') ? (f.checked ? '1' : '0') : f.value;
-    if (f.type === 'password' && !v) { continue; }
-    const r = await fetch('/api/settings/env', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: f.getAttribute('data-key'), value: v})});
-    const d = await r.json();
-    if (!d.ok) { failed++; status.textContent = 'Failed: ' + (d.error || 'unknown'); }
-  }
-  if (!failed) { status.textContent = 'Saved. Restart the server for changes to take effect.'; }
-}
-document.getElementById('settings-save').addEventListener('click', saveSettings);
-loadSettings();
-</script>"""
-                    self._send_html(200, _page_html("Settings", html))
                 elif parsed.path == "/library":
                     files = server._library_files()
                     html = "<h1>Library</h1>"
@@ -2733,7 +2679,7 @@ loadSettings();
                     import base64 as _b64t
                     try:
                         # The browser sends the MediaRecorder blob directly,
-                        # matching old Aidon's endpoint. Keep JSON/base64 as
+                        # matching the compatibility endpoint. Keep JSON/base64 as
                         # a compatibility form for API clients.
                         if raw and self.headers.get("Content-Type", "").lower().startswith("audio/"):
                             audio = raw

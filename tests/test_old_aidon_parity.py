@@ -1,4 +1,4 @@
-"""Old Aidon parity modules, built now, each module imported and exercised, no fake live claims."""
+"""Parity modules: each module is imported and exercised without fake live claims."""
 
 import sys, tempfile
 from pathlib import Path

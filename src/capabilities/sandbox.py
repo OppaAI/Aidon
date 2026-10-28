@@ -92,7 +92,7 @@ class Sandbox:
             return SandboxResult(124, exc.stdout or "", "timeout", isolated)
 
     def _apply_resource_limits(self) -> None:
-        """Apply old Aidon's optional POSIX limits to the child process.
+        """Apply Aidon's optional POSIX limits to the child process.
 
         RLIMIT_NPROC is deliberately not set here. Linux counts every
         task (thread) of the uid against it, not the child's own

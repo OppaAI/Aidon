@@ -1,4 +1,4 @@
-"""Missing old-Aidon things, built now: computer use, chain, outbox, CLI commands, WebUI tabs."""
+"""Coverage for computer use, chain, outbox, CLI commands, and WebUI tabs."""
 
 import sys
 from pathlib import Path

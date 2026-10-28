@@ -1,4 +1,4 @@
-"""Intake, old Aidon intake concept, rebuilt, separate from interview.
+"""Intake, Aidon intake concept, rebuilt, separate from interview.
 
 Intake is the first step before an interview: take a raw message, extract a goal, a project
 id, and any stated constraints, and validate that the goal is non-empty, so the interview

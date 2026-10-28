@@ -1,4 +1,4 @@
-"""Missing old-Aidon plan tools, rebuilt as extra tools in _goal_extra_tools.
+"""Extra plan tools exposed through _goal_extra_tools.
 
 No real network is hit: messaging senders are tested only in their
 unconfigured state (tokens removed from the environment), fetch_url

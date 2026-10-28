@@ -144,7 +144,7 @@ a rung:
 
 ## Model routing
 
-Two-tier model routing, inspired by approaches used in projects such as OpenClaw and OpenCode.
+Two-tier model routing with fast and strong model tiers.
 
 When `AIDON_FAST_MODEL` specifies a different model, Aidon routes lightweight 
 phases to the fast tier and more demanding phases to the strong tier. 

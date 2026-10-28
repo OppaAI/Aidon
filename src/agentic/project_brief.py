@@ -1,4 +1,4 @@
-"""Project brief, old Aidon project_brief concept, rebuilt.
+"""Project brief, Aidon project_brief concept, rebuilt.
 
 A brief is the one-page record of a project before planning: goal, audience, constraints,
 deliverables, and criteria, saved as JSON and Markdown under <home>/briefs/<project>.json/.md.

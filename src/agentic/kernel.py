@@ -1,4 +1,4 @@
-"""Kernel mode, old Aidon, seed-only toolset, no harm, opt-in.
+"""Kernel mode, Aidon, seed-only toolset, no harm, opt-in.
 
 AIDON_KERNEL=1 means only the minimal seed toolset is
 exposed: write, read, list, shell, plus research fetch,

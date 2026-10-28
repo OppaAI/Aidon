@@ -1,4 +1,4 @@
-"""One-way social publishing, old Aidon: Threads and Instagram.
+"""One-way social publishing, Aidon: Threads and Instagram.
 
 Old keys, only: AIDON_THREADS_ACCESS_TOKEN,
 AIDON_THREADS_ACCOUNT_ID, AIDON_IG_USER_ID,
@@ -8,7 +8,7 @@ convention: publish_threads and publish_instagram take
 an approval function, and return "not approved" unless
 it returns approved. Two-way channels need no approval
 for outbound, one-way publishing always does, standing
-comms policy, same as old Aidon.
+comms policy, same as Aidon.
 Threads: create a container, then publish it, via the
 Threads Graph API. Instagram: create a media container,
 then publish it, via the Instagram Graph API, photos

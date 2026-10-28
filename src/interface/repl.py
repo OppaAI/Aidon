@@ -1,4 +1,4 @@
-"""REPL, old Aidon repl concept, rebuilt.
+"""REPL, Aidon repl concept, rebuilt.
 
 A REPL is a read, eval, print loop, with history, not a one-shot chat: /help lists commands,
 /history shows past goals, /clear clears history, /quit exits, and any other line is passed

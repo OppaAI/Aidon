@@ -296,13 +296,15 @@ def test_settings_page_has_the_preapproval_panel(tmp_path):
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
     try:
-        with urllib.request.urlopen(base + "/settings") as response:
-            page = response.read().decode()
-        assert 'id="preapprovals"' in page
-        assert 'id="pre-grant"' in page
-        with urllib.request.urlopen(base + "/static/settings.js") as response:
-            script = response.read().decode()
-        assert "/api/preapprovals" in script
+        with urllib.request.urlopen(base + "/api/preapprovals") as response:
+            payload = json.loads(response.read())
+        assert "grants" in payload
+        try:
+            urllib.request.urlopen(base + "/settings")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 404
+        else:
+            raise AssertionError("/settings route must be removed")
     finally:
         httpd.shutdown()
 

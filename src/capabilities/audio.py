@@ -1,8 +1,8 @@
-"""Audio lip sync, old Aidon audio concept, rebuilt for VRM, browser-side, honestly scoped.
+"""Audio lip sync, Aidon audio concept, rebuilt for VRM, browser-side, honestly scoped.
 
-New Aidon uses a robot SVG with speechSynthesis, not a VRM with Web Audio, so this module
+The default interface uses a robot SVG with speechSynthesis, not a VRM with Web Audio, so this module
 does NOT claim the SVG lip sync is phoneme-accurate. What it does provide is the real
-Web Audio lip sync JavaScript for a VRM avatar, the way old Aidon did it: an AnalyserNode
+Web Audio lip sync JavaScript for a VRM avatar, the way Aidon did it: an AnalyserNode
 on the spoken audio, RMS volume driving Fcl_MTH morphs, and a blink timer driving
 Fcl_EYE_Close, so the VRM page can use it when a VRM file is present. The Python side
 returns that JavaScript as a string, with the morph names in it, and a test checks for

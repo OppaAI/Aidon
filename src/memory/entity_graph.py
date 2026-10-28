@@ -1,8 +1,8 @@
 """Entity graph for memory and KB: find by shared entity, not only by vector.
 
-Old Aidon said it explicitly, in its memory module: "No entity
-graphs, no spreading; just hybrid recall". New Aidon keeps that
-hybrid recall, dense plus sparse fused with RRF, and adds the
+The memory design is explicit: "No entity graphs, no spreading; just
+hybrid recall." The implementation keeps dense plus sparse fused with RRF,
+and adds the
 entity graph on top, so a point that is relevant because it
 shares an entity with a recalled point is found even when its
 vector score is low.

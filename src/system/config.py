@@ -113,7 +113,7 @@ class Config:
     ingest_dir: Path | None = None
     budget_tokens: int = 200000
     budget_seconds: int = 3600
-    # Old Aidon knobs, carried over because they have a live
+    # Compatibility knobs, retained because they have a live
     # consumer in the new code, not as dead settings.
     model_timeout_seconds: float = 120.0
     timezone: str = "UTC"
@@ -157,7 +157,7 @@ class Config:
     sam_api_key: str = ""
     learn_max_skills_per_day: int = 5
     skill_max_failures: int = 3
-    # Backend selection, old Aidon keys: AIDON_BACKEND decides
+    # Backend selection, Aidon keys: AIDON_BACKEND decides
     # between a local Ollama, the Meta Model API, a plain
     # OpenAI-compatible endpoint, and the offline fake client.
     backend: str = ""
@@ -165,7 +165,7 @@ class Config:
     ollama_think: bool = False
     ollama_num_ctx: int = 0
     fast_num_ctx: int = 0
-    # Research caps, old Aidon names only, no new duplicates.
+    # Research caps, Aidon names only, no new duplicates.
     # AIDON_RESEARCH_ALLOWLIST is a comma list, empty = unrestricted.
     research_max_rounds: int = 10
     max_stuck_iterations: int = 8

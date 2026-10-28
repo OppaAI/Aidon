@@ -1,6 +1,6 @@
 """Research allowlist and multi-round research.
 
-Allowlist, from old Aidon, now in new Aidon:
+Research allowlist used by Aidon:
 - <home>/research_allowlist.txt, one domain per line, or
   AIDON_RESEARCH_ALLOWLIST as a comma list. When an allowlist
   is set, a research source outside it is not used as a
@@ -31,7 +31,7 @@ def host_of(url: str) -> str:
 
 
 class DomainGrants:
-    """Domain grants on top of the configured allowlist, old Aidon shape.
+    """Domain grants on top of the configured allowlist, Aidon shape.
 
     The configured allowlist stays untouched. A grant is either
     run-scoped (ends when the run finishes, never saved) or permanent
@@ -160,7 +160,7 @@ def guard_reason(url: str, allowlist: list[str] | None = None,
 class StuckDetector:
     """Stuck-iteration watchdog: the same result N times in a row stops a loop.
 
-    Old Aidon AIDON_MAX_STUCK_ITERATIONS, default 8. A research loop
+    AIDON_MAX_STUCK_ITERATIONS, default 8. A research loop
     that keeps returning the identical signature is not making
     progress, it is spinning; the caller breaks, reports the stuck
     signature, and does not burn the rest of the budget on repeats.

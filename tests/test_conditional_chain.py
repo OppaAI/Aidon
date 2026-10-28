@@ -1,4 +1,4 @@
-"""Conditional chain execution restored from old Aidon / AAA."""
+"""Conditional chain execution restored from Aidon / AAA."""
 
 from src.capabilities.chain import (
     eval_condition,

@@ -1,4 +1,4 @@
-"""Phase router, old Aidon ClawRouter idea, fast vs strong tier.
+"""Phase router, Aidon ClawRouter idea, fast vs strong tier.
 
 Old keys, only: AIDON_FAST_MODEL, AIDON_ROUTER_FAST_PHASES.
 No new duplicate. When AIDON_FAST_MODEL names a
@@ -6,7 +6,7 @@ different model, cheap phases run on the fast tier and
 hard phases run on the strong tier. Empty fast model
 means everything runs on the strong model, exactly as
 before, routing is opt-in.
-Default fast phases, old Aidon: interpret, learn,
+Default fast phases, Aidon: interpret, learn,
 respond. Trace compaction always uses fast, in old
 Aidon, because it is mechanical summarization.
 This is different from the semantic router, which

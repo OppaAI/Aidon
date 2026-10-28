@@ -1,4 +1,4 @@
-"""Planner, old Aidon planner concept, rebuilt, deterministic, no model call.
+"""Planner, Aidon planner concept, rebuilt, deterministic, no model call.
 
 plan_goal builds a plan from a goal, a pattern, and available tools: if a pattern matches,
 its steps are used, otherwise a single write step is used, with the goal as deliverable

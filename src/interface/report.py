@@ -1,4 +1,4 @@
-"""Reports, old Aidon report concept, rebuilt as a separate module.
+"""Reports, Aidon report concept, rebuilt as a separate module.
 
 daily_report is the scheduler's daily report, re-exported here so the CLI report command
 and the WebUI reports tab use the same function, not two copies. autonomy_report is new

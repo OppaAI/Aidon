@@ -1,4 +1,4 @@
-"""Old Aidon capabilities, rebuilt in new Aidon, with fake APIs.
+"""Capability coverage with fake APIs.
 
 No real Tavily, YouTube, Fish, Threads, Instagram, GitHub,
 or email call is made here. All external calls use an

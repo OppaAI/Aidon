@@ -16,7 +16,7 @@ from src.interface.webui import (
 
 
 def test_base_css_has_page_rules():
-    # Old-Aidon dark theme: variables, dark default, light override.
+    # Dark theme: variables, dark default, light override.
     assert "--bg:#070b16" in BASE_CSS
     assert "--accent:#0082fb" in BASE_CSS
     assert "body.light{--bg:#eef1f7" in BASE_CSS

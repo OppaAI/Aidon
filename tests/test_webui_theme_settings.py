@@ -1,4 +1,4 @@
-"""Old-Aidon theme + real settings page.
+"""WebUI theme + settings API.
 
 Regression: the settings page rendered only a header and the API-keys
 list, so it looked empty and gave no way to change a setting. The
@@ -6,6 +6,7 @@ catalog and the .env writer existed as APIs but no page used them.
 """
 import json
 import threading
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -20,7 +21,7 @@ from src.interface.webui import (
 
 
 def test_theme_variables_and_toggle():
-    assert "--bg:#070b16" in BASE_CSS  # old Aidon dark default
+    assert "--bg:#070b16" in BASE_CSS  # Aidon dark default
     assert "--accent:#0082fb" in BASE_CSS
     assert "body.light{--bg:#eef1f7" in BASE_CSS  # light override
     assert 'id="theme-toggle"' in CHAT_HTML
@@ -28,8 +29,7 @@ def test_theme_variables_and_toggle():
     assert "aidon-theme" in _page_html("X", "<p>y</p>")
 
 
-def test_settings_page_has_form():
-    # Drive the handler's settings branch through a live server.
+def test_settings_api_remains_available_without_page_route():
     with TemporaryDirectory() as td:
         home = Path(td)
         srv = WebUIServer(home, None, None)
@@ -37,18 +37,12 @@ def test_settings_page_has_form():
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         try:
             base = f"http://127.0.0.1:{httpd.server_address[1]}"
-            with urllib.request.urlopen(base + "/settings") as resp:
-                page = resp.read().decode()
-            assert 'id="settings-groups"' in page
-            assert 'id="settings-save"' in page
-            assert "Keys, hash prefixes only" in page
-            # The page itself is static now; the form's wiring lives in
-            # its script, so the catalog call is asserted there.
-            with urllib.request.urlopen(base + "/static/settings.js") as resp:
-                script = resp.read().decode()
-            assert "/api/settings/catalog" in script
-            assert "/api/settings" in script
-            assert "restart aidon webui" in (page + script).lower()
+            try:
+                urllib.request.urlopen(base + "/settings")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 404
+            else:
+                raise AssertionError("/settings route must be removed")
         finally:
             httpd.shutdown()
 
@@ -60,7 +54,7 @@ def test_settings_page_has_form():
         tz = [s for g in catalog["groups"] for s in g["settings"]
               if s["key"] == "AIDON_TIMEZONE"]
         assert tz and tz[0]["value"] == "America/Vancouver"
-        # Secrets are writable here, old-Aidon behaviour: write-only,
+        # Secrets are writable here: write-only,
         # never shown back, empty leaves the current value alone.
         secret = srv.settings_set_env("AIDON_API_KEY", "sk-test-value")
         assert secret["ok"] is True

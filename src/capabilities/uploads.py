@@ -1,4 +1,4 @@
-"""Uploads, old Aidon uploads concept, rebuilt as a separate module.
+"""Uploads, Aidon uploads concept, rebuilt as a separate module.
 
 An upload is a file copied into <home>/uploads/ with a safe filename, listed, read, and
 deleted by name, so a WebUI upload, a WhatsApp media file, or a CLI file can be stored

@@ -249,7 +249,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
     except Exception:
         pass
 
-    # Compatibility names from old Aidon.
+    # Compatibility names from Aidon.
     if "threads_publish" in tools:
         tools["threads_post"] = tools["threads_publish"]
     if "instagram_publish" in tools:
@@ -410,7 +410,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
 
     tools["notify"] = notify
 
-    # MCP client tools from old Aidon. Connections live for this goal run;
+    # MCP client tools from Aidon. Connections live for this goal run;
     # every new stdio connection is approval-gated before third-party code
     # is started. Server tools are exposed with a namespaced name so they
     # cannot collide with Aidon's own tools.
@@ -809,14 +809,14 @@ def main(argv: list[str] | None = None) -> int:
     email_parser.add_argument("--subject", default="", help="Subject for send")
     email_parser.add_argument("--body", default="", help="Body for send")
 
-    memory_parser = sub.add_parser("memory", help="Inspect and prune Aidon memory, old Aidon memory commands")
+    memory_parser = sub.add_parser("memory", help="Inspect and prune Aidon memory, Aidon memory commands")
     memory_parser.add_argument("action", choices=["forget", "ingest", "check", "prune", "list"], help="forget = delete matching memories, ingest = ingest a folder, check = list points, prune = delete decayed memories, list = list projects")
     memory_parser.add_argument("query", nargs="?", default="", help="Query for forget, folder for ingest")
     memory_parser.add_argument("--id", default=None, help="Exact point id for forget")
     memory_parser.add_argument("--collection", default="episodic", help="Collection for forget, check, prune")
     memory_parser.add_argument("--project", default="default", help="Project id")
     memory_parser.add_argument("--dry-run", action="store_true", help="Prune dry run only, do not delete")
-    skills_parser = sub.add_parser("skills", help="Inspect the skill library, old Aidon skills commands")
+    skills_parser = sub.add_parser("skills", help="Inspect the skill library, Aidon skills commands")
     skills_parser.add_argument("action", choices=["list", "show", "check", "rollback"], help="list = list skills, show = show one skill state, check = governor check, rollback = reset a skill to candidate")
     skills_parser.add_argument("name", nargs="?", default="", help="Skill name")
     tools_parser = sub.add_parser("tools", help="Inspect the tool registry")
@@ -839,7 +839,7 @@ def main(argv: list[str] | None = None) -> int:
     export_parser.add_argument("--dir", default="", help="Output directory, default <home>/export")
     export_parser.add_argument("--registry", action="store_true", help="Export the full registry to Markdown, in addition to memory points")
     export_parser.add_argument("--full", action="store_true", help="Also export missions, skills, DAGs, and runs as separate Markdown files")
-    schedule_parser = sub.add_parser("schedule", help="Cron-like scheduled jobs, old Aidon schedule commands, scheduler serve runs them")
+    schedule_parser = sub.add_parser("schedule", help="Cron-like scheduled jobs, Aidon schedule commands, scheduler serve runs them")
     schedule_parser.add_argument("action", choices=["add", "list", "remove", "show"], help="add = add a job, list = list jobs, remove = remove a job, show = show a job")
     schedule_parser.add_argument("--name", default="", help="Job name")
     schedule_parser.add_argument("--goal", default="", help="Goal for add")
@@ -853,29 +853,29 @@ def main(argv: list[str] | None = None) -> int:
     chain_parser = sub.add_parser("chain", help="Declarative tool chains, zero-LLM scheduled jobs")
     chain_parser.add_argument("action", choices=["validate", "run"], help="validate = validate a chain spec JSON, run = run a validated chain through sandbox tools")
     chain_parser.add_argument("path", help="Chain spec JSON file")
-    chat_parser = sub.add_parser("chat", help="Interactive terminal chat, old Aidon chat command, type a goal, empty line to exit")
+    chat_parser = sub.add_parser("chat", help="Interactive terminal chat, Aidon chat command, type a goal, empty line to exit")
     computer_parser = sub.add_parser("computer", help="Screenshot and computer use, approval-gated, no GUI action without a driver")
     computer_parser.add_argument("action", choices=["screenshot", "run"], help="screenshot = capture screen to a file, run = run a computer-use action JSON file")
     computer_parser.add_argument("path", help="Output PNG for screenshot, or action JSON file for run")
     computer_parser.add_argument("--approve", action="store_true", help="Approve irreversible actions in this run, otherwise they are refused")
 
-    report_parser = sub.add_parser("report", help="Autonomy and daily reports, old Aidon report commands")
+    report_parser = sub.add_parser("report", help="Autonomy and daily reports, Aidon report commands")
     report_parser.add_argument("action", choices=["autonomy", "daily"], help="autonomy = counts and gate status, daily = daily report text")
     demo_parser = sub.add_parser("demo", help="Demo learning and invent-tool, live, not canned")
     demo_parser.add_argument("action", choices=["learn", "invent-tool"], help="learn = real experience counts, invent-tool = draft a plugin skeleton and scan it, adoption still needs the gate")
     demo_parser.add_argument("--name", default="", help="Plugin name for invent-tool")
     demo_parser.add_argument("--description", default="", help="Plugin description for invent-tool")
-    slack_parser = sub.add_parser("slack", help="Slack inbound listening, old Aidon slack listen")
+    slack_parser = sub.add_parser("slack", help="Slack inbound listening, Aidon slack listen")
     slack_parser.add_argument("action", choices=["listen", "status"], help="listen = poll Slack once or for --seconds, status = configured or not")
     slack_parser.add_argument("--channel", default="", help="Slack channel id, or AIDON_SLACK_INBOUND_CHANNEL")
     slack_parser.add_argument("--seconds", type=int, default=0, help="Listen duration in seconds, 0 = one poll only")
     slack_parser.add_argument("--run", action="store_true", help="Run polled messages as goals, otherwise just print them")
-    whatsapp_parser = sub.add_parser("whatsapp", help="WhatsApp status and send, old Aidon whatsapp commands")
+    whatsapp_parser = sub.add_parser("whatsapp", help="WhatsApp status and send, Aidon whatsapp commands")
     whatsapp_parser.add_argument("action", choices=["status", "send"], help="status = configured or missing, send = send a real WhatsApp message, fails if not configured, never faked")
     whatsapp_parser.add_argument("--to", default="", help="Recipient number for send")
     whatsapp_parser.add_argument("--text", default="", help="Message text for send")
-    tick_parser = sub.add_parser("tick", help="Run due scheduler jobs once, old Aidon tick")
-    repl_parser = sub.add_parser("repl", help="Full REPL, old Aidon repl, /help, /history, /quit, or a goal")
+    tick_parser = sub.add_parser("tick", help="Run due scheduler jobs once, Aidon tick")
+    repl_parser = sub.add_parser("repl", help="Full REPL, Aidon repl, /help, /history, /quit, or a goal")
     learn_parser = sub.add_parser("learn", help="Idle learn cycle: re-test candidate skills, promote passers, consolidate validated duplicates")
     skill_lib_parser = sub.add_parser("skill-library", help="Full skill library: list, show, promote, trust, retire, rollback, versions")
     skill_lib_parser.add_argument("action", choices=["list", "show", "promote", "trust", "retire", "rollback", "versions"], help="list = list skills, show = show one, promote/trust/retire = lifecycle, rollback = restore a version, versions = version history")
@@ -930,7 +930,7 @@ def main(argv: list[str] | None = None) -> int:
     think_parser.add_argument("--level", default="", help="Requested effort level: off, low, medium, high")
     think_parser.add_argument("--escalate", action="store_true", help="Raise one level (verifier rejection only)")
     args = parser.parse_args(argv)
-    # Old Aidon called this surface `run`; keep the spelling while using
+    # This surface is called `run`; keep the spelling while using
     # the new goal runner and its current state/control implementation.
     if args.command == "run":
         args.command = "goal"
@@ -1358,7 +1358,7 @@ def main(argv: list[str] | None = None) -> int:
             except FileNotFoundError:
                 print(f"No mission {args.id}"); return 2
             if mission.get("status") != "cancelled" and mission.get("status") != "rejected":
-                # Old Aidon discard was explicit only for REJECTED drafts, here we require cancelled or rejected, otherwise refuse
+                # Discard is explicit only for cancelled or rejected drafts; otherwise refuse.
                 print(f"Discard refused: mission {args.id} status is {mission.get('status')}, not cancelled or rejected"); return 2
             store.set_status(args.id, "cancelled")
             print(f"Discarded {args.id}")
@@ -2220,7 +2220,7 @@ def main(argv: list[str] | None = None) -> int:
                 _serve_control.register(_serve_run_id, job.goal, job.project_id)
                 print(f"Job {job.name}: run id {_serve_run_id}")
 
-                # Scheduled non-goal jobs retain the old Aidon scheduler
+                # Scheduled non-goal jobs retain the Aidon scheduler
                 # semantics. They do not need a model GoalRunner.
                 _handled = False
                 if job.kind == "learn":

@@ -1,6 +1,6 @@
 """Graduated approvals: learn how often to ask, never what is forbidden.
 
-Ported from old Aidon autonomy.py, same semantics. The AutonomyPolicy
+Ported from Aidon autonomy.py, same semantics. The AutonomyPolicy
 keeps per-action-class TrustRecords: consecutive EXPLICIT human
 approvals graduate low/medium-stakes classes to act/act_and_notify.
 The boundary is deliberate and one-way:

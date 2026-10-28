@@ -48,7 +48,7 @@ post-hackathon, NOT built, NOT demoed, at the end.
   before parsing, both dispatching through the same
   trigger dispatcher, replies back on the same
   transport, with real WhatsApp Cloud API and Slack
-  chat.postMessage senders, using the old Aidon key
+  chat.postMessage senders, using the Aidon key
   names, and approve / reject by message. Real
   sending needs your own tokens, not included here,
   and not tested without those accounts, and public
@@ -134,7 +134,7 @@ post-hackathon, NOT built, NOT demoed, at the end.
   A server built without a runner still returns 501
   "execution not configured", fail-closed.
 
-- Missing old-Aidon things, built now: CLI memory,
+- Previously missing features, built now: CLI memory,
   skills, tools, dag, mission, outbox, export,
   schedule, sandbox check, chain, chat, and
   computer, plus WebUI tabs capabilities, memory,
@@ -146,7 +146,7 @@ post-hackathon, NOT built, NOT demoed, at the end.
   live desktop tool are still post-hackathon below,
   this is the tool layer, not a live GUI driver.
 
-- Old Aidon parity, built now: separate modules
+- Feature parity, built now: separate modules
   conversations, project_brief, docgen/docstore/
   ebook, mail_rules, patterns, prompts,
   recall_budget, registry with Markdown export,
@@ -225,7 +225,7 @@ post-hackathon, NOT built, NOT demoed, at the end.
   male Drosophila central nervous system connectome,
   as a biological layer, with sentient emergence and
   reinforcement learning and decision, and all the
-  good stuffs, as a joke. In Aiko's real fly work,
+  good stuffs, as a joke. In published fly research,
   MaleCNS v1.0 is about 166,700 neurons, brain plus
   optic lobes plus ventral nerve cord, with mushroom
   body, central complex, and other circuits used as

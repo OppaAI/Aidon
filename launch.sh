@@ -58,7 +58,7 @@ fi
 cd "$REPO_DIR"
 
 if [ "${1:-}" = "--both" ]; then
-  # Keep the old Aidon ports so an existing Tailscale Funnel continues to
+  # Keep the Aidon ports so an existing Tailscale Funnel continues to
   # work: public webhook Funnel -> 8766, tailnet WebUI -> 8765.
   WEBUI_PORT=${AIDON_WEBUI_PORT:-8765}
   WEBHOOK_PORT=${AIDON_WEBHOOK_PORT:-8766}

@@ -36,7 +36,7 @@ The base install does not pull heavyweight ML packages. Use `uv sync --extra mem
 `--extra embed`, `--extra sparse`, `--extra vision`, `--extra kb`, or `--extra docs`
 for the corresponding capabilities. `./setup.sh --with-optional` installs all optional groups.
 
-Setup and launch, in that order, are the entry points, as in the old Aidon guides.
+Setup and launch, in that order, are the entry points, as in the Aidon guides.
 
 ```sh
 ./setup.sh

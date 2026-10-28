@@ -29,7 +29,7 @@ How Aidon wires it in:
   canned tool results, so no browser is launched, no
   network is used, and the wiring is still tested.
 
-Security boundary, same as old Aidon: a browser can see
+Security boundary, same as Aidon: a browser can see
 a page, it cannot see Aidon's home, .env, or keys, unless
 the owner explicitly passes them, and a page's content is
 untrusted data, never instructions, never followed as a

@@ -1,4 +1,4 @@
-"""Lifecycle, old Aidon lifecycle concept, rebuilt, separate from mission snapshots.
+"""Lifecycle, Aidon lifecycle concept, rebuilt, separate from mission snapshots.
 
 A project lifecycle is a state machine, file-based under <home>/lifecycle/<project>.json:
 draft -> ready_for_review -> in_progress -> done, with cancelled from any state, and

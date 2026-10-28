@@ -7,7 +7,7 @@ then runs it mechanically on every firing.
 
 Two supported shapes (both validated by code, never by the model):
 
-1. Sequential sandbox shape (original new-Aidon form):
+1. Sequential sandbox shape:
 
     {
       "steps": [
@@ -17,7 +17,7 @@ Two supported shapes (both validated by code, never by the model):
       ]
     }
 
-2. Conditional shape (restored from old Aidon / AAA):
+2. Conditional shape (restored from Aidon / AAA):
 
     [
       {"tool": "read", "args": {"file": "status.txt"}, "as": "status"},
@@ -210,7 +210,7 @@ def validate_conditional_chain(
 
     ``allowed_tools`` is optional. When it is None (the default) any
     tool name is accepted here and the caller's ``invoke`` callable is
-    the authority: the conditional form is the old Aidon chain, which
+    the authority: the conditional form is the Aidon chain, which
     dispatches to the registered tool set, so a name that is not
     registered fails at invoke time and is recorded as an error.
     Pass a set to enforce a narrower allowlist for a specific caller.

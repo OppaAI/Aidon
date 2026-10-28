@@ -1,4 +1,4 @@
-"""Governor, old Aidon governor concept, rebuilt, file-based caps, fail closed.
+"""Governor, Aidon governor concept, rebuilt, file-based caps, fail closed.
 
 A governor caps how much a project can spend in a day: model calls, tokens, and learns,
 stored under <home>/governor/<project>.json. check returns whether a new spend fits,

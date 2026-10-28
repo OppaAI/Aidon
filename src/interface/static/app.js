@@ -268,7 +268,7 @@
   // ---- TTS playback: play button toggles to stop while playing --------
   // Audio routes through a Web Audio analyser that drives the avatar's
   // lip sync (mouth open from RMS level) and the waveform bars under
-  // the avatar circle — same pattern as Aiko's WebUI.
+  // the avatar circle — same pattern as the rest of this WebUI.
   let currentAudio = null;
   let currentBtn = null;
   let voiceAnnounce = false;

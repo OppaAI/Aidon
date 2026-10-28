@@ -1,6 +1,6 @@
-"""Semantic router, from old Aidon, embedding-based, no LLM call.
+"""Semantic router, from Aidon, embedding-based, no LLM call.
 
-What it was used for in old Aidon, exactly:
+What it was used for in Aidon, exactly:
 Classify a user goal, by embedding similarity, into
 chat, webchat, artifact, or agentic, before the full
 pipeline, so a chat question does not burn a full
@@ -22,7 +22,7 @@ memory, and it skips the full pipeline for chat and
 webchat goals. It does not make the model faster, it
 avoids model calls entirely for the route, and avoids
 a full run for chat goals.
-Example phrases are the old Aidon sets, copied as
+Example phrases are the Aidon sets, copied as
 data, not as code: chat greetings and questions,
 webchat lookups, artifact file goals, agentic actions.
 A router needs an embedder with embed_dense(list[str])
@@ -128,7 +128,7 @@ class SemanticRouter:
     def __init__(self, embedder, example_vectors: dict | None = None, cache_path=None):
         # Embedder interface, in order: embed_dense, embed_batch,
         # or single embed. HashEmbedder and EmbeddingGemma 2
-        # use embed_batch, old Aidon used embed_dense, so accept
+        # use embed_batch, Aidon used embed_dense, so accept
         # all three, otherwise the router silently disables itself
         # in the WebUI handler's try/except, which is what was
         # happening before this fix, because HashEmbedder has no

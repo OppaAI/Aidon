@@ -1,4 +1,4 @@
-"""Prompt templates, old Aidon prompts concept, rebuilt as a separate module.
+"""Prompt templates, Aidon prompts concept, rebuilt as a separate module.
 
 Prompts are data, not code scattered through the loop: a named template with {placeholders},
 rendered by code, with a hard error on a missing variable, never a silently empty placeholder.

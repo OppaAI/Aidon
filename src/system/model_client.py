@@ -134,7 +134,8 @@ class ModelClient:
     def chat(self, messages: list[Message], sampling=None) -> str:
         raise NotImplementedError
 
-    def chat_response(self, messages: list[Message], sampling=None) -> ChatResponse:
+    def chat_response(self, messages: list[Message], sampling=None,
+                      tools=None) -> ChatResponse:
         """Compatibility adapter for callers expecting a normalized response."""
         return ChatResponse(text=self.chat(messages, sampling=sampling))
 
@@ -169,7 +170,7 @@ class HttpModelClient(ModelClient):
         self.model = model
         self.timeout = timeout
 
-    def chat(self, messages: list[Message], sampling=None) -> str:
+    def _payload(self, messages: list[Message], sampling=None, tools=None) -> dict:
         payload = {
             "model": self.model,
             "messages": [{"role": m.role, "content": m.content}
@@ -182,6 +183,11 @@ class HttpModelClient(ModelClient):
                 payload["top_p"] = sampling["top_p"]
             if sampling.get("seed") is not None:
                 payload["seed"] = sampling["seed"]
+        if tools:
+            payload["tools"] = tools
+        return payload
+
+    def _post(self, payload: dict) -> dict:
         # A list content is sent as-is, so image parts reach
         # the model, not just the text part. A string content
         # is unchanged, so old text-only calls keep working.
@@ -193,15 +199,30 @@ class HttpModelClient(ModelClient):
                      "Authorization": f"Bearer {self.api_key}"},
         )
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        choices = data.get("choices") or []
-        if not choices:
-            return ""
-        content = choices[0].get("message", {}).get("content", "")
+            return json.loads(resp.read().decode("utf-8"))
+
+    @staticmethod
+    def _content(message: dict) -> str:
+        content = message.get("content", "")
         if isinstance(content, list):
             return "".join(part.get("text", "") for part in content
                            if isinstance(part, dict))
         return str(content)
+
+    def chat_response(self, messages: list[Message], sampling=None,
+                      tools=None) -> ChatResponse:
+        data = self._post(self._payload(messages, sampling=sampling, tools=tools))
+        choices = data.get("choices") or []
+        if not choices:
+            return ChatResponse(raw=data)
+        message = choices[0].get("message", {}) or {}
+        return ChatResponse(
+            text=self._content(message),
+            tool_calls=parse_openai_tool_calls(message),
+            usage=data.get("usage") or {}, raw=data)
+
+    def chat(self, messages: list[Message], sampling=None) -> str:
+        return self.chat_response(messages, sampling=sampling).text
 
 
 class OllamaClient(ModelClient):
@@ -254,8 +275,31 @@ class OllamaClient(ModelClient):
             body["options"] = {"num_ctx": self.num_ctx}
         return body
 
-    def chat(self, messages: list[Message], sampling=None) -> str:
+    def _request(self, body: dict) -> dict:
+        req = urllib.request.Request(
+            f"{self.base}/api/chat",
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", "replace")
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"Ollama {self.base} returned {exc.code}: {detail[:300]}"
+            ) from exc
+
+    def chat_response(self, messages: list[Message], sampling=None,
+                      tools=None) -> ChatResponse:
         body = self._body(messages)
+        if tools:
+            body["tools"] = tools
         if sampling:
             if sampling.get("think") is not None:
                 body["think"] = bool(sampling["think"])
@@ -266,26 +310,19 @@ class OllamaClient(ModelClient):
                 body["options"]["top_p"] = sampling["top_p"]
             if sampling.get("seed") is not None:
                 body["options"]["seed"] = sampling["seed"]
-        req = urllib.request.Request(
-            f"{self.base}/api/chat",
-            data=json.dumps(body).encode("utf-8"),
-            method="POST",
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            detail = ""
-            try:
-                detail = exc.read().decode("utf-8", "replace")
-            except Exception:
-                pass
-            raise RuntimeError(
-                f"Ollama {self.base} returned {exc.code}: {detail[:300]}"
-            ) from exc
+        data = self._request(body)
         message = data.get("message") or {}
-        return str(message.get("content", "") or "")
+        return ChatResponse(
+            text=str(message.get("content", "") or ""),
+            tool_calls=parse_ollama_tool_calls(message),
+            usage=data.get("prompt_eval_count") and {
+                "prompt_eval_count": data.get("prompt_eval_count"),
+                "eval_count": data.get("eval_count"),
+            } or {},
+            thinking=str(message.get("thinking", "") or ""), raw=data)
+
+    def chat(self, messages: list[Message], sampling=None) -> str:
+        return self.chat_response(messages, sampling=sampling).text
 
 
 class MetaModelAPIClient(HttpModelClient):
