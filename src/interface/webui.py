@@ -2781,10 +2781,17 @@ loadSettings();
                     self._send_json(404, {"error": "webhook only"})
                     return
                 raw = self._read_body()
-                try:
-                    body = json.loads(raw) if raw else {}
-                except json.JSONDecodeError:
+                content_type = self.headers.get("Content-Type", "").lower()
+                if content_type.startswith("audio/"):
+                    # Audio uploads are binary and must reach /api/transcribe
+                    # unchanged; attempting json.loads here raises a
+                    # UnicodeDecodeError before that route can handle them.
                     body = {}
+                else:
+                    try:
+                        body = json.loads(raw) if raw else {}
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        body = {}
                 if parsed.path == "/api/library/upload":
                     import base64 as _b64
                     name = str(body.get("name", "upload.bin"))
@@ -2836,7 +2843,9 @@ loadSettings();
                         else:
                             audio = _b64t.b64decode(str(body.get("audio_b64", "")))
                         from ..capabilities.voice import transcribe as _transcribe
-                        result = _transcribe(audio, server.transcribe_key)
+                        content_type = self.headers.get("Content-Type", "audio/wav")
+                        result = _transcribe(audio, server.transcribe_key,
+                                             content_type=content_type)
                         self._send_json(200, result)
                     except Exception as exc:
                         self._send_json(500, {"error": str(exc)})

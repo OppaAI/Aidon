@@ -302,6 +302,7 @@
   let ttsAvailable = false;
   let ttsCtx = null, ttsAnalyser = null, ttsAnalyserData = null;
   let ttsMouthLevel = 0, ttsMouthLoop = false, ttsPlaying = false;
+  let micCtx = null, micAnalyser = null, micAnalyserData = null;
   const waveCvs = document.getElementById("voice-wave");
   const WAVE_BARS = 26;
   const waveLevels = new Array(WAVE_BARS).fill(0);
@@ -325,7 +326,13 @@
     const W = waveCvs.width, H = waveCvs.height;
     ctx.clearRect(0, 0, W, H);
     let freq = null;
-    if (ttsPlaying && ttsAnalyser) {
+    let micTime = null;
+    if (recorder && micAnalyser) {
+      if (!micAnalyserData || micAnalyserData.length !== micAnalyser.fftSize)
+        micAnalyserData = new Uint8Array(micAnalyser.fftSize);
+      micAnalyser.getByteTimeDomainData(micAnalyserData);
+      micTime = micAnalyserData;
+    } else if (ttsPlaying && ttsAnalyser) {
       if (!waveFreq || waveFreq.length !== ttsAnalyser.frequencyBinCount)
         waveFreq = new Uint8Array(ttsAnalyser.frequencyBinCount);
       ttsAnalyser.getByteFrequencyData(waveFreq);
@@ -335,7 +342,13 @@
     const lt = document.documentElement.dataset.theme === "light";
     for (let i = 0; i < WAVE_BARS; i++) {
       let target = 0.06; // idle floor
-      if (freq) {
+      if (micTime) {
+        const stride = Math.max(1, Math.floor(micTime.length / WAVE_BARS));
+        let peak = 0;
+        for (let j = i * stride; j < Math.min(micTime.length, (i + 1) * stride); j++)
+          peak = Math.max(peak, Math.abs(micTime[j] - 128) / 128);
+        target = 0.08 + Math.min(1, peak * 2.4);
+      } else if (freq) {
         const b0 = 2 + Math.floor(i * 44 / WAVE_BARS);
         const v = ((freq[b0] || 0) + (freq[b0 + 1] || 0)) / 2 / 255;
         target = 0.06 + Math.min(1, v * 1.7);
@@ -349,6 +362,7 @@
       ctx.fillStyle = grad;
       ctx.fillRect(i * bw + bw * 0.22, mid - h / 2, Math.max(1, bw * 0.56), h);
     }
+    if (recorder) requestAnimationFrame(drawWave);
   }
 
   function mouthLoop() {
@@ -1339,20 +1353,37 @@
       return;
     }
     const chunks = [];
-    recorder = new MediaRecorder(stream);
+    const mimeTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+    const mimeType = mimeTypes.find((m) => window.MediaRecorder.isTypeSupported(m)) || "";
+    try {
+      micCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = micCtx.createMediaStreamSource(stream);
+      micAnalyser = micCtx.createAnalyser();
+      micAnalyser.fftSize = 256;
+      source.connect(micAnalyser);
+      micAnalyserData = new Uint8Array(micAnalyser.fftSize);
+    } catch (e) {
+      micCtx = null; micAnalyser = null; micAnalyserData = null;
+    }
+    recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
     recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
     recorder.onstop = async () => {
       micBtn.classList.remove("recording");
       stream.getTracks().forEach((t) => t.stop());
+      if (micCtx) micCtx.close().catch(() => {});
+      micCtx = null; micAnalyser = null; micAnalyserData = null;
       recorder = null;
-      const blob = new Blob(chunks, { type: "audio/webm" });
+      const audioType = mimeType || "audio/webm";
+      const blob = new Blob(chunks, { type: audioType });
       try {
         const r = await fetch("/api/transcribe", {
           method: "POST",
-          headers: { "X-Audio-Name": "mic.webm" },
+          headers: { "X-Audio-Name": audioType.includes("mp4") ? "mic.mp4" : "mic.webm",
+                     "Content-Type": audioType },
           body: blob,
         });
-        const data = await r.json();
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || data.detail || ("HTTP " + r.status));
         if (data.text) {
           input.value = (input.value ? input.value + " " : "") + data.text;
           input.focus();
@@ -1365,6 +1396,7 @@
     };
     recorder.start();
     micBtn.classList.add("recording");
+    drawWave();
   });
 
   drawWave(); // idle waveform frame on load

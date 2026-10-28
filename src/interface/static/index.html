@@ -116,8 +116,8 @@
     <div id="thread"></div>
     <div id="approval-slot"></div>
     <div id="img-preview" hidden></div>
+    <canvas id="voice-wave" width="520" height="34" title="Voice activity"></canvas>
     <footer id="composer">
-      <button id="mic" title="Voice input (Meta Transcribe)">&#9679;</button>
       <button id="attach-btn" title="Attach image" aria-label="Attach image">&#128206;</button>
       <button id="camera-btn" title="Take photo" aria-label="Take photo">&#128247;</button>
       <div id="composer-inputs">
@@ -125,13 +125,14 @@
         <input id="guidance-input" type="text" placeholder="Guidance (optional) — your steps or hints; Aidon follows them and fills the gaps…" autocomplete="off">
       </div>
       <button id="send">Run</button>
+      <button id="mic" title="Record voice input" aria-label="Record voice input"><span class="mic-icon">&#127908;</span></button>
     </footer>
     <div id="steer-row" hidden>
       <input id="steer-input" type="text" placeholder="Steer mid-run — Aidon finishes the current step, then follows…" autocomplete="off">
       <button id="steer-send">Steer</button>
       <button id="cancel-run">Cancel run</button>
     </div>
-    <div id="hint">Enter = run &nbsp;·&nbsp; approvals appear as cards above &nbsp;·&nbsp; mic needs AIDON_API_KEY (Meta Transcribe)</div>
+    <div id="hint">Enter = run &nbsp;·&nbsp; approvals appear as cards above &nbsp;·&nbsp; click the mic to record, click stop to transcribe</div>
   </main>
 
   <!-- ============ RIGHT SIDEBAR ============ -->
@@ -157,7 +158,6 @@
         </svg>
       </div>
     </div>
-    <canvas id="voice-wave" width="240" height="36" title="Voice activity"></canvas>
     <div id="dashboard-stack">
       <section class="dash-card">
         <div class="dash-title"><span>▣</span> Current Project <span class="dash-chevron">›</span></div>

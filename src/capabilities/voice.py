@@ -68,7 +68,8 @@ def open_tts_stream(text: str, fish_key: str, voice_id: str = ""):
     return urllib.request.urlopen(request, timeout=60)
 
 
-def transcribe(audio_bytes: bytes, transcribe_key: str, post=None) -> dict:
+def transcribe(audio_bytes: bytes, transcribe_key: str, post=None,
+               content_type: str = "audio/wav") -> dict:
     if not transcribe_key:
         return {"ok": False, "error": "AIDON_TRANSCRIBE_API_KEY not set", "text": ""}
     if not audio_bytes:
@@ -80,7 +81,7 @@ def transcribe(audio_bytes: bytes, transcribe_key: str, post=None) -> dict:
         request = urllib.request.Request(
             "https://api.meta.ai/v1/asr/transcribe", data=audio_bytes, method="POST",
             headers={"Authorization": f"Bearer {transcribe_key}",
-                     "Content-Type": "audio/wav"})
+                     "Content-Type": content_type or "audio/wav"})
         with urllib.request.urlopen(request, timeout=60) as response:
             result = json.loads(response.read())
             return {"ok": True, "text": result.get("text", "")}
