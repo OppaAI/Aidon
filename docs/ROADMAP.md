@@ -210,6 +210,10 @@ will be available inside a future VM once that backend exists.
   for local models, beyond the generic endpoint plus
   model name client built now, which already works
   with a local endpoint.
+- YAML settings file: secrets, endpoints, and models
+  stay in .env, every other setting moves to one YAML
+  file, with a one-time migration and the settings
+  page editing both sources without drift.
 - Email, RSS, and database triggers, as plugins,
   beyond the core triggers built now.
 

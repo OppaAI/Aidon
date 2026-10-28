@@ -117,7 +117,7 @@ def _promotion_ask(point) -> bool:
     return answer in ("y", "yes")
 
 
-def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
+def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     The loop approval-gates any extra tool whose name contains
@@ -144,6 +144,16 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
     from ..capabilities.tools import ToolResult
     workdir = Path(workdir)
     tools: dict = {}
+
+    def _free_path(path: Path) -> Path:
+        """First non-existing sibling: stem, stem_2, stem_3, ..."""
+        if not path.exists():
+            return path
+        for index in range(2, 1000):
+            candidate = path.with_name(f"{path.stem}_{index}{path.suffix}")
+            if not candidate.exists():
+                return candidate
+        raise ValueError(f"no free filename near {path}")
 
     def _confined(name: str) -> Path:
         relative = str(name).replace("\\", "/")
@@ -215,8 +225,14 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
                     destination += "." + str(format).lstrip(".")
                 target = _confined(destination)
                 if target.exists() and not overwrite:
-                    return (f"FILE_EXISTS: {destination}. Ask the user whether "
-                            "to overwrite it or choose a new filename.")
+                    # Same dead-end as write_file: a FILE_EXISTS string
+                    # is marked as a passed step, then repair skips the
+                    # deliverable forever while nothing was written.
+                    # Rename instead; the original is untouched.
+                    renamed_from = destination
+                    target = _free_path(target)
+                else:
+                    renamed_from = ""
                 if target.exists() and overwrite:
                     ok, why = _approval(
                         "live", "Overwrite existing document",
@@ -225,6 +241,9 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
                     if not ok:
                         return f"overwrite rejected for {destination}: {why}"
                 result = write_document_file(title, sections, target)
+                if renamed_from:
+                    result = (f"wrote {target} (renamed: requested "
+                              f"{renamed_from} already existed)")
                 return ToolResult(result, path=target, kind="document")
             return generate_document(title, sections)
         tools["generate_document"] = _generate_document
@@ -354,8 +373,15 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         name = str(name or input_path or path or file)
         path = _confined(name)
         if path.exists() and not overwrite:
-            return (f"FILE_EXISTS: {name}. Ask the user whether to overwrite "
-                    "it or choose a new filename.")
+            # Never dead-end the run with a FILE_EXISTS string: the
+            # executor marks a returned string as a passed step, then
+            # repair skips that deliverable forever while the file
+            # was never written. Rename instead; the original is
+            # untouched, so no approval is needed for a rename.
+            path = _free_path(path)
+            renamed_from = name
+        else:
+            renamed_from = ""
         if path.exists() and overwrite:
             ok, why = _approval("live", "Overwrite existing file",
                                 f"Replace the existing file {path}?",
@@ -363,7 +389,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
             if not ok:
                 return f"overwrite rejected for {name}: {why}"
         path.write_text(str(text if text != "" else content), encoding="utf-8")
-        return ToolResult(f"wrote {path}", path=path, kind="file")
+        note = f" (renamed: requested {renamed_from} already existed)" if renamed_from else ""
+        return ToolResult(f"wrote {path}{note}", path=path, kind="file")
 
     tools["read_file"] = read_file
     tools["write_file"] = write_file
@@ -673,12 +700,20 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
 
     def ask_user(question):
         # Interview / clarifying questions are chat turns, not approval
-        # cards. With no gate there is no surface to carry the question
-        # back to the owner, so say that instead of pretending it was
-        # asked (the reply would otherwise be mistaken for an answer).
+        # cards. When the surface provides a question channel (the
+        # WebUI waiter), block until the owner answers; questions
+        # carry no 180s clock. Without a channel, say so instead of
+        # echoing the question back as if it were answered.
+        if question_answer is not None:
+            try:
+                return str(question_answer(question))
+            except Exception as exc:
+                return f"question failed: {exc}"
         if gate is None:
             return "no gate configured"
-        return str(question)
+        return ("QUESTION_NOT_DELIVERED: no channel exists to ask the user "
+                "this question; proceed with your best judgment and note "
+                "the assumption.")
 
     def declare_blocked(reason):
         # Single shape source: direction.blocked_note is the dict form,
@@ -1963,7 +1998,7 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"))
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback")), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"))
             def _surface_reply(text):
                 # The WebUI already displays and polls the run ID. Keep the
                 # ID in Slack/WhatsApp replies where it is needed for

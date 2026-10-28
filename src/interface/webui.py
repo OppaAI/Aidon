@@ -833,6 +833,11 @@ class WebUIServer:
         self.media_downloader = media_downloader
         self.run_control = run_control
         self._web_runs: dict[str, dict] = {}
+        # Runs blocked in ask_user, by run id and by conversation id.
+        # A question is a chat turn, not an approval card: no clock.
+        self._question_waiters: dict[str, dict] = {}
+        self._question_by_conversation: dict[str, dict] = {}
+        self._question_lock = threading.Lock()
         self.webui_token = webui_token
         self.transcribe_key = transcribe_key
         self.tts_key = tts_key
@@ -1083,6 +1088,53 @@ class WebUIServer:
             return {"reply": f"Error: {exc}"}
         return {"reply": replies[0] if replies else "Received."}
 
+    def ask_question(self, run_id: str, conversation_id: str, question: str) -> str:
+        """Block the run thread until the owner answers in chat.
+
+        The question is posted as a chat event so the owner sees it,
+        and run_snapshot reports it as waiting_question so the
+        composer stays usable. Questions carry no 180s clock (chat
+        is for conversation, cards are for decisions); the wait ends
+        on an answer or on run cancellation.
+        """
+        event = threading.Event()
+        waiter = {"run_id": run_id, "conversation_id": conversation_id,
+                  "question": str(question), "event": event, "answer": None}
+        with self._question_lock:
+            self._question_waiters[run_id] = waiter
+            self._question_by_conversation[conversation_id] = waiter
+        record = self._web_runs.get(run_id)
+        if record is not None:
+            record["events"].append({"kind": "aidon", "text": str(question)})
+        try:
+            while not event.wait(1.0):
+                if (self.run_control is not None
+                        and self.run_control.is_cancelled(run_id)):
+                    return ("QUESTION_CANCELLED: the run was cancelled "
+                            "while waiting for an answer.")
+            return waiter["answer"] if waiter["answer"] is not None else ""
+        finally:
+            with self._question_lock:
+                if self._question_waiters.get(run_id) is waiter:
+                    del self._question_waiters[run_id]
+                if self._question_by_conversation.get(conversation_id) is waiter:
+                    del self._question_by_conversation[conversation_id]
+
+    def answer_question(self, conversation_id: str, answer: str) -> str | None:
+        """Deliver a chat answer to the waiting run in this conversation."""
+        with self._question_lock:
+            waiter = self._question_by_conversation.get(conversation_id)
+            if waiter is None:
+                return None
+            waiter["answer"] = str(answer)
+            waiter["event"].set()
+            return waiter["run_id"]
+
+    def waiting_question(self, run_id: str) -> str | None:
+        with self._question_lock:
+            waiter = self._question_waiters.get(run_id)
+            return waiter["question"] if waiter else None
+
     def start_goal(self, body: dict) -> dict:
         """Start the same dispatcher path used by messaging triggers."""
         from .run_control import new_run_id
@@ -1118,6 +1170,15 @@ class WebUIServer:
                 )
             except Exception:
                 pass
+        # A message sent while this conversation's run waits for a
+        # question IS the answer, not a new goal: the composer is
+        # disabled while a run works and enabled only while it waits,
+        # so a goal arriving here can only be an answer. Return the
+        # same run id, as the frontend's answer path expects.
+        answered_run = self.answer_question(conversation_id, goal)
+        if answered_run is not None:
+            return {"run_id": answered_run, "conversation_id": conversation_id,
+                    "goal": goal}
         run_id = new_run_id()
         if self.run_control is not None:
             self.run_control.register(run_id, goal, project_id)
@@ -1145,6 +1206,9 @@ class WebUIServer:
             if isinstance(item, dict):
                 record["trace"].append(dict(item))
 
+        def question_callback(question):
+            return self.ask_question(run_id, conversation_id, question)
+
         def reply(text):
             record["events"].append({"kind": "aidon-final", "text": str(text),
                                      "stream_id": run_id if stream_state["active"] else ""})
@@ -1167,6 +1231,7 @@ class WebUIServer:
                    "_stream_callback": stream_delta,
                    "_route_callback": route_update,
                    "_trace_callback": trace_update,
+                   "_question_callback": question_callback,
                    "result_delivery": delivery.__dict__ if delivery else {}}
         image_paths = [str(path) for path in (body.get("image_paths") or [])
                        if str(path).strip()]
@@ -1215,6 +1280,7 @@ class WebUIServer:
         out["trace_total"] = len(all_trace)
         out["events"] = all_events[max(0, int(since)):]
         out["trace"] = all_trace[max(0, int(trace_since)):]
+        out["waiting_question"] = self.waiting_question(run_id)
         pending = self.webui_gate.pending_cards()
         out["pending"] = pending[0] if pending else None
         return out

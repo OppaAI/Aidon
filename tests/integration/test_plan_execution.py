@@ -131,7 +131,10 @@ def test_document_goal_does_not_accept_list_only_plan(tmp_path):
             "deliverables": ["workdir_listing_verification"],
             "criteria": ["PDF is created inside workdir with auto-derived filename"]}
 
-    def generate_document(title, content, format):
+    def generate_document(title, content, format, filename=None):
+        # The fallback now passes an explicit filename (the real tool
+        # honors it); this stub keeps writing its derived path, which
+        # is what the actual-path binding is supposed to map to.
         path = tmp_path / "home" / "work" / "derived.pdf"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"%PDF-1.4")

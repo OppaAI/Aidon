@@ -673,6 +673,40 @@ class GoalRunner:
                     raise ValueError(
                         "Do not use shell/fpdf for PDF output; use the "
                         "available generate_document tool instead")
+                if "generate_document" in self.extra_tools:
+                    # The text check above misses the common bypass:
+                    # write a script file importing fpdf, then run it
+                    # by name (``python3 make_pdf.py`` contains no
+                    # "fpdf"). Refuse to run a workdir script that
+                    # imports a PDF library when the document tool
+                    # already writes PDFs with no install needed.
+                    import re as _re
+                    workdir = getattr(self.sandbox, "workdir", None)
+                    for token in (args.get("command") or []):
+                        if not str(token).endswith(".py"):
+                            continue
+                        try:
+                            candidate = Path(str(token))
+                            if not candidate.is_absolute():
+                                candidate = Path(workdir) / candidate
+                            elif workdir is not None:
+                                # Only police scripts inside the run's
+                                # workdir; host scripts are not the
+                                # planner's PDF bypass.
+                                resolved = candidate.resolve()
+                                root = Path(workdir).resolve()
+                                if resolved != root and root not in resolved.parents:
+                                    continue
+                            source = candidate.read_text(
+                                encoding="utf-8", errors="replace")
+                        except Exception:
+                            continue
+                        if _re.search(r"^\s*(?:import|from)\s+(fpdf|reportlab)\b",
+                                      source, _re.MULTILINE):
+                            raise ValueError(
+                                "Do not run a script importing fpdf or "
+                                "reportlab for PDF output; use the "
+                                "available generate_document tool instead")
             return self.tools.call(name, args)
         except ValueError as exc:
             if str(exc).startswith("unknown tool:") and self.plugins is not None:
@@ -757,10 +791,11 @@ class GoalRunner:
                             "requested output file.")
                 system += (" Document and file tools refuse to overwrite an "
                            "existing path unless overwrite=true is supplied "
-                           "and the human approves it. If they return "
-                           "FILE_EXISTS, ask the human to approve replacement "
-                           "or choose a new filename; do not retry the same "
-                           "path indefinitely.")
+                           "and the human approves it. When the path exists, "
+                           "they write to a numbered rename (name_2, "
+                           "name_3, ...) and report the actual path; use "
+                           "that reported path in deliverables and "
+                           "criteria, and do not retry the original path.")
                 system += (" Do not invent a filename or the literal "
                            "workdir/ prefix. If the user did not specify a "
                            "filename, omit the output path and let Aidon "
@@ -1262,7 +1297,8 @@ class GoalRunner:
                 steps=[Step(
                     tool="generate_document",
                     args={"title": "Aidon document", "content": goal,
-                          "format": "pdf"},
+                          "format": "pdf",
+                          "filename": "generated_document.pdf"},
                     deliverable="generated_document.pdf",
                     criteria="PDF file is created inside workdir")],
                 deliverables=["generated_document.pdf"],
