@@ -15,6 +15,7 @@ from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
 from src.capabilities.tools import ToolRegistry
 from src.capabilities.tools import ToolResult
+from src.capabilities.extra_tools import dispatch_extra_tool
 from src.agentic.verify import check_criterion, verify_plan
 
 
@@ -50,6 +51,9 @@ def test_tool_result_keeps_text_and_artifact_metadata(tmp_path):
     assert result.path.endswith("report.pdf")
     assert result.kind == "document"
     assert result.status == "ok"
+    dispatched = dispatch_extra_tool(
+        {"make_file": lambda: result}, "make_file")
+    assert dispatched.path.endswith("report.pdf")
 
 
 def test_verify_criteria_and_ledger(tmp_path):

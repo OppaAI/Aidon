@@ -53,4 +53,7 @@ def dispatch_extra_tool(tools: dict, name: str, args=None) -> str:
         result = handler(**args)
     else:
         result = handler(args)
-    return str(result)
+    # Preserve structured string subclasses such as ToolResult. They remain
+    # fully backward-compatible strings, but carry authoritative artifact
+    # metadata (path/kind/status) for the executor and verifier.
+    return result if isinstance(result, str) else str(result)
