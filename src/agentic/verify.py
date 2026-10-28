@@ -69,7 +69,7 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
     text = str(criterion).strip()
     # Models often describe the evidence instead of naming the generated
     # file. The file-producing tool is the source of truth in this case.
-    if re.search(r"(?:pdf|document|file)\s+(?:file\s+)?(?:is\s+)?created\s+inside\s+(?:the\s+)?workdir(?:\b|$)",
+    if re.search(r"(?:pdf|document|file)\s+(?:file\s+)?(?:is\s+)?(?:created|exists)\s+inside\s+(?:the\s+)?workdir(?:\b|$)",
                  text, re.IGNORECASE):
         files = [path for path in workdir.rglob("*")
                  if path.is_file() and (path.suffix.lower() == ".pdf"
@@ -80,6 +80,13 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
     if re.search(r"(?:output|final)\s+message\s+provides?\s+(?:a\s+)?link\s+to\s+(?:the\s+)?(?:file|document|pdf)",
                  text, re.IGNORECASE):
         files = [path for path in workdir.rglob("*") if path.is_file()]
+        ok = bool(files)
+        return ok, ("output link target available" if ok
+                    else "output link target missing")
+    if re.search(r"(?:pdf|document)\s+link\s+(?:can\s+be\s+)?returned\s+in\s+output\s+message",
+                 text, re.IGNORECASE):
+        files = [path for path in workdir.rglob("*")
+                 if path.is_file() and path.suffix.lower() == ".pdf"]
         ok = bool(files)
         return ok, ("output link target available" if ok
                     else "output link target missing")
@@ -136,11 +143,21 @@ def verify_plan(workdir: Path, deliverables: list[str],
     """Returns (ok, failures, verified_files)."""
     failures: list[str] = []
     verified: list[str] = []
+    pdf_files = [path for path in workdir.rglob("*")
+                 if path.is_file() and path.suffix.lower() == ".pdf"]
     for name in deliverables:
         relative = _relative_name(workdir, name)
         path = workdir / relative
         if not path.is_file():
-            failures.append(f"missing deliverable: {name}")
+            # If a document tool produced exactly one PDF, its structured
+            # result may have been lost by an older adapter or an in-flight
+            # repair. Recover the real artifact rather than asking a model
+            # to verify a prose label or replacing the plan with ``list``.
+            if (len(pdf_files) == 1 and
+                    re.search(r"pdf|document", str(name), re.IGNORECASE)):
+                verified.append(str(pdf_files[0].relative_to(workdir)))
+            else:
+                failures.append(f"missing deliverable: {name}")
         elif path.stat().st_size == 0:
             failures.append(f"empty deliverable: {name}")
         else:

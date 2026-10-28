@@ -81,6 +81,18 @@ def test_verify_normalizes_workdir_and_output_link_criteria(tmp_path):
     assert verified == ["workdir/aidon_intro.pdf"]
 
 
+def test_verify_recovers_single_pdf_from_prose_deliverable(tmp_path):
+    work = tmp_path / "workdir"
+    work.mkdir()
+    (work / "Aidon_document_2026.pdf").write_bytes(b"%PDF-1.4")
+    ok, failures, verified = verify_plan(
+        work, ["Aidon introduction PDF"],
+        ["PDF file exists inside workdir",
+         "PDF link can be returned in output message"])
+    assert ok, failures
+    assert verified == ["Aidon_document_2026.pdf"]
+
+
 def test_loop_executes_real_steps_and_verifies(tmp_path):
     plan = {"steps": [{"tool": "write", "args": {"file": "out.md", "text": "done"}, "deliverable": "out.md"}],
             "deliverables": ["out.md"], "criteria": ["out.md contains done"]}
