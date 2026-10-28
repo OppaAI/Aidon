@@ -980,6 +980,49 @@ class WebUIServer:
         except Exception:
             return []
 
+    def _project_records(self) -> list[dict]:
+        """Return durable projects, including empty newly-created ones."""
+        records = []
+        seen = set()
+        try:
+            for item in self._conversations_db().list_projects():
+                record = {"id": str(item["id"]),
+                          "name": str(item.get("name") or item["id"]),
+                          "conversation_count": 0}
+                records.append(record)
+                seen.add(record["id"])
+        except Exception:
+            pass
+        try:
+            memory_projects = self._projects()
+        except Exception:
+            memory_projects = []
+        for project_id in memory_projects:
+            project_id = str(project_id)
+            if project_id and project_id not in seen:
+                records.append({"id": project_id, "name": project_id,
+                                "conversation_count": 0})
+                seen.add(project_id)
+        try:
+            db = self._conversations_db()
+            for item in records:
+                item["conversation_count"] = len(
+                    db.list_conversations(item["id"]))
+        except Exception:
+            pass
+        return records
+
+    def handle_project_create(self, body: dict) -> dict:
+        name = " ".join(str(body.get("name", "")).split()).strip()
+        if not name:
+            return {"ok": False, "error": "project name is required"}
+        if len(name) > 120:
+            return {"ok": False, "error": "project name is too long"}
+        try:
+            return self._conversations_db().create_project(name)
+        except Exception as exc:
+            return {"ok": False, "error": f"could not create project: {exc}"}
+
     def _avatar_path(self) -> Path | None:
         import os
         candidates = []
@@ -2839,7 +2882,7 @@ loadSettings();
                         items = server._library_files()
                     self._send_json(200, {"files": items})
                 elif parsed.path == "/api/projects":
-                    self._send_json(200, {"projects": server._projects()})
+                    self._send_json(200, {"projects": server._project_records()})
                 elif parsed.path == "/api/approvals":
                     # Auth already checked at the top of do_GET,
                     # the same is_authorized check every /api/
@@ -3127,6 +3170,9 @@ loadSettings();
                         else:
                             result = server.settings_set_env(key, body.get("value", ""))
                             self._send_json(200 if result.get("ok") else 400, result)
+                elif parsed.path == "/api/projects":
+                    result = server.handle_project_create(body)
+                    self._send_json(200 if result.get("id") else 400, result)
                 elif parsed.path == "/api/settings/env":
                     result = server.settings_set_env(str(body.get("key", "")), body.get("value", ""))
                     self._send_json(200 if result.get("ok") else 400, result)

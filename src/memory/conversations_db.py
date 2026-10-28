@@ -129,6 +129,13 @@ class ConversationStoreDB:
             self._conn.commit()
         return {"id": project_id, "name": name}
 
+    def list_projects(self) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, name, created_at FROM projects ORDER BY created_at"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     # -- conversations -------------------------------------------------
 
     def create_conversation(self, project_id: str) -> dict:
