@@ -134,6 +134,10 @@ class ModelClient:
     def chat(self, messages: list[Message], sampling=None) -> str:
         raise NotImplementedError
 
+    def chat_stream(self, messages: list[Message], sampling=None):
+        """Yield text deltas when supported; default keeps old clients safe."""
+        yield self.chat(messages, sampling=sampling)
+
     def chat_response(self, messages: list[Message], sampling=None,
                       tools=None) -> ChatResponse:
         """Compatibility adapter for callers expecting a normalized response."""
@@ -198,6 +202,7 @@ class HttpModelClient(ModelClient):
             headers={"Content-Type": "application/json",
                      "Authorization": f"Bearer {self.api_key}"},
         )
+        emitted = False
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
@@ -223,6 +228,39 @@ class HttpModelClient(ModelClient):
 
     def chat(self, messages: list[Message], sampling=None) -> str:
         return self.chat_response(messages, sampling=sampling).text
+
+    def chat_stream(self, messages: list[Message], sampling=None):
+        payload = self._payload(messages, sampling=sampling)
+        payload["stream"] = True
+        req = urllib.request.Request(
+            f"{self.api_base}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"), method="POST",
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {self.api_key}"})
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line or line == "data: [DONE]":
+                    continue
+                if line.startswith("data:"):
+                    line = line[5:].strip()
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                choices = data.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                text = delta.get("content", "")
+                if text:
+                    emitted = True
+                    yield str(text)
+        if not emitted:
+            # Some compatible gateways ignore stream=true and return one
+            # normal JSON response. Preserve compatibility rather than
+            # silently showing an empty answer.
+            yield self.chat(messages, sampling=sampling)
 
 
 class NativeModelClient(ModelClient):
@@ -321,6 +359,37 @@ class NativeModelClient(ModelClient):
 
     def chat(self, messages: list[Message], sampling=None) -> str:
         return self.chat_response(messages, sampling=sampling).text
+
+    def chat_stream(self, messages: list[Message], sampling=None):
+        body = self._body(messages)
+        body["stream"] = True
+        if sampling:
+            if sampling.get("think") is not None:
+                body["think"] = bool(sampling["think"])
+            body.setdefault("options", {})
+            for key in ("temperature", "top_p", "seed"):
+                if sampling.get(key) is not None:
+                    body["options"][key] = sampling[key]
+        req = urllib.request.Request(
+            f"{self.base}/api/chat", data=json.dumps(body).encode("utf-8"),
+            method="POST", headers={"Content-Type": "application/json"})
+        emitted = False
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                message = data.get("message") or {}
+                text = message.get("content", "")
+                if text:
+                    emitted = True
+                    yield str(text)
+        if not emitted:
+            yield self.chat(messages, sampling=sampling)
 
 
 class MetaModelAPIClient(HttpModelClient):

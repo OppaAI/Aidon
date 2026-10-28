@@ -64,6 +64,22 @@ WEBCHAT_EXAMPLES = [
     "what's a good restaurant in Seattle for a business dinner?",
 ]
 
+# Intent examples are deliberately topic-free. The subject belongs in the
+# user's text; these examples only teach the router that the user wants an
+# external lookup.
+WEB_INTENT_EXAMPLES = [
+    "check the web",
+    "check online",
+    "look online",
+    "look into the web",
+    "search the internet",
+    "browse online",
+    "verify this on the web",
+    "find this online",
+    "research this online",
+    "look up current information",
+]
+
 ARTIFACT_EXAMPLES = [
     "write a haiku about the ocean to haiku.md",
     "save a comparison of flask and django to cmp.md in markdown",
@@ -146,6 +162,7 @@ class SemanticRouter:
             self._webchat_vecs = example_vectors["webchat"]
             self._agentic_vecs = example_vectors["agentic"]
             self._artifact_vecs = example_vectors["artifact"]
+            self._web_intent_vecs = example_vectors.get("web_intent", self._webchat_vecs)
             return
         cached = self._load_cache(cache_path) if cache_path else None
         if cached is not None:
@@ -153,11 +170,13 @@ class SemanticRouter:
             self._webchat_vecs = cached["webchat"]
             self._agentic_vecs = cached["agentic"]
             self._artifact_vecs = cached["artifact"]
+            self._web_intent_vecs = cached.get("web_intent", self._webchat_vecs)
             return
         self._chat_vecs = self._embed(CHAT_EXAMPLES)
         self._webchat_vecs = self._embed(WEBCHAT_EXAMPLES)
         self._agentic_vecs = self._embed(AGENTIC_EXAMPLES)
         self._artifact_vecs = self._embed(ARTIFACT_EXAMPLES)
+        self._web_intent_vecs = self._embed(WEB_INTENT_EXAMPLES)
         if cache_path:
             self._save_cache(cache_path)
 
@@ -169,10 +188,13 @@ class SemanticRouter:
             if data.get("embedder") != self._embedder_name:
                 return None
             if data.get("examples") != {"chat": CHAT_EXAMPLES, "webchat": WEBCHAT_EXAMPLES,
+                                        "web_intent": WEB_INTENT_EXAMPLES,
                                         "agentic": AGENTIC_EXAMPLES, "artifact": ARTIFACT_EXAMPLES}:
                 return None
             vecs = data["vectors"]
-            if len(vecs["chat"]) != len(CHAT_EXAMPLES) or len(vecs["webchat"]) != len(WEBCHAT_EXAMPLES):
+            if (len(vecs["chat"]) != len(CHAT_EXAMPLES)
+                    or len(vecs["webchat"]) != len(WEBCHAT_EXAMPLES)
+                    or len(vecs.get("web_intent", [])) != len(WEB_INTENT_EXAMPLES)):
                 return None
             return vecs
         except Exception:
@@ -186,8 +208,10 @@ class SemanticRouter:
             path.parent.mkdir(parents=True, exist_ok=True)
             data = {"embedder": self._embedder_name,
                     "examples": {"chat": CHAT_EXAMPLES, "webchat": WEBCHAT_EXAMPLES,
+                                 "web_intent": WEB_INTENT_EXAMPLES,
                                  "agentic": AGENTIC_EXAMPLES, "artifact": ARTIFACT_EXAMPLES},
                     "vectors": {"chat": self._chat_vecs, "webchat": self._webchat_vecs,
+                                "web_intent": self._web_intent_vecs,
                                 "agentic": self._agentic_vecs, "artifact": self._artifact_vecs}}
             path.write_text(_json.dumps(data))
         except Exception:
@@ -195,6 +219,12 @@ class SemanticRouter:
 
     def classify(self, text: str) -> tuple[str, float]:
         vec = self._embed([text])[0]
+        web_intent_score = max(_cosine(vec, v) for v in self._web_intent_vecs)
+        # This is semantic similarity to a topic-free lookup intent, not a
+        # regex or a hard-coded subject. It lets “check the web” govern the
+        # rest of the request, whatever topic follows it.
+        if web_intent_score >= 0.55:
+            return "webchat", min(1.0, web_intent_score)
         scores = [
             ("chat", max(_cosine(vec, v) for v in self._chat_vecs)),
             ("webchat", max(_cosine(vec, v) for v in self._webchat_vecs)),

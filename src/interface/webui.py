@@ -1062,9 +1062,20 @@ class WebUIServer:
         record = {"run_id": run_id, "goal": goal, "project_id": project_id,
                   "status": "running", "events": [], "trace": []}
         self._web_runs[run_id] = record
+        stream_state = {"text": "", "active": False}
+
+        def stream_delta(delta):
+            text = str(delta or "")
+            if not text:
+                return
+            stream_state["active"] = True
+            stream_state["text"] += text
+            record["events"].append({"kind": "aidon-stream",
+                                     "stream_id": run_id, "delta": text})
 
         def reply(text):
-            record["events"].append({"kind": "aidon-final", "text": str(text)})
+            record["events"].append({"kind": "aidon-final", "text": str(text),
+                                     "stream_id": run_id if stream_state["active"] else ""})
             if conversation_db is not None:
                 try:
                     conversation_db.record_exchange(conversation_id, "assistant", str(text))
@@ -1081,6 +1092,7 @@ class WebUIServer:
         payload = {"run_id": run_id,
                    "guidance": str(body.get("guidance", "")),
                    "force_web": force_web,
+                   "_stream_callback": stream_delta,
                    "result_delivery": delivery.__dict__ if delivery else {}}
         image_paths = [str(path) for path in (body.get("image_paths") or [])
                        if str(path).strip()]

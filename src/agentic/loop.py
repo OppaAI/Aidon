@@ -260,7 +260,8 @@ class GoalRunner:
                  researcher=None, extra_tools=None, router=None,
                  versioned_writes: bool = False,
                  network_available: bool | None = None,
-                 guidance: str = "", image_paths=None, force_web: bool = False):
+                 guidance: str = "", image_paths=None, force_web: bool = False,
+                 stream_callback=None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -313,6 +314,7 @@ class GoalRunner:
         self.researcher = researcher
         self.extra_tools = extra_tools or {}
         self.force_web = bool(force_web)
+        self.stream_callback = stream_callback
 
     def _trace(self, kind: str, status: str, detail: str = "") -> None:
         # Attribute to this runner's own run id: sub-runners share
@@ -514,6 +516,29 @@ class GoalRunner:
                 creative=bool(getattr(self, "_creative_mode", False)))
         except Exception:
             sampling = None
+        if (self.stream_callback is not None
+                and str(phase).lower() in ("respond", "webchat")):
+            stream_client = self.router if self.router is not None else self.client
+            stream = getattr(stream_client, "chat_stream", None)
+            if callable(stream):
+                chunks = []
+                try:
+                    iterator = (stream(str(phase), messages, sampling=sampling)
+                                if self.router is not None
+                                else stream(messages, sampling=sampling))
+                except TypeError:
+                    try:
+                        iterator = (stream(str(phase), messages)
+                                    if self.router is not None
+                                    else stream(messages))
+                    except TypeError:
+                        iterator = stream(messages)
+                for chunk in iterator:
+                    text = str(chunk)
+                    if text:
+                        chunks.append(text)
+                        self.stream_callback(text)
+                return "".join(chunks)
         has_image = False
         for message in messages or []:
             content = getattr(message, "content", "")
@@ -867,7 +892,8 @@ class GoalRunner:
         _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
         if self.force_web and self.researcher is not None and spec is None and not _write_intent:
             from ..capabilities.webchat import webchat_reply
-            reply = webchat_reply(goal, self.researcher, self.client)
+            reply = webchat_reply(goal, self.researcher, self.client,
+                                  on_token=self.stream_callback)
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
@@ -878,7 +904,8 @@ class GoalRunner:
             return self._finalize(report)
         if self.use_semantic_router_skip and self.last_route and self.last_route[0] == "webchat" and spec is None and not _write_intent and self.researcher is not None:
             from ..capabilities.webchat import webchat_reply
-            reply = webchat_reply(goal, self.researcher, self.client)
+            reply = webchat_reply(goal, self.researcher, self.client,
+                                  on_token=self.stream_callback)
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)

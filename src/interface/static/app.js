@@ -49,6 +49,7 @@
   let lastTraceCount = 0;
   let lastTracePhase = null;
   let cardShownFor = null;
+  const streamMessages = {};
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) =>
@@ -563,11 +564,15 @@
         body: JSON.stringify({ text: spoken }),
       };
       const streamRequest = fetch("/api/tts/stream", request);
-      if (el && el._typing) { try { await el._typing; } catch (e) {} }
-      if (gen !== speakGen) return;
       const streamResponse = await streamRequest;
       if (!streamResponse.ok) throw new Error("tts " + streamResponse.status);
-      const progressive = await progressiveAudio(streamResponse);
+      // Start consuming Fish while the message is still typewriting. The
+      // old order waited for the complete visual animation before reading
+      // the first audio chunk, which made long answers feel silent.
+      const progressivePromise = progressiveAudio(streamResponse);
+      if (el && el._typing) { try { await el._typing; } catch (e) {} }
+      if (gen !== speakGen) return;
+      const progressive = await progressivePromise;
       let audio;
       let url;
       if (progressive) {
@@ -866,9 +871,32 @@
           if (!renderMaybeImage("user", e.text, e.t))
             addMsg("user", e.text, e.t);
         }
-        else if (e.kind === "aidon" || e.kind === "aidon-final") {
-          const m = addMsgTyped("aidon", e.text, e.t, e.kind === "aidon-final");
-          const btn = playButton(e.text || "", m);
+        else if (e.kind === "aidon-stream" || e.kind === "aidon" || e.kind === "aidon-final") {
+          const sid = e.stream_id || "";
+          let m = sid ? streamMessages[sid] : null;
+          if (e.kind === "aidon-stream") {
+            if (!m) {
+              m = addMsg("aidon", "", e.t);
+              m._streamText = "";
+              m.innerHTML = "";
+              m._body = document.createElement("div");
+              m.appendChild(m._body);
+              streamMessages[sid] = m;
+            }
+            m._streamText += String(e.delta || "");
+            m._body.innerHTML = md(m._streamText);
+            thread.scrollTop = thread.scrollHeight;
+            return;
+          }
+          if (m) {
+            m._streamText = String(e.text || m._streamText || "");
+            m.innerHTML = e.kind === "aidon-final"
+              ? renderFinalMessage(m._streamText) : md(m._streamText);
+            if (e.kind === "aidon-final") delete streamMessages[sid];
+          } else {
+            m = addMsgTyped("aidon", e.text, e.t, e.kind === "aidon-final");
+          }
+          const btn = playButton(e.text || m._streamText || "", m);
           m.appendChild(btn);
           if (e.kind === "aidon-final") {
             // The run is over: the avatar smiles, the answer is read

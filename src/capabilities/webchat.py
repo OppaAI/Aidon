@@ -58,13 +58,24 @@ def _named_file(goal: str):
     return match.group(0) if match else None
 
 
-def _call_model(client, prompt: str) -> str:
+def _call_model(client, prompt: str, on_token=None) -> str:
     message = _make_message(prompt)
     try:
         from ..agentic.think_effort import sampling_for
         sampling = sampling_for("webchat")
     except Exception:
         sampling = None
+    if on_token is not None and hasattr(client, "chat_stream"):
+        chunks = []
+        try:
+            stream = client.chat_stream("webchat", [message], sampling=sampling)
+        except TypeError:
+            stream = client.chat_stream([message], sampling=sampling)
+        for chunk in stream:
+            text = str(chunk)
+            chunks.append(text)
+            on_token(text)
+        return "".join(chunks)
     if hasattr(client, "chat_phase"):
         try:
             return str(client.chat_phase("webchat", [message], sampling=sampling))
@@ -167,7 +178,7 @@ def read_only_tools(workdir) -> dict:
     return {"read": read}
 
 
-def webchat_reply(goal: str, researcher, client) -> str:
+def webchat_reply(goal: str, researcher, client, on_token=None) -> str:
     """Return a webchat reply for a goal, from researcher facts only."""
     if not goal or not str(goal).strip():
         raise ValueError("goal is required")
@@ -190,10 +201,4 @@ def webchat_reply(goal: str, researcher, client) -> str:
         "Answer the goal using only the facts above. "
         "Do not invent any fact that is not in the facts above."
     )
-    message = _make_message(prompt)
-    if hasattr(client, "chat_phase"):
-        try:
-            return str(client.chat_phase("webchat", [message]))
-        except TypeError:
-            return str(client.chat([message]))
-    return str(client.chat([message]))
+    return _call_model(client, prompt, on_token=on_token)
