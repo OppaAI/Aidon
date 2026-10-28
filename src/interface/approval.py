@@ -79,6 +79,7 @@ class ApprovalGate:
         stakes: str | None = None,
         force_ask: bool = False,
         reversible: bool = False,
+        context: dict | None = None,
     ) -> Decision:
         """Ask for a decision. kind == 'question' is not a decision.
 
@@ -103,6 +104,12 @@ class ApprovalGate:
             publish, spend, delete, or install anything. The plain
             gate ignores it; a PreapprovalGate wrapper uses it to
             decide whether a "live" grant may skip the card.
+        context:
+            Optional run context for the deciding surface
+            (run_id, conversation_id, source, whatsapp_to, ...).
+            Forwarded to the decide callable only when it
+            accepts a context parameter, so plain decide
+            callables keep working unchanged.
         """
         if kind == "question":
             raise ValueError("questions are chat turns, not approval cards")
@@ -132,8 +139,17 @@ class ApprovalGate:
                 )
 
         result: list[Decision] = []
+        decide_kwargs: dict = {}
+        if context is not None:
+            import inspect as _inspect
+            try:
+                if "context" in _inspect.signature(self._decide).parameters:
+                    decide_kwargs["context"] = context
+            except (TypeError, ValueError):
+                pass
         thread = threading.Thread(
-            target=lambda: result.append(self._decide(kind, title, body)),
+            target=lambda: result.append(
+                self._decide(kind, title, body, **decide_kwargs)),
             daemon=True,
         )
         thread.start()

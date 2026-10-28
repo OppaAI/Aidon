@@ -331,7 +331,7 @@ class GoalRunner:
                  guidance: str = "", image_paths=None, force_web: bool = False,
                  stream_callback=None, conversation_context: str = "",
                  route_callback=None, trace_callback=None,
-                 allowed_side_effect_tools=None):
+                 allowed_side_effect_tools=None, gate_context=None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -367,6 +367,10 @@ class GoalRunner:
         self.execution_backend = execution_backend
         self.allowed_side_effect_tools = frozenset(
             str(t).lower() for t in (allowed_side_effect_tools or ()))
+        # Run context handed to approval cards: run_id,
+        # conversation_id, source, and a WhatsApp destination
+        # when the run warrants one. None means no context.
+        self.gate_context = gate_context
         self.budget = budget
         self.trace = trace
         self.model_verifier = model_verifier
@@ -571,6 +575,12 @@ class GoalRunner:
             "approval",
             lambda prompt: self._chat("respond", [Message("user", prompt)]))
         body = f"{lead or approval_lead_in()}\n\n{body}"
+        # Run context for the deciding surface: which run and
+        # conversation this card belongs to, and where a copy
+        # goes (e.g. WhatsApp). Gates that do not understand
+        # context ignore it; the WebUI gate delivers from it.
+        if "context" not in kwargs and getattr(self, "gate_context", None):
+            kwargs["context"] = self.gate_context
         timer = getattr(self, "_elapsed_timer", None)
         if timer is None:
             return self.gate.ask(kind, title, body, **kwargs)
@@ -1966,8 +1976,18 @@ class GoalRunner:
                 nodes = []
                 tools_used = []
                 for step in current_plan.normalized_steps():
-                    nodes.append({"tool": step.tool, "args": step.args,
-                                  "deliverable": step.deliverable})
+                    # Store the full node, not just tool/args/
+                    # deliverable: a recalled workflow must
+                    # restore its real dependencies and tier,
+                    # not a sequential chain invented at recall
+                    # time. criteria rides as expected, the
+                    # step's own success condition.
+                    nodes.append({"id": step.id,
+                                  "tool": step.tool, "args": step.args,
+                                  "deliverable": step.deliverable,
+                                  "depends_on": list(step.depends_on or []),
+                                  "executor": step.executor,
+                                  "expected": step.criteria})
                     if step.tool not in tools_used:
                         tools_used.append(step.tool)
                 # Incremental improving: the lesson for the

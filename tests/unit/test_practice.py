@@ -173,13 +173,30 @@ def test_report_text():
 def test_practice_gate():
     gate = PracticeGate()
     assert gate.ask("live", "t", "b", reversible=True).verdict == "approved"
-    assert gate.ask("shell", "t", "b").verdict == "approved"
+    # The live card's force_ask means "don't skip via standing
+    # policy"; this gate uses no standing policy, only the
+    # schedule grant, so a reversible live plan still passes.
+    assert gate.ask("live", "t", "b", reversible=True,
+                    force_ask=True).verdict == "approved"
     assert gate.ask("live", "t", "b", reversible=False).verdict == "rejected"
+    # A publish-class live card is the extra-tool send path,
+    # not plan execution: rejected even for a reversible plan.
     assert gate.ask("live", "t", "b", reversible=True,
                     action_class="publish").verdict == "rejected"
-    for kind in ("install", "publish", "spend", "delete",
-                 "send_external", "external_email", "live_execute", "plugin"):
+    # Default-deny: only live and mandatory can ever pass.
+    # A recording is rejected even when forced, and unknown
+    # kinds are rejected rather than approved.
+    for kind in ("record", "install", "publish", "spend", "delete",
+                 "send_external", "external_email", "live_execute", "plugin",
+                 "shell", "overwrite", "mcp_connect", "something_new"):
         assert gate.ask(kind, "t", "b").verdict == "rejected", kind
+    assert gate.ask("record", "t", "b", force_ask=True).verdict == "rejected"
+    try:
+        gate.ask("question", "t", "b")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("questions must raise, not approve")
     # Mandatory without a sandbox is always rejected.
     assert gate.ask("mandatory", "t", "Run shell command: rm -rf old/").verdict == "rejected"
 

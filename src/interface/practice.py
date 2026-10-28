@@ -52,19 +52,19 @@ WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 _MAX_SESSIONS_KEPT = 20
 
 # Kinds a pre-approved practice gate never auto-approves.
-# Mirrors the pre-approval doctrine's irreversible set, minus
-# "mandatory", which the PracticeGate handles specially: a
-# mandatory shell command confined to the practice folder
-# is allowed, because that is exactly what the practice
-# folder exists for. An external send, a publish, spending,
-# a delete outside the folder, an install, a plugin change,
-# or a live execution are all destructive or outward-facing,
-# so they fail fast instead of running unattended.
+# The gate is allowlist-based (see PracticeGate.ask): only
+# "live" and "mandatory" can ever be approved, and only
+# under their own rules. Everything else — an external
+# send, a publish, spending, a delete outside the folder,
+# an install, a plugin change, a recording, a desktop
+# action, or any kind the gate does not recognise — is
+# rejected. The set below names the known-sensitive kinds
+# for the rejection reason; unknown kinds are rejected by
+# the allowlist, not by this set.
 PRACTICE_IRREVERSIBLE_KINDS = {
     "send_external", "external_email", "publish", "spend", "delete",
-    "live_execute", "plugin", "install",
+    "live_execute", "plugin", "install", "record",
 }
-PRACTICE_IRREVERSIBLE_ACTION_CLASSES = {"publish"}
 
 
 def coerce_preapprove(value) -> bool:
@@ -82,15 +82,33 @@ class PracticeGate:
     """Auto-approve practice steps within the owner's allowance.
 
     Same ask() shape as ApprovalGate, so it drops into any
-    GoalRunner. The allowance the owner stated for practice:
+    GoalRunner. The gate is allowlist-based: only "live"
+    and "mandatory" can ever be approved, and only under
+    their own rules below. Every other kind — a recording,
+    an install, a plugin change, a desktop action, an
+    external send, a publish, spending, a delete, or any
+    kind the gate does not recognise — is rejected at once,
+    with the reason in the decision. That default-deny is
+    safe here because a practice run legitimately produces
+    only "live" and "mandatory": practice runners carry
+    only the practice tools, and plugin tools do not route
+    through this gate. A tool's force_ask flag does not
+    change this: the live card's force_ask means "don't
+    skip via standing policy", and this gate uses no
+    standing policy — it uses the schedule grant — while
+    a sensitive kind is rejected on its kind, force or not.
+
+    The allowance the owner stated for practice:
     sends go only to the owner's own destinations (owner
     email, owner WhatsApp, owner Slack channel) through the
     practice tools, whose destinations are forced in code;
-    deletes and installs stay inside the practice folder,
-    which the sandbox confines. Everything else destructive
-    is rejected at once, with the reason in the decision, so
-    the run fails that step fast instead of stalling on a
-    card. In particular:
+    deletes and installs stay inside one specific
+    practice folder in the sandbox, which the sandbox
+    confines. A rejected step fails fast instead of
+    stalling on a card, and the session moves on to the
+    next random goal.
+
+    In particular:
 
     - "live" is approved only for a reversible plan (the
       loop certifies this, with the practice tools on the
@@ -103,10 +121,6 @@ class PracticeGate:
       piped download-to-shell, and no absolute, home, or
       parent path — a practice delete uses a relative path
       inside the practice folder, or it does not run.
-    - Publish, spend, external sends, plugin changes, and
-      extra-tool installs stay rejected: practice runners
-      do not carry those tools, and the gate would refuse
-      them anyway.
     """
 
     def __init__(self, practice_dir=None, sandboxed: bool = False):
@@ -115,8 +129,22 @@ class PracticeGate:
 
     def ask(self, kind: str, title: str, body: str, **kwargs):
         from .approval import Decision
-        action_class = str(kwargs.get("action_class") or "")
-        reversible = bool(kwargs.get("reversible", False))
+        if kind == "question":
+            raise ValueError("questions are chat turns, not approval cards")
+        if kind == "live":
+            # A publish-class live card is the extra-tool send
+            # path, not plan execution: never approved here,
+            # whatever the plan's reversibility says.
+            if str(kwargs.get("action_class") or "") == "publish":
+                return Decision(
+                    "rejected",
+                    reason="practice pre-approval excludes publishing/sending")
+            if bool(kwargs.get("reversible", False)):
+                return Decision("approved",
+                                reason="practice schedule pre-approval")
+            return Decision(
+                "rejected",
+                reason="practice pre-approval needs a reversible plan")
         if kind == "mandatory":
             if self.sandboxed and _mandatory_safe_for_practice(body):
                 return Decision("approved",
@@ -126,18 +154,9 @@ class PracticeGate:
                 reason="practice allows shell deletes/installs only "
                        "inside the practice folder, relative paths, "
                        "no sudo/system commands")
-        if kind in PRACTICE_IRREVERSIBLE_KINDS:
-            return Decision("rejected",
-                            reason=f"practice pre-approval excludes {kind}")
-        if action_class in PRACTICE_IRREVERSIBLE_ACTION_CLASSES:
-            return Decision(
-                "rejected",
-                reason="practice pre-approval excludes publishing/sending")
-        if kind == "live" and not reversible:
-            return Decision(
-                "rejected",
-                reason="practice pre-approval needs a reversible plan")
-        return Decision("approved", reason="practice schedule pre-approval")
+        return Decision(
+            "rejected",
+            reason=f"practice pre-approval does not cover {kind}")
 
 
 # Mandatory patterns that are NEVER practice-safe, even in the

@@ -140,14 +140,26 @@ def build_experience(goal: str, goal_shape: str, dag_nodes: list[dict],
 def store_experience(memory: Memory, experience: Experience) -> Point:
     """Store, merging on save when a close Experience already exists.
 
-    Merge rule, same shape as the earlier design, better
-    documented: if an existing Experience shares at least
+    Merge rule: if an existing Experience shares at least
     half its shape tokens (Jaccard >= 0.5) and at least one
     tool, the new DAG nodes are unioned into the existing
     point (dedupe by deliverable), tools and skills are
     unioned, and the lesson is appended, instead of creating
-    a duplicate. Otherwise a new point is created. The
-    library of workflows heals itself instead of duplicating.
+    a duplicate. The library of workflows heals itself
+    instead of duplicating.
+
+    Two compatibility gates keep a merge from producing an
+    unreliable workflow. First, a deliverable (or node id)
+    produced with different arguments is a different
+    procedure with the same name, not the same workflow
+    twice: merging it would silently keep the old steps
+    and drop the new ones, so the two experiences stay
+    separate instead. Second, the merged node set must
+    pass DAG validation (no duplicate ids or deliverables,
+    no missing or cyclic dependencies, no unknown
+    executors) before it replaces the stored point; a
+    merged set that fails validation is not saved, and
+    the new experience is stored separately.
     """
     if not experience.goal_shape:
         experience.goal_shape = goal_shape_for(experience.goal)
@@ -157,6 +169,24 @@ def store_experience(memory: Memory, experience: Experience) -> Point:
             continue
         if not (set(candidate.tools_used) & set(experience.tools_used)):
             continue
+        # Compatibility gate 1: same name, different procedure.
+        by_deliverable = {n.get("deliverable"): n
+                          for n in candidate.dag_nodes}
+        by_id = {n.get("id"): n for n in candidate.dag_nodes
+                 if n.get("id")}
+        compatible = True
+        for node in experience.dag_nodes:
+            old = by_deliverable.get(node.get("deliverable"))
+            if (old is not None and node.get("deliverable")
+                    and old.get("args") != node.get("args")):
+                compatible = False
+                break
+            old_id = by_id.get(node.get("id")) if node.get("id") else None
+            if old_id is not None and old_id != node:
+                compatible = False
+                break
+        if not compatible:
+            continue
         # Merge into the existing point, by re-recording it.
         merged_nodes = list(candidate.dag_nodes)
         seen = {n.get("deliverable") for n in merged_nodes}
@@ -164,6 +194,15 @@ def store_experience(memory: Memory, experience: Experience) -> Point:
             if node.get("deliverable") not in seen:
                 merged_nodes.append(node)
                 seen.add(node.get("deliverable"))
+        # Compatibility gate 2: the merged set must validate
+        # as the DAG the adapt path will actually execute.
+        try:
+            from ..agentic.dag import dag_from_experience as _dfe
+            _dfe(Experience(goal=candidate.goal,
+                            goal_shape=candidate.goal_shape,
+                            dag_nodes=merged_nodes)).validate_strict()
+        except Exception:
+            continue
         merged = Experience(
             goal=candidate.goal, goal_shape=candidate.goal_shape,
             dag_nodes=merged_nodes,
@@ -205,6 +244,75 @@ def recall_experiences(memory: Memory, goal: str,
         scored.append((hit.score + _shape_overlap(exp.goal_shape, shape), exp))
     scored.sort(key=lambda kv: kv[0], reverse=True)
     return [exp for _, exp in scored[:limit]]
+
+
+def experience_skill_name(experience: Experience) -> str:
+    """Filename-safe skill name for an experience: slugged goal."""
+    import re as _re
+    slug = _re.sub(r"[^a-z0-9]+", "-", experience.goal.lower()).strip("-")
+    return slug or "skill"
+
+
+def render_experience_skill(experience: Experience) -> str:
+    """Render a successful run's workflow as a planner-readable skill.
+
+    The planner discovers standalone skills from <home>/skills/
+    Markdown files, so this is the format a promoted workflow
+    takes: the goal it solves, the steps that solved it (tool,
+    deliverable, and arguments), and the lesson the run left
+    behind. Provenance records that the workflow comes from
+    one successful run, not from a vetted library skill, so
+    a reader can tell what kind of evidence backs it.
+    """
+    lines = [
+        f"# Skill: {experience_skill_name(experience)}",
+        "",
+        f"Learned from a successful run of: {experience.goal}",
+        f"Outcome: {experience.outcome or 'done'}",
+        "",
+        "## Workflow",
+        "",
+    ]
+    for index, node in enumerate(experience.dag_nodes, 1):
+        tool = node.get("tool", "write")
+        deliverable = node.get("deliverable", "")
+        args = node.get("args", {})
+        detail = f" -> {deliverable}" if deliverable else ""
+        lines.append(f"{index}. {tool}{detail}")
+        if args:
+            lines.append(f"   args: {args}")
+    if not experience.dag_nodes:
+        lines.append("(no steps recorded)")
+    lines += ["", "## Lesson", "", experience.lesson or "(none)", "",
+              "## Provenance", "",
+              f"- source: successful run (experience, shape: {experience.goal_shape})",
+              f"- tools: {', '.join(experience.tools_used) or '(none)'}",
+              ""]
+    return "\n".join(lines)
+
+
+def promote_experience_to_skill(home, experience: Experience,
+                                name: str | None = None):
+    """Write an experience out as a discoverable skill file.
+
+    The file lands in <home>/skills/<name>.md, where the
+    planner's skill discovery already reads it, so the next
+    run can reuse the workflow. An existing file is never
+    overwritten silently: the owner edits or deletes a
+    hand-tuned skill by hand, and a promotion must not
+    clobber it. Promotion is an explicit owner action (the
+    skill-library CLI), not something a run does to itself.
+    """
+    from pathlib import Path as _Path
+    skills_dir = _Path(home) / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    filename = (name or experience_skill_name(experience)) + ".md"
+    path = skills_dir / filename
+    if path.exists():
+        raise FileExistsError(
+            f"skill file already exists: {path} (delete or rename it first)")
+    path.write_text(render_experience_skill(experience), encoding="utf-8")
+    return path
 
 
 # --- Failed examples: negative lessons, same collection ---

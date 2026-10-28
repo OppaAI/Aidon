@@ -97,16 +97,22 @@ class NudgeTracker:
         self._nudged: set[str] = set()
 
     def check(self, approval_id: str, pending_since: float, now: float,
-              slack_sender=None) -> bool:
+              slack_sender=None, note: str = "",
+              min_elapsed_seconds: float | None = None) -> bool:
         if approval_id in self._nudged:
             return False
         if self.nudge_minutes <= 0:
             return False
-        if (now - pending_since) < self.nudge_minutes * 60:
+        threshold = (min_elapsed_seconds if min_elapsed_seconds is not None
+                     else self.nudge_minutes * 60)
+        if (now - pending_since) < threshold:
             return False
         self._nudged.add(approval_id)
         if slack_sender is not None and self.channel:
-            slack_sender(self.channel, f"Approval pending: {approval_id}")
+            text = f"Approval pending: {approval_id}"
+            if note:
+                text += f" — {note}"
+            slack_sender(self.channel, text)
         return True
 
 

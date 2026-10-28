@@ -1146,8 +1146,8 @@ def main(argv: list[str] | None = None) -> int:
     tick_parser = sub.add_parser("tick", help="Run due scheduler jobs once, Aidon tick")
     repl_parser = sub.add_parser("repl", help="Full REPL, Aidon repl, /help, /history, /quit, or a goal")
     learn_parser = sub.add_parser("learn", help="Idle learn cycle: re-test candidate skills, promote passers, consolidate validated duplicates")
-    skill_lib_parser = sub.add_parser("skill-library", help="Full skill library: list, show, promote, trust, retire, rollback, versions")
-    skill_lib_parser.add_argument("action", choices=["list", "show", "promote", "trust", "retire", "rollback", "versions"], help="list = list skills, show = show one, promote/trust/retire = lifecycle, rollback = restore a version, versions = version history")
+    skill_lib_parser = sub.add_parser("skill-library", help="Full skill library: list, show, promote, trust, retire, rollback, versions, from-experience")
+    skill_lib_parser.add_argument("action", choices=["list", "show", "promote", "trust", "retire", "rollback", "versions", "from-experience"], help="list = list skills, show = show one, promote/trust/retire = lifecycle, rollback = restore a version, versions = version history, from-experience = promote a successful run's workflow to a discoverable skill file")
     skill_lib_parser.add_argument("name", nargs="?", default="", help="Skill name")
     skill_lib_parser.add_argument("--version", type=int, default=0, help="Version for rollback")
     conversations_parser = sub.add_parser("conversations", help="SQLite conversation store: list, history, record, delete")
@@ -1353,7 +1353,19 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{skill.name} v{skill.version} {skill.state} privileged={skill.privileged}")
             return 0
         if not args.name:
-            print("skill-library show/promote/trust/retire/rollback/versions need a name"); return 2
+            print("skill-library show/promote/trust/retire/rollback/versions/from-experience need a name"); return 2
+        if args.action == "from-experience":
+            from ..memory.experience import (
+                promote_experience_to_skill, recall_experiences)
+            memory = _make_memory(config)
+            matches = recall_experiences(memory, args.name, limit=1)
+            if not matches:
+                print(f"No successful experience matches {args.name!r}"); return 2
+            try:
+                path = promote_experience_to_skill(config.home, matches[0])
+            except FileExistsError as exc:
+                print(str(exc)); return 1
+            print(f"Promoted {matches[0].goal!r} to skill: {path}"); return 0
         if args.action == "show":
             skill = lib.get(args.name)
             print(skill if skill else f"No skill {args.name}"); return 0 if skill else 2
@@ -2121,6 +2133,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             server.webui_gate.autonomy_tracker = None
             server.webui_gate.slack_sender = slack_sender
+            server.webui_gate.whatsapp_sender = whatsapp_sender
             plugins = PluginRegistry(config.home)
             plugins.load_all()
             budget = Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps,
@@ -2243,6 +2256,34 @@ def main(argv: list[str] | None = None) -> int:
                 from ..interface.phrasing import phrase_with_model as _pwm
                 return _pwm(kind, _say)
 
+            # Approval cards carry this run's context so the
+            # WebUI gate can deliver a copy to WhatsApp when
+            # the run warrants one: a run that started on
+            # WhatsApp, or a WebUI/Slack conversation the
+            # owner mirrored to WhatsApp. Mirroring is the
+            # opt-in; an unmirrored run gets no WhatsApp card.
+            _whatsapp_to = None
+            if event.source == "whatsapp":
+                _whatsapp_to = str(event.payload.get("from", "") or "")
+            elif msg.whatsapp_owner:
+                from ..interface.surfaces import (
+                    whatsapp_mirrored_for_conversation,
+                    whatsapp_mirrored_for_slack)
+                if event.source == "webui" and conversation_id and \
+                        whatsapp_mirrored_for_conversation(
+                            config.home, conversation_id):
+                    _whatsapp_to = msg.whatsapp_owner
+                elif event.source == "slack" and \
+                        whatsapp_mirrored_for_slack(
+                            config.home,
+                            str(event.payload.get("channel", ""))):
+                    _whatsapp_to = msg.whatsapp_owner
+            _gate_context = {"run_id": run_id,
+                             "conversation_id": conversation_id,
+                             "source": event.source}
+            if _whatsapp_to:
+                _gate_context["whatsapp_to"] = _whatsapp_to
+
             runner = GoalRunner(client, run_sandbox, _gate,
                                 config.home, memory=memory,
                                 project_id=event.project_id, plugins=plugins,
@@ -2252,7 +2293,7 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"))
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context)
             def _deliver_files(files, target):
                 """Upload run deliverables as bytes to a Slack/WhatsApp target.
 

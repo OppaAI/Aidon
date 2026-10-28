@@ -152,3 +152,135 @@ def test_loop_composes_distinct_workflows(tmp_path):
     assert "Write a snake game" in report.adapted_from
     assert "Write a shopping list" in report.adapted_from
     assert {"snake.py", "list.md"} <= set(report.plan.deliverables)
+
+
+def test_dag_from_experience_restores_dependencies(tmp_path):
+    """Stored dependencies survive a save/recall round trip.
+
+    A workflow whose steps were parallel must not come back
+    as a sequential chain: nodes stored with depends_on
+    keep it, while nodes stored without it (older records)
+    still fall back to the chain.
+    """
+    from src.agentic.dag import dag_from_experience
+    exp = build_experience("Write a snake game", "", [
+        {"id": "a", "tool": "write", "args": {},
+         "deliverable": "a.py", "depends_on": [],
+         "executor": "tool", "expected": "runs"},
+        {"id": "b", "tool": "write", "args": {},
+         "deliverable": "b.py", "depends_on": ["a"],
+         "executor": "tool", "expected": "imports a"},
+        {"id": "c", "tool": "write", "args": {},
+         "deliverable": "c.py", "depends_on": [],
+         "executor": "strong", "expected": "standalone"},
+    ], ["write"], [], "done", "")
+    dag = dag_from_experience(exp)
+    by_id = {node.id: node for node in dag.nodes.values()}
+    assert by_id["a"].depends_on == []
+    assert by_id["b"].depends_on == ["a"]
+    assert by_id["c"].depends_on == []
+    assert by_id["c"].executor == "strong"
+    assert by_id["a"].expected == "runs"
+    old = build_experience("Write a snake game", "", [
+        {"tool": "write", "args": {}, "deliverable": "a.py"},
+        {"tool": "write", "args": {}, "deliverable": "b.py"},
+    ], ["write"], [], "done", "")
+    old_dag = dag_from_experience(old)
+    ids = list(old_dag.nodes.values())
+    assert ids[0].depends_on == []
+    assert ids[1].depends_on == [ids[0].id]
+
+
+def _experience_points(memory):
+    return list(memory.iter_points("experience"))
+
+
+def test_merge_refuses_same_deliverable_different_args(tmp_path):
+    """Same name, different procedure: kept separate, not merged.
+
+    Merging would silently keep the old steps and drop the
+    new ones, so the two experiences stay as two points.
+    """
+    memory = _memory(tmp_path)
+    store_experience(memory, _success("Write a snake game", "snake.py"))
+    changed = build_experience("Write a snake game", "", [{
+        "tool": "write",
+        "args": {"file": "snake.py", "text": "Totally different content.\n"},
+        "deliverable": "snake.py"}], ["write"], [], "done", "")
+    store_experience(memory, changed)
+    assert len(_experience_points(memory)) == 2
+
+
+def test_merge_validates_merged_dag(tmp_path):
+    """A merged node set that fails DAG validation is not saved."""
+    memory = _memory(tmp_path)
+    store_experience(memory, _success("Write a snake game", "snake.py"))
+    broken = build_experience("Write a snake game", "", [{
+        "id": "x", "tool": "write", "args": {},
+        "deliverable": "other.py", "depends_on": ["missing-id"],
+    }], ["write"], [], "done", "")
+    store_experience(memory, broken)
+    assert len(_experience_points(memory)) == 2
+
+
+def test_merge_still_works_for_compatible_workflows(tmp_path):
+    """Compatible workflows still union into one point."""
+    memory = _memory(tmp_path)
+    store_experience(memory, _success("Write a snake game", "snake.py"))
+    extra = build_experience("Write a snake game", "", [{
+        "tool": "write",
+        "args": {"file": "tests.py", "text": "Content for tests.py.\n"},
+        "deliverable": "tests.py"}], ["write"], [], "done", "")
+    store_experience(memory, extra)
+    points = _experience_points(memory)
+    assert len(points) == 1
+    import json
+    nodes = json.loads(points[0].payload["dag_nodes"])
+    assert {n["deliverable"] for n in nodes} == {"snake.py", "tests.py"}
+
+
+def test_experience_promotes_to_discoverable_skill(tmp_path):
+    """A promoted workflow lands where the planner discovers skills.
+
+    The planner reads <home>/skills/*.md files, so promotion
+    writes that file — goal, steps, and lesson included — and
+    the plugin registry's skill texts pick it up.
+    """
+    from src.capabilities.plugins import PluginRegistry
+    from src.memory.experience import (
+        promote_experience_to_skill, render_experience_skill)
+    memory = _memory(tmp_path)
+    exp = _success("Write a snake game", "snake.py")
+    text = render_experience_skill(exp)
+    assert "Write a snake game" in text
+    assert "snake.py" in text
+    path = promote_experience_to_skill(tmp_path / "home", exp)
+    assert path.exists()
+    assert path.read_text(encoding="utf-8") == text
+    texts = PluginRegistry(tmp_path / "home").skill_texts()
+    assert any("Write a snake game" in value for value in texts.values())
+    try:
+        promote_experience_to_skill(tmp_path / "home", exp)
+    except FileExistsError:
+        pass
+    else:
+        raise AssertionError("promotion must not overwrite an existing skill")
+
+
+def test_trust_publishes_and_retire_removes_discovery(tmp_path):
+    """Only trusted library skills reach the planner; retired ones leave.
+
+    The JSON library is not what the planner reads, so trust
+    publishes the skill's Markdown into <home>/skills/ and
+    retire removes it again. Candidates are never published.
+    """
+    from src.capabilities.skill_library import Skill, SkillLibrary
+    lib = SkillLibrary(tmp_path / "home")
+    lib.add(Skill(name="greeter", description="Says hello."))
+    assert not (tmp_path / "home" / "skills" / "greeter.md").exists()
+    lib.trust("greeter", approved=True)
+    published = tmp_path / "home" / "skills" / "greeter.md"
+    assert published.exists()
+    assert "Says hello." in published.read_text(encoding="utf-8")
+    lib.retire("greeter", "no longer needed")
+    assert not published.exists()

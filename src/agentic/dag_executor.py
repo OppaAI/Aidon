@@ -77,15 +77,14 @@ class DAGExecutor:
         return f"node:{node_id}"
 
     def _dag_fingerprint(self) -> str:
-        nodes = []
-        for node in self.dag.topological_order():
-            nodes.append({
-                "id": node.id,
-                "tool": node.tool,
-                "args": node.args,
-                "deliverable": node.deliverable,
-                "depends_on": list(node.depends_on or []),
-            })
+        # Every field that can affect a node's execution or
+        # whether its result stays valid. Fingerprinting a
+        # subset once let a changed precondition, expected
+        # result, assumption, or executor reuse a stale
+        # checkpoint; to_dict already carries the full node,
+        # so hash that instead of a hand-picked subset.
+        nodes = [node.to_dict()
+                 for node in self.dag.topological_order()]
         canonical = json.dumps(nodes, sort_keys=True,
                                ensure_ascii=False, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

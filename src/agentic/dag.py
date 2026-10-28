@@ -347,17 +347,28 @@ def compute_levels(items: list[tuple[str, list[str]]]) -> list[list[str]]:
 
 
 def dag_from_experience(experience) -> DAG:
-    """Convert a saved sequential Experience to a DAG, chain dependencies."""
+    """Convert a saved Experience to a DAG, restoring dependencies.
+
+    Nodes stored with depends_on keep their real structure;
+    nodes stored without it (older records, which kept only
+    tool/args/deliverable) fall back to the sequential chain,
+    so old experiences still load. The executor is restored
+    when stored, otherwise routed from the tool as before.
+    """
     nodes = []
     previous = None
     for index, step in enumerate(experience.dag_nodes):
         from pathlib import Path as _Path
         node_id = step.get("id") or _Path(str(step.get("deliverable", ""))).stem or f"step-{index}"
+        if "depends_on" in step and isinstance(step.get("depends_on"), list):
+            depends_on = list(step["depends_on"])
+        else:
+            depends_on = [previous] if previous else []
         node = DAGNode(id=node_id, tool=str(step.get("tool", "write")),
                        args=dict(step.get("args", {})),
                        deliverable=str(step.get("deliverable", "")),
                        executor=route_executor(step),
-                       depends_on=[previous] if previous else [],
+                       depends_on=depends_on,
                        inputs=list(step.get("inputs", [])),
                        outputs=[str(step.get("deliverable", ""))] if step.get("deliverable") else [],
                        expected=str(step.get("expected", "")),

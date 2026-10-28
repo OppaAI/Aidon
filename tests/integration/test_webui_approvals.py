@@ -201,3 +201,89 @@ def test_chat_page_polls_and_decides_approvals():
     assert 'robot-bob' in CHAT_HTML
     assert 'render_markdown' in CHAT_HTML
     assert 'setInterval(refreshPills, 2000)' in CHAT_HTML
+
+
+def test_whatsapp_card_delivery_on_creation():
+    """A card for a WhatsApp-bound run is delivered at once.
+
+    The card carries its run context; when the context names
+    a WhatsApp destination, the full card — title, body, id,
+    and the approve/reject reply words — goes to the owner
+    immediately, instead of the owner never learning the id.
+    Without a WhatsApp destination, nothing is sent.
+    """
+    sent = []
+    gate = WebUIGate(timeout_seconds=0.5,
+                     whatsapp_sender=lambda to, text: sent.append((to, text)))
+    decision = gate.gate.ask(
+        "live", "Run the plan",
+        "The plan writes report.md.",
+        context={"run_id": "r1", "conversation_id": "c1",
+                 "source": "webui", "whatsapp_to": "+10000000000"})
+    assert decision.verdict == "rejected"  # timed out unanswered: fail-closed
+    assert len(sent) == 1
+    to, text = sent[0]
+    assert to == "+10000000000"
+    assert "card-1" in text
+    assert "Run the plan" in text
+    assert "report.md" in text
+    assert "approve card-1" in text
+    assert "reject card-1" in text
+    assert gate.cards["card-1"]["context"]["run_id"] == "r1"
+
+    sent.clear()
+    plain = WebUIGate(timeout_seconds=0.5,
+                      whatsapp_sender=lambda to, text: sent.append((to, text)))
+    plain.gate.ask("live", "Run the plan", "The plan writes report.md.")
+    assert sent == []
+
+
+def test_nudge_fires_before_timeout_with_title():
+    """The Slack nudge beats the card timeout and names the card.
+
+    A nudge configured for longer than the card timeout used
+    to arrive only after the card had already failed closed,
+    carrying a bare id. It now fires at half the timeout and
+    includes the title.
+    """
+    from src.interface.scheduler_loop import NudgeTracker
+    nudges = []
+    gate = WebUIGate(
+        timeout_seconds=4,
+        nudge_tracker=NudgeTracker(nudge_minutes=15, channel="#owner"),
+        slack_sender=lambda channel, text: nudges.append((channel, text)))
+    gate.gate.ask("live", "Run the plan", "The plan writes report.md.")
+    assert len(nudges) == 1
+    channel, text = nudges[0]
+    assert channel == "#owner"
+    assert "card-1" in text
+    assert "Run the plan" in text
+
+
+def test_nudge_skipped_when_card_decided():
+    """An approved card gets no nudge."""
+    import threading
+    from src.interface.scheduler_loop import NudgeTracker
+    nudges = []
+    gate = WebUIGate(
+        timeout_seconds=4,
+        nudge_tracker=NudgeTracker(nudge_minutes=15, channel="#owner"),
+        slack_sender=lambda channel, text: nudges.append((channel, text)))
+    threading.Timer(0.5, lambda: gate.approve("card-1", "approved")).start()
+    decision = gate.gate.ask("live", "Run the plan", "body")
+    assert decision.verdict == "approved"
+    time.sleep(2.5)
+    assert nudges == []
+
+
+def test_gate_context_forwarded_only_when_decide_accepts_it():
+    """ApprovalGate forwards context to context-aware decides only."""
+    from src.interface.approval import ApprovalGate, Decision
+    seen = {}
+    gate = ApprovalGate(
+        lambda kind, title, body, context: seen.update(context) or Decision("approved"))
+    gate.ask("live", "t", "b", context={"run_id": "r1"})
+    assert seen == {"run_id": "r1"}
+    plain = ApprovalGate(lambda kind, title, body: Decision("approved"))
+    assert plain.ask("live", "t", "b",
+                     context={"run_id": "r1"}).verdict == "approved"

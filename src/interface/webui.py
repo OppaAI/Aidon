@@ -701,10 +701,24 @@ class WebUIGate:
     Cards and nudges live here; graduated autonomy lives on the
     inner ApprovalGate (same AutonomyPolicy / autonomy.json as CLI).
 
-    - On card creation, a pending time is recorded, and a daemon
-      thread nudges via the Slack sender after
-      AIDON_APPROVAL_NUDGE_MIN minutes, once per card, via
-      NudgeTracker, so an away owner is nudged, not looped.
+    - Each card carries its run context (run_id, conversation
+      id, source, and a WhatsApp destination when one applies),
+      so an approval is no longer an anonymous id: the card
+      knows which run and conversation it belongs to.
+    - On card creation, when the run's context names a
+      WhatsApp destination — the run started on WhatsApp, or
+      its WebUI/Slack conversation is WhatsApp-mirrored —
+      the full card (title, body, id, and the approve/reject
+      reply words) is sent to the owner on WhatsApp at once.
+      The reply path already resolves "approve <id>" from any
+      surface, so delivery was the missing half.
+    - A nudge still goes to Slack via NudgeTracker, once per
+      card, but it now fires before the card times out (the
+      earlier of the configured nudge minutes and half the
+      card timeout — a 15-minute nudge for a 180-second card
+      could only ever arrive for an already-rejected card),
+      carries the card title instead of a bare id, and is
+      skipped when the card already has a verdict.
     - Autonomy: pass policy= into __init__ (or set
       self.gate.policy later). Callers use self.gate.ask(...,
       action_class=..., force_ask=...). High-stakes and
@@ -715,18 +729,21 @@ class WebUIGate:
     """
 
     def __init__(self, timeout_seconds: int = 180, nudge_tracker=None,
-                 autonomy_tracker=None, slack_sender=None, policy=None):
+                 autonomy_tracker=None, slack_sender=None, policy=None,
+                 whatsapp_sender=None):
         self.timeout_seconds = timeout_seconds
         self.nudge_tracker = nudge_tracker
         self.autonomy_tracker = autonomy_tracker  # optional legacy
         self.slack_sender = slack_sender
+        self.whatsapp_sender = whatsapp_sender
         self.cards: dict[str, dict] = {}
         self._events: dict[str, threading.Event] = {}
         self._counter = 0
         # Prefer shared AutonomyPolicy (same file as CLI)
         self.gate = ApprovalGate(self._decide, policy=policy)
 
-    def _decide(self, kind: str, title: str, body: str) -> Decision:
+    def _decide(self, kind: str, title: str, body: str,
+                context: dict | None = None) -> Decision:
         import time as _time
         self._counter += 1
         card_id = f"card-{self._counter}"
@@ -734,17 +751,32 @@ class WebUIGate:
         self._events[card_id] = event
         self.cards[card_id] = {
             "kind": kind, "title": title, "body": body, "verdict": None,
-            "edited_text": "",
+            "edited_text": "", "context": dict(context or {}),
         }
         pending_since = _time.time()
-        if self.nudge_tracker is not None:
+        whatsapp_to = (context or {}).get("whatsapp_to")
+        if whatsapp_to and self.whatsapp_sender is not None:
+            snippet = body if len(body) <= 1000 else body[:1000] + "…"
+            try:
+                self.whatsapp_sender(
+                    whatsapp_to,
+                    f"Approval needed [{card_id}]: {title}\n{snippet}\n"
+                    f"Reply: approve {card_id}  or  reject {card_id}")
+            except Exception:
+                pass
+        if self.nudge_tracker is not None and self.nudge_tracker.nudge_minutes > 0:
+            nudge_delay = min(self.nudge_tracker.nudge_minutes * 60,
+                              self.timeout_seconds / 2)
+
             def _nudge():
-                _time.sleep(max(0, self.nudge_tracker.nudge_minutes * 60))
-                if not event.is_set():
+                _time.sleep(max(0, nudge_delay))
+                if not event.is_set() and \
+                        self.cards[card_id]["verdict"] is None:
                     try:
                         self.nudge_tracker.check(
                             card_id, pending_since, _time.time(),
-                            slack_sender=self.slack_sender)
+                            slack_sender=self.slack_sender, note=title,
+                            min_elapsed_seconds=nudge_delay)
                     except Exception:
                         pass
             threading.Thread(target=_nudge, daemon=True).start()
@@ -753,7 +785,6 @@ class WebUIGate:
         verdict = card["verdict"] or "rejected"
         card["verdict"] = verdict
         return Decision(verdict, edited_text=card.get("edited_text", ""))
-
     def pending_cards(self) -> list[dict]:
         """Cards still awaiting a verdict, in creation order.
 
