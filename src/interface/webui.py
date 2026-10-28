@@ -1840,6 +1840,9 @@ class WebUIServer:
         db_path = self.home / "conversations.db"
         if db_path.is_file():
             try:
+                project_db = self._conversations_db()
+                if project_db.delete_project(project_id):
+                    found = True
                 import sqlite3
                 conn = sqlite3.connect(str(db_path), timeout=10.0)
                 try:

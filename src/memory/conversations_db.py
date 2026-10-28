@@ -136,6 +136,13 @@ class ConversationStoreDB:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def delete_project(self, project_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM projects WHERE id = ?", (str(project_id),))
+            self._conn.commit()
+        return cur.rowcount > 0
+
     # -- conversations -------------------------------------------------
 
     def create_conversation(self, project_id: str) -> dict:
