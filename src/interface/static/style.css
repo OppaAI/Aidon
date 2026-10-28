@@ -717,3 +717,23 @@ body:has(.settings-app) { overflow: auto; }
   letter-spacing: .12em; text-transform: uppercase; cursor: pointer;
   box-shadow: 0 0 16px var(--accent-glow);
 }
+
+/* ── pre-approvals panel (settings page) ─────────────────────────── */
+.preapprovals { margin: 32px 0 8px; padding: 16px 18px;
+  border: 1px solid var(--line, #2b2b33); border-radius: 10px; }
+.preapprovals h2 { margin: 0 0 6px; font-size: 16px; }
+.pre-note { margin: 0 0 12px; font-size: 13px; line-height: 1.5;
+  color: var(--muted, #9a9aa5); }
+.pre-form { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; }
+.pre-form label { display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; color: var(--muted, #9a9aa5); }
+.pre-form input, .pre-form select { padding: 6px 8px; border-radius: 6px;
+  border: 1px solid var(--line, #2b2b33); background: var(--panel, #17171c);
+  color: var(--fg, #e8e8ee); font-size: 13px; min-width: 120px; }
+#pre-grant { padding: 7px 14px; border-radius: 6px; cursor: pointer; }
+#pre-status { font-size: 12px; color: var(--muted, #9a9aa5); }
+#pre-list { list-style: none; margin: 12px 0 0; padding: 0; font-size: 13px; }
+#pre-list li { display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; padding: 8px 0; border-top: 1px solid var(--line, #2b2b33); }
+#pre-list li.pre-empty { color: var(--muted, #9a9aa5); }
+#pre-list button { padding: 4px 10px; border-radius: 6px; cursor: pointer; }

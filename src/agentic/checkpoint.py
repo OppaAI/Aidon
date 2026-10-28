@@ -186,4 +186,3 @@ def filter_resumable_passed(
     """Keep only passed deliverables that still exist on disk."""
     return [name for name in passed
             if deliverable_still_present(workdir, name)]
-Grok finished responding

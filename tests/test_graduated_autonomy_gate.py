@@ -148,4 +148,3 @@ def test_timeout_is_rejected_and_does_not_build_trust(tmp_path):
     assert d.reason == "timeout"
     # Timeout is not consent — streak stays zero.
     assert policy.permission("skill", stakes=STAKES_MEDIUM)["action"] == ASK
-Grok finished responding

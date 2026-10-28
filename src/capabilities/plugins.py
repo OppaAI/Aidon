@@ -394,12 +394,19 @@ class PluginRegistry:
             except TypeError:
                 approved = bool(approve(plugin, findings))
         elif gate is not None:
-            decision = gate.ask(
-                "plugin",
-                "Adopt this plugin?",
-                body,
-                action_class="plugin",
-            )
+            # Gates from out-of-tree callers and test doubles may take
+            # only (kind, title, body). The action_class is an
+            # autonomy hint, not part of the decision, so a plain gate
+            # is asked without it rather than crashing adoption.
+            try:
+                decision = gate.ask(
+                    "plugin",
+                    "Adopt this plugin?",
+                    body,
+                    action_class="plugin",
+                )
+            except TypeError:
+                decision = gate.ask("plugin", "Adopt this plugin?", body)
             approved = decision.verdict in ("approved", "auto_approved")
         if not approved:
             return False, findings, "Adoption rejected by owner"

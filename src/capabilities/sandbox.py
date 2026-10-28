@@ -92,12 +92,24 @@ class Sandbox:
             return SandboxResult(124, exc.stdout or "", "timeout", isolated)
 
     def _apply_resource_limits(self) -> None:
-        """Apply old Aidon's optional POSIX limits to the child process."""
+        """Apply old Aidon's optional POSIX limits to the child process.
+
+        RLIMIT_NPROC is deliberately not set here. Linux counts every
+        task (thread) of the uid against it, not the child's own
+        children, so a 256 cap is already exceeded on an ordinary
+        desktop (a browser alone has hundreds of threads). The fork
+        inside bwrap then fails with EAGAIN, which surfaces as
+        "Creating new namespace failed: Resource temporarily
+        unavailable" and makes every sandboxed step fail on a busy
+        machine. Process isolation comes from bwrap's --unshare-pid
+        and the wall-clock timeout, not from a per-uid task cap.
+        ``nproc`` is kept as a constructor argument so existing
+        callers and config keys keep working.
+        """
         try:
             import resource
             limits = (
                 (resource.RLIMIT_AS, self.mem_mb * 1024 * 1024),
-                (resource.RLIMIT_NPROC, self.nproc),
                 (resource.RLIMIT_FSIZE, self.fsize_mb * 1024 * 1024),
                 (resource.RLIMIT_CPU, self.cpu_seconds),
             )

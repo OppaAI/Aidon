@@ -812,6 +812,78 @@ class WebUIServer:
             return f"Steered {parts[1]}: {parts[2]}" if ok else f"No such run {parts[1]}"
         return None
 
+    # ── pre-approval, one store, three surfaces ──────────────────────
+    def preapproval_store(self):
+        from .preapproval import PreapprovalStore
+        return PreapprovalStore(self.home)
+
+    def _resolve_preapproval(self, text: str) -> str | None:
+        """Handle preapprove / preapprovals / unpreapprove from any chat.
+
+        Returns None when the text is not a pre-approval command, so the
+        caller can carry on and treat it as a goal. The same function
+        serves the WebUI chat box, WhatsApp, and Slack, so a grant made
+        on a phone is the same grant the WebUI panel shows.
+        """
+        from .preapproval import handle_command
+        try:
+            return handle_command(self.preapproval_store(), text)
+        except Exception as exc:
+            return f"Pre-approval error: {type(exc).__name__}: {exc}"
+
+    def handle_preapprovals(self) -> dict:
+        """Active grants, the kind menu, and the help text, for the UI."""
+        from .preapproval import HELP_TEXT, KINDS
+        try:
+            grants = self.preapproval_store().active()
+        except Exception:
+            grants = []
+        return {"grants": grants, "kinds": KINDS, "help": HELP_TEXT}
+
+    def handle_preapproval_grant(self, body: dict) -> tuple[int, dict]:
+        """Grant from the WebUI form: project, kind (name or number), hours."""
+        import time as _time
+
+        from .preapproval import (DEFAULT_HOURS, IRREVERSIBLE, MAX_HOURS,
+                                  kind_from_token)
+        spec_id = str(body.get("spec_id") or body.get("project")
+                      or "default").strip()
+        kind = kind_from_token(str(body.get("kind", "")))
+        if not spec_id:
+            return 400, {"ok": False, "error": "project id is required"}
+        if kind is None:
+            return 400, {"ok": False, "error": "choose a kind, by number or name"}
+        if kind in IRREVERSIBLE:
+            return 400, {"ok": False,
+                         "error": f"{kind} can never be pre-approved: it is "
+                                  f"irreversible or leaves the machine"}
+        try:
+            hours = float(body.get("hours") or DEFAULT_HOURS)
+        except (TypeError, ValueError):
+            return 400, {"ok": False, "error": "hours must be a number"}
+        if hours <= 0:
+            return 400, {"ok": False, "error": "hours must be greater than 0"}
+        hours = min(hours, MAX_HOURS)
+        ok = self.preapproval_store().grant(
+            spec_id, kind, _time.time() + hours * 3600.0)
+        if not ok:
+            return 400, {"ok": False, "error": "grant refused"}
+        return 200, {"ok": True, "spec_id": spec_id, "kind": kind,
+                     "hours": hours}
+
+    def handle_preapproval_revoke(self, spec_id: str,
+                                  kind: str = "") -> tuple[int, dict]:
+        from .preapproval import kind_from_token
+        spec_id = str(spec_id or "").strip()
+        if not spec_id:
+            return 400, {"ok": False, "error": "project id is required"}
+        resolved = kind_from_token(kind) if kind else None
+        if kind and resolved is None:
+            return 400, {"ok": False, "error": f"unknown kind {kind!r}"}
+        removed = self.preapproval_store().revoke(spec_id, resolved)
+        return (200, {"ok": True, "removed": removed}) if removed \
+            else (404, {"ok": False, "removed": 0, "error": "nothing to revoke"})
+
     def _library_files(self) -> list[dict]:
         library_dir = self.home / "library" / "files"
         if not library_dir.exists():
@@ -846,6 +918,9 @@ class WebUIServer:
         control_reply = self._resolve_control(message)
         if control_reply is not None:
             return {"reply": control_reply}
+        preapproval_reply = self._resolve_preapproval(message)
+        if preapproval_reply is not None:
+            return {"reply": preapproval_reply}
         project_id = str(body.get("project_id", "default"))
         replies: list[str] = []
         event = TriggerEvent(source="webui", kind="chat", goal=message,
@@ -961,6 +1036,8 @@ class WebUIServer:
                         decision_reply = self._resolve_decision(text)
                         if decision_reply is None:
                             decision_reply = self._resolve_control(text)
+                        if decision_reply is None:
+                            decision_reply = self._resolve_preapproval(text)
                         if decision_reply is not None:
                             replies.append(decision_reply)
                             if self.whatsapp_sender is not None:
@@ -1006,6 +1083,8 @@ class WebUIServer:
             decision_reply = self._resolve_decision(text)
             if decision_reply is None:
                 decision_reply = self._resolve_control(text)
+            if decision_reply is None:
+                decision_reply = self._resolve_preapproval(text)
             if decision_reply is not None:
                 if self.slack_sender is not None:
                     self.slack_sender(channel, decision_reply, thread_ts)
@@ -2013,6 +2092,20 @@ class WebUIServer:
                            "y": index * 90, "layer": layer})
         return 200, {"layout": layout}
 
+    def handle_keys(self) -> dict:
+        """API keys as name, scope, and hash prefix only.
+
+        The static settings page used to lose this list when the page
+        moved out of the inline HTML, so it is served here: never a
+        real key, only the first characters of the hash, which is
+        enough for the owner to tell two keys apart.
+        """
+        try:
+            keys = self.auth_store.list_keys() if self.auth_store else []
+        except Exception:
+            keys = []
+        return {"keys": keys}
+
     def handle_voice(self) -> dict:
         """Voice capability info: whether spoken replies are
         announced, and whether a TTS key is configured. No secret
@@ -2370,6 +2463,8 @@ loadSettings();
                     # route gets. Only still-pending cards: a
                     # decided or timed-out card is gone here.
                     self._send_json(200, {"cards": server.webui_gate.pending_cards()})
+                elif parsed.path == "/api/preapprovals":
+                    self._send_json(200, server.handle_preapprovals())
                 elif parsed.path == "/factory":
                     self._send_html(200, FACTORY_HTML)
                 elif parsed.path == "/api/factory":
@@ -2438,6 +2533,8 @@ loadSettings();
                     self._send_json(200, {"projects": server.projects_history()})
                 elif parsed.path == "/api/settings/catalog":
                     self._send_json(200, server.settings_catalog())
+                elif parsed.path == "/api/keys":
+                    self._send_json(200, server.handle_keys())
                 elif parsed.path == "/api/settings":
                     self._send_json(200, server.settings_get())
                 elif parsed.path == "/api/avatar.vrm":
@@ -2553,7 +2650,11 @@ loadSettings();
                         items = [item for item in items if needle in json.dumps(item).lower()]
                     matched = len(items)
                     page = items[offset:offset + max(1, min(limit, 200))]
-                    self._send_json(200, {"items": page, "total": len(raw_points),
+                    # "items" is what the memory page renders; "points"
+                    # is the original key this route answered with, kept
+                    # so older clients (and the route tests) keep working.
+                    self._send_json(200, {"items": page, "points": page,
+                                          "total": len(raw_points),
                                           "matched": matched, "mode": "Aidon memory"})
                 elif parsed.path in ("/webhook/whatsapp", "/webhooks/whatsapp"):
                     query = parse_qs(parsed.query)
@@ -2693,6 +2794,9 @@ loadSettings();
                     verdict = str(body.get("verdict", "rejected"))
                     ok = server.webui_gate.approve(card_id, verdict)
                     self._send_json(200 if ok else 404, {"ok": ok})
+                elif parsed.path == "/api/preapprovals":
+                    status, payload = server.handle_preapproval_grant(body)
+                    self._send_json(status, payload)
                 elif parsed.path == "/api/studio/memory":
                     if str(body.get("action", "")) == "edit":
                         # Edit works with or without a live memory
@@ -2835,6 +2939,13 @@ loadSettings();
                     point_id = "/".join(parts[4:]).strip("/")
                     result = server.handle_memory_point_delete(collection, point_id)
                     self._send_json(200 if result["ok"] else 404, result)
+                elif parsed.path.startswith("/api/preapprovals/"):
+                    rest = parsed.path[len("/api/preapprovals/"):].strip("/")
+                    parts = rest.split("/")
+                    spec_id = parts[0] if parts else ""
+                    kind = parts[1] if len(parts) > 1 else ""
+                    status, payload = server.handle_preapproval_revoke(spec_id, kind)
+                    self._send_json(status, payload)
                 elif parsed.path.startswith("/api/dags/"):
                     dag_id = parsed.path[len("/api/dags/"):]
                     self._send_json(200, server.handle_dag_delete(dag_id))

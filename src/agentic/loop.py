@@ -61,6 +61,33 @@ class Step:
     executor: str = "tool"
 
 
+# Tool-name fragments that mean the step leaves the workdir, touches a
+# third party, spends money, deletes data, or installs code. A plan that
+# contains any of them is not reversible, so a "live" pre-approval must
+# not cover it. Conservative on purpose: a false "not reversible" only
+# means one more card, a false "reversible" would skip one it should not.
+SIDE_EFFECT_TOOL_WORDS = (
+    "send", "post", "publish", "email", "mail", "install", "adopt",
+    "delete", "spend", "pay", "upload", "record", "tts", "speak",
+    "mcp_", "sam_", "transcribe", "threads", "instagram", "slack",
+    "whatsapp", "notify", "schedule_job", "cancel_schedule",
+)
+
+
+def plan_is_reversible(plan: Plan) -> bool:
+    """True when every step stays inside the run's own workdir.
+
+    Used by the pre-approval gate: a pre-approved "live" card is
+    honoured only for a plan that cannot send, publish, spend,
+    delete, or install anything.
+    """
+    for step in plan.normalized_steps():
+        name = str(getattr(step, "tool", "") or "").lower()
+        if any(word in name for word in SIDE_EFFECT_TOOL_WORDS):
+            return False
+    return True
+
+
 @dataclass
 class Plan:
     steps: list = field(default_factory=list)
@@ -542,13 +569,15 @@ class GoalRunner:
             # Mandatory-approval commands always need a human,
             # even in autonomous mode: recursive delete, piped
             # download-to-shell, sudo, raw disk writes, and the
-            # rest of the security gate's list.
+            # rest of the security gate's list. The kind is
+            # "mandatory", not "live": a pre-approval granted for a
+            # reversible live run must never cover one of these.
             from ..capabilities.security_gate import command_needs_mandatory_approval
             command_text = " ".join(str(c) for c in args.get("command", [])) if isinstance(args.get("command"), list) else str(args.get("command", ""))
             reason = command_needs_mandatory_approval(command_text)
             if reason:
                 decision = self._ask_for_approval(
-                    "live", f"Mandatory approval: shell ({reason})",
+                    "mandatory", f"Mandatory approval: shell ({reason})",
                     self._approval_body(f"Run shell command: {command_text}?"),
                     force_ask=True,
                 )
@@ -1137,6 +1166,13 @@ class GoalRunner:
             # it. A ledger file that exists but totals wrong
             # is not passed, so repair can rewrite it, while
             # a good file that passed every check is untouched.
+            # A step that wrote its file is provisionally passed
+            # above; a verification failure on that file must
+            # take it back out, or the repair attempt would skip
+            # the very step it has to fix.
+            for name in list(passed):
+                if any(name in msg for msg in failures):
+                    passed.discard(name)
             for name in verified:
                 if not any(name in msg for msg in failures):
                     passed.add(name)
@@ -1185,6 +1221,7 @@ class GoalRunner:
             "live", "Approve live execution?",
             self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"),
             force_ask=True,
+            reversible=plan_is_reversible(current_plan),
         )
         # edited means "change the proposal" — not approve the original.
         # Live card has no apply-edit path; require a clean approved.

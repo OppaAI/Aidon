@@ -164,4 +164,3 @@ def test_one_bad_tool_does_not_abort_chain():
     assert "ok_tool" in result["ran"]
     assert "after" in result["ran"]
     assert any("boom" in e for e in result["errors"])
-Grok finished responding

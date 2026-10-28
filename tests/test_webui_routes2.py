@@ -210,7 +210,13 @@ def test_capabilities_keys_and_contents(tmp_path):
     library.add(Skill(name="adder", description="adds things"))
     payload = server.handle_capabilities()
     assert set(payload) == {"tools", "skills", "mcp_servers"}
-    assert "write" in payload["tools"]
+    # Tools are rows, not bare names: the capabilities page needs
+    # origin and side-effect badges to tell a core tool from an
+    # adopted plugin that acts on the world.
+    rows = {row["name"]: row for row in payload["tools"]}
+    assert "write" in rows
+    assert rows["write"]["origin"] == "core"
+    assert rows["write"]["side_effect"] is False
     assert "adder" in payload["skills"]
     assert payload["mcp_servers"] == []
 
@@ -219,7 +225,7 @@ def test_capabilities_route_live(live_server):
     base, _, _ = live_server
     status, payload = _get(base, "/api/capabilities")
     assert status == 200
-    assert "write" in payload["tools"]
+    assert "write" in [row["name"] for row in payload["tools"]]
 
 
 def test_capability_code_known_and_unknown(tmp_path):
@@ -273,9 +279,13 @@ def test_memory_points_without_memory_and_limit_cap(tmp_path):
 
 def test_memory_routes_live(live_server):
     base, server, _ = live_server
-    # No memory configured: empty lists, delete is 404.
+    # No memory configured: empty lists, delete is 404. The route
+    # answers a paginated envelope; "points" is kept for older
+    # clients, "items" is what the memory page renders.
     status, payload = _get(base, "/api/memory/episodes")
-    assert status == 200 and payload == {"points": []}
+    assert status == 200
+    assert payload["points"] == [] and payload["items"] == []
+    assert payload["total"] == 0 and payload["matched"] == 0
     status, _ = _delete(base, "/api/memory/episodes/ghost")
     assert status == 404
     # With memory: list and delete round-trip.
@@ -288,4 +298,4 @@ def test_memory_routes_live(live_server):
     status, payload = _delete(base, "/api/memory/knowledge/k9")
     assert status == 200 and payload == {"ok": True}
     status, payload = _get(base, "/api/memory/knowledge")
-    assert payload == {"points": []}
+    assert payload["points"] == [] and payload["items"] == []

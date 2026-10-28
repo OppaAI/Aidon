@@ -36,15 +36,19 @@ def test_settings_page_has_form():
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), srv.make_handler())
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         try:
-            url = f"http://127.0.0.1:{httpd.server_address[1]}/settings"
-            with urllib.request.urlopen(url) as resp:
+            base = f"http://127.0.0.1:{httpd.server_address[1]}"
+            with urllib.request.urlopen(base + "/settings") as resp:
                 page = resp.read().decode()
             assert 'id="settings-groups"' in page
             assert 'id="settings-save"' in page
-            assert "/api/settings/catalog" in page
-            assert "/api/settings/env" in page
-            assert "Restart the server" in page
             assert "Keys, hash prefixes only" in page
+            # The page itself is static now; the form's wiring lives in
+            # its script, so the catalog call is asserted there.
+            with urllib.request.urlopen(base + "/static/settings.js") as resp:
+                script = resp.read().decode()
+            assert "/api/settings/catalog" in script
+            assert "/api/settings" in script
+            assert "restart aidon webui" in (page + script).lower()
         finally:
             httpd.shutdown()
 

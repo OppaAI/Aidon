@@ -144,6 +144,29 @@ class AutonomyPolicy:
             self._apply_decay(rec)
             return rec.approvals
 
+    def standing(self, action_class: str, *,
+                 stakes: str | None = None) -> bool:
+        """True when the class may act without a card.
+
+        Distinct from ``permission()``, which also reports partial
+        trust (ACT_NOTIFY below the threshold). Partial trust is a
+        hint that the owner approves often, not consent: a card is
+        still shown until the class actually reaches its threshold.
+        Low stakes act without history; high stakes never do.
+        """
+        with self._lock:
+            rec = self._records.get(action_class)
+            tier = (stakes or (rec.stakes if rec else
+                               ACTION_STAKES.get(action_class, STAKES_HIGH))).lower()
+            if tier not in _STAKES_ORDER:
+                tier = STAKES_HIGH
+            if tier == STAKES_LOW:
+                return True
+            if tier == STAKES_HIGH or rec is None or rec.revoked:
+                return False
+            self._apply_decay(rec)
+            return rec.approvals >= self._threshold
+
     # ── learning ──
     def record_approval(self, action_class: str, *,
                         stakes: str | None = None) -> TrustRecord:

@@ -202,17 +202,31 @@ def _render_args(args: Any, bindings: dict[str, Any]) -> Any:
     return args
 
 
-def validate_conditional_chain(chain: Any) -> list[str]:
-    """Return a list of spec errors; empty means valid."""
+def validate_conditional_chain(
+    chain: Any,
+    allowed_tools: tuple[str, ...] | list[str] | set[str] | None = None,
+) -> list[str]:
+    """Return a list of spec errors; empty means valid.
+
+    ``allowed_tools`` is optional. When it is None (the default) any
+    tool name is accepted here and the caller's ``invoke`` callable is
+    the authority: the conditional form is the old Aidon chain, which
+    dispatches to the registered tool set, so a name that is not
+    registered fails at invoke time and is recorded as an error.
+    Pass a set to enforce a narrower allowlist for a specific caller.
+    """
     errors: list[str] = []
     if not isinstance(chain, list) or not chain:
         return ["chain must be a non-empty list of steps"]
     for i, step in enumerate(chain):
-        errors.extend(_validate_conditional_step(step, f"step {i}"))
+        errors.extend(_validate_conditional_step(step, f"step {i}", allowed_tools))
     return errors
 
 
-def _validate_conditional_step(step: Any, where: str) -> list[str]:
+def _validate_conditional_step(
+    step: Any, where: str,
+    allowed_tools: tuple[str, ...] | list[str] | set[str] | None = None,
+) -> list[str]:
     errors: list[str] = []
     if not isinstance(step, dict):
         return [f"{where}: must be an object"]
@@ -220,7 +234,7 @@ def _validate_conditional_step(step: Any, where: str) -> list[str]:
         tool = step["tool"]
         if not isinstance(tool, str) or not tool.strip():
             errors.append(f"{where}: 'tool' must be a non-empty string")
-        elif tool not in ALLOWED_CHAIN_TOOLS:
+        elif allowed_tools is not None and tool not in allowed_tools:
             errors.append(f"{where}: tool is not permitted: {tool}")
         if "args" in step and not isinstance(step["args"], (dict, list, str)):
             errors.append(f"{where}: 'args' must be an object, list, or string")
@@ -247,7 +261,7 @@ def _validate_conditional_step(step: Any, where: str) -> list[str]:
                     for j, sub in enumerate(step[branch]):
                         errors.extend(
                             _validate_conditional_step(
-                                sub, f"{where}.{branch}[{j}]"
+                                sub, f"{where}.{branch}[{j}]", allowed_tools
                             )
                         )
     else:
@@ -258,14 +272,16 @@ def _validate_conditional_step(step: Any, where: str) -> list[str]:
 def run_conditional_chain(
     chain: list[dict[str, Any]],
     invoke: Callable[[str, dict[str, Any]], Any],
+    allowed_tools: tuple[str, ...] | list[str] | set[str] | None = None,
 ) -> dict[str, Any]:
     """Execute a conditional chain. Returns a summary of what ran.
 
-    Defensive by design: validate first (allowlist + shape). Hand-edited
-    job records cannot skip the policy. Malformed steps after that are
-    recorded in ``errors`` and skipped — one bad step never aborts the rest.
+    Defensive by design: validate first (shape, plus the caller's
+    optional allowlist). Hand-edited job records cannot skip the shape
+    check. Malformed steps after that are recorded in ``errors`` and
+    skipped — one bad step never aborts the rest.
     """
-    pre = validate_conditional_chain(chain)
+    pre = validate_conditional_chain(chain, allowed_tools)
     if pre:
         return {
             "ok": False,
@@ -301,7 +317,7 @@ def run_conditional_chain(
                         f"step {idx}: 'tool' must be a non-empty string; skipped"
                     )
                     continue
-                if name not in ALLOWED_CHAIN_TOOLS:
+                if allowed_tools is not None and name not in allowed_tools:
                     errors.append(f"step {idx}: tool not permitted: {name}")
                     continue
                 args = _render_args(step.get("args") or {}, bindings)
@@ -347,4 +363,3 @@ def run_conditional_chain(
         "errors": errors,
         "bindings": bindings,
     }
-Grok finished responding

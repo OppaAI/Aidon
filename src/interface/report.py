@@ -38,6 +38,18 @@ def _run_day(record: dict, tz) -> date | None:
         return None
 
 
+def _read_last_run(home: Path) -> dict:
+    """Read <home>/learned/last_run.json, or {} when absent or unreadable."""
+    path = Path(home) / "learned" / "last_run.json"
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def generate_daily_report(home, day: date | None = None,
                           tz_name: str = "UTC") -> dict:
     """Write a deterministic daily brief and one detail file per goal."""
@@ -64,6 +76,23 @@ def generate_daily_report(home, day: date | None = None,
         lines.append(f"{len(records)} runs: {', '.join(parts)}.")
         lines.extend(f"- {r.get('goal', '?')} → {r.get('status', '?')}"
                      for r in records)
+    # The last recorded run is the fallback the daily brief always had:
+    # a home with no run records today still says what Aidon did last,
+    # from learned/last_run.json, instead of an empty "nothing" report.
+    last_run = _read_last_run(home)
+    if last_run:
+        status = str(last_run.get("status", "") or "recorded")
+        project = str(last_run.get("project_id", "") or "")
+        goal = str(last_run.get("goal", "") or "")
+        line = f"Last recorded run: {status}"
+        if goal:
+            line += f" — {goal}"
+        if project:
+            line += f" (project {project})"
+        lines.extend(["", line])
+        deliverables = last_run.get("deliverables") or []
+        if isinstance(deliverables, list) and deliverables:
+            lines.append("Deliverables: " + ", ".join(str(d) for d in deliverables))
     brief = "\n".join(lines) + "\n"
     outdir = home / "reports" / day.isoformat()
     goals_dir = outdir / "goals"

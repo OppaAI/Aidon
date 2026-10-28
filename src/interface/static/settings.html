@@ -21,6 +21,29 @@
   <div id="settings-env" class="settings-env"></div>
   <main id="settings-groups"></main>
 
+  <section id="preapprovals" class="preapprovals">
+    <h2>Pre-approvals</h2>
+    <p class="pre-note">A pre-approval lets Aidon run <strong>reversible</strong> steps for one
+      project without asking every time. Anything that sends, publishes, spends, deletes,
+      or installs always asks. The same list is what WhatsApp and Slack show when you type
+      <code>preapprovals</code>, and you can grant or revoke from there too.</p>
+    <div class="pre-form">
+      <label>Project <input id="pre-project" type="text" placeholder="default" autocomplete="off"></label>
+      <label>Kind <select id="pre-kind"></select></label>
+      <label>Hours <input id="pre-hours" type="number" min="0.5" step="0.5" value="8"></label>
+      <button id="pre-grant" type="button">Pre-approve</button>
+      <span id="pre-status"></span>
+    </div>
+    <ul id="pre-list"></ul>
+  </section>
+
+  <section id="keys" class="preapprovals">
+    <h2>Keys, hash prefixes only, never real keys</h2>
+    <p class="pre-note">Each API key is shown by name, scope, and the first characters of
+      its hash. The key itself is never sent to the page.</p>
+    <ul id="key-list"></ul>
+  </section>
+
   <footer id="settings-footer">
     <div id="settings-note">Changes are written to the <span id="env-path"></span> file.
       Restart <code>aidon webui</code> for new values to take effect.</div>

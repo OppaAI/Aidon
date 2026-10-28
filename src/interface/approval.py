@@ -78,6 +78,7 @@ class ApprovalGate:
         action_class: str | None = None,
         stakes: str | None = None,
         force_ask: bool = False,
+        reversible: bool = False,
     ) -> Decision:
         """Ask for a decision. kind == 'question' is not a decision.
 
@@ -97,11 +98,20 @@ class ApprovalGate:
         force_ask:
             If True, ignore the policy and always prompt (e.g. for
             plan approval or other one-shot high-consequence cards).
+        reversible:
+            Caller's statement that this action cannot send,
+            publish, spend, delete, or install anything. The plain
+            gate ignores it; a PreapprovalGate wrapper uses it to
+            decide whether a "live" grant may skip the card.
         """
         if kind == "question":
             raise ValueError("questions are chat turns, not approval cards")
 
         # Graduated autonomy short-circuit (never for force_ask).
+        # Only standing permission — a class at or over its threshold,
+        # or a low-stakes class — skips the card. Partial trust
+        # (ACT_NOTIFY below the threshold) is reported by the policy
+        # as a hint, but the human is still asked for it.
         if (
             not force_ask
             and self.policy is not None
@@ -112,7 +122,10 @@ class ApprovalGate:
             )
             action = verdict.get("action", "ask")
             why = verdict.get("why", "")
-            if action in ("act", "act_and_notify"):
+            if (
+                action in ("act", "act_and_notify")
+                and self.policy.standing(action_class, stakes=stakes)
+            ):
                 return Decision(
                     "auto_approved",
                     reason=f"{action}: {why}",
@@ -152,4 +165,3 @@ class ApprovalGate:
                 )
 
         return decision
-Grok finished responding

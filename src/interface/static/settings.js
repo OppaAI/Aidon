@@ -126,4 +126,93 @@
 
   saveBtn.addEventListener("click", save);
   load();
+
+  // ── pre-approvals: grant, list, revoke ─────────────────────────────
+  // Same store and same rules as WhatsApp, Slack, and the chat box:
+  // the reply text there and this panel read <home>/preapprovals.json.
+  const preList = document.getElementById("pre-list");
+  const preKind = document.getElementById("pre-kind");
+  const preStatus = document.getElementById("pre-status");
+  const preGrant = document.getElementById("pre-grant");
+
+  function hoursLeft(until) {
+    const ms = Math.max(0, until * 1000 - Date.now());
+    if (ms >= 3600000) return (ms / 3600000).toFixed(1) + "h left";
+    return Math.max(1, Math.round(ms / 60000)) + "m left";
+  }
+
+  async function loadPre() {
+    if (!preList) return;
+    let data;
+    try {
+      const r = await fetch("/api/preapprovals");
+      data = await r.json();
+    } catch (e) {
+      preStatus.textContent = "could not load pre-approvals";
+      return;
+    }
+    preKind.innerHTML = (data.kinds || []).map((k, i) =>
+      '<option value="' + esc(k.name) + '">' + (i + 1) + ". " + esc(k.label) +
+      "</option>").join("");
+    const grants = data.grants || [];
+    preList.innerHTML = grants.length ? grants.map((g) =>
+      '<li><span>' + esc(g.spec_id) + " · <strong>" + esc(g.action_kind) +
+      "</strong> · " + hoursLeft(Number(g.until)) + "</span>" +
+      '<button type="button" data-revoke="' + esc(g.spec_id) +
+      '" data-kind="' + esc(g.action_kind) + '">Revoke</button></li>').join("")
+      : '<li class="pre-empty">Nothing pre-approved.</li>';
+  }
+
+  if (preList) {
+    preList.addEventListener("click", async (ev) => {
+      const btn = ev.target.closest("button[data-revoke]");
+      if (!btn) return;
+      const spec = btn.dataset.revoke;
+      const kind = btn.dataset.kind;
+      const r = await fetch("/api/preapprovals/" + encodeURIComponent(spec) +
+        "/" + encodeURIComponent(kind), { method: "DELETE" });
+      const d = await r.json();
+      preStatus.textContent = d.ok ? "revoked" : (d.error || "not revoked");
+      loadPre();
+    });
+  }
+
+  if (preGrant) {
+    preGrant.addEventListener("click", async () => {
+      const spec = (document.getElementById("pre-project").value || "default").trim();
+      const kind = preKind.value;
+      const hours = Number(document.getElementById("pre-hours").value || 8);
+      preStatus.textContent = "saving…";
+      const r = await fetch("/api/preapprovals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spec_id: spec, kind: kind, hours: hours }),
+      });
+      const d = await r.json();
+      preStatus.textContent = d.ok ? "pre-approved" : (d.error || "refused");
+      loadPre();
+    });
+  }
+
+  loadPre();
+
+  // ── API keys: name, scope, hash prefix only ────────────────────────
+  async function loadKeys() {
+    const list = document.getElementById("key-list");
+    if (!list) return;
+    let keys = [];
+    try {
+      const r = await fetch("/api/keys");
+      keys = (await r.json()).keys || [];
+    } catch (e) {
+      list.innerHTML = '<li class="pre-empty">could not load keys</li>';
+      return;
+    }
+    list.innerHTML = keys.length ? keys.map((k) =>
+      "<li><span>" + esc(k.name) + " · " + esc(k.scope) + "</span><code>" +
+      esc(k.key_hash_prefix) + "</code></li>").join("")
+      : '<li class="pre-empty">No API keys.</li>';
+  }
+
+  loadKeys();
 })();

@@ -36,7 +36,8 @@ from .model_client import FakeClient
 from ..capabilities.sandbox import Sandbox
 
 
-def _cli_gate(home, timeout_seconds: int = 180) -> ApprovalGate:
+def _cli_gate(home, timeout_seconds: int = 180,
+              project_id: str = "default") -> ApprovalGate:
     from ..interface.autonomy import policy_for
 
     def decide(kind: str, title: str, body: str) -> Decision:
@@ -44,11 +45,20 @@ def _cli_gate(home, timeout_seconds: int = 180) -> ApprovalGate:
         answer = input("Approve? [y/N] ").strip().lower()
         return Decision("approved" if answer in ("y", "yes") else "rejected")
 
-    return ApprovalGate(
+    gate = ApprovalGate(
         decide,
         timeout_seconds=timeout_seconds,
         policy=policy_for(home),
     )
+    # Pre-approval applies to CLI and scheduled runs too, not only to
+    # the WebUI: the store is the same file the WebUI, WhatsApp, and
+    # Slack surfaces write, keyed by the run's project id.
+    try:
+        from ..interface.preapproval import PreapprovalStore
+        from ..interface.preapproval_gate import PreapprovalGate
+        return PreapprovalGate(gate, PreapprovalStore(home), project_id)
+    except Exception:
+        return gate
 
 
 def _network_available(execution_backend, sandbox) -> bool:
@@ -497,7 +507,12 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None) -> dict:
         pass
 
     def ask_user(question):
-        # Interview / clarifying questions are chat turns, not approval cards.
+        # Interview / clarifying questions are chat turns, not approval
+        # cards. With no gate there is no surface to carry the question
+        # back to the owner, so say that instead of pretending it was
+        # asked (the reply would otherwise be mistaken for an answer).
+        if gate is None:
+            return "no gate configured"
         return str(question)
 
     def declare_blocked(reason):
@@ -1577,7 +1592,7 @@ def main(argv: list[str] | None = None) -> int:
             _tick_control = _TickControl(config.home)
             _tick_control.register(_tick_run_id, job.goal, job.project_id)
             print(f"Tick job {job.name}: run id {_tick_run_id}")
-            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id=job.project_id, plugins=_plugins, execution_backend=_backend, budget=_B(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T(config.home, project_id=job.project_id), model_verifier=_MV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), run_id=_tick_run_id, run_control=_tick_control)
+            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds, job.project_id), config.home, memory=memory, project_id=job.project_id, plugins=_plugins, execution_backend=_backend, budget=_B(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T(config.home, project_id=job.project_id), model_verifier=_MV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), run_id=_tick_run_id, run_control=_tick_control)
             report = runner.run(job.goal)
             print(f"Tick job {job.name}: {report.status}, files: {', '.join(report.files)}")
         return 0
@@ -2455,13 +2470,13 @@ def main(argv: list[str] | None = None) -> int:
     _goal_control = _GoalControl(config.home)
     _goal_control.register(_goal_run_id, args.text, args.project)
     print(f"run id: {_goal_run_id}")
-    runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home,
+    runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds, args.project), config.home,
                         memory=memory, promotion_ask=_promotion_ask,
                         project_id=args.project, plugins=plugins, execution_backend=execution_backend,
                         budget=budget, trace=trace, model_verifier=model_verifier,
                         kernel_mode=config.kernel_mode, semantic_router=_cli_router,
                         use_semantic_router_skip=True, researcher=_researcher,
-                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds), researcher=_researcher),
+                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds, args.project), researcher=_researcher),
                         router=model_router, versioned_writes=True,
                         run_id=_goal_run_id, run_control=_goal_control,
                         network_available=_network_available(execution_backend, sandbox),

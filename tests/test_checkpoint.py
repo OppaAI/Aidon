@@ -78,4 +78,3 @@ def test_plan_to_dict_from_object():
     data = plan_to_dict(Plan())
     assert data["deliverables"] == ["x.md"]
     assert data["steps"][0]["tool"] == "write"
-Grok finished responding
