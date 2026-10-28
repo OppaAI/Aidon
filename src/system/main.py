@@ -829,6 +829,34 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         except Exception as exc:
             return f"whatsapp send failed: {type(exc).__name__}: {exc}"
 
+    def slack_send_file(channel, file, title=""):
+        """Upload a workdir file to a Slack channel (bytes, not a localhost link)."""
+        try:
+            from ..interface.messaging import send_slack_file
+            target = _confined(str(file))
+            if not target.is_file():
+                return f"slack send file failed: not found in workdir: {file}"
+            result = send_slack_file(_msg_config(), str(channel), target, str(title))
+            if result.get("ok"):
+                return f"slack file sent to {channel} (file {result.get('file_id', '')})"
+            return f"slack send file failed: {result.get('error', 'unknown error')}"
+        except Exception as exc:
+            return f"slack send file failed: {type(exc).__name__}: {exc}"
+
+    def whatsapp_send_media(to, file, caption=""):
+        """Send a workdir file over WhatsApp via the media API (bytes, not a link)."""
+        try:
+            from ..interface.messaging import send_whatsapp_media
+            target = _confined(str(file))
+            if not target.is_file():
+                return f"whatsapp send media failed: not found in workdir: {file}"
+            result = send_whatsapp_media(_msg_config(), str(to), target, str(caption))
+            if result.get("ok"):
+                return f"whatsapp media sent to {to} (id {result.get('message_id', '')})"
+            return f"whatsapp send media failed: {result.get('error', 'unknown error')}"
+        except Exception as exc:
+            return f"whatsapp send media failed: {type(exc).__name__}: {exc}"
+
     def list_schedule():
         try:
             from ..interface.triggers import Scheduler
@@ -864,6 +892,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     tools["search_research_cache"] = search_research_cache
     tools["slack_send"] = slack_send
     tools["whatsapp_send"] = whatsapp_send
+    tools["slack_send_file"] = slack_send_file
+    tools["whatsapp_send_media"] = whatsapp_send_media
     tools["list_schedule"] = list_schedule
     tools["cancel_schedule"] = cancel_schedule
     return tools
@@ -1085,6 +1115,8 @@ def main(argv: list[str] | None = None) -> int:
     practice_parser.add_argument("--end", default="22:00", help="Window end HH:MM")
     practice_parser.add_argument("--goal", action="append", default=[], help="Goal text, repeatable")
     practice_parser.add_argument("--spec", action="append", default=[], help="Spec name per goal, positionally paired with --goal")
+    practice_parser.add_argument("--preapprove", dest="preapprove", action="store_true", default=True, help="Pre-approve the schedule (default): reversible steps auto-approve, destructive steps are rejected")
+    practice_parser.add_argument("--no-preapprove", dest="preapprove", action="store_false", help="Do not pre-approve: practice stops for approval like any other run")
     sandbox_parser = sub.add_parser("sandbox", help="Sandbox isolation boundary")
     sandbox_parser.add_argument("action", choices=["check"], help="check = report sandbox backend and workdir, fail closed if backend missing")
     chain_parser = sub.add_parser("chain", help="Declarative tool chains, zero-LLM scheduled jobs")
@@ -1698,12 +1730,13 @@ def main(argv: list[str] | None = None) -> int:
                 spec = (args.spec[i] if i < len(args.spec) else ""
                         ) or inline_spec.strip()
                 goals.append({"goal": text.strip(), "spec": spec})
-            schedule, error = add_schedule(config.home, {
+            _padd, _perr = add_schedule(config.home, {
                 "name": args.name, "date": args.date,
                 "days": [d.strip() for d in args.days.split(",") if d.strip()],
-                "start": args.start, "end": args.end, "goals": goals})
-            if error is not None:
-                print(f"practice add failed: {error}"); return 2
+                "start": args.start, "end": args.end, "goals": goals,
+                "preapprove": args.preapprove})
+            if _perr:
+                print(f"practice add failed: {_perr}"); return 2
             print(f"Added practice schedule {args.name}")
             return 0
         if args.action == "remove":
@@ -1721,14 +1754,17 @@ def main(argv: list[str] | None = None) -> int:
             from ..agentic.trace import TraceRecorder as _PT
             from ..agentic.verifier_model import ModelVerifier as _PMV
             from ..capabilities.plugins import PluginRegistry as _PPR
-            from ..interface.approval import ApprovalGate as _PAG, Decision as _PDec
+            from ..interface.practice import PracticeGate, coerce_preapprove
             _pplugins = _PPR(config.home); _pplugins.load_all()
             try:
                 from ..capabilities.execution import make_backend as _pmb
                 _pbackend = _pmb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _pbackend = None
-            _pgate = _PAG(lambda kind, title, body: _PDec("approved", "practice schedule"))
+            if coerce_preapprove(schedule.get("preapprove", True)):
+                _pgate = PracticeGate()
+            else:
+                _pgate = _cli_gate(config.home, config.approval_timeout_seconds)
             _prunner = GoalRunner(client, sandbox, _pgate, config.home, memory=memory, project_id="default", plugins=_pplugins, execution_backend=_pbackend, budget=_PB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_PT(config.home, project_id="default"), model_verifier=_PMV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_pbackend, sandbox))
 
             def _p_run_goal(goal_text, spec):
@@ -1756,7 +1792,11 @@ def main(argv: list[str] | None = None) -> int:
 
             summary = run_practice_session(schedule, _p_run_goal,
                                            datetime.now() + timedelta(minutes=60),
-                                           home=config.home, on_report=_p_deliver)
+                                           home=config.home, on_report=_p_deliver,
+                                           on_progress=lambda live: print(
+                                               f"Practice live: {live['goal']} "
+                                               f"(attempt {live['attempt']})")
+                                           if live else None)
             record_session(config.home, schedule["name"], summary)
             print(f"Practice session {schedule['name']}: "
                   f"{'passed: ' + summary['goal'] if summary['passed'] else 'no pass'} "
@@ -2189,7 +2229,50 @@ def main(argv: list[str] | None = None) -> int:
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
                                 researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"))
-            def _surface_reply(text):
+            def _deliver_files(files, target):
+                """Upload run deliverables as bytes to a Slack/WhatsApp target.
+
+                target is ("slack", channel) or ("whatsapp", number).
+                Slack and WhatsApp cannot open localhost file links,
+                so a run's files reach those surfaces as uploads,
+                not links. Paths are confined to the run workdir;
+                anything outside it, or not a file, is skipped.
+                Failures are reported as a reply, never silent.
+                """
+                if not files or not target:
+                    return
+                from pathlib import Path as _P
+                root = _P(run_sandbox.workdir).resolve()
+                kind, recipient = target
+                if not recipient:
+                    return
+                for name in files:
+                    candidate = (_P(name) if _P(name).is_absolute()
+                                 else root / str(name))
+                    try:
+                        resolved = candidate.resolve()
+                    except Exception:
+                        continue
+                    if resolved != root and root not in resolved.parents:
+                        continue
+                    if not resolved.is_file():
+                        continue
+                    try:
+                        from ..interface.messaging import (
+                            send_slack_file as _ssf, send_whatsapp_media as _swm)
+                        if kind == "slack":
+                            result = _ssf(msg, recipient, resolved)
+                        else:
+                            result = _swm(msg, recipient, resolved)
+                        if not result.get("ok"):
+                            event.send_reply(
+                                f"File delivery failed for {resolved.name}: "
+                                f"{result.get('error', 'unknown error')}")
+                    except Exception as exc:
+                        event.send_reply(
+                            f"File delivery failed for {resolved.name}: {exc}")
+
+            def _surface_reply(text, files=None):
                 # The WebUI already displays and polls the run ID. Keep the
                 # ID in Slack/WhatsApp replies where it is needed for
                 # cross-surface control commands, but do not show it in chat.
@@ -2247,6 +2330,10 @@ def main(argv: list[str] | None = None) -> int:
                 if not result.get("ok"):
                     event.send_reply(f"Result delivery to {channel} failed: "
                                      f"{result.get('error', 'unknown error')}")
+                else:
+                    # A delivered result carries its files as bytes
+                    # too — the phone cannot open a localhost link.
+                    _deliver_files(files, (channel, recipient))
             # WebUI goals run once. Swarm remains an explicit CLI option;
             # automatically splitting ordinary chat made conversational
             # questions appear multiple times and multiplied model calls.
@@ -2265,7 +2352,18 @@ def main(argv: list[str] | None = None) -> int:
                                                 "cancelled") else None)
                 _surface_reply(_report_text(
                     report.status, report.files, report.error, run_id,
-                    format_run_stats(report), phrase=_phrase))
+                    format_run_stats(report), phrase=_phrase), files=report.files)
+            # A run that started on Slack or WhatsApp gets its
+            # deliverables as uploads on that same surface, after
+            # the text report above — localhost links are dead
+            # from a phone.
+            if report.status == "done" and report.files:
+                if event.source == "slack":
+                    _deliver_files(report.files,
+                                   ("slack", str(event.payload.get("channel", ""))))
+                elif event.source == "whatsapp":
+                    _deliver_files(report.files,
+                                   ("whatsapp", str(event.payload.get("from", ""))))
 
         dispatcher.register("webui", _goal_handler)
         dispatcher.register("whatsapp", _goal_handler)
@@ -2676,21 +2774,11 @@ def main(argv: list[str] | None = None) -> int:
         if _slack_ts_path.is_file():
             _slack_last_ts = _slack_ts_path.read_text().strip()
         # Practice sessions: the serve daemon owns the window tick
-        # and the report delivery. Practice runs are unattended,
-        # so their gate auto-approves: creating the schedule IS
-        # the owner's approval for those goals in that window.
-        def _practice_run_goal(goal_text, spec):
-            _runner = _full_scheduler_runner()
-            from ..interface.approval import ApprovalGate as _PAG2, Decision as _PDec2
-            _runner.gate = _PAG2(lambda kind, title, body: _PDec2("approved", "practice schedule"))
-            _report = _runner.run(goal_text, spec=spec)
-            return {"status": _report.status, "files": list(_report.files or []),
-                    "error": _report.error or "",
-                    "elapsed_seconds": getattr(_report, "elapsed_seconds", 0),
-                    "tokens": _report.model_tokens_estimated,
-                    "run_id": getattr(_runner, "run_id", "") or "",
-                    "dag": _report.dag_summary or {}}
-
+        # and the report delivery. A pre-approved schedule's gate
+        # auto-approves reversible steps and rejects destructive
+        # ones at once (PracticeGate); a schedule with preapprove
+        # off uses the WebUI gate, so it stops for approval like
+        # any other run, which is that setting's expected behaviour.
         def _practice_deliver(text, goal, result):
             try:
                 server._conversations_db().record_exchange("practice", "assistant", text)
@@ -2710,9 +2798,33 @@ def main(argv: list[str] | None = None) -> int:
                 pass
 
         def _practice_session_sync(schedule, end):
-            from ..interface.practice import run_practice_session as _rps, record_session as _rec
-            summary = _rps(schedule, _practice_run_goal, end, home=config.home,
-                           on_report=_practice_deliver)
+            from ..interface.practice import (PracticeGate, coerce_preapprove,
+                                              run_practice_session as _rps,
+                                              record_session as _rec,
+                                              update_live as _live)
+
+            def _run_goal(goal_text, spec):
+                _runner = _full_scheduler_runner()
+                if coerce_preapprove(schedule.get("preapprove", True)):
+                    _runner.gate = PracticeGate()
+                else:
+                    _runner.gate = server.webui_gate.gate
+                _report = _runner.run(goal_text, spec=spec)
+                return {"status": _report.status, "files": list(_report.files or []),
+                        "error": _report.error or "",
+                        "elapsed_seconds": getattr(_report, "elapsed_seconds", 0),
+                        "tokens": _report.model_tokens_estimated,
+                        "run_id": getattr(_runner, "run_id", "") or "",
+                        "dag": _report.dag_summary or {}}
+
+            def _on_progress(live):
+                try:
+                    _live(config.home, schedule["name"], live)
+                except Exception:
+                    pass
+
+            summary = _rps(schedule, _run_goal, end, home=config.home,
+                           on_report=_practice_deliver, on_progress=_on_progress)
             _rec(config.home, schedule["name"], summary)
             if not summary["passed"]:
                 # Window closed with no pass: WebUI-only summary,

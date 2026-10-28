@@ -433,10 +433,12 @@ def test_slack_image_attached_like_whatsapp_marker():
     event = parse_slack_event(payload)
     assert event is not None
     assert "[image slack_file_id=F1" in event.goal
-    assert "F2" not in event.goal  # non-image files are not attached
+    assert "[file slack_file_id=F2" in event.goal  # documents attach too
     assert len(event.payload["images"]) == 1
     assert event.payload["images"][0]["name"] == "plant.jpg"
     assert event.payload["images"][0]["downloaded"] is False
+    assert len(event.payload["files"]) == 1
+    assert event.payload["files"][0]["name"] == "notes.txt"
 
 
 def test_slack_image_only_message_still_becomes_goal():

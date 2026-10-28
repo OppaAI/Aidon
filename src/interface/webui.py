@@ -1418,6 +1418,32 @@ class WebUIServer:
                                         text = f"{caption} [image library_id={saved['id']}]".strip()
                                 except Exception as exc:
                                     text = caption or f"image received, could not save: {exc}"
+                        elif not text and message.get("type") in ("document", "video", "audio"):
+                            # Same download path as images (the Graph
+                            # media-download API, two steps), no vision
+                            # step: the file lands in the library and
+                            # the goal text carries its library id.
+                            mtype = message["type"]
+                            media = message.get(mtype, {}) or {}
+                            media_id = media.get("id", "")
+                            caption = media.get("caption", "")
+                            filename = media.get("filename", "") or f"whatsapp-{mtype}"
+                            text = caption
+                            if self.media_downloader is not None and media_id:
+                                try:
+                                    data = self.media_downloader(media_id)
+                                    from ..memory.library import Library
+                                    safe = self._safe_name(filename)
+                                    tmp = self.home / "library" / f"whatsapp-{media_id}-{safe}"
+                                    tmp.parent.mkdir(parents=True, exist_ok=True)
+                                    tmp.write_bytes(data)
+                                    library = Library(self.home)
+                                    saved = library.add_file(tmp, kind="attachment",
+                                                             description=f"WhatsApp {mtype}")
+                                    text = (f"{caption} [file library_id={saved['id']} "
+                                            f"kind={mtype}]").strip()
+                                except Exception as exc:
+                                    text = caption or f"{mtype} received, could not save: {exc}"
                         sender = message.get("from", "")
                         if not owner or normalize_number(sender) != owner:
                             continue
@@ -1563,18 +1589,21 @@ class WebUIServer:
             caption = text
             replies: list[str] = []
             # Image intake, same shape as parse_slack_event: image
-            # files ride with the goal text as [image ...] markers.
-            # Decision replies above already ran on the raw text, so
-            # replacing the goal text here cannot change an approval
-            # verdict. When the server's messaging config carries a
-            # Slack bot token, the file bytes are downloaded here
+            # files ride with the goal text as [image ...] markers,
+            # other files as [file ...] markers. Decision replies
+            # above already ran on the raw text, so replacing the
+            # goal text here cannot change an approval verdict.
+            # When the server's messaging config carries a Slack
+            # bot token, the file bytes are downloaded here
             # (mirroring the WhatsApp path: library save + vision
-            # message); without a token, markers + metadata only.
+            # message for images, library save for documents);
+            # without a token, markers + metadata only.
             payload: dict = {}
             try:
                 from .slack_inbound import parse_slack_event as _parse_slack
                 _parsed = _parse_slack(body)
-                if _parsed is not None and _parsed.payload.get("images"):
+                if _parsed is not None and (_parsed.payload.get("images")
+                                           or _parsed.payload.get("files")):
                     text = _parsed.goal
                     payload = _parsed.payload
             except Exception:
@@ -1610,6 +1639,35 @@ class WebUIServer:
                             replacement = f"[image library_id={saved['id']}]"
                         text = text.replace(marker, replacement)
                         image["downloaded"] = True
+                    except Exception:
+                        continue
+            # Non-image files: same download, no vision step — the
+            # document lands in the library and the marker carries
+            # its library id, so the run can read it.
+            if payload.get("files") and self.messaging_config.slack_bot_token:
+                from .messaging import download_slack_file as _dl_slack_file
+                for shared in payload["files"]:
+                    url = shared.get("url_private", "")
+                    if not url:
+                        continue
+                    try:
+                        data = _dl_slack_file(self.messaging_config.slack_bot_token, url)
+                    except Exception:
+                        continue
+                    try:
+                        from ..memory.library import Library
+                        safe = self._safe_name(str(shared.get("name", "slack-file")))
+                        tmp = self.home / "library" / f"slack-{shared['id']}-{safe}"
+                        tmp.parent.mkdir(parents=True, exist_ok=True)
+                        tmp.write_bytes(data)
+                        library = Library(self.home)
+                        saved = library.add_file(tmp, kind="attachment",
+                                                 description="Slack file")
+                        marker = (f"[file slack_file_id={shared['id']} "
+                                  f"mimetype={shared['mimetype']} name={shared['name']}]")
+                        text = text.replace(
+                            marker, f"[file library_id={saved['id']}]")
+                        shared["downloaded"] = True
                     except Exception:
                         continue
             payload["force_web"] = force_web

@@ -14,12 +14,19 @@ closes with no pass gets a summary in the WebUI record
 only, so a silent failure never looks like a pass.
 
 Practice runs are unattended by definition — free time
-means the owner is away — so the practice gate
-auto-approves: creating the schedule IS the owner's
+means the owner is away — so a pre-approved schedule's
+gate auto-approves: creating the schedule IS the owner's
 approval for those goals in that window, and the report
-says so. A practice run that would send mail, spend
-money, or publish should not be scheduled; the gate does
-not second-guess the schedule.
+says so. Pre-approval follows the standing doctrine:
+reversible only, never destructive. The PracticeGate
+enforces it at the gate, so a practice run cannot send,
+publish, spend, delete, install, or run a non-reversible
+plan even if the planner tries: those steps are rejected
+immediately, not left waiting 180s for a card nobody will
+answer, and the session moves on to the next random goal.
+A schedule with preapprove off stops for approval like
+any other run, which is the expected behaviour for that
+setting, not a bug.
 
 Storage is one JSON file under the Aidon home
 (practice.json), separate from the cron-style scheduler:
@@ -39,6 +46,60 @@ from pathlib import Path
 _PRACTICE_FILE = "practice.json"
 WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 _MAX_SESSIONS_KEPT = 20
+
+# Kinds a pre-approved practice gate never auto-approves.
+# Mirrors the pre-approval doctrine's irreversible set: an
+# external send, a publish, spending, a delete, an install,
+# a plugin change, a mandatory shell approval, or a live
+# execution are all destructive or outward-facing, so they
+# fail fast instead of running unattended.
+PRACTICE_IRREVERSIBLE_KINDS = {
+    "send_external", "external_email", "publish", "spend", "delete",
+    "live_execute", "plugin", "install", "mandatory",
+}
+PRACTICE_IRREVERSIBLE_ACTION_CLASSES = {"publish"}
+
+
+def coerce_preapprove(value) -> bool:
+    """A schedule's preapprove flag, default True for old schedules."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    if value is None:
+        return True
+    return bool(value)
+
+
+class PracticeGate:
+    """Auto-approve reversible practice steps, reject destructive ones.
+
+    Same ask() shape as ApprovalGate, so it drops into any
+    GoalRunner. Reversible steps (ordinary workdir work, and
+    a live card whose plan the loop already certified
+    reversible) are approved with the schedule as the reason.
+    Anything irreversible — by kind, by action class, or a
+    live card for a non-reversible plan — is rejected at
+    once, with the reason in the decision, so the run fails
+    that step fast instead of stalling on a card.
+    """
+
+    def ask(self, kind: str, title: str, body: str, **kwargs):
+        from .approval import Decision
+        action_class = str(kwargs.get("action_class") or "")
+        reversible = bool(kwargs.get("reversible", False))
+        if kind in PRACTICE_IRREVERSIBLE_KINDS:
+            return Decision("rejected",
+                            reason=f"practice pre-approval excludes {kind}")
+        if action_class in PRACTICE_IRREVERSIBLE_ACTION_CLASSES:
+            return Decision(
+                "rejected",
+                reason="practice pre-approval excludes publishing/sending")
+        if kind == "live" and not reversible:
+            return Decision(
+                "rejected",
+                reason="practice pre-approval needs a reversible plan")
+        return Decision("approved", reason="practice schedule pre-approval")
 
 
 def _parse_hhmm(text: str) -> time | None:
@@ -110,6 +171,7 @@ def validate_schedule(data: dict) -> tuple[dict | None, str | None]:
         "start": start.strftime("%H:%M"),
         "end": end.strftime("%H:%M"),
         "goals": goals,
+        "preapprove": coerce_preapprove(data.get("preapprove", True)),
         "created": datetime.now().isoformat(timespec="seconds"),
         "last_session_date": "",
         "sessions": [],
@@ -232,7 +294,7 @@ def practice_report_text(schedule_name: str, goal: str, result: dict,
 
 def run_practice_session(schedule: dict, run_goal, end: datetime,
                          home=None, now_fn=datetime.now, rng=None,
-                         on_report=None) -> dict:
+                         on_report=None, on_progress=None) -> dict:
     """Run random goals until a pass or the window end.
 
     run_goal(goal_text, spec_dict) returns a result dict with
@@ -243,6 +305,11 @@ def run_practice_session(schedule: dict, run_goal, end: datetime,
     on_report(report_text, goal, result) is called for each
     successful run — in practice the session ends at the
     first success, so that is one report per session.
+    on_progress(live) is called before each attempt with
+    {"goal", "attempt", "started"}, and with None when the
+    session ends, so the Practice page can show live
+    progress; results still go through on_report and the
+    session record, never through progress alone.
     """
     rng = rng or random
     goals = schedule.get("goals", [])
@@ -253,6 +320,10 @@ def run_practice_session(schedule: dict, run_goal, end: datetime,
         pick = rng.choice(goals)
         spec_name = str(pick.get("spec", "") or "")
         spec = load_spec(home, spec_name) if home is not None else None
+        if on_progress is not None:
+            on_progress({"goal": str(pick["goal"]),
+                         "attempt": len(attempts) + 1,
+                         "started": started})
         result = run_goal(str(pick["goal"]), spec)
         record = {"goal": str(pick["goal"]), "spec": spec_name,
                   "status": str(result.get("status", "")),
@@ -269,6 +340,8 @@ def run_practice_session(schedule: dict, run_goal, end: datetime,
                     record["goal"], result)
             break
     ended = now_fn().isoformat(timespec="seconds")
+    if on_progress is not None:
+        on_progress(None)
     return {
         "date": started[:10],
         "started": started,
@@ -288,5 +361,19 @@ def record_session(home: Path, schedule_name: str, summary: dict) -> None:
             sessions = schedule.get("sessions", []) or []
             sessions.append(summary)
             schedule["sessions"] = sessions[-_MAX_SESSIONS_KEPT:]
+            schedule.pop("live", None)
+            break
+    save_schedules(home, schedules)
+
+
+def update_live(home: Path, schedule_name: str, live: dict | None) -> None:
+    """Set or clear a schedule's live progress block for the page."""
+    schedules = load_schedules(home)
+    for schedule in schedules:
+        if schedule.get("name") == schedule_name:
+            if live is None:
+                schedule.pop("live", None)
+            else:
+                schedule["live"] = live
             break
     save_schedules(home, schedules)

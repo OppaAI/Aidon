@@ -4,9 +4,10 @@ import json
 from datetime import datetime, timedelta
 
 from src.interface.practice import (
-    add_schedule, due_for_session, get_schedule, load_schedules,
-    load_spec, practice_report_text, record_session, remove_schedule,
-    run_practice_session, validate_schedule, window_active, window_end)
+    PracticeGate, add_schedule, coerce_preapprove, due_for_session,
+    get_schedule, load_schedules, load_spec, practice_report_text,
+    record_session, remove_schedule, run_practice_session,
+    update_live, validate_schedule, window_active, window_end)
 
 
 def _sched(**over):
@@ -167,3 +168,44 @@ def test_report_text():
                                 "2026-11-02T21:00:00", "2026-11-02T21:05:00")
     assert "evening" in text and "Write a haiku" in text
     assert "haiku.md" in text and "auto-approved" in text
+
+
+def test_practice_gate():
+    gate = PracticeGate()
+    assert gate.ask("live", "t", "b", reversible=True).verdict == "approved"
+    assert gate.ask("shell", "t", "b").verdict == "approved"
+    assert gate.ask("live", "t", "b", reversible=False).verdict == "rejected"
+    assert gate.ask("live", "t", "b", reversible=True,
+                    action_class="publish").verdict == "rejected"
+    for kind in ("mandatory", "install", "publish", "spend", "delete",
+                 "send_external", "external_email", "live_execute", "plugin"):
+        assert gate.ask(kind, "t", "b").verdict == "rejected", kind
+
+
+def test_coerce_preapprove():
+    assert coerce_preapprove(True) is True
+    assert coerce_preapprove(False) is False
+    assert coerce_preapprove(None) is True
+    assert coerce_preapprove("false") is False
+    assert coerce_preapprove("0") is False
+    assert coerce_preapprove("yes") is True
+    schedule, _ = validate_schedule(_sched(preapprove=False))
+    assert schedule["preapprove"] is False
+    schedule, _ = validate_schedule(_sched())
+    assert schedule["preapprove"] is True
+
+
+def test_live_progress_and_clear(tmp_path):
+    schedule, _ = add_schedule(tmp_path, _sched())
+    progress = []
+    summary = run_practice_session(
+        schedule, lambda goal, spec: {"status": "done", "files": [], "run_id": "r"},
+        datetime(2026, 11, 2, 22, 0),
+        now_fn=lambda: datetime(2026, 11, 2, 21, 30),
+        on_progress=progress.append)
+    assert progress[0]["goal"] == "Write a haiku" and progress[0]["attempt"] == 1
+    assert progress[-1] is None
+    update_live(tmp_path, "evening", {"goal": "Write a haiku", "attempt": 1})
+    assert get_schedule(tmp_path, "evening")["live"]["attempt"] == 1
+    record_session(tmp_path, "evening", summary)
+    assert "live" not in get_schedule(tmp_path, "evening")

@@ -62,6 +62,7 @@ import os
 import re
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 
 WHATSAPP_API_BASE = "https://graph.facebook.com/v21.0"
 SLACK_API_BASE = "https://slack.com/api"
@@ -211,6 +212,150 @@ def send_slack(config: MessagingConfig, channel: str, text: str,
     if not result.get("ok"):
         return {"ok": False, "error": str(result.get("error", "unknown error"))}
     return {"ok": True, "ts": result.get("ts", "")}
+
+
+def _post_multipart(url: str, token: str, fields: dict, file_bytes: bytes,
+                    filename: str, upload=None) -> dict:
+    """POST one file as multipart/form-data, stdlib only.
+
+    fields are plain form fields; the file rides as the
+    "file" part. upload is injectable for tests, taking
+    (url, token, fields, file_bytes, filename) and returning
+    a parsed dict. Slack's external upload URL is already
+    authenticated, so callers pass token="" for that step.
+    """
+    if upload is not None:
+        return upload(url, token, fields, file_bytes, filename)
+    import uuid as _uuid
+    boundary = _uuid.uuid4().hex
+    parts: list[bytes] = []
+    for key, value in fields.items():
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode())
+        parts.append(f"{value}\r\n".encode())
+    parts.append(f"--{boundary}\r\n".encode())
+    parts.append(f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode())
+    parts.append(b"Content-Type: application/octet-stream\r\n\r\n")
+    parts.append(file_bytes)
+    parts.append(f"\r\n--{boundary}--\r\n".encode())
+    headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, data=b"".join(parts),
+                                     method="POST", headers=headers)
+    with urllib.request.urlopen(request, timeout=60) as response:
+        raw = response.read()
+    try:
+        return json.loads(raw.decode())
+    except Exception:
+        return {"ok": True, "raw": raw[:200].decode(errors="replace")}
+
+
+def send_slack_file(config, channel: str, file_path, title: str = "",
+                    post=None, upload=None) -> dict:
+    """Upload a file to a Slack channel, files.uploadV2 three steps.
+
+    Step 1 files.getUploadURLExternal reserves the upload,
+    step 2 posts the bytes to the returned URL, step 3
+    files.completeUploadExternal shares it in the channel.
+    Incoming webhooks cannot upload files, so a bot token
+    is required. Links need no upload — a URL in a text
+    message autolinks in Slack — this is for real files
+    and media the phone cannot reach over localhost.
+    """
+    if not config.slack_configured():
+        return {"ok": False, "error": "SLACK_BOT_TOKEN not set"}
+    if not channel:
+        return {"ok": False, "error": "no channel"}
+    path = Path(file_path) if not isinstance(file_path, Path) else file_path
+    if not path.is_file():
+        return {"ok": False, "error": f"file not found: {path}"}
+    data = path.read_bytes()
+    try:
+        reserved = _post_json(f"{SLACK_API_BASE}/files.getUploadURLExternal",
+                              config.slack_bot_token,
+                              {"filename": path.name, "length": len(data)}, post=post)
+    except Exception as exc:
+        return {"ok": False, "error": type(exc).__name__}
+    if not reserved.get("ok"):
+        return {"ok": False, "error": str(reserved.get("error", "upload URL failed"))}
+    try:
+        _post_multipart(reserved["upload_url"], "", {}, data, path.name, upload=upload)
+    except Exception as exc:
+        return {"ok": False, "error": type(exc).__name__}
+    try:
+        done = _post_json(f"{SLACK_API_BASE}/files.completeUploadExternal",
+                          config.slack_bot_token,
+                          {"files": [{"id": reserved["file_id"],
+                                      "title": title or path.name}],
+                           "channel_id": channel}, post=post)
+    except Exception as exc:
+        return {"ok": False, "error": type(exc).__name__}
+    if not done.get("ok"):
+        return {"ok": False, "error": str(done.get("error", "upload completion failed"))}
+    return {"ok": True, "file_id": reserved["file_id"]}
+
+
+_WHATSAPP_MEDIA_TYPES = {
+    "image": {"jpg", "jpeg", "png", "gif", "webp"},
+    "video": {"mp4", "3gp"},
+    "audio": {"mp3", "ogg", "aac", "m4a", "opus"},
+}
+
+
+def send_whatsapp_media(config, to: str, file_path, caption: str = "",
+                        post=None, upload=None) -> dict:
+    """Send a file or media over WhatsApp, Graph media API two steps.
+
+    Step 1 uploads the bytes to /<phone-number-id>/media and
+    returns a media id; step 2 sends a message carrying that
+    id. The type follows the extension — image, video, audio,
+    everything else document — matching the media API's own
+    types. This is why no Dropbox-style link host is needed:
+    the bytes live in WhatsApp itself, and the existing
+    messaging token already covers media upload.
+    """
+    if not config.whatsapp_configured():
+        return {"ok": False, "error": "AIDON_WHATSAPP_TOKEN / AIDON_WHATSAPP_PHONE_ID not set"}
+    if not to:
+        return {"ok": False, "error": "no recipient"}
+    path = Path(file_path) if not isinstance(file_path, Path) else file_path
+    if not path.is_file():
+        return {"ok": False, "error": f"file not found: {path}"}
+    ext = path.suffix.lower().lstrip(".")
+    media_type = "document"
+    for kind, exts in _WHATSAPP_MEDIA_TYPES.items():
+        if ext in exts:
+            media_type = kind
+            break
+    try:
+        uploaded = _post_multipart(
+            f"{WHATSAPP_API_BASE}/{config.whatsapp_phone_id}/media",
+            config.whatsapp_token, {"messaging_product": "whatsapp"},
+            path.read_bytes(), path.name, upload=upload)
+    except Exception as exc:
+        return {"ok": False, "error": type(exc).__name__}
+    media_id = uploaded.get("id", "")
+    if not media_id:
+        return {"ok": False, "error": f"media upload failed: {uploaded}"}
+    body: dict = {"messaging_product": "whatsapp", "to": to, "type": media_type}
+    media_body: dict = {"id": media_id}
+    if media_type in ("image", "video") and caption:
+        media_body["caption"] = caption
+    if media_type == "document":
+        media_body["filename"] = path.name
+        if caption:
+            media_body["caption"] = caption
+    body[media_type] = media_body
+    try:
+        result = _post_json(f"{WHATSAPP_API_BASE}/{config.whatsapp_phone_id}/messages",
+                            config.whatsapp_token, body, post=post)
+    except Exception as exc:
+        return {"ok": False, "error": type(exc).__name__}
+    if result.get("error"):
+        return {"ok": False, "error": str(result["error"])}
+    messages = result.get("messages") or [{}]
+    return {"ok": True, "message_id": messages[0].get("id", ""), "media_id": media_id}
 
 
 def poll_slack_once(config, channel: str, last_ts: str = "", fetch=None) -> tuple[list[dict], str]:
