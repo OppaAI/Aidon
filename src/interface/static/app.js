@@ -6,6 +6,7 @@
 
   const thread = document.getElementById("thread");
   const input = document.getElementById("goal-input");
+  const defaultGoalPlaceholder = "Start with a goal…\n\nPlan something, research a question, or ask Aidon to build a result for you. Your run stages and deliverables will appear here.";
   const guidanceInput = document.getElementById("guidance-input");
   const sendBtn = document.getElementById("send");
   const steerRow = document.getElementById("steer-row");
@@ -16,15 +17,6 @@
   const approvalSlot = document.getElementById("approval-slot");
   const statusDot = document.getElementById("status-dot");
   const statusText = document.getElementById("status-text");
-  const chatSearch = document.getElementById("chat-search");
-
-  if (chatSearch) chatSearch.addEventListener("input", () => {
-    const needle = chatSearch.value.trim().toLowerCase();
-    thread.querySelectorAll(".msg").forEach((message) => {
-      message.hidden = !!needle && !message.textContent.toLowerCase().includes(needle);
-    });
-  });
-
   function loadDashboardStatus() {
     fetch("/api/status").then((r) => r.json()).then((data) => {
       document.querySelectorAll("[data-status]").forEach((node) => {
@@ -380,7 +372,7 @@
         }
         const lv = waveLevels[i];
         waveLevels[i] = lv + (target - lv) * (target > lv ? 0.55 : 0.3);
-        const h = Math.max(1.5, waveLevels[i] * (H - 2));
+        const h = (micTime || freq) ? Math.max(1.5, waveLevels[i] * (H - 2)) : 0;
         const grad = ctx.createLinearGradient(0, mid - h / 2, 0, mid + h / 2);
         grad.addColorStop(0, lt ? "#4d9fff" : "#7de9ff");
         grad.addColorStop(1, lt ? "#0064e0" : "#1a9ec4");
@@ -935,7 +927,7 @@
         guidanceInput.disabled = true;
         input.placeholder = waiting
           ? "Answer Aidon's question…"
-          : "Chat or give Aidon a goal…";
+          : defaultGoalPlaceholder;
       }
       if (run.status !== "running") {
         clearInterval(pollTimer);
@@ -943,7 +935,7 @@
         sendBtn.disabled = false;
         input.disabled = false;
         guidanceInput.disabled = false;
-        input.placeholder = "Chat or give Aidon a goal…";
+        input.placeholder = defaultGoalPlaceholder;
         steerRow.hidden = true;
         approvalSlot.innerHTML = ""; // no stale card survives completion
         // loadHistory lives in the sidebar IIFE below (exposed on window)

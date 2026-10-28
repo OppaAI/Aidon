@@ -68,8 +68,7 @@ body::before { /* faint sci-fi grid backdrop */
 .nav-btn:hover { background: var(--surface2); color: var(--text); }
 .nav-btn.active { background: var(--surface2); color: var(--accent); font-weight: 700; }
 a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
-.nav-ico { font-size: 18px; width: 24px; text-align: center; flex: 0 0 auto;
-  filter: grayscale(1) brightness(1.55); }
+.nav-ico { font-size: 18px; width: 24px; text-align: center; flex: 0 0 auto; }
 #left-content { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .left-view { display: none; flex: 1; min-height: 0; flex-direction: column; }
 .left-view.active { display: flex; }
@@ -175,10 +174,6 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
 .online-label, .version-label { color: var(--muted); font-size: 11px; font-family: var(--font-mono);
   font-weight: 400; }
 .version-label { color: var(--text); font-size: 11px; font-weight: 600; }
-#chat-search { width: 220px; padding: 8px 12px; border: 1px solid var(--border);
-  border-radius: 9px; background: var(--surface2); color: var(--text); outline: none;
-  font-family: var(--font-display); font-size: 13px; }
-#chat-search:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
 #stages { display: flex; gap: 5px; flex-wrap: wrap; padding: 12px 0 8px; }
 .stage { display: inline-flex; align-items: center; gap: 6px;
   font-family: var(--font-display); font-size: 12px; font-weight: 600;
@@ -192,18 +187,6 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
   font-family: system-ui, sans-serif; font-size: 14px; line-height: 1; }
 #thread { flex: 1; min-height: 0; overflow-y: auto; display: flex;
   flex-direction: column; gap: 10px; padding: 8px 4px 12px; }
-#thread:empty { align-items: center; justify-content: center; }
-#thread:empty::before {
-  content: "Start with a goal\A\APlan something, research a question, or ask Aidon to build a result for you. Your run stages and deliverables will appear here.";
-  display: block; max-width: 540px; padding: 28px 34px; text-align: center;
-  white-space: pre-wrap; color: var(--text); font-family: var(--font-display);
-  font-size: 20px; line-height: 1.45; letter-spacing: .02em;
-  color: var(--muted); border: 1px solid var(--border);
-  border-radius: 18px; background:
-    var(--surface2);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, .18),
-    0 0 24px var(--accent-glow);
-}
 .msg { max-width: 88%; padding: 10px 13px; border-radius: 14px; font-size: 14px;
   line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
 /* markdown output: pre-wrap would double-space rendered block elements,
@@ -313,6 +296,9 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
   font-size: 14px; line-height: 1.45; outline: none; font-family: inherit; }
 #goal-input:focus { border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-glow), 0 0 18px var(--accent-glow); }
+#goal-input::placeholder, #guidance-input::placeholder { color: #596984; opacity: 1; }
+html[data-theme="light"] #goal-input::placeholder,
+html[data-theme="light"] #guidance-input::placeholder { color: #65758b; }
 #guidance-input { width: 100%; padding: 8px 14px; border-radius: 16px;
   border: 1px dashed var(--border); background: var(--surface2); color: var(--muted);
   font-size: 12px; outline: none; font-family: var(--font-mono); }
