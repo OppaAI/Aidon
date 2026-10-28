@@ -40,6 +40,7 @@ import json
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -374,6 +375,7 @@ class GoalRunner:
         self.gate_context = gate_context
         self.budget = budget
         self.trace = trace
+        self._trace_started = {}
         self.model_verifier = model_verifier
         self._effort_escalated = False
         if self.model_verifier is not None:
@@ -400,6 +402,27 @@ class GoalRunner:
         self.route_callback = route_callback
         self.trace_callback = trace_callback
 
+    def _counting_clients(self) -> list:
+        """Counting clients whose phase deltas feed trace events.
+
+        The main client plus the router's tier clients. Taking
+        a delta twice from the same object is harmless (the
+        second take is zero, drained), so a shared client
+        cannot double-count.
+        """
+        clients: list = []
+        candidates = [getattr(self, "client", None)]
+        router = getattr(self, "router", None)
+        if router is not None:
+            candidates += [getattr(router, "fast_client", None),
+                           getattr(router, "strong_client", None)]
+        for candidate in candidates:
+            if candidate is not None and \
+                    callable(getattr(candidate, "take_phase_usage", None)) \
+                    and candidate not in clients:
+                clients.append(candidate)
+        return clients
+
     def _trace(self, kind: str, status: str, detail: str = "") -> None:
         # Attribute to this runner's own run id: sub-runners share
         # their parent's recorder, and without the override their
@@ -407,14 +430,43 @@ class GoalRunner:
         # with no run id passes None, and record() falls back to
         # the recorder's own run id, so unregistered runs behave
         # exactly as before.
+        # Seconds are measured between a kind's "started" event
+        # and its terminal event, like old Aidon. Tokens drain
+        # from the counting clients on terminal events only: a
+        # "started" event precedes its calls, so it carries
+        # zeros. Non-model steps (sandbox, checkpoint) drain
+        # nothing and honestly show 0→0.
+        started = getattr(self, "_trace_started", None)
+        if started is None:
+            started = self._trace_started = {}
+        seconds = 0.0
+        tokens_in = tokens_out = thinking_tokens = 0
+        thinking = ""
+        if status == "started":
+            started[kind] = time.monotonic()
+        else:
+            begin = started.pop(kind, None)
+            if begin is not None:
+                seconds = round(time.monotonic() - begin, 1)
+            for client in self._counting_clients():
+                usage = client.take_phase_usage(kind)
+                tokens_in += usage["tokens_in"]
+                tokens_out += usage["tokens_out"]
+                thinking_tokens += usage["thinking_tokens"]
+                if usage["thinking"]:
+                    thinking = usage["thinking"]
         if self.trace is not None:
             event = self.trace.record(kind, status, detail, run_id=self.run_id)
             if callable(self.trace_callback):
-                self.trace_callback({
+                payload = {
                     "phase": kind, "status": status, "title": detail,
-                    "detail": detail, "seconds": 0,
-                    "tokens_in": 0, "tokens_out": 0,
-                })
+                    "detail": detail, "seconds": seconds,
+                    "tokens_in": tokens_in, "tokens_out": tokens_out,
+                    "thinking_tokens": thinking_tokens,
+                }
+                if thinking:
+                    payload["thinking"] = thinking
+                self.trace_callback(payload)
         if self.run_control is not None and self.run_id:
             stage_map = {
                 "interpret": "interpret", "research": "research",
@@ -640,9 +692,14 @@ class GoalRunner:
             if callable(stream):
                 chunks = []
                 try:
-                    iterator = (stream(str(phase), messages, sampling=sampling)
-                                if self.router is not None
-                                else stream(messages, sampling=sampling))
+                    if self.router is not None:
+                        iterator = stream(str(phase), messages, sampling=sampling)
+                    else:
+                        try:
+                            iterator = stream(messages, sampling=sampling,
+                                              phase=str(phase))
+                        except TypeError:
+                            iterator = stream(messages, sampling=sampling)
                 except TypeError:
                     try:
                         iterator = (stream(str(phase), messages)

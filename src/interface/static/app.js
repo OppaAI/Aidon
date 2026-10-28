@@ -884,24 +884,32 @@
       const failed = String(e.status || "").toLowerCase() === "failed";
       item.className = "think-item " + (e.kind || "note") +
         (failed ? " think-failed" : "");
-      const meta = (e.tokens_in || e.tokens_out)
-        ? ((e.tokens_in || 0) + " in · " + (e.tokens_out || 0) + " out")
-        : (e.status || ((e.seconds || 0) + "s"));
+      const hasTokenFields = ("tokens_in" in e) || ("tokens_out" in e);
+      const meta = hasTokenFields
+        ? ((e.seconds || 0) + "s · " + (e.tokens_in || 0) + "→" + (e.tokens_out || 0) + " tok")
+        : ((e.tokens_in || e.tokens_out)
+          ? ((e.tokens_in || 0) + " in · " + (e.tokens_out || 0) + " out")
+          : (e.status || ((e.seconds || 0) + "s")));
       const detail = e.detail || e.title || e.error || "";
       const usefulDetail = detail && detail !== (e.title || "");
-      // Token accounting alone is not expandable content. Only a trace
-      // event carrying actual thinking text gets the arrow and click
-      // handler; statuses, tool names, and errors stay static.
-      const expandable = !!(e.thinking && String(e.thinking).trim());
+      // Expandable when the step carries thinking to show: thinking
+      // text (Ollama) or a thinking-token count (Meta usage). The
+      // body stays collapsed until the row is clicked.
+      const hasThinkingText = !!(e.thinking && String(e.thinking).trim());
+      const hasThinkingTokens = (e.thinking_tokens || 0) > 0;
+      const expandable = hasThinkingText || hasThinkingTokens;
       const detailMarkup = failed
         ? (usefulDetail ? '<div class="think-error-detail">' + esc(detail) + "</div>" : "")
-        : (expandable && (usefulDetail || e.thinking)
+        : (expandable && (usefulDetail || hasThinkingText || hasThinkingTokens)
           ? '<div class="think-body"><div class="think-detail">' + esc(detail) +
-            (e.thinking ? '</div><pre class="think-thinking">' + esc(e.thinking) + "</pre>" : "</div>") +
+            (hasThinkingTokens ? '</div><div class="think-detail">thinking tokens: ' +
+              esc(e.thinking_tokens) + '</div>' : '</div>') +
+            (hasThinkingText ? '<pre class="think-thinking">' + esc(e.thinking) + "</pre>" : "") +
             "</div>"
           : "");
       item.innerHTML =
-        '<div class="think-head-row"' + (expandable ? ' title="click to expand details"' : '') + '>' +
+        '<div class="think-head-row"' + (expandable ? ' title="click to expand' +
+          (hasThinkingTokens ? ' thinking tokens"' : ' details"') : '') + '>' +
         (expandable ? '<button class="think-toggle" title="expand">›</button>' :
           '<span class="think-toggle" style="visibility:hidden">›</span>') +
         '<div class="think-title">' + esc(e.title || e.detail || e.status || phase) + "</div>" +
