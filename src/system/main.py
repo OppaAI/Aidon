@@ -117,6 +117,62 @@ def _promotion_ask(point) -> bool:
     return answer in ("y", "yes")
 
 
+def _env_int(name, default):
+    try:
+        return max(1, int(os.environ.get(name, default)))
+    except Exception:
+        return default
+
+
+def _deep_search_fns(config):
+    """Search + fetch callables for deep research, from config.
+
+    Shared by the deep_research plan tool (extractive, no model
+    client) and the loop-side deep researcher (judge + synthesis
+    via the run's client). Search returns result dicts with
+    title/url/snippet, so citations survive — the researcher
+    callable used by web_search returns strings only, no URLs.
+    """
+    from ..agentic.research_allow import DomainGrants, load_allowlist
+    from ..capabilities.documents import read_document as _read_doc
+    from ..capabilities.search import search as _search
+
+    def _search_fn(query_text):
+        result = _search(query_text, backend=config.search_backend,
+                         tavily_key=config.tavily_api_key,
+                         searxng_url=config.searxng_url,
+                         allowlist=load_allowlist(config.home, config.research_allowlist),
+                         grants=DomainGrants(config.home))
+        return result.get("results", []) if isinstance(result, dict) else result
+
+    def _fetch_fn(url):
+        try:
+            return _read_doc(str(url))
+        except Exception as exc:
+            return f"fetch failed: {type(exc).__name__}: {exc}"
+
+    return _search_fn, _fetch_fn
+
+
+def make_deep_researcher(config):
+    """Loop-side deep researcher: (query, chat) -> report dict.
+
+    chat is the run's model callable (loop._chat with phase
+    "research"), so the judge and synthesis run at the run's
+    thinking level — max in research mode. Rounds/sources come
+    from the deep-research env params.
+    """
+    from ..agentic.deep_research import deep_research as _deep
+    search_fn, fetch_fn = _deep_search_fns(config)
+
+    def deep_researcher(query, chat):
+        return _deep(str(query), search_fn, fetch_fn, chat=chat,
+                     max_rounds=_env_int("AIDON_DEEP_RESEARCH_ROUNDS", 2),
+                     max_sources=_env_int("AIDON_DEEP_RESEARCH_SOURCES", 5))
+
+    return deep_researcher
+
+
 def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
@@ -894,37 +950,11 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         # The plan tool runs without a model client, so the judge
         # is heuristic (top sources) and the summary extractive;
         # the module's judge/synthesis activate when a caller
-        # passes a client. Search goes through the configured
-        # backend with the same allowlist/grants as web search,
-        # so citations carry real URLs (the researcher callable
-        # returns title/snippet strings only, no URLs).
+        # passes a client (the loop-side researcher does).
         try:
             from ..agentic.deep_research import deep_research as _deep
-            from ..agentic.research_allow import DomainGrants, load_allowlist
-            from ..capabilities.documents import read_document as _read_doc
-            from ..capabilities.search import search as _search
-
-            def _search_fn(query_text):
-                result = _search(query_text, backend=config.search_backend,
-                                 tavily_key=config.tavily_api_key,
-                                 searxng_url=config.searxng_url,
-                                 allowlist=load_allowlist(config.home, config.research_allowlist),
-                                 grants=DomainGrants(config.home))
-                return result.get("results", []) if isinstance(result, dict) else result
-
-            def _fetch_fn(url):
-                try:
-                    return _read_doc(str(url))
-                except Exception as exc:
-                    return f"fetch failed: {type(exc).__name__}: {exc}"
-
-            def _env_int(name, default):
-                try:
-                    return max(1, int(os.environ.get(name, default)))
-                except Exception:
-                    return default
-
-            out = _deep(str(query), _search_fn, _fetch_fn, chat=None,
+            search_fn, fetch_fn = _deep_search_fns(config)
+            out = _deep(str(query), search_fn, fetch_fn, chat=None,
                         max_rounds=_env_int("AIDON_DEEP_RESEARCH_ROUNDS", 2),
                         max_sources=_env_int("AIDON_DEEP_RESEARCH_SOURCES", 5))
             head = (f"Deep research: {out['query']} "
@@ -2078,6 +2108,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "repl":
         from ..interface.repl import Repl
         _cli_think_state = {"on": False}
+        _cli_research_state = {"on": False}
 
         def _repl_handler(goal: str) -> str:
             from ..agentic.budgets import Budget as _B2
@@ -2091,12 +2122,22 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 _backend = None
             from ..interface.surfaces import parse_think_command as _cli_think
+            from ..interface.surfaces import parse_research_command as _cli_research
             _cli_cmd = _cli_think(goal)
             _cli_once = False
             if _cli_cmd is not None and _cli_cmd["action"] == "once":
                 goal = _cli_cmd["goal"]
                 _cli_once = True
-            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), think_max=_cli_once or _cli_think_state["on"])
+            _cli_rcmd = _cli_research(goal)
+            _cli_research_once = False
+            if _cli_rcmd is not None:
+                if _cli_rcmd["action"] == "toggle":
+                    _cli_research_state["on"] = not _cli_research_state["on"]
+                    return (f"Deep-research mode {'on' if _cli_research_state['on'] else 'off'} "
+                            "for this REPL session.")
+                goal = _cli_rcmd["goal"]
+                _cli_research_once = True
+            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), think_max=_cli_once or _cli_think_state["on"], research_mode=_cli_research_once or _cli_research_state["on"], deep_researcher=make_deep_researcher(config))
             report = runner.run(goal)
             if report.status == "chat":
                 return report.chat_reply or "Received."
@@ -2357,7 +2398,7 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context)
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context)
             def _deliver_files(files, target):
                 """Upload run deliverables as bytes to a Slack/WhatsApp target.
 

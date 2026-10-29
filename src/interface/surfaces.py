@@ -225,10 +225,13 @@ def mirror_status_text(home: Path, conversation_id: str = "",
 _THINK_FILE = "think_flags.json"
 
 _THINK_RE = re.compile(r"^/think(?:\s+(.*?))?\s*$", re.IGNORECASE)
+_RESEARCH_RE = re.compile(r"^/research(?:\s+(.*?))?\s*$", re.IGNORECASE)
 
 HELP_TEXT = (
     "/think — toggle maximum thinking for this conversation (🧠 button does the same).\n"
     "/think <goal> — run one goal with maximum thinking.\n"
+    "/research — toggle deep-research mode for this conversation.\n"
+    "/research <goal> — run one goal with deep research first, at maximum thinking.\n"
     "/web <question> — force a web answer for one question (🌐 button does the same).\n"
     "/mirror slack #channel — link this conversation to a Slack channel.\n"
     "/mirror slack off — remove the Slack link.\n"
@@ -242,6 +245,8 @@ HELP_TEXT = (
 CLI_HELP_TEXT = (
     "/think — toggle maximum thinking for this REPL session.\n"
     "/think <goal> — run one goal with maximum thinking.\n"
+    "/research — toggle deep-research mode for this REPL session.\n"
+    "/research <goal> — run one goal with deep research first, at maximum thinking.\n"
     "/help — this list.\n"
     "/history — past goals this session.\n"
     "/clear — clear history.\n"
@@ -271,8 +276,17 @@ def load_think_flags(home: Path) -> dict:
 def _save_think_flags(home: Path, flags: dict) -> None:
     path = _think_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    # Read-merge: the same file also holds the research section,
+    # and a think toggle must never wipe it (or vice versa).
+    data["think"] = flags
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"think": flags}, indent=2), encoding="utf-8")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
     tmp.replace(path)
 
 
@@ -305,6 +319,75 @@ def parse_think_command(text: str) -> dict | None:
     runs one goal with max thinking without changing the flag.
     """
     match = _THINK_RE.match(str(text or "").strip())
+    if not match:
+        return None
+    rest = (match.group(1) or "").strip()
+    if not rest:
+        return {"action": "toggle"}
+    return {"action": "once", "goal": rest}
+
+
+def load_research_flags(home: Path) -> dict:
+    """Return the research-mode flags, {} when absent or broken.
+
+    Research flags share think_flags.json with the think flags
+    (a second section in the same file), so one flags file holds
+    both per-conversation run toggles.
+    """
+    try:
+        data = json.loads(_think_path(home).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    flags = data.get("research", {}) if isinstance(data, dict) else {}
+    return {str(k): bool(v) for k, v in flags.items()
+            if isinstance(k, str)} if isinstance(flags, dict) else {}
+
+
+def _save_research_flags(home: Path, flags: dict) -> None:
+    path = _think_path(home)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    data["research"] = flags
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def research_enabled(home: Path, key: str) -> bool:
+    """True when deep-research mode is on for a conversation key."""
+    return bool(load_research_flags(home).get(str(key or ""), False))
+
+
+def set_research(home: Path, key: str, enabled: bool) -> bool:
+    """Set deep-research mode for a conversation key; returns the new state."""
+    key = str(key or "")
+    flags = load_research_flags(home)
+    if enabled:
+        flags[key] = True
+    else:
+        flags.pop(key, None)
+    _save_research_flags(home, flags)
+    return bool(enabled)
+
+
+def toggle_research(home: Path, key: str) -> bool:
+    """Flip deep-research mode for a conversation key; returns the new state."""
+    return set_research(home, key, not research_enabled(home, key))
+
+
+def parse_research_command(text: str) -> dict | None:
+    """Parse a /research command; None when the text is not one.
+
+    Bare ``/research`` toggles the sticky flag; ``/research
+    <goal>`` runs one goal with deep research first, at maximum
+    thinking, without changing the flag.
+    """
+    match = _RESEARCH_RE.match(str(text or "").strip())
     if not match:
         return None
     rest = (match.group(1) or "").strip()

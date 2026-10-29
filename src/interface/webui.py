@@ -1276,7 +1276,9 @@ class WebUIServer:
         mirror_response = self._mirror_command(conversation_id, goal, project_id)
         if mirror_response is not None:
             return mirror_response
-        from .surfaces import (HELP_TEXT, parse_think_command, think_enabled,
+        from .surfaces import (HELP_TEXT, parse_research_command,
+                               parse_think_command, research_enabled,
+                               think_enabled, toggle_research,
                                toggle_think)
         if goal.strip() == "/help":
             return self._simple_command_response(conversation_id, goal, project_id,
@@ -1292,6 +1294,17 @@ class WebUIServer:
             goal = think_cmd["goal"]
             think_max = True
         think_max = think_max or think_enabled(self.home, conversation_id)
+        research_mode = False
+        research_cmd = parse_research_command(goal)
+        if research_cmd is not None:
+            if research_cmd["action"] == "toggle":
+                state = toggle_research(self.home, conversation_id)
+                return self._simple_command_response(
+                    conversation_id, goal, project_id,
+                    f"Deep-research mode {'on' if state else 'off'} for this conversation.")
+            goal = research_cmd["goal"]
+            research_mode = True
+        research_mode = research_mode or research_enabled(self.home, conversation_id)
         run_id = new_run_id()
         if self.run_control is not None:
             self.run_control.register(run_id, goal, project_id)
@@ -1367,6 +1380,7 @@ class WebUIServer:
                    "guidance": str(body.get("guidance", "")),
                    "force_web": force_web,
                    "think_max": think_max,
+                   "research_mode": research_mode,
                    "_stream_callback": stream_delta,
                    "_route_callback": route_update,
                    "_trace_callback": trace_update,
@@ -1520,11 +1534,15 @@ class WebUIServer:
                                     self.whatsapp_sender(sender, ack)
                                 continue
                         from .surfaces import (HELP_TEXT as _WA_HELP,
+                                                parse_research_command as _wa_research,
                                                 parse_think_command as _wa_think,
+                                                research_enabled as _wa_research_enabled,
                                                 think_enabled as _wa_enabled,
+                                                toggle_research as _wa_research_toggle,
                                                 toggle_think as _wa_toggle)
                         wa_key = "whatsapp:" + str(sender)
                         wa_think_max = False
+                        wa_research_mode = False
                         if decision_reply is None:
                             wa_cmd = _wa_think(text)
                             if wa_cmd is not None:
@@ -1536,8 +1554,19 @@ class WebUIServer:
                                 else:
                                     text = wa_cmd["goal"]
                                     wa_think_max = True
-                            elif text.strip() == "/help":
-                                decision_reply = _WA_HELP
+                            else:
+                                wa_rcmd = _wa_research(text)
+                                if wa_rcmd is not None:
+                                    if wa_rcmd["action"] == "toggle":
+                                        state = _wa_research_toggle(self.home, wa_key)
+                                        decision_reply = (
+                                            f"Deep-research mode {'on' if state else 'off'} "
+                                            "for this chat.")
+                                    else:
+                                        text = wa_rcmd["goal"]
+                                        wa_research_mode = True
+                                elif text.strip() == "/help":
+                                    decision_reply = _WA_HELP
                         if decision_reply is None:
                             text, force_web = self._force_web_prefix(text)
                             if not text:
@@ -1553,7 +1582,8 @@ class WebUIServer:
                         event = TriggerEvent(source="whatsapp", kind="message",
                                              goal=text, payload={"from": sender,
                                                                  "force_web": force_web,
-                                                                 "think_max": wa_think_max or _wa_enabled(self.home, wa_key)},
+                                                                 "think_max": wa_think_max or _wa_enabled(self.home, wa_key),
+                                                                 "research_mode": wa_research_mode or _wa_research_enabled(self.home, wa_key)},
                                              reply=local_replies.append)
                         self.dispatcher.dispatch(event)
                         for reply in local_replies:
@@ -1665,11 +1695,15 @@ class WebUIServer:
                 self._record_surface_exchange("slack:" + channel, "assistant", mirror_reply)
                 return 200, {"replies": [mirror_reply]}
             from .surfaces import (HELP_TEXT as _SL_HELP,
+                                    parse_research_command as _sl_research,
                                     parse_think_command as _sl_think,
+                                    research_enabled as _sl_research_enabled,
                                     think_enabled as _sl_enabled,
+                                    toggle_research as _sl_research_toggle,
                                     toggle_think as _sl_toggle)
             sl_key = "slack:" + channel
             sl_think_max = False
+            sl_research_mode = False
             if decision_reply is None:
                 sl_cmd = _sl_think(text)
                 if sl_cmd is not None:
@@ -1680,8 +1714,18 @@ class WebUIServer:
                     else:
                         text = sl_cmd["goal"]
                         sl_think_max = True
-                elif text.strip() == "/help":
-                    decision_reply = _SL_HELP
+                else:
+                    sl_rcmd = _sl_research(text)
+                    if sl_rcmd is not None:
+                        if sl_rcmd["action"] == "toggle":
+                            state = _sl_research_toggle(self.home, sl_key)
+                            decision_reply = (f"Deep-research mode {'on' if state else 'off'} "
+                                              "for this channel.")
+                        else:
+                            text = sl_rcmd["goal"]
+                            sl_research_mode = True
+                    elif text.strip() == "/help":
+                        decision_reply = _SL_HELP
             force_web = False
             if decision_reply is None:
                 text, force_web = self._force_web_prefix(text)
@@ -1788,6 +1832,7 @@ class WebUIServer:
                         continue
             payload["force_web"] = force_web
             payload["think_max"] = sl_think_max or _sl_enabled(self.home, sl_key)
+            payload["research_mode"] = sl_research_mode or _sl_research_enabled(self.home, sl_key)
             payload["channel"] = channel
             payload["thread_ts"] = thread_ts
             event = TriggerEvent(source="slack", kind="message", goal=text,
@@ -3581,6 +3626,12 @@ loadSettings();
                     _think_query = _parse_qs_think(parsed.query)
                     conv = str(_think_query.get("conversation_id", [""])[0])
                     self._send_json(200, {"think_max": _get_think(server.home, conv)})
+                elif parsed.path == "/api/research":
+                    from .surfaces import research_enabled as _get_research
+                    from urllib.parse import parse_qs as _parse_qs_research
+                    _research_query = _parse_qs_research(parsed.query)
+                    conv = str(_research_query.get("conversation_id", [""])[0])
+                    self._send_json(200, {"research_mode": _get_research(server.home, conv)})
                 elif parsed.path == "/api/practice":
                     self._send_json(200, server.handle_practice_list())
                 elif parsed.path == "/api/conversations":
@@ -3763,6 +3814,11 @@ loadSettings();
                     conv = str(body.get("conversation_id", ""))
                     state = _post_think(server.home, conv)
                     self._send_json(200, {"think_max": state})
+                elif parsed.path == "/api/research":
+                    from .surfaces import toggle_research as _post_research
+                    conv = str(body.get("conversation_id", ""))
+                    state = _post_research(server.home, conv)
+                    self._send_json(200, {"research_mode": state})
                 elif parsed.path == "/api/transcribe_stream/start":
                     if not server.transcribe_key:
                         self._send_json(501, {"error": "transcribe key not configured"})

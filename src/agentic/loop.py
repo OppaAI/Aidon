@@ -333,7 +333,8 @@ class GoalRunner:
                  stream_callback=None, conversation_context: str = "",
                  route_callback=None, trace_callback=None,
                  allowed_side_effect_tools=None, gate_context=None,
-                 think_max: bool = False):
+                 think_max: bool = False, research_mode: bool = False,
+                 deep_researcher=None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -397,6 +398,15 @@ class GoalRunner:
         # for this run (reasoning_effort max on backends that take
         # it, think=True on boolean backends).
         self.think_max = bool(think_max)
+        # /research mode: deep research first, at max thinking, for
+        # this run. research_mode implies think_max (see _chat);
+        # deep_researcher is the injected loop-side deep research
+        # callable (query, chat) -> report dict, built by main.py
+        # from the configured search backend. None means the mode
+        # still max-thinks, but research stays the standard kind.
+        self.research_mode = bool(research_mode)
+        self.deep_researcher = deep_researcher
+        self._deep_research_context = ""
         self.stream_callback = stream_callback
         self.conversation_context = str(conversation_context or "")
         self.route_callback = route_callback
@@ -682,7 +692,8 @@ class GoalRunner:
                 phase,
                 escalate=self._effort_escalated and str(phase) in ("repair", "verify"),
                 creative=bool(getattr(self, "_creative_mode", False)),
-                think_max=bool(getattr(self, "think_max", False)))
+                think_max=bool(getattr(self, "think_max", False) or
+                               getattr(self, "research_mode", False)))
         except Exception:
             sampling = None
         if (self.stream_callback is not None
@@ -1035,6 +1046,13 @@ class GoalRunner:
         if failure_context:
             user = user + (f"\n\nPrevious attempt failed, repair only the "
                            f"failed parts, do not rewrite passed files:\n{failure_context}")
+        # Research-mode deep findings ride along with any targeted
+        # research context, on every plan call in the run (fresh,
+        # spec, repair, replan) — set once by run(), read here.
+        deep_context = str(getattr(self, "_deep_research_context", "") or "")
+        if deep_context:
+            research_context = (deep_context + "\n" + research_context).strip() \
+                if research_context else deep_context
         if research_context:
             user = user + ("\n\nTargeted research findings for the plan's "
                            "open questions, use them to fill those gaps, "
@@ -1191,6 +1209,34 @@ class GoalRunner:
                         "agentic route selected because the request changes state")
             if callable(self.route_callback):
                 self.route_callback(self.last_route)
+        # Research mode: deep research first, before recall and
+        # planning, so every plan call in the run carries the
+        # findings. A chat/webchat route is forced to agentic:
+        # the user asked for research, not a chat answer. Sticky
+        # mode means exactly that for the whole conversation;
+        # toggle it off with /research when chat is wanted again.
+        # force_web still wins: it is the explicit override.
+        self._deep_research_context = ""
+        if self.research_mode and not self.force_web:
+            if self.last_route and self.last_route[0] in ("chat", "webchat"):
+                self.last_route = ("agentic", 1.0)
+                self._trace("interpret", "done",
+                            "agentic route selected because research mode is on")
+                if callable(self.route_callback):
+                    self.route_callback(self.last_route)
+            if self.deep_researcher is not None:
+                self._trace("research", "started", "deep research")
+                try:
+                    report = self.deep_researcher(
+                        goal,
+                        lambda messages: self._chat("research", messages))
+                    report = report or {}
+                    self._deep_research_context = str(report.get("summary", "") or "")
+                    sources = report.get("citations", []) or []
+                    self._trace("research", "done",
+                                f"deep research: {len(sources)} source(s)")
+                except Exception as exc:
+                    self._trace("research", "failed", str(exc)[:100])
         if self.force_web and self.researcher is not None and spec is None and not _write_intent:
             from ..capabilities.webchat import webchat_reply
             reply = webchat_reply(goal, self.researcher, self.client,
