@@ -1,6 +1,6 @@
 """Memory fallback warning: the dashboard status must say loudly when
 memory is on SQLite/Hash instead of Qdrant, and setup.sh must offer
-the Qdrant server-binary install."""
+the Qdrant Docker install."""
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,10 +53,10 @@ def test_chat_page_has_system_status_section():
     assert 'id="memory-warning"' not in CHAT_HTML
 
 
-def test_setup_offers_qdrant_server_binary():
+def test_setup_offers_qdrant_docker():
     setup = (Path(__file__).parents[2] / "setup.sh").read_text()
-    assert "install_qdrant_server" in setup
-    assert "aidon-qdrant.service" in setup
+    assert "install_qdrant_docker" in setup
+    assert "aidon-qdrant" in setup
     assert "--with-qdrant" in setup
     assert "healthz" in setup
     assert "v1.19.1" in setup
