@@ -96,6 +96,7 @@ class CountingClient(ModelClient):
         self.in_tokens_actual: int = 0
         self.out_tokens_actual: int = 0
         self.calls_with_usage: int = 0
+        self.last_stream_usage = None
         self._thinking_text: dict[str, str] = {}
         # Parallel LLM steps count through here concurrently;
         # without a lock, increments from two threads can
@@ -218,10 +219,16 @@ class CountingClient(ModelClient):
             self.out_tokens_estimated += out_tokens
             self.calls_by_phase["stream"] = self.calls_by_phase.get("stream", 0) + 1
             self.tokens_by_phase["stream"] = self.tokens_by_phase.get("stream", 0) + tokens
-        # Streamed deltas carry text only, so this delta is always
-        # the split estimate, thinking tokens 0.
+        # Streamed usage, when the provider sent it, is the provider's
+        # own count, same as a non-streamed call; without it, the
+        # split estimate, as before.
+        usage = getattr(self.inner, "last_stream_usage", None)
+        if not isinstance(usage, dict) or (usage.get("prompt_tokens") is None
+                                           and usage.get("completion_tokens") is None):
+            usage = None
+        self.last_stream_usage = usage
         with self._lock:
-            self._record_usage(phase, messages, reply, None)
+            self._record_usage(phase, messages, reply, usage)
 
     def report(self) -> dict:
         return {"model_calls": self.calls,

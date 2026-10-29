@@ -289,6 +289,7 @@ class HttpModelClient(ModelClient):
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        self.last_stream_usage = None
 
     def _payload(self, messages: list[Message], sampling=None, tools=None) -> dict:
         payload = {
@@ -357,6 +358,28 @@ class HttpModelClient(ModelClient):
     def chat_stream(self, messages: list[Message], sampling=None):
         payload = self._payload(messages, sampling=sampling)
         payload["stream"] = True
+        # Chat Completions usage chunk: the provider sends one final
+        # chunk with an empty choices array and the whole-request
+        # usage, before [DONE]. Asking for it costs no extra request
+        # and no extra latency; when the provider does not send it,
+        # the caller falls back to the estimate, as before.
+        payload["stream_options"] = {"include_usage": True}
+        self.last_stream_usage = None
+        try:
+            yield from self._stream_payload(messages, sampling, payload)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 400:
+                raise
+            # A provider that rejects stream_options still streams
+            # fine without it. The 400 surfaces before any chunk is
+            # yielded, so retrying once cannot duplicate text; usage
+            # then falls back to the estimate.
+            payload = dict(payload)
+            payload.pop("stream_options", None)
+            self.last_stream_usage = None
+            yield from self._stream_payload(messages, sampling, payload)
+
+    def _stream_payload(self, messages, sampling, payload):
         url = f"{self.api_base}/chat/completions"
         resp, origin = _post(
             url,
@@ -381,6 +404,9 @@ class HttpModelClient(ModelClient):
                     data = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                usage = data.get("usage")
+                if usage:
+                    self.last_stream_usage = usage
                 choices = data.get("choices") or []
                 if not choices:
                     continue
@@ -417,6 +443,7 @@ class NativeModelClient(ModelClient):
         self.timeout = timeout
         self.think = think
         self.num_ctx = num_ctx
+        self.last_stream_usage = None
 
     def _body(self, messages: list[Message]) -> dict:
         converted = []
@@ -495,6 +522,7 @@ class NativeModelClient(ModelClient):
     def chat_stream(self, messages: list[Message], sampling=None):
         body = self._body(messages)
         body["stream"] = True
+        self.last_stream_usage = None
         if sampling:
             if sampling.get("think") is not None:
                 body["think"] = bool(sampling["think"])
@@ -520,6 +548,11 @@ class NativeModelClient(ModelClient):
                     data = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if data.get("done") and (data.get("prompt_eval_count") is not None
+                                         or data.get("eval_count") is not None):
+                    self.last_stream_usage = {
+                        "prompt_tokens": data.get("prompt_eval_count") or 0,
+                        "completion_tokens": data.get("eval_count") or 0}
                 message = data.get("message") or {}
                 text = message.get("content", "")
                 if text:

@@ -5,7 +5,8 @@ separately and never added into one number. A finished-run
 total uses real counts when every call reported usage
 (basis "actual", agreeing with the trace rows) and the
 estimate otherwise (basis "estimated"). Streamed calls
-stay estimated: the stream protocol carries no usage.
+use provider usage when the stream carries it, and stay
+estimated otherwise.
 """
 
 from src.agentic.counting import CountingClient

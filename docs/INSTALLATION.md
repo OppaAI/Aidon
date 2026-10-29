@@ -19,8 +19,10 @@ not install a VM. Docker is installed by you, on the
 machine where Aidon runs, if you want the Docker
 backend: Docker Desktop on macOS or Windows, or
 `docker.io` on Ubuntu, then log out and back in so the
-docker group applies. A VM is post-hackathon, future
-only, not installed by setup, and not needed now.
+docker group applies. A VM is not installed or
+provisioned by setup; the VM backend connects over
+SSH to a VM you already run, and a disposable VM
+per run is post-hackathon.
 `launch.sh` runs setup first if the home is missing,
 then starts the WebUI server with the same home, backend, and
 ingest path.
@@ -59,4 +61,4 @@ Setup and launch, in that order, are the entry points, as in the Aidon guides.
 ./launch.sh goal "Plan a dinner for two"
 ```
 
-A VM is post-hackathon, future only, not installed by setup, and not needed now.
+A VM is not installed or provisioned by setup; the VM backend connects over SSH to a VM you already run, and a disposable VM per run is post-hackathon.

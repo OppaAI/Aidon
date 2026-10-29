@@ -97,6 +97,7 @@ class RouterClient(ModelClient):
             yield from stream(messages, sampling=sampling)
         except TypeError:
             yield from stream(messages)
+        self.last_stream_usage = getattr(client, "last_stream_usage", None)
 
     def stats(self) -> dict:
         return dict(self.calls_by_phase)
