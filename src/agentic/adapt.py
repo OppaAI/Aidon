@@ -38,7 +38,7 @@ import json
 import re
 
 from ..memory.embedder import tokens
-from ..memory.experience import goal_shape_for
+from ..memory.experience import dag_similarity_threshold, goal_shape_for
 
 _STOP = {"a", "an", "the", "for", "to", "and", "or", "of", "in", "on",
          "with", "i", "want", "please", "me", "my", "write", "make",
@@ -157,7 +157,7 @@ def adapt_experience(experience, new_goal: str, client=None):
     shape_new = goal_shape_for(new_goal)
     set_old, set_new = set(shape_old.split()), set(shape_new.split())
     overlap = len(set_old & set_new) / len(set_old | set_new) if (set_old | set_new) else 0.0
-    if overlap < 0.3:
+    if overlap < dag_similarity_threshold():
         return None
     # Heuristic first, so a model failure still gives a usable plan.
     mapping = _word_map(old_goal, new_goal)

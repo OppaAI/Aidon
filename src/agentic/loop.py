@@ -1457,8 +1457,9 @@ class GoalRunner:
         """Build a plan by combining distinct recalled workflows, or None.
 
         Trigger: at least two recalled experiences with DAG
-        nodes, each matching the goal shape (>= 0.3, the adapt
-        threshold) and pairwise distinct from each other
+        nodes, each matching the goal shape (>= the DAG
+        similarity threshold, AIDON_DAG_SIMILARITY, default
+        0.3) and pairwise distinct from each other
         (shape overlap < 0.5, the store-merge threshold, so
         near-duplicate workflows are not combined twice).
         Up to five recalled workflows are considered.
@@ -1477,7 +1478,7 @@ class GoalRunner:
         when no combining step is needed; a failed join
         keeps the join-less union.
         """
-        from ..memory.experience import goal_shape_for
+        from ..memory.experience import dag_similarity_threshold, goal_shape_for
         from .dag import combine_dags, dag_from_experience
 
         def overlap(a: str, b: str) -> float:
@@ -1490,7 +1491,7 @@ class GoalRunner:
             if not exp.dag_nodes:
                 continue
             exp_shape = exp.goal_shape or goal_shape_for(exp.goal)
-            if overlap(exp_shape, goal_shape) < 0.3:
+            if overlap(exp_shape, goal_shape) < dag_similarity_threshold():
                 continue
             if any(overlap(exp_shape, cand.goal_shape or goal_shape_for(cand.goal)) >= 0.5
                    for cand in candidates):

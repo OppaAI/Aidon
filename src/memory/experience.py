@@ -45,6 +45,8 @@ second knowledge store.
 from __future__ import annotations
 
 import json
+import math
+import os
 from dataclasses import dataclass, field
 
 from .embedder import tokens
@@ -317,9 +319,28 @@ def promote_experience_to_skill(home, experience: Experience,
 
 # --- Failed examples: negative lessons, same collection ---
 
-# Same threshold as the adapt path: below this shape overlap
-# a failure is about a different task, not this goal.
-_FAILURE_SHAPE_MIN = 0.3
+# One knob for "same goal shape", shared by DAG learning,
+# experience adaptation, DAG adaptation, composition recall,
+# and failure matching: AIDON_DAG_SIMILARITY, default 0.3.
+# Read at call time, never at import, so a settings change
+# applies to the next run. Garbage falls back to the
+# default; out-of-range values clamp into [0, 1], so 1.0
+# means "identical shape only" and 0.0 means "everything
+# matches".
+DEFAULT_DAG_SIMILARITY = 0.3
+
+
+def dag_similarity_threshold() -> float:
+    raw = os.environ.get("AIDON_DAG_SIMILARITY", "")
+    if not str(raw).strip():
+        return DEFAULT_DAG_SIMILARITY
+    try:
+        value = float(str(raw).strip())
+    except ValueError:
+        return DEFAULT_DAG_SIMILARITY
+    if not math.isfinite(value):
+        return DEFAULT_DAG_SIMILARITY
+    return min(1.0, max(0.0, value))
 
 
 @dataclass
@@ -396,10 +417,11 @@ def recall_failures(memory: Memory, goal: str,
 def matching_failure(memory: Memory, goal: str) -> FailedExample | None:
     """Best negative lesson for a goal, or None when unrelated.
 
-    Same 0.3 shape threshold as the adapt path: a failure
-    about a different task must not steer this goal's plan.
+    Same shape threshold as the adapt path (AIDON_DAG_SIMILARITY,
+    default 0.3): a failure about a different task must not
+    steer this goal's plan.
     """
     for example in recall_failures(memory, goal, limit=3):
-        if _shape_overlap(example.goal_shape, goal_shape_for(goal)) >= _FAILURE_SHAPE_MIN:
+        if _shape_overlap(example.goal_shape, goal_shape_for(goal)) >= dag_similarity_threshold():
             return example
     return None

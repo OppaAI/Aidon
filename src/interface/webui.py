@@ -2133,11 +2133,13 @@ class WebUIServer:
             {"key": "AIDON_REACT_MAX_WORKERS", "label": "ReAct parallel workers", "type": "int", "default": "3", "desc": "Parallel tool workers within one ReAct round; 1 = sequential.", "secret": False},
             {"key": "AIDON_CRITIC_ENABLED", "label": "Plan critic on/off", "type": "int", "default": "1", "desc": "Reflection pass on each valid plan before execution; 0 skips it.", "secret": False},
             {"key": "AIDON_CRITIC_MAX_ROUNDS", "label": "Critic repair rounds", "type": "int", "default": "1", "desc": "Critic-issue repair rounds; 0 runs the critic without repairing.", "secret": False},
+            {"key": "AIDON_DAG_SIMILARITY", "label": "DAG similarity threshold", "type": "string", "default": "0.3", "desc": "Goal-shape overlap (0-1) for DAG replacement, experience adaptation, and failure matching; lower merges more aggressively.", "secret": False},
         ]},
     ]
     _CATALOG_FLOAT_KEYS = frozenset({
         "AIDON_MODEL_TIMEOUT_S", "AIDON_FORGET_HALF_LIFE_DAYS",
         "AIDON_FORGET_CLEANUP_THRESHOLD", "AIDON_AUTONOMY_DECAY_DAYS",
+        "AIDON_DAG_SIMILARITY",
     })
 
     def _catalog_entry(self, env_key: str):

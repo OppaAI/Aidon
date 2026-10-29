@@ -58,6 +58,7 @@ Important runtime settings include the model backend, execution isolation, memor
 - `AIDON_EMBED_MODEL` / `AIDON_SPARSE_MODEL` — dense and sparse memory models
 - `AIDON_VERIFIER_MODEL` — optional independent local verifier model
 - `AIDON_THINK_PHASES` — local-model phases that may use extended thinking
+- `AIDON_DAG_SIMILARITY` — goal-shape overlap (0-1) for DAG replacement, experience adaptation, and failure matching (default 0.3; lower merges more aggressively)
 - `AIDON_SLACK_SIGNING_SECRET` — Slack webhook signing secret
 
 See `examples/.env.example` for the complete commented configuration.
