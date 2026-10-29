@@ -2365,7 +2365,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "webui":
         from ..interface.messaging import MessagingConfig, send_slack, send_whatsapp
-        from ..interface.triggers import TriggerDispatcher
+        from ..interface.triggers import TriggerDispatcher, TriggerEvent
         from ..interface.v1 import AuthStore
         from ..interface.webui import WebUIServer
         msg = MessagingConfig.from_env()
