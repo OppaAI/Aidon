@@ -452,14 +452,26 @@ class GoalRunner:
         a delta twice from the same object is harmless (the
         second take is zero, drained), so a shared client
         cannot double-count.
+
+        Routers hide their tiers: a RoutedClient keeps them as
+        fast_client/strong_client and a RouterClient keeps them
+        in clients/default, so unwrap one level or the trace
+        drains nothing and every phase honestly shows 0→0.
         """
         clients: list = []
-        candidates = [getattr(self, "client", None)]
-        router = getattr(self, "router", None)
-        if router is not None:
-            candidates += [getattr(router, "fast_client", None),
-                           getattr(router, "strong_client", None)]
+        candidates = [getattr(self, "client", None),
+                      getattr(self, "router", None)]
+        expanded = list(candidates)
         for candidate in candidates:
+            if candidate is None:
+                continue
+            expanded.append(getattr(candidate, "fast_client", None))
+            expanded.append(getattr(candidate, "strong_client", None))
+            tier_map = getattr(candidate, "clients", None)
+            if isinstance(tier_map, dict):
+                expanded.extend(tier_map.values())
+            expanded.append(getattr(candidate, "default", None))
+        for candidate in expanded:
             if candidate is not None and \
                     callable(getattr(candidate, "take_phase_usage", None)) \
                     and candidate not in clients:
@@ -686,6 +698,60 @@ class GoalRunner:
             return self.gate.ask(kind, title, body, **kwargs)
         with timer.approval_wait():
             return self.gate.ask(kind, title, body, **kwargs)
+
+    def _route_judge(self):
+        """Fast-model second opinion for routing, or None.
+
+        Only when the loop's client is a RoutedClient (i.e. a
+        fast model is configured): the judge calls the fast
+        tier, never the strong one. Without a fast model there
+        is no judge and routing stays embedding-only. The judge
+        returns a route or None (abstain); any failure abstains,
+        so routing never breaks on a judge error.
+        """
+        fast = getattr(getattr(self, "client", None), "fast_client", None)
+        if fast is None:
+            return None
+
+        def judge(text):
+            prompt = (
+                "Classify this user message as exactly one of: "
+                "chat, webchat, agentic, artifact.\n"
+                "chat = chatting, asking a question, or talking about "
+                "something, including telling the assistant to wait "
+                "while the user checks something themselves.\n"
+                "webchat = asking to look something up on the web.\n"
+                "agentic = asking the assistant to DO something, change "
+                "state, or produce a file.\n"
+                "artifact = asking for a document or artifact to keep.\n"
+                "Reply with only JSON like {\"route\": \"chat\"}.\n"
+                f"Message: {text}")
+            try:
+                try:
+                    reply = fast.chat([Message("user", prompt)],
+                                      phase="route")
+                except TypeError:
+                    reply = fast.chat([Message("user", prompt)])
+            except Exception:
+                return None
+            try:
+                route = str(json.loads(reply).get("route", "")).strip().lower()
+            except Exception:
+                route = ""
+            if route not in ("chat", "webchat", "agentic", "artifact"):
+                match = re.search(
+                    r'"route"\s*:\s*"(chat|webchat|agentic|artifact)"',
+                    str(reply).lower())
+                if match:
+                    route = match.group(1)
+                elif str(reply).strip().lower() in (
+                        "chat", "webchat", "agentic", "artifact"):
+                    route = str(reply).strip().lower()
+                else:
+                    return None
+            return route
+
+        return judge
 
     def _chat(self, phase: str, messages) -> str:
         """One model call, router-aware.
@@ -1305,7 +1371,14 @@ class GoalRunner:
             return self._finalize(self._execute_plan(goal, self.resume_plan))
         if self.semantic_router is not None:
             try:
-                self.last_route = self.semantic_router.classify(goal)
+                try:
+                    self.last_route = self.semantic_router.classify(
+                        goal, judge=self._route_judge())
+                except TypeError:
+                    # Duck-typed routers with the old one-argument
+                    # classify keep working; the TypeError fires at
+                    # call binding, before any routing work runs.
+                    self.last_route = self.semantic_router.classify(goal)
                 self._trace("interpret", "done", f"semantic route {self.last_route[0]} {self.last_route[1]:.2f}")
                 if callable(self.route_callback):
                     self.route_callback(self.last_route)

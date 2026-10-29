@@ -37,6 +37,7 @@ small margin, because question forms make categories overlap.
 from __future__ import annotations
 
 import math
+import re
 
 CHAT_EXAMPLES = [
     "hi", "hello", "hey there", "good morning", "good evening",
@@ -171,6 +172,17 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb)
 
 
+# User-pause / meta-talk signals: the user telling the assistant
+# to wait while THEY check something, or talking about a task
+# rather than assigning it. Embeddings match vocabulary, not
+# speech acts, so "let me see if we create a file" scores like
+# "create a file" (a task) even though it assigns nothing.
+_PAUSE_RE = re.compile(
+    r"\b(?:give me a (?:minute|sec|second|moment)|hold on|wait|"
+    r"let me (?:check|see|look)|i(?:'ll| will) (?:check|see|look))\b",
+    re.IGNORECASE)
+
+
 class SemanticRouter:
     """Embedding-based chat / webchat / artifact / agentic classifier.
 
@@ -280,7 +292,20 @@ class SemanticRouter:
         except Exception:
             pass
 
-    def classify(self, text: str) -> tuple[str, float]:
+    def classify(self, text: str, judge=None) -> tuple[str, float]:
+        """Embedding route, with an optional fast-model second opinion.
+
+        judge, when given, is a callable taking the text and
+        returning one of chat/webchat/agentic/artifact, or None
+        to abstain. It is consulted only in the ambiguous band
+        (confidence below 0.75) and on user-pause messages that
+        embed like agentic tasks; clear embedding results stand
+        untouched, so most messages still cost no model call.
+        A judge failure or an unparseable answer keeps the
+        embedding result. The returned confidence still
+        describes the embedding match; only the route may come
+        from the judge.
+        """
         vec = self._embed([text])[0]
         web_intent_score = max((_cosine(vec, v) for v in self._web_intent_vecs), default=0.0)
         scores = [
@@ -317,7 +342,16 @@ class SemanticRouter:
         if best_score >= 0.75:
             confidence = min(1.0, max(confidence, best_score - 0.30))
         if confidence < 0.15:
-            return "agentic", confidence
+            best_cat = "agentic"
+        if judge is not None and (confidence < 0.75 or
+                                  (best_cat == "agentic" and
+                                   _PAUSE_RE.search(text))):
+            try:
+                judged = judge(text)
+            except Exception:
+                judged = None
+            if judged in ("chat", "webchat", "agentic", "artifact"):
+                return judged, confidence
         return best_cat, confidence
 
     def mode_for(self, text: str) -> str | None:
