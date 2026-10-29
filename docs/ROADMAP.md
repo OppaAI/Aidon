@@ -246,6 +246,14 @@ will be available inside a future VM once that backend exists.
   headless run, because there is no display to
   move it on.
 
+- Conscience Laya as safeguard model: a small conscience
+  model as an independent guardrail over Aidon's plans
+  and live actions — verifying an outcome met its goal
+  and refusing or flagging what fails, before anything
+  goes live. Post-hackathon; the safeguard role is the
+  definite, checkable kind (outcome verification,
+  guardrail classification), not a general moral sense.
+
 - Aidon fly-brain biological layer: the MaleCNS, the
   male Drosophila central nervous system connectome,
   as a biological layer, with sentient emergence and
