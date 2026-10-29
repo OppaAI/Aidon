@@ -194,7 +194,7 @@ post-hackathon, NOT built, NOT demoed, at the end.
   and scheduled runs execute directly.
 - Risk-based critic by default, and model verifier
   modes off, selective, and always (default off),
-  with gradual repair: a model NO naming a file
+  with incremental repair: a model NO naming a file
   re-runs only that file, passed files untouched.
 - Settings catalog in 9 groups (Interface, Scheduler,
   System, Cognitive, Memory, Voice, Agentic, Social,

@@ -1,6 +1,6 @@
-"""Gradual repair: a model-verifier NO re-runs only the named files.
+"""Incremental repair: a model-verifier NO re-runs only the named files.
 
-Code failures already repaired gradually (passed steps skipped). A
+Code failures already repaired incrementally (passed steps skipped). A
 model NO used to wipe every passed file (passed.clear()), forcing a
 full regeneration that could break good files. Now only deliverables
 named in the NO reason leave the passed set; the rest are kept.

@@ -3,7 +3,7 @@
 AIDON_MODEL_VERIFIER off/selective/always. Off spends no model call;
 selective skips only all-structured runs, where code checks are
 complete; always is the previous behavior. A NO reason must name the
-failed deliverable, so gradual repair can target it.
+failed deliverable, so incremental repair can target it.
 """
 
 import pytest

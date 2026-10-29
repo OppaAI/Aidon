@@ -2616,7 +2616,7 @@ class GoalRunner:
             self._trace("verify", "done" if ok else "failed", f"verified={len(verified)}")
             failures.extend(verify_failures)
             # Model verifier, second opinion only, after code
-            # verification passes. A "no" triggers gradual repair,
+            # verification passes. A "no" triggers incremental repair,
             # an "unknown" reply does not override code. The mode
             # is tunable (AIDON_MODEL_VERIFIER off/selective/
             # always, default off); a skipped verifier is traced
