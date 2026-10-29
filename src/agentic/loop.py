@@ -24,13 +24,15 @@ At most 3 attempts in total (1 initial + 2 repairs),
 then the run fails, it does not ask for approval, and
 it does not go live.
 
-Memory, blank by design: a fresh Aidon starts with empty
+Memory, blank by design: a new home starts with empty
 collections, no import from previous projects. When a
 memory is present, the loop recalls Experiences before
 planning fresh, records episodic memory scoped by
 project_id, and builds an Experience after a successful
-run only. Promotion is auto if the flag says so,
-otherwise via promotion_ask, otherwise left to the caller.
+run only. Promotion to long-term memory is automatic:
+a done run's episodic record and a chat exchange are
+copied to LTM, deduplicated when identical and
+superseding when the same shape recurs.
 """
 
 from __future__ import annotations
@@ -54,6 +56,10 @@ from .elapsed import ElapsedTimer
 MAX_ATTEMPTS = 3
 MAX_REPLANS = 1
 MAX_PLAN_REPAIRS = 2
+# Full skill text budget per skill on a level-2 load: about
+# 5000 tokens, so one huge skill file cannot flood the plan
+# prompt. The head (200 chars) stays the always-on level 1.
+_SKILL_FULL_CHARS = 20000
 
 
 def _resolve_count(env_name: str, default: int, minimum: int) -> int:
@@ -134,6 +140,11 @@ class Plan:
     # independent. The executor runs such a plan's levels
     # concurrently; every other plan runs sequentially.
     parallel_ok: bool = False
+    # Skill names the planner asked to have loaded in full
+    # (level 2). Read by _plan for one expansion pass, then
+    # ignored: the expanded plan's own list never triggers
+    # a further pass.
+    skills: list = field(default_factory=list)
 
     def normalized_steps(self) -> list[Step]:
         out = []
@@ -320,7 +331,7 @@ def run_react(client, messages: list, tools, *, max_rounds: int | None = None,
 class GoalRunner:
     def __init__(self, client: ModelClient, sandbox: Sandbox,
                  gate: ApprovalGate, home: Path, memory=None,
-                 promotion_ask=None, project_id: str = "default",
+                 project_id: str = "default",
                  plugins=None, execution_backend=None,
                  budget=None, trace=None, model_verifier=None,
                  kernel_mode: bool = False, semantic_router=None,
@@ -345,7 +356,6 @@ class GoalRunner:
         self.gate = gate
         self.home = Path(home)
         self.memory = memory
-        self.promotion_ask = promotion_ask
         self.project_id = project_id
         self.network_available = network_available
         # Optional human guidance, binding on the planner: carried
@@ -445,7 +455,7 @@ class GoalRunner:
         # the recorder's own run id, so unregistered runs behave
         # exactly as before.
         # Seconds are measured between a kind's "started" event
-        # and its terminal event, like old Aidon. Tokens drain
+        # and its terminal event. Tokens drain
         # from the counting clients on terminal events only: a
         # "started" event precedes its calls, so it carries
         # zeros. Non-model steps (sandbox, checkpoint) drain
@@ -931,7 +941,8 @@ class GoalRunner:
             raise
 
     def _plan(self, goal: str, failure_context: str = "",
-              spec=None, research_context: str = "") -> Plan:
+              spec=None, research_context: str = "",
+              skill_full: dict | None = None) -> Plan:
         if self.kernel_mode:
             system = ("Propose a short plan as JSON with keys steps, "
                       "deliverables, criteria. Each step is an object "
@@ -941,7 +952,7 @@ class GoalRunner:
                       "the workdir.")
         else:
             system = ("Propose a short plan as JSON with keys steps, "
-                      "deliverables, criteria. Each step is an object "
+                      "deliverables, criteria, skills. Each step is an object "
                       "with tool, args, deliverable. Tools: write, read, "
                       "list, shell, calculate. Keep every file inside "
                       "the workdir.")
@@ -961,6 +972,19 @@ class GoalRunner:
                            "not callable tools — never put a skill name "
                            "in a step's tool field, and never invent a "
                            "skill name outside this list.")
+                if skill_full is None:
+                    system += (" If a skill above holds the procedure "
+                               "this goal needs, list its name in the "
+                               "plan JSON 'skills' array; the full text "
+                               "will be loaded and planning will repeat "
+                               "with it.")
+                else:
+                    for full_name, full_text in skill_full.items():
+                        body = str(full_text)[:_SKILL_FULL_CHARS]
+                        system += (f" Full skill text for {full_name}, "
+                                   f"loaded on your request, follow it: {body}")
+                        if len(str(full_text)) > _SKILL_FULL_CHARS:
+                            system += " [cut here at the full-text budget]"
         if self.extra_tools and not self.kernel_mode:
             # Kernel mode restricts _call_tool to seed tools, so
             # extra tools are advertised only outside kernel mode.
@@ -1096,9 +1120,13 @@ class GoalRunner:
                 deliverables = [str(s.get("deliverable", ""))
                                 for s in steps if isinstance(s, dict)
                                 and s.get("deliverable")]
-            return Plan(steps=steps, deliverables=deliverables,
+            raw_skills = data.get("skills", []) or []
+            if isinstance(raw_skills, str):
+                raw_skills = [raw_skills]
+            plan = Plan(steps=steps, deliverables=deliverables,
                         criteria=[str(c) for c in data.get("criteria", [])],
-                        needs_research=[str(x) for x in data.get("needs_research", []) or []])
+                        needs_research=[str(x) for x in data.get("needs_research", []) or []],
+                        skills=[str(s) for s in raw_skills])
         except (json.JSONDecodeError, AttributeError):
             return Plan(
                 steps=[Step(tool="write", args={"file": "deliverable.md",
@@ -1106,6 +1134,32 @@ class GoalRunner:
                             deliverable="deliverable.md")],
                 deliverables=["deliverable.md"],
                 criteria=["deliverable.md exists"])
+        # Level 2, one expansion pass at most: the planner asked
+        # for full skill texts by name. Unknown names are
+        # ignored, never a failure; the expanded plan's own
+        # list is never expanded again (skill_full is set).
+        if skill_full is None and not self.kernel_mode \
+                and self.plugins is not None and plan.skills:
+            try:
+                texts = self.plugins.skill_texts()
+            except Exception:
+                texts = {}
+            resolved = {}
+            for wanted in plan.skills:
+                if wanted in texts and wanted not in resolved:
+                    resolved[wanted] = texts[wanted]
+                    continue
+                bare = [k for k in texts
+                        if k.rsplit("/", 1)[-1] == wanted]
+                if len(bare) == 1 and bare[0] not in resolved:
+                    resolved[bare[0]] = texts[bare[0]]
+            if resolved:
+                self._trace("plan", "skills-expanded", ", ".join(resolved))
+                return self._plan(goal, failure_context=failure_context,
+                                  spec=spec,
+                                  research_context=research_context,
+                                  skill_full=resolved)
+        return plan
 
     def _attachment_message(self, text: str) -> Message:
         """Preserve the user text and attach WebUI images when present."""
@@ -1543,10 +1597,11 @@ class GoalRunner:
         # the verbatim turn, while this point is the durable summary hook.
         if report.status == "chat" and self.memory is not None:
             try:
-                self.memory.record_episodic(
+                episodic = self.memory.record_episodic(
                     self.project_id, report.goal,
                     {"kind": "chat", "outcome": report.chat_reply or "",
                      "status": "done"})
+                self.memory.promote_to_ltm(episodic, kind="semantic")
             except Exception:
                 pass
         # Proven-run DAG learn, successful runs only, best
@@ -2247,11 +2302,7 @@ class GoalRunner:
             except Exception:
                 pass
             try:
-                if self.promotion_ask is not None:
-                    self.memory.promote_with_ask(
-                        episodic, self.promotion_ask, kind="semantic")
-                elif self.memory.auto_promote_enabled():
-                    self.memory.promote_to_ltm(episodic, kind="semantic")
+                self.memory.promote_to_ltm(episodic, kind="semantic")
             except Exception:
                 pass
         self._trace("learn", "done", "experience recorded")
