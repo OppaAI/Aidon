@@ -264,3 +264,60 @@ def test_plan_prompt_includes_episodic_and_semantic(tmp_path):
     assert "User prefers roast beef" in prompt
     assert "User is allergic to milk" in prompt
     assert "General facts" in prompt
+
+
+def test_plan_semantic_expands_via_entity_graph(tmp_path, monkeypatch):
+    """Semantic recall uses the full method: RRF + entity nodes.
+
+    Episode recall is switched off for this test, so the episodic
+    neighbour text in the prompt can only arrive through the
+    semantic leg's entity-graph expansion.
+    """
+    from src.agentic.loop import GoalRunner as _GR
+    from src.memory.entity_graph import EntityGraph
+
+    class _ScriptedClient:
+        def __init__(self, replies):
+            self.replies = list(replies)
+            self.calls = []
+
+        def chat(self, messages, sampling=None):
+            self.calls.append(messages)
+            return self.replies.pop(0)
+
+    monkeypatch.setenv("AIDON_EPISODE_RECALL_LIMIT", "0")
+    monkeypatch.setenv("AIDON_KNOWLEDGE_RECALL_LIMIT", "0")
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    memory = Memory(home, embedder=HashEmbedder(), store=InMemoryStore(),
+                    entity_graph=EntityGraph(home))
+    record_extraction(memory, "default", {
+        "facts": [{"subject": "Bread from Northside Bakery",
+                   "predicate": "is", "value": "the favourite",
+                   "scope": "semantic", "importance": 0.9}],
+        "understandings": []})
+    memory.record("episodic", "Fresh bread from Northside Bakery")
+    plan_json = json.dumps({
+        "steps": [{"tool": "write", "args": {"file": "a.txt"},
+                   "deliverable": "a.txt"}],
+        "deliverables": ["a.txt"], "criteria": [], "skills": []})
+    client = _ScriptedClient([plan_json])
+    runner = _GR.__new__(_GR)
+    runner.client = client
+    runner.router = None
+    runner.plugins = SimpleNamespace(tool_names=lambda: [],
+                                     skill_texts=lambda: {})
+    runner.kernel_mode = False
+    runner.extra_tools = {}
+    runner.memory = memory
+    runner.budget = None
+    runner.guidance = ""
+    runner.image_paths = []
+    runner.stream_callback = None
+    runner._effort_escalated = False
+    runner._trace = lambda *args, **kwargs: None
+    runner._plan("Plan a dinner menu")
+    prompt = " ".join(str(m.content) for m in client.calls[0])
+    assert "General facts" in prompt
+    general = prompt.split("General facts", 1)[1]
+    assert "Fresh bread from Northside Bakery" in general

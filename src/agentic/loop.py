@@ -1074,11 +1074,12 @@ class GoalRunner:
                 episodes, knowledge = self.memory.recall_both(
                     goal, episode_limit, knowledge_limit)
                 # General facts (extracted + promoted semantic points)
-                # are a third recall leg: direct hits only, no graph
-                # expansion, so the section stays facts, not neighbours.
+                # are a third recall leg, recalled the same full way
+                # as everything else: hybrid dense + sparse keyword
+                # search fused by RRF, retention-ranked by extraction
+                # importance, plus entity-graph node expansion.
                 semantic = self.memory.recall(
-                    "semantic", goal, limit=semantic_limit,
-                    graph=False) if semantic_limit else []
+                    "semantic", goal, limit=semantic_limit) if semantic_limit else []
                 sections = []
                 for label, hits in (("Earlier experiences", episodes),
                                     ("Relevant knowledge", knowledge),
