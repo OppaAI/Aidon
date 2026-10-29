@@ -80,7 +80,7 @@ def _cli_gate(home, timeout_seconds: int = 900,
         return gate
 
 
-def _scheduled_gate() -> ApprovalGate:
+def _scheduled_gate(sandboxed: bool = False) -> ApprovalGate:
     """Non-blocking gate for unattended scheduled runs.
 
     A daemon tick loop must never block on stdin: _cli_gate's
@@ -89,16 +89,22 @@ def _scheduled_gate() -> ApprovalGate:
     auto-approval and no prompt: email tools are approved (the
     email tool itself enforces owner-only delivery for scheduled
     runs, so the gate cannot leak mail to other recipients),
-    and everything else is rejected fail-closed and fast. A
-    scheduled goal that needs shell, install, publish, or live
-    approval therefore fails with a clear rejection instead of
-    hanging the tick loop — it never worked unattended before
-    either, it just failed slowly.
+    sandboxed shell commands that pass the practice safety scan
+    are approved, and everything else is rejected fail-closed
+    and fast. A scheduled goal that needs install, publish, or
+    live approval therefore fails with a clear rejection
+    instead of hanging the tick loop — it never worked
+    unattended before either, it just failed slowly.
     """
     def decide(kind: str, title: str, body: str) -> Decision:
         if kind == "live" and title in ("Extra tool email_send",
                                         "Extra tool email_make_draft"):
             return Decision("approved")
+        if kind == "mandatory" and sandboxed:
+            from ..interface.practice import _mandatory_safe_for_practice
+            if _mandatory_safe_for_practice(body):
+                return Decision("approved",
+                                reason="scheduled shell command")
         return Decision("rejected")
 
     return ApprovalGate(decide, policy=None)
@@ -861,16 +867,25 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         from ..agentic.direction import blocked_note
         return f"[blocked] {blocked_note(reason)['reason']}"
 
-    def schedule_job(name, kind="", schedule="", goal=""):
+    def schedule_job(name, kind="", schedule="", goal="", until="", tz="", time_limit=0):
         from ..interface.triggers import Scheduler, SchedulerJob
         scheduler = Scheduler(config.home)
         try:
             scheduler.add_job(SchedulerJob(name=name, schedule=schedule,
                                            goal=goal, kind=kind or "goal",
-                                           project_id="default"))
+                                           project_id="default",
+                                           until=until, tz=tz,
+                                           time_limit=time_limit))
         except ValueError as exc:
             return f"schedule failed: {exc}"
-        return f"scheduled {name} ({kind}) {schedule}: {goal}"
+        detail = f"scheduled {name} ({kind}) {schedule}: {goal}"
+        if until:
+            detail += f" until {until}"
+        if tz:
+            detail += f" ({tz})"
+        if time_limit:
+            detail += f" time limit {time_limit}s"
+        return detail
 
     def web_search(query):
         try:
@@ -3236,17 +3251,51 @@ def main(argv: list[str] | None = None) -> int:
                     # agentic pipeline; the web_search plan tool
                     # carries its own researcher.
                     _job_researcher = _make_web_researcher(config)
-                    _job_gate = _scheduled_gate()
+                    # Sandboxed shell for the gate: a real backend
+                    # (bwrap/Docker) isolates, and a host Sandbox
+                    # with bwrap present is offline; a host Sandbox
+                    # without bwrap is not isolated, so its shell
+                    # approvals stay rejected.
+                    _job_sandboxed = _backend is not None or bool(
+                        getattr(sandbox, "bwrap", False))
+                    _job_gate = _scheduled_gate(sandboxed=_job_sandboxed)
                     _job_tools = _goal_extra_tools(config, sandbox.workdir, gate=_job_gate, researcher=_job_researcher, question_answer=None, scheduled=True)
+                    try:
+                        _job_deadline = float(job.time_limit or 0) or None
+                    except (TypeError, ValueError):
+                        _job_deadline = None
                     runner = GoalRunner(client, sandbox, _job_gate, config.home,
                                         memory=memory, project_id=job.project_id, plugins=_plugins,
                                         execution_backend=_backend, budget=_Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
                                         trace=_Trace(config.home, project_id=job.project_id), model_verifier=_MV(client),
                                         kernel_mode=config.kernel_mode, semantic_router=_router2,
                                         use_semantic_router_skip=True, network_available=_network_available(_backend, sandbox), run_id=_serve_run_id, run_control=_serve_control,
-                                        extra_tools=_job_tools)
+                                        extra_tools=_job_tools,
+                                        deadline_seconds=_job_deadline)
                     report = runner.run(job.goal)
                     print(f"Job {job.name}: {report.status}, files: {', '.join(report.files)}")
+                    # Failure notification for goal jobs, mirroring
+                    # the brief kind's WhatsApp send. Failed and
+                    # partial (time-box cut) both notify: either
+                    # way the job did not complete. Unconfigured
+                    # messaging fails soft, like everything else
+                    # in this loop — the print above is the floor.
+                    if report.status in ("failed", "partial"):
+                        try:
+                            from ..interface.messaging import MessagingConfig, send_whatsapp
+                            _notify_cfg = MessagingConfig(
+                                whatsapp_token=config.whatsapp_token,
+                                whatsapp_phone_id=config.whatsapp_phone_id,
+                                whatsapp_verify_token=config.whatsapp_verify_token,
+                                whatsapp_app_secret=config.whatsapp_app_secret,
+                                whatsapp_owner=config.whatsapp_owner)
+                            _detail = (report.error or "")[:500]
+                            _text = (f"Scheduled job {job.name} {report.status}: "
+                                     f"{_detail or ', '.join(report.files) or 'no output'}")
+                            _sent = send_whatsapp(_notify_cfg, config.whatsapp_owner, _text)
+                            print(f"Job {job.name}: failure notification {_sent}")
+                        except Exception as exc:
+                            print(f"Job {job.name}: failure notification failed: {exc}")
             # Tick drain: once per tick, due notifications only,
             # cadence-spaced by the Outbox itself.
             _serve_loop.drain_outbox()

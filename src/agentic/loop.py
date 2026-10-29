@@ -334,7 +334,7 @@ class GoalRunner:
                  route_callback=None, trace_callback=None,
                  allowed_side_effect_tools=None, gate_context=None,
                  think_max: bool = False, research_mode: bool = False,
-                 deep_researcher=None):
+                 deep_researcher=None, deadline_seconds: float | None = None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -407,6 +407,10 @@ class GoalRunner:
         self.research_mode = bool(research_mode)
         self.deep_researcher = deep_researcher
         self._deep_research_context = ""
+        # Wall-clock time box for the run, seconds from run()
+        # start; None means unlimited. Enforced between execution
+        # steps (see _deadline_exceeded), never mid-step.
+        self.deadline_seconds = deadline_seconds
         self.stream_callback = stream_callback
         self.conversation_context = str(conversation_context or "")
         self.route_callback = route_callback
@@ -962,6 +966,17 @@ class GoalRunner:
             # extra tools are advertised only outside kernel mode.
             system += (" Extra tools available to plan steps: "
                        + ", ".join(sorted(self.extra_tools)) + ".")
+            if "schedule_job" in self.extra_tools:
+                system += (" schedule_job takes name, kind, schedule, goal, "
+                           "and optional until (ISO datetime, the job "
+                           "never fires after it), tz (IANA timezone "
+                           "name for interpreting the schedule), and "
+                           "time_limit (per-run seconds, 0 = unlimited; "
+                           "a run cut by it ends partial with files "
+                           "kept). Schedules that fire: at:<ISO>, "
+                           "daily HH:MM, weekly DAY HH:MM, monthly ..., "
+                           "or a 5-field cron — never 'every N …' or a "
+                           "bare ISO datetime, which never fire.")
             if "computer_use" in self.extra_tools:
                 system += (" For GUI tasks such as opening an application or "
                            "typing into it, use computer_use with validated "
@@ -1155,6 +1170,16 @@ class GoalRunner:
     def run(self, goal: str, spec=None, research_report=None,
             live_actions=None) -> RunReport:
         self._elapsed_timer = ElapsedTimer().start()
+        # Time box starts here, covering research, planning, and
+        # execution. A deadline consumed by planning or research
+        # trips at the first execution step instead of cutting
+        # those phases off mid-call.
+        self._timeboxed = False
+        try:
+            deadline = float(getattr(self, "deadline_seconds", None) or 0)
+        except (TypeError, ValueError):
+            deadline = 0
+        self._deadline_at = (time.monotonic() + deadline) if deadline > 0 else None
         # Creative requests get a wider response distribution. Keep this
         # narrow and phrase-based so ordinary tasks remain deterministic;
         # callers can still use AIDON_TEMP_* and AIDON_TOP_P_* overrides.
@@ -1767,6 +1792,9 @@ class GoalRunner:
                 if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
                     cancelled = True
                     break
+                if self._deadline_exceeded():
+                    self._timeboxed = True
+                    break
                 runnable = []
                 for step_id in level:
                     step = by_id[step_id]
@@ -1810,6 +1838,18 @@ class GoalRunner:
         finally:
             self.stream_callback = saved_callback
         return failures, cancelled
+
+    def _deadline_exceeded(self) -> bool:
+        """True when the run's wall-clock deadline has passed.
+
+        Enforced between execution steps, never mid-step: a step
+        already running (including a shell step, capped by the
+        sandbox timeout) finishes first. Planning and research
+        phases are not interrupted; a deadline consumed there
+        trips at the first execution step instead.
+        """
+        deadline = getattr(self, "_deadline_at", None)
+        return deadline is not None and time.monotonic() >= deadline
 
     def _execute_plan(self, goal: str, plan: Plan) -> RunReport:
         if self.budget is not None:
@@ -2004,10 +2044,27 @@ class GoalRunner:
                                          backend=self._backend_name())
                     if step.deliverable and step.deliverable in passed:
                         continue
+                    if self._deadline_exceeded():
+                        self._timeboxed = True
+                        break
                     error = self._run_plan_step(
                         step, goal, current_plan, passed, verified, attempt)
                     if error is not None:
                         failures.append(error)
+            # Time box: stop here, before verification. Verifying
+            # a partial plan would fail on the missing
+            # deliverables and misreport a clean cut as a failure.
+            # Partial is its own outcome: files kept, no failed
+            # example recorded (a time cut is not evidence the
+            # approach was wrong), no DAG learned from it.
+            if getattr(self, "_timeboxed", False):
+                self._trace("live", "done",
+                            "time limit reached; partial results kept")
+                return RunReport("partial", goal, current_plan, False, False,
+                                 files=sorted(passed), attempts=attempt,
+                                 error=(f"time limit reached; "
+                                        f"{len(passed)} deliverable(s) kept"),
+                                 backend=self._backend_name())
             # Verify: deliverables + plan criteria + step criteria.
             criteria = list(current_plan.criteria)
             for step in current_plan.normalized_steps():
