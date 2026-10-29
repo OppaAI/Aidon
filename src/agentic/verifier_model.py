@@ -142,7 +142,7 @@ class ModelVerifier:
                     "UNKNOWN. If a shown (text, extracted, or image) "
                     "file is truncated and a criterion cannot be "
                     "confirmed from the shown content, answer NO "
-                    "and name that criterion."
+                    "and name that criterion. When you answer NO, name the deliverable file(s) that fail in your one-line reason, so only those files are repaired and files that passed are kept."
                     "\n\nAnswer YES if every deliverable is complete and "
                     "matches the goal and criteria, otherwise NO, with one "
                     "line reason — or UNKNOWN when the only unconfirmed "

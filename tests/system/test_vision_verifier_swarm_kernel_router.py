@@ -93,7 +93,10 @@ def test_phase_router_tier():
     assert routed.stats() == {"fast_calls": 1, "strong_calls": 1}
 
 
-def test_loop_model_verifier_no_triggers_repair(tmp_path):
+def test_loop_model_verifier_no_triggers_repair(tmp_path, monkeypatch):
+    # The verifier path is opt-in now (default off); this test
+    # exercises it, so it turns the verifier on explicitly.
+    monkeypatch.setenv("AIDON_MODEL_VERIFIER", "always")
     # Code verifier passes, model verifier says NO, so the
     # run should repair, not approve, and with a FakeClient
     # plan it will fail after attempts, not go live.

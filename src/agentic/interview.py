@@ -459,7 +459,7 @@ class InterviewRunner:
                         "spec. Reply as JSON with keys question and spec. "
                         "If the spec is complete, question is null and "
                         "complete is true. Ask one question at a time, "
-                        "in chat, never assume an answer."),
+                        "in chat, never assume an answer. If the goal involves encryption and no algorithm is specified, ask which encryption algorithm to use, offering AES-256-GCM as the default."),
                 Message("user", json.dumps({
                     "goal": message, "spec": spec.to_dict(),
                     "exchanges": exchanges[-10:],

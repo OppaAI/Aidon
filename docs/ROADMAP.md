@@ -266,6 +266,15 @@ will be available inside a future VM once that backend exists.
   scheduler path stays the timer plus the WebUI process.
   Post-hackathon.
 
+- Post-hackathon cleanup, one entry: research-cache search index and
+  single persistence registry. The research cache is bounded by small
+  caps now (file, scan, and match limits); an FTS5 full-text index
+  replaces full-file scans when the cache grows, so search stays fast
+  without reading every entry. Separately, the goal loop opens two
+  Registry instances per runner (mission registry and checkpoint
+  registry); unify them into one or document the split, so checkpoint
+  and mission state stop living in two handles. Post-hackathon.
+
 - Aidon fly-brain biological layer: the MaleCNS, the
   male Drosophila central nervous system connectome,
   as a biological layer, with sentient emergence and

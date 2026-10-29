@@ -90,6 +90,38 @@ def _resolve_critic_mode() -> str:
     return "always" if mode == "always" else "risk"
 
 
+def _resolve_model_verifier_mode() -> str:
+    """Model verifier scope: "off" (default), "selective", or "always".
+
+    The default is the lowest: code verification decides alone and
+    no model call is spent on a second opinion. Unknown values fall
+    back to "off", so a typo must never silently turn the verifier
+    into always-on.
+    """
+    mode = (os.environ.get("AIDON_MODEL_VERIFIER", "") or "off").strip().lower()
+    return mode if mode in ("selective", "always") else "off"
+
+
+def _model_verifier_wanted(mode: str, deliverables) -> bool:
+    """True when the model verifier should run for these deliverables.
+
+    "off" never runs; "always" always runs. "selective" runs unless
+    every deliverable is structured data (JSON, JSONL, CSV, TSV),
+    where code checks are complete -- existence, contents, and
+    recomputed totals -- and a model opinion adds no quality
+    signal. A prose, document, or image deliverable earns the
+    second opinion.
+    """
+    if mode == "always":
+        return True
+    if mode != "selective":
+        return False
+    structured = {".json", ".jsonl", ".csv", ".tsv"}
+    return any(
+        Path(str(name)).suffix.lower() not in structured
+        for name in (deliverables or []))
+
+
 def _critic_wanted(plan, adapted_from: str = "") -> bool:
     """True when the plan critic should run on this plan.
 
@@ -1152,6 +1184,13 @@ class GoalRunner:
                    "step that renames the best attempt output to the exact "
                    "requested name inside the workdir (shell mv), so "
                    "verification and delivery see the exact name.")
+        system += (" Encryption: when a goal asks to encrypt a file, "
+                   "verify the content BEFORE encryption (criteria "
+                   "checked on the plaintext), then encrypt, then verify "
+                   "the container by properties and by a code round-trip "
+                   "(decrypt inside the sandbox and compare hashes), "
+                   "never send plaintext to the model verifier. Default "
+                   "cipher AES-256-GCM unless the user specifies another.")
         if self.plugins is not None and not self.kernel_mode:
             plugin_tools = self.plugins.tool_names()
             if plugin_tools:
@@ -1633,6 +1672,12 @@ class GoalRunner:
                         "AIDON_EPISODE_RECALL_LIMIT", "1") or "1"))
                 except ValueError:
                     recall_limit = 1
+                # Composition floor, fixed at 5: the adaptation path
+                # always considers at least five past experiences, even
+                # when AIDON_EPISODE_RECALL_LIMIT is set lower. The
+                # floor cannot go lower; the setting only raises the
+                # count above it. The plan-prompt block honors the
+                # setting as written.
                 experiences = recall_experiences(
                     self.memory, goal, limit=max(recall_limit, 5))
                 failure = matching_failure(self.memory, goal)
@@ -2559,10 +2604,16 @@ class GoalRunner:
             self._trace("verify", "done" if ok else "failed", f"verified={len(verified)}")
             failures.extend(verify_failures)
             # Model verifier, second opinion only, after code
-            # verification passes. A "no" triggers repair,
-            # an "unknown" reply does not override code.
+            # verification passes. A "no" triggers gradual repair,
+            # an "unknown" reply does not override code. The mode
+            # is tunable (AIDON_MODEL_VERIFIER off/selective/
+            # always, default off); a skipped verifier is traced
+            # so the saving is visible.
             model_failed = False
-            if ok and self.model_verifier is not None:
+            verifier_mode = _resolve_model_verifier_mode()
+            verifier_wanted = _model_verifier_wanted(
+                verifier_mode, current_plan.deliverables)
+            if ok and self.model_verifier is not None and verifier_wanted:
                 try:
                     mv = self.model_verifier.verify(goal, current_plan.deliverables, self.sandbox.workdir, criteria)
                     self._trace("verify", mv["verdict"], f"model verifier {mv['reason'][:100]}")
@@ -2571,6 +2622,9 @@ class GoalRunner:
                         failures.append(f"model verifier: {mv['reason']}")
                 except Exception as exc:
                     self._trace("verify", "failed", str(exc)[:100])
+            elif ok and self.model_verifier is not None:
+                self._trace("verify", "skipped",
+                            f"model verifier {verifier_mode}")
             # Passed means existence AND no failure mentions
             # it. A ledger file that exists but totals wrong
             # is not passed, so repair can rewrite it, while
@@ -2585,8 +2639,6 @@ class GoalRunner:
             for name in verified:
                 if not any(name in msg for msg in failures):
                     passed.add(name)
-            if model_failed:
-                passed.clear()
             if (not ok and not model_failed
                     and not self._criterion_repaired and failures
                     and all(f.startswith("unverified criterion: ")

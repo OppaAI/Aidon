@@ -1344,7 +1344,7 @@ class WebUIServer:
         if mode is None and str(body.get("mode", "") or "") in ("ask", "plan", "execute"):
             mode = str(body.get("mode"))
         if mode is None:
-            mode = mode_enabled(self.home, conversation_id) or "execute"
+            mode = mode_enabled(self.home, conversation_id) or "ask"
         run_id = new_run_id()
         if self.run_control is not None:
             self.run_control.register(run_id, goal, project_id)
@@ -1670,7 +1670,7 @@ class WebUIServer:
                                        "force_web": force_web,
                                        "think_max": wa_think_max or _wa_enabled(self.home, wa_key),
                                        "research_mode": wa_research_mode or _wa_research_enabled(self.home, wa_key),
-                                       "mode": wa_mode or _wa_mode_enabled(self.home, wa_key) or "execute"}
+                                       "mode": wa_mode or _wa_mode_enabled(self.home, wa_key) or "ask"}
                         if wa_resume_stop_id:
                             _wa_payload["resume_stop_id"] = wa_resume_stop_id
                         if isinstance(wa_resume_spec, dict):
@@ -1968,7 +1968,7 @@ class WebUIServer:
             payload["force_web"] = force_web
             payload["think_max"] = sl_think_max or _sl_enabled(self.home, sl_key)
             payload["research_mode"] = sl_research_mode or _sl_research_enabled(self.home, sl_key)
-            payload["mode"] = sl_mode or _sl_mode_enabled(self.home, sl_key) or "execute"
+            payload["mode"] = sl_mode or _sl_mode_enabled(self.home, sl_key) or "ask"
             if sl_resume_stop_id:
                 payload["resume_stop_id"] = sl_resume_stop_id
             if isinstance(sl_resume_spec, dict):
@@ -2227,7 +2227,7 @@ class WebUIServer:
             {"key": "AIDON_FORGET_HALF_LIFE_DAYS", "label": "Forget half-life days", "type": "string", "default": "21", "desc": "Forgetting-curve half-life, in days.", "secret": False},
             {"key": "AIDON_FORGET_GRACE_DAYS", "label": "Forget grace days", "type": "int", "default": "35", "desc": "Days before forgetting starts.", "secret": False},
             {"key": "AIDON_FORGET_CLEANUP_THRESHOLD", "label": "Forget cleanup threshold", "type": "string", "default": "0.02", "desc": "Recall weight below which a point is pruned.", "secret": False},
-            {"key": "AIDON_EPISODE_RECALL_LIMIT", "label": "Episode recall limit", "type": "int", "default": "1", "desc": "Number of prior experiences considered before a fresh plan.", "secret": False},
+            {"key": "AIDON_EPISODE_RECALL_LIMIT", "label": "Episode recall limit", "type": "int", "default": "1", "desc": "Number of prior experiences considered before a fresh plan. Composition always uses at least 5; that floor is fixed and cannot go lower.", "secret": False},
             {"key": "AIDON_KNOWLEDGE_RECALL_LIMIT", "label": "Knowledge recall limit", "type": "int", "default": "3", "desc": "Number of knowledge points considered before planning.", "secret": False},
             {"key": "AIDON_RECALL_MAX_TOKENS", "label": "Recall token budget", "type": "int", "default": "2000", "desc": "Maximum memory context included in a plan.", "secret": False},
             {"key": "AIDON_LEARN_MAX_SKILLS_PER_DAY", "label": "Learning skills per day", "type": "int", "default": "5", "desc": "Maximum candidate skills promoted by one learn cycle per day.", "secret": False},
@@ -2265,6 +2265,7 @@ class WebUIServer:
             {"key": "AIDON_CRITIC_MAX_ISSUES", "label": "Critic issues per round", "type": "int", "default": "5", "desc": "Most issues the critic returns per review round; repairs address them in order.", "secret": False},
             {"key": "AIDON_CRITIC_MODE", "label": "Critic mode", "type": "enum", "default": "risk", "desc": "Plan critic scope: risk (review only fresh large plans and plans with live steps; adapted and small plans skip it) or always (review every valid plan). Flip to always if risk-based review misses real plan flaws. Default: risk.", "secret": False, "options": ["risk", "always"]},
             {"key": "AIDON_CRITIC_RISK_MAX_STEPS", "label": "Critic risk small-plan steps", "type": "int", "default": "3", "desc": "A plan with at most this many steps counts as small for risk-based critic mode and skips review when it has no live steps; 0 means only adapted plans skip. Default: 3.", "secret": False},
+            {"key": "AIDON_MODEL_VERIFIER", "label": "Model verifier mode", "type": "enum", "default": "off", "desc": "Model second opinion after code verification passes: off (code decides alone, fewest tokens), selective (runs unless every deliverable is structured data such as JSON or CSV, where code checks are complete), or always (runs on every passing run). Flip up if code-only verification misses quality flaws. Default: off.", "secret": False, "options": ["off", "selective", "always"]},
             {"key": "AIDON_CHOICE_POLICY", "label": "Choice policy", "type": "enum", "default": "auto", "desc": "Choice policy when research finds real alternatives: auto (reason and pick) or ask (present ranked candidates at a choice gate). Default: auto.", "secret": False, "options": ["auto", "ask"]},
         ]},
         {"group": "Social", "settings": [

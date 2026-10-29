@@ -2261,7 +2261,7 @@ def main(argv: list[str] | None = None) -> int:
         from ..interface.repl import Repl
         _cli_think_state = {"on": False}
         _cli_research_state = {"on": False}
-        _cli_mode_state = {"mode": "execute"}
+        _cli_mode_state = {"mode": "ask"}
 
         def _repl_handler(goal: str) -> str:
             from ..agentic.budgets import Budget as _B2
@@ -2334,7 +2334,7 @@ def main(argv: list[str] | None = None) -> int:
                 _cli_router = _CliRouter(memory.embedder, cache_path=config.home / "semantic_router_vectors.json")
             except Exception:
                 _cli_router = None
-            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), think_max=_cli_once or _cli_think_state["on"], research_mode=_cli_research_once or _cli_research_state["on"], deep_researcher=make_deep_researcher(config), mode=_cli_mode_once or (_cli_mode_state["mode"] if _cli_mode_state["mode"] != "execute" else None), question_ask=lambda q: input(f"\nAidon: {q}\nYou: "), conversation_key="cli", resume_plan=_cli_resume_plan, semantic_router=_cli_router)
+            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), think_max=_cli_once or _cli_think_state["on"], research_mode=_cli_research_once or _cli_research_state["on"], deep_researcher=make_deep_researcher(config), mode=_cli_mode_once or _cli_mode_state["mode"], question_ask=lambda q: input(f"\nAidon: {q}\nYou: "), conversation_key="cli", resume_plan=_cli_resume_plan, semantic_router=_cli_router)
             if _cli_resume_spec is not None:
                 report = runner.run(goal, spec=_cli_resume_spec)
             else:
