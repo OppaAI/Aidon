@@ -195,3 +195,21 @@ def test_http_catalog_and_project_delete_routes(tmp_path):
         assert status == 404
     finally:
         httpd.shutdown()
+
+
+def test_catalog_carries_vm_and_revision_settings(tmp_path):
+    server = _server(tmp_path)
+    entries = {entry["key"]: entry for group in server.settings_catalog()["groups"]
+               for entry in group["settings"]}
+    backend = entries["AIDON_EXECUTION_BACKEND"]
+    assert "vm" in backend["options"]
+    assert entries["AIDON_VM_HOST"]["default"] == ""
+    assert entries["AIDON_VM_USER"]["default"] == ""
+    assert entries["AIDON_VM_USE_SUDO"]["default"] == "0"
+    password = entries["AIDON_VM_SUDO_PASSWORD"]
+    assert password["secret"] is True
+    assert "stdin" in password["desc"]
+    revision = entries["AIDON_EMBEDDING_REVISION"]
+    assert revision["default"] == "f9972ac22e696a105c482202646979e33e4b5a1e"
+    assert "Default:" in revision["desc"]
+    assert "Default:" in entries["AIDON_VM_HOST"]["desc"]
