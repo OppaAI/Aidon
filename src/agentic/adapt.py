@@ -55,30 +55,37 @@ def distinctive_words(goal: str) -> list[str]:
 
 
 def _word_map(old_goal: str, new_goal: str) -> dict[str, str]:
-    """Map old distinctive words to new ones, by position.
+    """Map old distinctive words to new ones, by position among changed words.
 
-    Snake -> Worm: old distinctive [snake], new [worm], map
-    snake -> worm. Longer goals map positionally, first to
-    first, and only for words that actually changed.
+    Shared words are ignored first: only words present in one goal map,
+    positionally, to words present only in the other. Snake -> Worm:
+    old distinctive [snake], new [worm], map snake -> worm. A word-order
+    shift (old [red, snake], new [worm, red]) maps snake -> worm, not
+    red -> worm, because red is shared and never enters the mapping.
     """
     old_words = distinctive_words(old_goal)
     new_words = distinctive_words(new_goal)
-    mapping = {}
-    for old, new in zip(old_words, new_words):
-        if old != new:
-            mapping[old] = new
-    return mapping
+    old_only = [w for w in old_words if w not in new_words]
+    new_only = [w for w in new_words if w not in old_words]
+    return dict(zip(old_only, new_only))
 
 
 def _replace_word(text: str, mapping: dict[str, str]) -> str:
     out = text
     for old, new in mapping.items():
-        # Case-preserving, word-boundary replace, both cases.
-        out = re.sub(rf"\b{re.escape(old)}\b", new, out,
+        # Case-preserving, word-boundary replace: a capitalised or
+        # upper-case match keeps its case in the replacement. (The old
+        # two-step version replaced everything with the lowercase form
+        # first, so its capital-restore step could never match.)
+        def _keep_case(match):
+            word = match.group(0)
+            if word.isupper():
+                return new.upper()
+            if word[0].isupper():
+                return new.capitalize()
+            return new
+        out = re.sub(rf"\b{re.escape(old)}\b", _keep_case, out,
                      flags=re.IGNORECASE)
-        # Restore capitalised form where the old word was capitalised.
-        out = re.sub(rf"\b{new.capitalize()}\b", new.capitalize(), out) \
-            if old[0].isupper() else out
     return out
 
 
