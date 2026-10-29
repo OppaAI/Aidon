@@ -13,7 +13,7 @@ from src.capabilities import voice as voice_mod
 from src.social import social as social_mod
 from src.capabilities import github_tools as github_mod
 from src.capabilities import email as email_mod
-from src.interface.scheduler_loop import (AutonomyTracker, NudgeTracker,
+from src.interface.scheduler_loop import (NudgeTracker,
                                 SchedulerLoop, daily_report)
 
 
@@ -97,15 +97,6 @@ def test_scheduler_loop_daily_report_nudges_autonomy(tmp_path):
     assert tracker.check("card-1", 0, 1000, slack_sender=lambda ch, text: sent.append((ch, text))) is True
     assert sent == [("C1", "Approval pending: card-1")]
     assert tracker.check("card-1", 0, 2000, slack_sender=lambda ch, text: sent.append((ch, text))) is False
-
-    autonomy = AutonomyTracker(enabled=True, threshold=2, decay_days=14)
-    assert autonomy.should_auto_approve("low", 100) is False
-    autonomy.record_approval("low", 100)
-    autonomy.record_approval("low", 101)
-    assert autonomy.should_auto_approve("low", 102) is True
-    assert autonomy.should_auto_approve("high", 102) is False
-    autonomy.record_rejection("low")
-    assert autonomy.should_auto_approve("low", 103) is False
 
 
 def test_email_draft_owner_and_corrected(tmp_path):

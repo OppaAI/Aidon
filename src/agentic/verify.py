@@ -17,13 +17,42 @@ Criteria, simple and checkable, in plain words:
 Anything else is not a checkable criterion: it is
 reported as unverified, not passed, so a model cannot
 pass itself by writing a vague criterion.
+
+Workspace boundary: every model-supplied name resolves
+strictly inside the workdir (resolve_in_workdir). A name
+with "..", an absolute path, or a symlink escaping the
+workdir resolves to nothing, so a criterion can never
+read a file outside the run's folder — not the home
+directory, not another run, not the host. The plan
+validator already rejects escapes in deliverables; this
+is the same rule for criteria, which the validator never
+sees.
+
+Binary deliverables: a file that is not UTF-8 text is
+not unreadable by default. PDFs and office documents get
+a stdlib-only text extraction (PDF text streams, plain
+or FlateDecode; docx/xlsx/pptx/epub XML parts), so
+"contains" checks and the model verifier can judge
+their content. Anything else binary — images, archives,
+executables, encrypted files — is opaque: judged on
+properties (exists, non-empty, size, format) only, never
+failed for being unreadable. An encrypted file is opaque
+by design: the verifier must never be handed its key,
+and its plaintext must never reach a model.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import zipfile
+import zlib
 from pathlib import Path
+
+# Extraction is best-effort and bounded: a huge binary must
+# not be pulled into memory just to judge it. Above this,
+# a binary deliverable is opaque, full stop.
+_EXTRACT_MAX_BYTES = 20 * 1024 * 1024
 
 
 
@@ -48,9 +77,212 @@ def _relative_name(workdir: Path, name: str) -> str:
     return value
 
 
+def resolve_in_workdir(workdir: Path, name: str) -> Path | None:
+    """Resolve a model-supplied name strictly inside ``workdir``.
+
+    Normalizes the planner's workdir/workspace-folder prefixes,
+    then resolves symlinks and rejects anything that is not
+    strictly below the workdir root: ".." escapes, absolute
+    paths outside the root, and symlinks pointing out. Returns
+    None for every rejected name, so callers treat it as a
+    missing file — fail-closed, never an outside read.
+    """
+    relative = _relative_name(workdir, name)
+    if not relative:
+        return None
+    root = Path(workdir).resolve()
+    candidate = (Path(workdir) / relative).resolve()
+    if candidate == root or not candidate.is_relative_to(root):
+        return None
+    return candidate
+
+
+def _pdf_literal_strings(content: str) -> list[str]:
+    """Literal and hex strings of PDF text-showing operators, in order.
+
+    Scans BT...ET blocks and collects (...) and <...> operands,
+    which is where Tj/TJ text lives in ordinary PDFs (reportlab,
+    fpdf2, and Aidon's own document writer). Nested literal
+    parens and backslash escapes are handled; kerning numbers
+    and operators are ignored. This is best-effort: a PDF with
+    custom font encodings yields glyph IDs, not text, and the
+    caller treats thin or empty extraction as opaque.
+    """
+    texts: list[str] = []
+    for block in re.findall(r"BT(.*?)ET", content, re.DOTALL):
+        index = 0
+        while index < len(block):
+            char = block[index]
+            if char == "(":
+                depth = 1
+                index += 1
+                buf: list[str] = []
+                while index < len(block) and depth:
+                    c = block[index]
+                    if c == "\\" and index + 1 < len(block):
+                        nxt = block[index + 1]
+                        if nxt in "nrtbf":
+                            buf.append({"n": "\n", "r": "\r", "t": "\t",
+                                        "b": "\b", "f": "\f"}[nxt])
+                            index += 2
+                        elif nxt.isdigit():
+                            octal = block[index + 1:index + 4]
+                            digits = ""
+                            for digit in octal:
+                                if digit.isdigit():
+                                    digits += digit
+                                else:
+                                    break
+                            buf.append(chr(int(digits, 8)) if digits else "")
+                            index += 1 + len(digits)
+                        else:
+                            buf.append(nxt)
+                            index += 2
+                    elif c == "(":
+                        depth += 1
+                        buf.append(c)
+                        index += 1
+                    elif c == ")":
+                        depth -= 1
+                        if depth:
+                            buf.append(c)
+                        index += 1
+                    else:
+                        buf.append(c)
+                        index += 1
+                texts.append("".join(buf))
+            elif char == "<" and index + 1 < len(block) \
+                    and block[index + 1] != "<":
+                match = re.match(r"<([0-9A-Fa-f\s]+)>", block[index:])
+                if match:
+                    raw = bytes.fromhex(re.sub(r"\s+", "", match.group(1)))
+                    if raw.startswith(b"\xfe\xff"):
+                        texts.append(raw[2:].decode("utf-16-be", "replace"))
+                    else:
+                        texts.append(raw.decode("latin-1"))
+                    index += match.end()
+                else:
+                    index += 1
+            else:
+                index += 1
+    return texts
+
+
+def _extract_pdf_text(data: bytes) -> str:
+    """Text of a PDF's content streams, plain or FlateDecode."""
+    parts: list[str] = []
+    for match in re.finditer(rb"stream\r?\n(.*?)endstream", data, re.DOTALL):
+        raw = match.group(1)
+        if raw.endswith(b"\r\n"):
+            raw = raw[:-2]
+        elif raw.endswith(b"\n"):
+            raw = raw[:-1]
+        try:
+            raw = zlib.decompress(raw)
+        except zlib.error:
+            pass
+        text = raw.decode("latin-1")
+        parts.append("".join(_pdf_literal_strings(text)))
+    joined = "\n".join(part for part in parts if part)
+    printable = "".join(c for c in joined if c.isprintable() or c in "\n\t")
+    return printable
+
+
+def _extract_office_text(path: Path) -> str:
+    """Text of docx/xlsx/pptx/epub XML parts, via stdlib zipfile."""
+    suffix = path.suffix.lower()
+    try:
+        archive = zipfile.ZipFile(path)
+    except (zipfile.BadZipFile, OSError):
+        return ""
+    try:
+        names = archive.namelist()
+        if suffix == ".docx":
+            wanted = ["word/document.xml"]
+            pattern = r"<w:t[^>]*>([^<]*)</w:t>"
+        elif suffix == ".xlsx":
+            wanted = ["xl/sharedStrings.xml"]
+            pattern = r"<t[^>]*>([^<]*)</t>"
+        elif suffix == ".pptx":
+            wanted = [n for n in names
+                      if n.startswith("ppt/slides/slide") and n.endswith(".xml")]
+            pattern = r"<a:t>([^<]*)</a:t>"
+        elif suffix == ".epub":
+            wanted = [n for n in names
+                      if n.endswith((".xhtml", ".html", ".htm"))]
+            pattern = None
+        else:
+            return ""
+        chunks: list[str] = []
+        for name in wanted:
+            if name not in names:
+                continue
+            try:
+                xml = archive.read(name).decode("utf-8", "replace")
+            except (KeyError, OSError):
+                continue
+            if pattern is None:
+                xml = re.sub(r"<[^>]+>", " ", xml)
+                chunks.append(xml)
+            else:
+                chunks.append(" ".join(re.findall(pattern, xml)))
+        return "\n".join(c for c in chunks if c.strip())
+    except (zipfile.BadZipFile, OSError):
+        return ""
+    finally:
+        archive.close()
+
+
+def _extract_binary_text(path: Path) -> str:
+    """Best-effort text for a binary deliverable, "" when opaque."""
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        try:
+            return _extract_pdf_text(path.read_bytes())
+        except OSError:
+            return ""
+    if suffix in (".docx", ".xlsx", ".pptx", ".epub"):
+        return _extract_office_text(path)
+    return ""
+
+
+def read_deliverable(path: Path, head_chars: int = 2000) -> dict:
+    """Head of a deliverable for verification, with its kind.
+
+    kind is "text" for UTF-8 text, "extracted" for a binary
+    document whose text was recovered, and "opaque" for
+    everything else binary — images, archives, executables,
+    encrypted files. Opaque deliverables carry no shown
+    content: a verifier judges them on properties only and
+    must never fail them for being unreadable.
+    """
+    size = path.stat().st_size
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            head = handle.read(head_chars + 1)
+    except UnicodeDecodeError:
+        pass
+    except OSError:
+        return {"kind": "opaque", "shown": "", "size": size}
+    else:
+        shown = head[:head_chars]
+        if len(head) > head_chars:
+            shown += f"\n[content truncated to {head_chars} chars]"
+        return {"kind": "text", "shown": shown, "size": size}
+    if size > _EXTRACT_MAX_BYTES:
+        return {"kind": "opaque", "shown": "", "size": size}
+    text = _extract_binary_text(path)
+    if not text.strip():
+        return {"kind": "opaque", "shown": "", "size": size}
+    shown = text[:head_chars]
+    if len(text) > head_chars:
+        shown += f"\n[content truncated to {head_chars} chars]"
+    return {"kind": "extracted", "shown": shown, "size": size}
+
+
 def _ledger_total(workdir: Path, name: str) -> int | None:
-    target = workdir / name
-    if not target.is_file():
+    target = resolve_in_workdir(workdir, name)
+    if target is None or not target.is_file():
         return None
     raw = target.read_text(encoding="utf-8", errors="ignore")
     try:
@@ -107,12 +339,14 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
     match = re.match(r"^(.+?)\s+exists$", text, re.IGNORECASE)
     if match:
         name = _relative_name(workdir, match.group(1))
-        ok = (workdir / name).is_file()
+        path = resolve_in_workdir(workdir, match.group(1))
+        ok = path is not None and path.is_file()
         return ok, f"{name} exists" if ok else f"{name} missing"
     match = re.match(r"^.+?\s+exists\s+at\s+(.+)$", text, re.IGNORECASE)
     if match:
         name = _relative_name(workdir, match.group(1))
-        ok = (workdir / name).is_file()
+        path = resolve_in_workdir(workdir, match.group(1))
+        ok = path is not None and path.is_file()
         return ok, f"{name} exists" if ok else f"{name} missing"
     # The user calls the workdir the "workspace folder": same folder,
     # same check. A leading "PDF file"/"document"/"file" descriptor
@@ -123,21 +357,36 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
         name = re.sub(r"^(?:pdf\s+file|document|file)\s+", "",
                       match.group(1).strip(), flags=re.IGNORECASE)
         name = _relative_name(workdir, name)
-        ok = (workdir / name).is_file()
+        path = resolve_in_workdir(workdir, name)
+        ok = path is not None and path.is_file()
         return ok, f"{name} exists" if ok else f"{name} missing"
     match = re.match(r"^(.+?)\s+is non-empty$", text, re.IGNORECASE)
     if match:
         name = _relative_name(workdir, match.group(1))
-        path = workdir / name
-        ok = path.is_file() and path.stat().st_size > 0
+        path = resolve_in_workdir(workdir, match.group(1))
+        ok = path is not None and path.is_file() and path.stat().st_size > 0
         return ok, f"{name} non-empty" if ok else f"{name} empty or missing"
     match = re.match(r"^(.+?)\s+contains\s+(.+)$", text, re.IGNORECASE)
     if match:
         name, needle = _relative_name(workdir, match.group(1)), match.group(2).strip()
-        path = workdir / name
-        if not path.is_file():
+        path = resolve_in_workdir(workdir, match.group(1))
+        if path is None or not path.is_file():
             return False, f"{name} missing"
-        ok = needle in path.read_text(encoding="utf-8", errors="ignore")
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # Binary deliverable: search extracted text where
+            # extraction works, fail closed where it does not.
+            # A compressed PDF that extracts is checkable; an
+            # encrypted or unextractable file is not, and the
+            # failure says so instead of claiming the needle
+            # is absent.
+            if path.stat().st_size > _EXTRACT_MAX_BYTES:
+                return False, f"{name} not searchable (binary, too large)"
+            content = _extract_binary_text(path)
+            if not content.strip():
+                return False, f"{name} not searchable (binary, text not extractable)"
+        ok = needle in content
         return ok, f"{name} contains {needle}" if ok else f"{name} lacks {needle}"
     match = re.match(r"^ledger\s+(.+?)\s+total is\s+(-?\d+)$", text, re.IGNORECASE)
     if match:
@@ -153,8 +402,8 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
         text, re.IGNORECASE)
     if match:
         name = _relative_name(workdir, match.group(1))
-        target = (workdir / name)
-        ok = target.is_file()
+        target = resolve_in_workdir(workdir, match.group(1))
+        ok = target is not None and target.is_file()
         if not ok and name.lower() in {"pdf", "document", "file"}:
             ok = any(path.is_file() and path.suffix.lower() == ".pdf"
                      for path in workdir.rglob("*")) if name.lower() == "pdf" else False
@@ -172,8 +421,8 @@ def verify_plan(workdir: Path, deliverables: list[str],
                  if path.is_file() and path.suffix.lower() == ".pdf"]
     for name in deliverables:
         relative = _relative_name(workdir, name)
-        path = workdir / relative
-        if not path.is_file():
+        path = resolve_in_workdir(workdir, name)
+        if path is None or not path.is_file():
             # If a document tool produced exactly one PDF, its structured
             # result may have been lost by an older adapter or an in-flight
             # repair. Recover the real artifact rather than asking a model

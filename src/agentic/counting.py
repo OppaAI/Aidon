@@ -12,9 +12,16 @@ input plus output, unless the wrapped client reports a real
 usage count, in which case that replaces the estimate. Calls
 are grouped by phase when the caller passes a phase, so a
 report can say: plan 1 call, repair 0, verify 0, adapt 1,
-not just a total. A report labels the token count as an
-estimate, never as an exact model token count, until a real
-usage count is available from the model API.
+not just a total. Real and estimated counts are tracked
+separately, never added into one number: in_tokens_actual /
+out_tokens_actual hold provider-reported usage only, while
+in_tokens_estimated / out_tokens_estimated hold the
+chars//4 split. A finished-run total uses the real counts
+when every call reported real usage, and the estimate
+otherwise, and says which basis it is — so a footer never
+silently mixes an estimate with a real count, and trace
+rows (real when present, estimate otherwise) agree with
+the footer whenever the basis is actual.
 
 Per-step display (the right-bar trace) reads the same data
 through take_phase_usage(): real usage when the backend
@@ -25,8 +32,13 @@ take_phase_usage drains the
 phase's delta without touching the cumulative totals, so the
 finished-message total never changes when a trace event
 reads its step's tokens. Streamed calls have no usage to
-read (server-sent deltas carry text only), so they stay
-estimated, thinking tokens 0.
+read (server-sent deltas carry text only, and the stream
+protocol surfaces no usage chunk), so they stay estimated,
+thinking tokens 0 — capturing real streamed usage needs
+the stream protocol to carry it, which is a separate change.
+Thinking tokens are real-only by nature: thinking text
+never appears in a reply, so no chars//4 estimate exists
+for it, and it is added to a total only as a real count.
 """
 
 from __future__ import annotations
@@ -75,6 +87,15 @@ class CountingClient(ModelClient):
         # always equals tokens_estimated exactly.
         self.in_tokens_estimated: int = 0
         self.out_tokens_estimated: int = 0
+        # Cumulative REAL usage, provider-reported only: calls
+        # without usage contribute nothing here, so these
+        # counters never mix an estimate with a real count.
+        # calls_with_usage tells the footer whether the real
+        # counters cover the whole run (basis "actual") or
+        # only part of it (basis "estimated").
+        self.in_tokens_actual: int = 0
+        self.out_tokens_actual: int = 0
+        self.calls_with_usage: int = 0
         self._thinking_text: dict[str, str] = {}
         # Parallel LLM steps count through here concurrently;
         # without a lock, increments from two threads can
@@ -96,6 +117,9 @@ class CountingClient(ModelClient):
             tokens_in = int(usage.get("prompt_tokens") or 0)
             tokens_out = int(usage.get("completion_tokens") or 0)
             thinking = int(details.get("reasoning_tokens") or 0)
+            self.in_tokens_actual += tokens_in
+            self.out_tokens_actual += tokens_out
+            self.calls_with_usage += 1
         else:
             tokens_in, tokens_out = self._split_estimate(messages, reply)
             thinking = 0
@@ -202,5 +226,11 @@ class CountingClient(ModelClient):
     def report(self) -> dict:
         return {"model_calls": self.calls,
                 "model_tokens_estimated": self.tokens_estimated,
+                "model_tokens_in_actual": self.in_tokens_actual,
+                "model_tokens_out_actual": self.out_tokens_actual,
+                "calls_with_usage": self.calls_with_usage,
+                "model_tokens_basis":
+                    "actual" if self.calls and
+                    self.calls_with_usage == self.calls else "estimated",
                 "calls_by_phase": dict(self.calls_by_phase),
                 "tokens_by_phase": dict(self.tokens_by_phase)}

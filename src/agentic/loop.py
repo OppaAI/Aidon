@@ -78,6 +78,49 @@ def _resolve_count(env_name: str, default: int, minimum: int) -> int:
     return max(minimum, value)
 
 
+def _resolve_critic_mode() -> str:
+    """Critic scope: "risk" (default) or "always".
+
+    Unknown values fall back to "risk": the default is the
+    safe side for token spend, and a typo must never silently
+    turn the critic into always-on (or off — off is
+    AIDON_CRITIC_ENABLED=0, not a mode).
+    """
+    mode = (os.environ.get("AIDON_CRITIC_MODE", "") or "risk").strip().lower()
+    return "always" if mode == "always" else "risk"
+
+
+def _critic_wanted(plan, adapted_from: str = "") -> bool:
+    """True when the plan critic should run on this plan.
+
+    In "always" mode it runs on every valid plan, the previous
+    behavior. In "risk" mode (default) it runs only when the
+    plan earns scrutiny: a fresh plan (not adapted from a past
+    success) that is not small, or any plan with a live step —
+    a tool whose name carries post/send/publish, the same
+    signal the dispatcher uses for the live gate. Adapted
+    plans already proved their shape, small plans have little
+    to sense-check, and live steps always earn a second look.
+    A plan whose steps cannot be read is treated as risky:
+    the critic runs. AIDON_CRITIC_ENABLED=0 disables the
+    critic entirely and is checked at the call site, not here.
+    """
+    if _resolve_critic_mode() == "always":
+        return True
+    try:
+        steps = plan.normalized_steps()
+    except Exception:
+        return True
+    live = any(
+        any(word in (getattr(step, "tool", "") or "")
+            for word in ("post", "send", "publish"))
+        for step in steps)
+    if live:
+        return True
+    small = len(steps) <= _resolve_count("AIDON_CRITIC_RISK_MAX_STEPS", 3, 0)
+    return not (adapted_from or small)
+
+
 @dataclass
 class Step:
     tool: str = "write"
@@ -212,6 +255,15 @@ class RunReport:
     mode_stop: dict = field(default_factory=dict)
     elapsed_seconds: float = 0.0
     approval_wait_seconds: float = 0.0
+    # Token basis for the finished-run total: "actual" when every
+    # model call reported provider usage (the in/out fields then
+    # hold real counts), "estimated" otherwise (chars//4 split).
+    # The in/out estimated fields always carry the
+    # basis-appropriate values, so the footer breakdown sums to
+    # the total; the actual fields hold the real counts alone.
+    model_tokens_basis: str = "estimated"
+    model_tokens_in_actual: int = 0
+    model_tokens_out_actual: int = 0
 
 
 def format_duration(seconds: float | int | None) -> str:
@@ -246,12 +298,14 @@ def format_run_stats(report: RunReport) -> str:
     in_tok = int(getattr(report, "model_tokens_in_estimated", 0) or 0)
     out_tok = int(getattr(report, "model_tokens_out_estimated", 0) or 0)
     think_tok = int(getattr(report, "model_thinking_tokens", 0) or 0)
+    basis = str(getattr(report, "model_tokens_basis", "estimated")
+                or "estimated")
     waited = float(getattr(report, "approval_wait_seconds", 0.0) or 0.0)
     waiting = (f" (plus {format_duration(waited)} waiting for you)"
                if waited >= 1 else "")
     if in_tok or out_tok or think_tok:
         usage = (f"IN: {in_tok:,} OUT: {out_tok:,} "
-                 f"(Think: {think_tok:,}) TOT: {tokens:,} tokens (estimated)")
+                 f"(Think: {think_tok:,}) TOT: {tokens:,} tokens ({basis})")
     else:
         # No breakdown recorded (a non-counting client): keep the
         # old single-number line rather than three zeros.
@@ -1792,29 +1846,50 @@ class GoalRunner:
 
         Sums the unwrapped counting clients, deduped, so fast-tier
         calls count even when the run's client is a plain client
-        and only the router holds counting tiers. in + out is the
-        chars//4 estimate split; think is the real reasoning
-        count, added on top because the estimate basis (prompt +
-        reply text) never contains thinking text, so adding it
-        cannot double-count it; total is in + out + think.
+        and only the router holds counting tiers. Basis is
+        "actual" when every call reported provider usage — then
+        in/out are the real counts and agree with the trace rows
+        by construction — and "estimated" otherwise, when in/out
+        are the chars//4 split. Think is always the real
+        reasoning count: the estimate basis (prompt + reply
+        text) never contains thinking text, so adding it cannot
+        double-count it. Total is in + out + think on the
+        chosen basis, so the footer breakdown always sums.
         """
         if self._counting_clients():
             clients = self._counting_clients()
-            in_tok = sum(int(getattr(c, "in_tokens_estimated", 0) or 0)
-                         for c in clients)
-            out_tok = sum(int(getattr(c, "out_tokens_estimated", 0) or 0)
-                          for c in clients)
+            calls = sum(int(getattr(c, "calls", 0) or 0)
+                        for c in clients)
+            with_usage = sum(int(getattr(c, "calls_with_usage", 0) or 0)
+                             for c in clients)
+            basis = "actual" if calls and with_usage == calls else "estimated"
+            if basis == "actual":
+                in_tok = sum(int(getattr(c, "in_tokens_actual", 0) or 0)
+                             for c in clients)
+                out_tok = sum(int(getattr(c, "out_tokens_actual", 0) or 0)
+                              for c in clients)
+            else:
+                in_tok = sum(int(getattr(c, "in_tokens_estimated", 0) or 0)
+                             for c in clients)
+                out_tok = sum(int(getattr(c, "out_tokens_estimated", 0) or 0)
+                              for c in clients)
             think = sum(int(getattr(c, "thinking_tokens_total", 0) or 0)
                         for c in clients)
-            return {"calls": sum(int(getattr(c, "calls", 0) or 0)
-                                 for c in clients),
-                    "in": in_tok, "out": out_tok, "think": think,
-                    "total": in_tok + out_tok + think}
+            in_actual = sum(int(getattr(c, "in_tokens_actual", 0) or 0)
+                            for c in clients)
+            out_actual = sum(int(getattr(c, "out_tokens_actual", 0) or 0)
+                             for c in clients)
+            return {"calls": calls, "in": in_tok, "out": out_tok,
+                    "think": think, "total": in_tok + out_tok + think,
+                    "basis": basis, "in_actual": in_actual,
+                    "out_actual": out_actual}
         client = self.client
         if hasattr(client, "calls") and hasattr(client, "tokens_estimated"):
             return {"calls": int(client.calls), "in": 0, "out": 0,
-                    "think": 0, "total": int(client.tokens_estimated)}
-        return {"calls": 0, "in": 0, "out": 0, "think": 0, "total": 0}
+                    "think": 0, "total": int(client.tokens_estimated),
+                    "basis": "estimated", "in_actual": 0, "out_actual": 0}
+        return {"calls": 0, "in": 0, "out": 0, "think": 0, "total": 0,
+                "basis": "estimated", "in_actual": 0, "out_actual": 0}
 
     def _finalize(self, report: RunReport) -> RunReport:
         """Fill model-usage and adaptation fields, from the counting client if present."""
@@ -1829,6 +1904,9 @@ class GoalRunner:
         report.model_tokens_in_estimated = totals["in"]
         report.model_tokens_out_estimated = totals["out"]
         report.model_thinking_tokens = totals["think"]
+        report.model_tokens_basis = totals.get("basis", "estimated")
+        report.model_tokens_in_actual = totals.get("in_actual", 0)
+        report.model_tokens_out_actual = totals.get("out_actual", 0)
         report.blocked = list(getattr(self, "_blocked", []))
         report.network = self.network_available
         report.adapted = bool(self._adapted)
@@ -2293,8 +2371,17 @@ class GoalRunner:
         # before any step runs. Issues feed the same bounded
         # repair path as validation failures. When rounds run
         # out, the latest plan proceeds with the issues traced
-        # — the critic advises, never blocks.
-        if _resolve_count("AIDON_CRITIC_ENABLED", 1, 0):
+        # — the critic advises, never blocks. In risk mode the
+        # pass is skipped for adapted or small plans with no
+        # live steps, and the skip is traced so the saving is
+        # visible: flip AIDON_CRITIC_MODE to "always" to restore
+        # a critic pass on every plan.
+        _critic_enabled = bool(_resolve_count("AIDON_CRITIC_ENABLED", 1, 0))
+        _run_critic = _critic_enabled and _critic_wanted(plan, self._adapted_from)
+        if _critic_enabled and not _run_critic:
+            self._trace("critic", "skipped",
+                        "risk-based: adapted or small plan, no live steps")
+        if _run_critic:
             from .critic import review_plan
             for _ in range(_resolve_count("AIDON_CRITIC_MAX_ROUNDS", 1, 0)):
                 self._trace("critic", "started", "reviewing plan")

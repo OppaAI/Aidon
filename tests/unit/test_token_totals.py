@@ -71,8 +71,12 @@ def test_usage_totals_include_thinking():
     totals = _runner(client)._usage_totals()
     assert totals["calls"] == 1
     assert totals["think"] == 30
-    assert totals["total"] == client.tokens_estimated + 30
-    assert totals["in"] + totals["out"] == client.tokens_estimated
+    assert totals["basis"] == "actual"
+    assert totals["in"] == 100
+    assert totals["out"] == 50
+    assert totals["total"] == 180
+    assert totals["in_actual"] == 100
+    assert totals["out_actual"] == 50
 
 
 def test_estimate_split_sums_to_total():
@@ -138,6 +142,8 @@ def test_usage_totals_fallback_to_plain_client_fields():
     plain.calls = 3
     plain.tokens_estimated = 400
     assert _runner(plain)._usage_totals() == {
-        "calls": 3, "in": 0, "out": 0, "think": 0, "total": 400}
+        "calls": 3, "in": 0, "out": 0, "think": 0, "total": 400,
+        "basis": "estimated", "in_actual": 0, "out_actual": 0}
     assert _runner(_PlainClient())._usage_totals() == {
-        "calls": 0, "in": 0, "out": 0, "think": 0, "total": 0}
+        "calls": 0, "in": 0, "out": 0, "think": 0, "total": 0,
+        "basis": "estimated", "in_actual": 0, "out_actual": 0}
