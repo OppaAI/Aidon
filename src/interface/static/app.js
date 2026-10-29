@@ -179,6 +179,15 @@
     };
   }
 
+  // Bodies equal ignoring the ⏱ stats footer and whitespace runs:
+  // the final event appends a stats footer the stream never
+  // carried, and HTML collapses whitespace anyway, so neither
+  // difference is a second message.
+  function sameMessageBody(a, b) {
+    const norm = (s) => String(s || "").replace(/\s+/g, " ").trim();
+    return norm(finalMessageParts(a).body) === norm(finalMessageParts(b).body);
+  }
+
   function renderFinalMessage(text, route) {
     const parts = finalMessageParts(text);
     let html = md(parts.body);
@@ -1128,12 +1137,16 @@
           }
           if (m) {
             if (e.kind === "aidon-final" && m._streamText && e.text &&
-                String(e.text).trim() !== String(m._streamText).trim()) {
-              // Streamed intermediate prose differs from the final
-              // summary (agentic runs stream fast-node prose, then
-              // finish with an assembled summary): keep the streamed
-              // bubble and show the final as its own message, instead
-              // of discarding the prose by replacing it.
+                !sameMessageBody(e.text, m._streamText)) {
+              // Streamed intermediate prose genuinely differs from
+              // the final summary (agentic runs stream fast-node
+              // prose, then finish with an assembled summary): keep
+              // the streamed bubble and show the final as its own
+              // message, instead of discarding the prose by
+              // replacing it. A stats footer or whitespace alone is
+              // not a difference: the final always appends a ⏱ stats
+              // line the stream never carried, and keeping both
+              // bubbles then reads as a duplicated reply.
               delete streamMessages[sid];
               m = addMsgTyped("aidon", e.text, e.t, true, lastRoute);
             } else {
