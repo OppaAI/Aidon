@@ -179,13 +179,16 @@ def phrase_with_model(kind: str, say, timeout_s: float = 10.0) -> str | None:
 
 
 def report_text(status: str, files: list[str], error: str,
-                run_id: str, stats_line: str, phrase: str | None = None) -> str:
+                run_id: str, stats_line: str, phrase: str | None = None,
+                blocked: list[str] | None = None) -> str:
     """Full completion message for a run, in natural language.
 
     The stats line (elapsed, tokens) is kept verbatim as the trailing
     line, so the WebUI stats display keeps working; only the human
     sentence above it varies. ``phrase`` is a model-written framing
-    when one was produced, else the rotation is used.
+    when one was produced, else the rotation is used. Blocked
+    actions, when any, render as their own section above the stats
+    line, so the owner sees what still needs a human.
     """
     if status == "done":
         head = f"{phrase or report_done_opener(run_id)} {files_sentence(files)}"
@@ -195,4 +198,7 @@ def report_text(status: str, files: list[str], error: str,
         head = phrase or report_cancelled(run_id)
     else:
         head = f"{phrase or report_failed_opener(run_id)} {error}"
+    if blocked:
+        lines = "\n".join(f"- {item}" for item in blocked)
+        head = f"{head}\nBlocked actions (need a human):\n{lines}"
     return f"{head}\n{stats_line}" if stats_line else head

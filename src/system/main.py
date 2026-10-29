@@ -2777,7 +2777,8 @@ def main(argv: list[str] | None = None) -> int:
                                                 "cancelled") else None)
                 _surface_reply(_report_text(
                     report.status, report.files, report.error, run_id,
-                    format_run_stats(report), phrase=_phrase), files=report.files)
+                    format_run_stats(report), phrase=_phrase,
+                    blocked=report.blocked), files=report.files)
             # A run that started on Slack or WhatsApp gets its
             # deliverables as uploads on that same surface, after
             # the text report above — localhost links are dead

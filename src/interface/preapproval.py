@@ -82,6 +82,13 @@ HELP_TEXT = (
     "Kinds, by number or name:\n"
     + "\n".join(f"  {i}. {kind['name']} — {kind['label']}"
                 for i, kind in enumerate(KINDS, 1))
+    + "\n\nCategories (Auto-Approve covers B only):\n"
+    "  A — No approval needed: sandbox steps, planning, replanning, "
+    "repairs, retries, workspace files, reusing past runs.\n"
+    "  B — Auto-approvable when granted: live (reversible runs only), "
+    "spec, semantic, sandbox.\n"
+    "  C — Always asks a human: send to others, external email, "
+    "publish, spend, delete, live execute, plugin, install, mandatory.\n"
 )
 
 _COMMAND_RE = re.compile(r"^\s*(preapprove|pre-approve|preapprovals|"

@@ -1784,7 +1784,7 @@
     const project = window.aidonConversation ? window.aidonConversation() : {};
     const specId = project.project_id || "default";
     const active = preapproveBtn.classList.contains("active");
-    if (!active && !window.confirm("Approve reversible live actions for " + specId + " for 8 hours?")) return;
+    if (!active && !window.confirm("Turn on Auto-Approve for " + specId + "? Eligible reversible live actions will pass without asking for 8 hours. Restricted actions will still pause.")) return;
     preapproveBtn.disabled = true;
     try {
       const r = await fetch(active
@@ -1796,10 +1796,10 @@
       const data = await r.json().catch(() => ({}));
       if (!r.ok || !data.ok) throw new Error(data.error || ("HTTP " + r.status));
       preapproveBtn.classList.toggle("active", !active);
-      preapproveBtn.title = active ? "Approve for me" : "Live actions approved for 8 hours; click to deactivate";
+      preapproveBtn.title = active ? "Auto-Approve" : "Auto-Approve on: eligible reversible actions pass for 8 hours; restricted actions still pause. Click to deactivate.";
       showMiddleStatus(active
-        ? "Approve for me deactivated for " + specId + "."
-        : "Reversible live actions approved for " + specId + " for 8 hours.");
+        ? "Auto-Approve deactivated for " + specId + "."
+        : "Auto-Approve on for " + specId + ": eligible reversible actions pass for 8 hours. Restricted actions still pause.");
     } catch (e) {
       showMiddleStatus("Preapproval failed: " + e.message, "error");
     } finally {

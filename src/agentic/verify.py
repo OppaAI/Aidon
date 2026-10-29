@@ -32,7 +32,8 @@ def _relative_name(workdir: Path, name: str) -> str:
 
     The planner sees the sandbox label ``workdir`` in prompts, while the
     verifier already receives that directory as its root. Joining both
-    would incorrectly look for ``workdir/workdir/foo``.
+    would incorrectly look for ``workdir/workdir/foo``. The user's
+    "workspace folder" is the same folder, so its prefix strips too.
     """
     value = str(name).strip().replace("\\", "/")
     root_name = workdir.name.strip()
@@ -42,6 +43,8 @@ def _relative_name(workdir: Path, name: str) -> str:
         return value[len(root_name) + 1:]
     if value.startswith("workdir/"):
         return value[len("workdir/"):]
+    if value.startswith("workspace folder/"):
+        return value[len("workspace folder/"):]
     return value
 
 
@@ -68,7 +71,7 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
     text = str(criterion).strip()
     # Models often describe the evidence instead of naming the generated
     # file. The file-producing tool is the source of truth in this case.
-    if re.search(r"(?:pdf|document|file)\s+(?:file\s+)?(?:is\s+)?(?:created|exists)\s+inside\s+(?:the\s+)?workdir(?:\b|$)",
+    if re.search(r"(?:pdf|document|file)\s+(?:file\s+)?(?:is\s+)?(?:created|exists)\s+inside\s+(?:the\s+)?(?:workdir|workspace folder)(?:\b|$)",
                  text, re.IGNORECASE):
         files = [path for path in workdir.rglob("*")
                  if path.is_file() and (path.suffix.lower() == ".pdf"
@@ -97,6 +100,17 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
     match = re.match(r"^.+?\s+exists\s+at\s+(.+)$", text, re.IGNORECASE)
     if match:
         name = _relative_name(workdir, match.group(1))
+        ok = (workdir / name).is_file()
+        return ok, f"{name} exists" if ok else f"{name} missing"
+    # The user calls the workdir the "workspace folder": same folder,
+    # same check. A leading "PDF file"/"document"/"file" descriptor
+    # is model phrasing, not part of the filename.
+    match = re.match(r"^(.+?)\s+exists\s+in\s+(?:the\s+)?workspace folder$",
+                     text, re.IGNORECASE)
+    if match:
+        name = re.sub(r"^(?:pdf\s+file|document|file)\s+", "",
+                      match.group(1).strip(), flags=re.IGNORECASE)
+        name = _relative_name(workdir, name)
         ok = (workdir / name).is_file()
         return ok, f"{name} exists" if ok else f"{name} missing"
     match = re.match(r"^(.+?)\s+is non-empty$", text, re.IGNORECASE)

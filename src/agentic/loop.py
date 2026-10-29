@@ -193,6 +193,11 @@ class RunReport:
     step_lines: list[str] = field(default_factory=list)
     narration: str = ""
     delivery_summary: str = ""
+    # Approval gates this run hit but never passed: rejected by a
+    # human, or timed out while the owner was away. Rendered as
+    # the "blocked actions" section of the final report, so a run
+    # never silently dies at a gate.
+    blocked: list[str] = field(default_factory=list)
     # Sandbox network state for this run: True means the
     # sandbox had network on (announced on stderr, shown on
     # approval cards), False means network off, None means
@@ -402,6 +407,7 @@ class GoalRunner:
         self.use_semantic_router_skip = use_semantic_router_skip
         self._adapted = False
         self._adapted_from = ""
+        self._blocked: list[str] = []
         self.run_id = run_id
         self.run_control = run_control
         self._replan_note = ""
@@ -695,9 +701,24 @@ class GoalRunner:
             kwargs["context"] = self.gate_context
         timer = getattr(self, "_elapsed_timer", None)
         if timer is None:
-            return self.gate.ask(kind, title, body, **kwargs)
-        with timer.approval_wait():
-            return self.gate.ask(kind, title, body, **kwargs)
+            decision = self.gate.ask(kind, title, body, **kwargs)
+        else:
+            with timer.approval_wait():
+                decision = self.gate.ask(kind, title, body, **kwargs)
+        if getattr(decision, "verdict", "") == "rejected":
+            # A blocked action is evidence, not a silent failure:
+            # the final report lists it for the morning. A timeout
+            # is still awaiting, a human rejection is declined.
+            note = f"{kind}: {title}"
+            if getattr(decision, "reason", "") == "timeout":
+                note += " (timed out, still awaiting)"
+            else:
+                note += " (declined)"
+            blocked = getattr(self, "_blocked", None)
+            if blocked is None:
+                blocked = self._blocked = []
+            blocked.append(note)
+        return decision
 
     def _route_judge(self):
         """Fast-model second opinion for routing, or None.
@@ -1045,6 +1066,12 @@ class GoalRunner:
                    "one step; never return deliverables with an empty or "
                    "missing steps array. For GUI requests, use the "
                    "computer_use tool when it is listed as available.")
+        system += (" Terminology: the user calls the workdir the 'workspace "
+                   "folder'. They are the same folder — this run's "
+                   "timestamped folder. When the user says 'workspace "
+                   "folder', resolve it to the workdir, and write criteria "
+                   "in checkable forms such as 'NAME exists in the "
+                   "workspace folder'.")
         if self.plugins is not None and not self.kernel_mode:
             plugin_tools = self.plugins.tool_names()
             if plugin_tools:
@@ -1767,6 +1794,7 @@ class GoalRunner:
             report.approval_wait_seconds = round(timer.approval_wait_seconds(), 1)
         report.model_calls, report.model_tokens_estimated = \
             self._usage_totals()
+        report.blocked = list(getattr(self, "_blocked", []))
         report.network = self.network_available
         report.adapted = bool(self._adapted)
         report.adapted_from = str(self._adapted_from)
