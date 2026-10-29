@@ -161,11 +161,6 @@ def _run_sandbox(config: Config, run_id: str) -> Sandbox:
         require_isolation=config.sandbox_require_isolation)
 
 
-def _promotion_ask(point) -> bool:
-    answer = input(
-        f"\nPromote this run's episodic memory to long-term memory? "
-        f"[y/N] ").strip().lower()
-    return answer in ("y", "yes")
 
 
 def _env_int(name, default):
@@ -3554,7 +3549,7 @@ def main(argv: list[str] | None = None) -> int:
         _i_control.register(_i_run_id, args.text, args.project)
         print(f"interview run id: {_i_run_id}")
         goal_runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home,
-                                 memory=memory, promotion_ask=_promotion_ask,
+                                 memory=memory,
                                  project_id=args.project, plugins=plugins, execution_backend=execution_backend, researcher=_interview_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds), researcher=_interview_researcher), router=model_router, versioned_writes=True,
                                  budget=_IBudget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
                                  trace=_ITrace(config.home, project_id=args.project),
@@ -3605,7 +3600,7 @@ def main(argv: list[str] | None = None) -> int:
     _goal_control.register(_goal_run_id, args.text, args.project)
     print(f"run id: {_goal_run_id}")
     runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds, args.project), config.home,
-                        memory=memory, promotion_ask=_promotion_ask,
+                        memory=memory,
                         project_id=args.project, plugins=plugins, execution_backend=execution_backend,
                         budget=budget, trace=trace, model_verifier=model_verifier,
                         kernel_mode=config.kernel_mode, semantic_router=_cli_router,
@@ -3637,7 +3632,6 @@ def main(argv: list[str] | None = None) -> int:
                 _goal_control.register(_sub_id, subgoal, args.project)
                 sub_runner = GoalRunner(client, sandbox, runner.gate,
                                         config.home, memory=memory,
-                                        promotion_ask=_promotion_ask,
                                         project_id=args.project, plugins=plugins,
                                         execution_backend=execution_backend,
                                         budget=budget, trace=trace,

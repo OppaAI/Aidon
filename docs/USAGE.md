@@ -350,10 +350,11 @@ scratch.
   collection.
 
 **Promotion, episodic to LTM:** at the end of a completed run,
-Aidon may ask whether to put that run's episodic memories into
-LTM. If `AIDON_AUTO_PROMOTE_TO_LTM=1`, promotion happens
-automatically, otherwise it asks, and a "no" leaves episodic
-memories project-scoped only.
+and for a chat exchange, that episodic record is copied to
+LTM automatically — no approval. An identical text already
+in LTM is a duplicate and is not recorded twice; a record
+sharing at least half its shape tokens supersedes the old
+copy; anything else is recorded alongside.
 
 **Embedder, production:** EmbeddingGemma 2, `google/embeddinggemma-2`,
 440M: text plus vision, audio omitted, 768-dim, local via

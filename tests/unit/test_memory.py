@@ -1,5 +1,5 @@
 """Memory component tests: hybrid recall, forgetting, projects,
-promotion asking, KB parsing, Experience merge.
+promotion, KB parsing, Experience merge.
 
 Offline: InMemoryStore + HashEmbedder, plus a stub
 EmbeddingGemma 2 model for sparse / RRF shape. No Qdrant
@@ -84,17 +84,17 @@ def test_conversation_history_and_projects(tmp_path):
     assert memory.conversation_context("conv1")["summary"] == "User greeted, assistant replied."
 
 
-def test_promote_with_ask_yes_and_no(tmp_path):
+def test_promote_auto_no_ask(tmp_path):
     memory = _memory(tmp_path)
     point_yes = memory.record_episodic("proj1", "fact to keep")
-    out = memory.promote_with_ask(point_yes, lambda p: True)
+    out = memory.promote_to_ltm(point_yes, kind="semantic")
     assert out is not None
     assert memory.recall("semantic", "fact to keep", graph=False)
     point_no = memory.record_episodic("proj1", "fact to drop")
-    out2 = memory.promote_with_ask(point_no, lambda p: False)
-    assert out2 is None
+    out2 = memory.promote_to_ltm(point_no, kind="semantic")
+    assert out2 is not None
     texts = [h.point.text for h in memory.recall("semantic", "fact to drop", graph=False)]
-    assert "fact to drop" not in texts
+    assert "fact to drop" in texts
 
 
 def test_remember_pins_semantic_memory_and_scores_high(tmp_path):
@@ -135,14 +135,13 @@ def test_experience_goal_shape_and_merge(tmp_path):
     assert "Second lesson." in merged[0].lesson
 
 
-def test_loop_promotion_ask(tmp_path):
+def test_loop_promotion_auto(tmp_path):
     home = tmp_path / "home2"
     home.mkdir()
     memory = _memory(tmp_path)
     sandbox = Sandbox(home / "work")
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
-    runner = GoalRunner(FakeClient(""), sandbox, gate, home, memory=memory,
-                        promotion_ask=lambda p: True)
+    runner = GoalRunner(FakeClient(""), sandbox, gate, home, memory=memory)
     report = runner.run("Write a note")
     assert report.status == "done"
     assert memory.recall("semantic", "Write a note", graph=False)

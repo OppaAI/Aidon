@@ -57,8 +57,8 @@ flowchart LR
     non-empty, rollback restores snapshots on failure.
 11. Learn: episodic memory, Experience, research report,
     and live record, with promotion to long-term memory
-    on request or by flag, never automatically without
-    that flag or that request.
+    that is automatic, deduplicated when identical and
+    superseding when the same shape recurs.
 
 ## 🧩 Components
 
