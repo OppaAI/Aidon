@@ -435,7 +435,6 @@ class SQLiteStore(InMemoryStore):
 
 
 def _sparse_from_text(text: str):
-    from .embedder import Embedder as _E
     # Keyword sparse, via the base embedder helper, without
     # constructing an embedder instance.
     weights = sparse_weights(text)
@@ -737,11 +736,6 @@ class Memory:
         return str(uuid.uuid5(uuid.NAMESPACE_URL,
                               text + str(time.time_ns())))
 
-    def _access_payload(self) -> dict:
-        now = _now_iso()
-        return {"created_at": now, "last_accessed": now,
-                "last_access_day": _today_iso(),
-                "access_count": 1, "access_day_count": 1}
 
     def _record_with_vector(self, collection: str, text: str,
                             vector: list[float],

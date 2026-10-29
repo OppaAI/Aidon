@@ -33,12 +33,6 @@ from ..system.model_client import Message, ModelClient
 DEFAULT_FAST_PHASES = {"interpret", "learn", "respond", "webchat"}
 
 
-def parse_fast_phases(value: str) -> set[str]:
-    if not value:
-        return set(DEFAULT_FAST_PHASES)
-    return {part.strip().lower() for part in value.split(",") if part.strip()}
-
-
 class RoutedClient(ModelClient):
     def __init__(self, fast_client: ModelClient, strong_client: ModelClient,
                  fast_phases: set[str] | None = None):

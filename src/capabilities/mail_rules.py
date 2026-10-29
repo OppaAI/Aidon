@@ -114,12 +114,6 @@ class SentMailLog:
                 return True
         return False
 
-    def rewrite_subject(self, arguments: dict, now: datetime | None = None) -> dict | None:
-        if not enabled() or not is_email_send(arguments) or not self.is_correction(arguments):
-            return None
-        out = dict(arguments)
-        out["subject"] = corrected_subject(str(arguments["subject"]), now or datetime.now())
-        return out
 
     def record(self, arguments: dict) -> None:
         entry = self._fingerprint(arguments)

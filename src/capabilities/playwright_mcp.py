@@ -83,9 +83,6 @@ class PlaywrightMcpClient:
     def click(self, element: str, ref: str):
         return self._call("browser_click", {"element": element, "ref": ref})
 
-    def type_text(self, element: str, ref: str, text: str, submit: bool = False):
-        return self._call("browser_type", {"element": element, "ref": ref,
-                                          "text": text, "submit": submit})
 
     def screenshot(self):
         return self._call("browser_take_screenshot", {})

@@ -86,9 +86,6 @@ class DomainGrants:
                 return True
         return False
 
-    def granted_hosts(self) -> list[str]:
-        return sorted(self._perm_grants | self._run_grants)
-
 
 def is_fetchable(url: str, allowlist: list[str] | None = None,
                  grants: DomainGrants | None = None) -> bool:

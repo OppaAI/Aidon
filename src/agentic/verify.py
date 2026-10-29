@@ -25,7 +25,6 @@ import json
 import re
 from pathlib import Path
 
-from ..capabilities.tools import ToolRegistry
 
 
 def _relative_name(workdir: Path, name: str) -> str:

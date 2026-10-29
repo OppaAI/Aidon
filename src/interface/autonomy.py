@@ -98,10 +98,6 @@ class AutonomyPolicy:
             self._load(path)
 
     # ── policy ──
-    def stakes_for(self, action_class: str) -> str:
-        """Stakes tier for an action class. Unseen classes default to HIGH."""
-        rec = self._records.get(action_class)
-        return rec.stakes if rec else ACTION_STAKES.get(action_class, STAKES_HIGH)
 
     def permission(self, action_class: str, *,
                    stakes: str | None = None) -> dict:

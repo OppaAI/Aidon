@@ -32,7 +32,7 @@ or a plain string. Tests pass stubs, the CLI wires the real GoalRunner.
 from __future__ import annotations
 
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 

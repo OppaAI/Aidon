@@ -31,6 +31,7 @@ import re
 import sys
 import threading
 from datetime import datetime
+from pathlib import Path
 
 from ..interface.approval import ApprovalGate, Decision
 from .config import Config
@@ -1531,7 +1532,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "inventory":
         from pathlib import Path as _Path
-        from ..agentic.artifact_inventory import inventory, inventory_markdown
+        from ..agentic.artifact_inventory import inventory_markdown
         workdir = _Path(args.workdir) if args.workdir else config.workdir
         print(inventory_markdown(workdir))
         return 0
@@ -1543,7 +1544,7 @@ def main(argv: list[str] | None = None) -> int:
         print(delivery_summary(report))
         return 0
     if args.command == "think":
-        from ..agentic.think_effort import effort_for, resolve_effort, sampling_for
+        from ..agentic.think_effort import resolve_effort, sampling_for
         level = resolve_effort(args.phase, requested=args.level or None, escalate=args.escalate)
         print(f"phase={args.phase} effort={level} sampling={sampling_for(args.phase)}")
         return 0
@@ -1562,7 +1563,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "vrm-check":
         from pathlib import Path as _P
-        from ..capabilities.vrm_check import check_vrm, used_morph_names, used_names_from_audio
+        from ..capabilities.vrm_check import check_vrm
         vrm_path = _P(args.vrm) if args.vrm else config.home / "avatar.vrm"
         if args.js:
             js_source = _P(args.js).read_text()

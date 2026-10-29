@@ -27,7 +27,6 @@ is 0.
 from __future__ import annotations
 
 import threading
-import time
 from datetime import datetime
 from pathlib import Path
 

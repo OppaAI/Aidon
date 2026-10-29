@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import json
 import random
-from datetime import datetime, time, timedelta
+from datetime import datetime, time
 from pathlib import Path
 
 _PRACTICE_FILE = "practice.json"

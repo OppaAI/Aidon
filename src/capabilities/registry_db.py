@@ -318,11 +318,6 @@ class Registry:
             " ORDER BY id").fetchall()
         return [dict(row) for row in rows]
 
-    def outbox_list(self) -> list[dict]:
-        rows = self._db.execute(
-            "SELECT id, kind, title, body, channel, status, attempts, last_error,"
-            " created_at, updated_at FROM notifications ORDER BY id").fetchall()
-        return [dict(row) for row in rows]
 
     def outbox_mark(self, notification_id: int, status: str,
                     error: str = "") -> None:

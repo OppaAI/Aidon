@@ -14,9 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..capabilities.mission import (CRITERION_STATUSES, GuardViolation,
-                                    InvalidTransition, grade_criteria,
-                                    guard_external_action)
+from ..capabilities.mission import (InvalidTransition, grade_criteria)
 
 TRANSITIONS = {
     "draft": ("ready_for_review", "cancelled"),
@@ -221,12 +219,3 @@ class NotificationOutbox:
         return {"delivered": delivered, "failed": failed, "dead": dead}
 
 
-def slack_notify(cfg, title: str, body: str = "", channel: str = "") -> None:
-    """Send a lifecycle notification through the configured Slack transport."""
-    from ..interface.messaging import send_slack
-    target = channel or getattr(cfg, "approval_nudge_channel", "")
-    if not target or not getattr(cfg, "slack_bot_token", ""):
-        raise RuntimeError("Slack not configured (channel/token)")
-    result = send_slack(cfg, target, f"{title}\n\n{body[:1500]}")
-    if not result.get("ok"):
-        raise RuntimeError(result.get("error", "Slack send failed"))

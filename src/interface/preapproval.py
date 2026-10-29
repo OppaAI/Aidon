@@ -105,10 +105,6 @@ def kind_from_token(token: str) -> str | None:
     return token
 
 
-def kind_is_reversible(kind: str) -> bool:
-    return bool(kind) and kind not in IRREVERSIBLE
-
-
 def grantable_kind(kind: str) -> bool:
     """True when a grant may name this kind: on the menu, reversible."""
     return bool(kind) and kind in KIND_NAMES and kind not in IRREVERSIBLE
@@ -165,12 +161,6 @@ class PreapprovalStore:
             self.save()
         return removed
 
-    def revoke_all(self) -> int:
-        removed = len(self.grants)
-        self.grants = []
-        if removed:
-            self.save()
-        return removed
 
     def active(self, now: float | None = None,
                spec_id: str | None = None) -> list[dict]:

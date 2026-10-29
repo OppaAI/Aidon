@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import time
 
 from .triggers import TriggerEvent
@@ -70,12 +69,6 @@ def _shared_files(event: dict) -> tuple[list[dict], list[dict]]:
             seen = seen_images if is_image else seen_files
             seen[record["id"] or record["name"]] = record
     return list(seen_images.values()), list(seen_files.values())
-
-
-def _image_files(event: dict) -> list[dict]:
-    """Image file shares only, kept for callers that only want images."""
-    images, _ = _shared_files(event)
-    return images
 
 
 def parse_slack_event(payload: dict, project_id: str = "default") -> TriggerEvent | None:
