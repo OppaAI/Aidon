@@ -122,6 +122,18 @@ def _model_verifier_wanted(mode: str, deliverables) -> bool:
         for name in (deliverables or []))
 
 
+def _mentions_file(msg: str, name: str) -> bool:
+    """True when a failure message names this exact file.
+
+    A mention is an exact filename match, not a substring: the name
+    must not be glued to another filename character on either side.
+    A failure mentioning data.txt therefore does not mention a.txt,
+    even though "a.txt" appears inside "data.txt" as text.
+    """
+    return re.search(r"(?<![A-Za-z0-9_.-])" + re.escape(name) +
+                     r"(?![A-Za-z0-9_.-])", msg) is not None
+
+
 def _critic_wanted(plan, adapted_from: str = "") -> bool:
     """True when the plan critic should run on this plan.
 
@@ -2632,12 +2644,14 @@ class GoalRunner:
             # A step that wrote its file is provisionally passed
             # above; a verification failure on that file must
             # take it back out, or the repair attempt would skip
-            # the very step it has to fix.
+            # the very step it has to fix. A mention is an exact
+            # filename match, not a substring, so a data.txt
+            # failure never takes a.txt out.
             for name in list(passed):
-                if any(name in msg for msg in failures):
+                if any(_mentions_file(msg, name) for msg in failures):
                     passed.discard(name)
             for name in verified:
-                if not any(name in msg for msg in failures):
+                if not any(_mentions_file(msg, name) for msg in failures):
                     passed.add(name)
             if (not ok and not model_failed
                     and not self._criterion_repaired and failures

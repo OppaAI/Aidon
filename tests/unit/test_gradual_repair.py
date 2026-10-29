@@ -86,3 +86,53 @@ def test_model_verifier_off_skips_the_call(tmp_path, monkeypatch):
     assert report.status == "done"
     assert report.attempts == 1
     assert calls["n"] == 0
+
+
+def test_mentions_file_is_boundary_aware():
+    from src.agentic.loop import _mentions_file
+    assert _mentions_file("data.txt is thin", "a.txt") is False
+    assert _mentions_file("a.txt is thin", "a.txt") is True
+    assert _mentions_file("workdir/a.txt missing", "a.txt") is True
+    assert _mentions_file("xa.txt failed", "a.txt") is False
+
+
+def test_model_no_naming_data_file_keeps_a_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIDON_MODEL_VERIFIER", "always")
+    work = tmp_path / "work"
+    work.mkdir(parents=True)
+    runner = _runner(work, tmp_path)
+    calls = {"n": 0}
+
+    def _verify(goal, deliverables, workdir, criteria):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"verdict": "no", "reason": "NO: data.txt is thin"}
+        return {"verdict": "yes", "reason": "YES fine"}
+
+    runner.model_verifier = SimpleNamespace(verify=_verify, effort_escalated=False)
+    runner._chat = lambda phase, messages: json.dumps({
+        "steps": [
+            {"tool": "write", "args": {"file": "a.txt", "text": "v2"},
+             "deliverable": "a.txt"},
+            {"tool": "write", "args": {"file": "data.txt", "text": "CHANGED"},
+             "deliverable": "data.txt"},
+        ],
+        "deliverables": ["a.txt", "data.txt"],
+        "criteria": ["a.txt exists", "data.txt exists"],
+    })
+    plan = Plan(
+        steps=[
+            Step(tool="write", args={"file": "a.txt", "text": "v1"},
+                 deliverable="a.txt"),
+            Step(tool="write", args={"file": "data.txt", "text": "v1"},
+                 deliverable="data.txt"),
+        ],
+        deliverables=["a.txt", "data.txt"],
+        criteria=["a.txt exists", "data.txt exists"])
+    report = runner._execute_plan("Write two files", plan)
+    assert report.status == "done"
+    assert report.attempts == 2
+    # data.txt was repaired; a.txt kept its first-attempt content even
+    # though "data.txt" contains "a.txt" as a substring.
+    assert (work / "a.txt").read_text(encoding="utf-8") == "v1"
+    assert (work / "data.txt").read_text(encoding="utf-8") == "CHANGED"
