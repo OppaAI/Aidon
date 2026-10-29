@@ -198,6 +198,57 @@ def _silent_meta_server(server_sock, seen):
         return
 
 
+def _closing_meta_server(server_sock, seen):
+    """Handshake + ack, then close: the server ends the session."""
+    try:
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = server_sock.recv(1)
+            if not chunk:
+                return
+            data += chunk
+        key = ""
+        for line in data.decode("utf-8", "replace").split("\r\n"):
+            if line.lower().startswith("sec-websocket-key:"):
+                key = line.split(":", 1)[1].strip()
+        server_sock.sendall(
+            f"HTTP/1.1 101 Switching Protocols\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Accept: {_ws_accept(key)}\r\n\r\n".encode())
+        while True:
+            opcode, payload = _read_frame(server_sock)
+            if opcode == 0x8:
+                return
+            if opcode == 0x1:
+                msg = json.loads(payload.decode("utf-8"))
+                if "authorization" in msg:
+                    server_sock.sendall(_server_frame(
+                        0x1, json.dumps({"sessionId": "test-session"}).encode()))
+                    server_sock.sendall(_server_frame(0x8, b""))
+                    return
+    except Exception:
+        return
+
+
+def test_realtime_server_close_records_reason():
+    """A server close must name itself, not die silently (410 cause)."""
+    client_sock, server_sock = socket.socketpair()
+    thread = threading.Thread(target=_closing_meta_server,
+                              args=(server_sock, {}), daemon=True)
+    thread.start()
+    rt = RealtimeTranscriber("test-key", session_id="test-session",
+                             socket_factory=lambda h, p: client_sock)
+    try:
+        assert rt.connect(timeout=5) == "test-session"
+        assert _wait_until(lambda: rt.send_audio(b"\x00\x01") is False)
+        assert rt.error == "server closed the session"
+    finally:
+        rt.close()
+        client_sock.close()
+        server_sock.close()
+
+
 def test_realtime_survives_idle_gap():
     """A silent mic must not kill the session (410 regression).
 

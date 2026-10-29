@@ -371,6 +371,15 @@ class RealtimeTranscriber:
             while True:
                 opcode, payload, fin = self._read_frame()
                 if opcode == 0x8:
+                    # A server close used to be silent too: the next
+                    # audio chunk failed with a bare 410 and nothing
+                    # said Meta ended the session. Keep the reason.
+                    if not self._error:
+                        reason = ""
+                        if len(payload) > 2:
+                            reason = payload[2:].decode("utf-8", "replace")
+                        self._error = ("server closed the session: " + reason
+                                       if reason else "server closed the session")
                     try:
                         self._send_frame(0x8, b"")
                     except Exception:

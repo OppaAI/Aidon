@@ -3994,7 +3994,8 @@ loadSettings();
                         self._send_json(400, {"error": "bad base64"})
                         return
                     if audio and not rt.send_audio(audio):
-                        self._send_json(410, {"error": "session closed"})
+                        detail = rt.error or ""
+                        self._send_json(410, {"error": "session closed" + (": " + detail if detail else "")})
                         return
                     self._send_json(200, {"transcript": rt.transcript,
                                           "final": rt.final})
