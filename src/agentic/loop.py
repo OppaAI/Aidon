@@ -1067,18 +1067,32 @@ class GoalRunner:
                     "AIDON_EPISODE_RECALL_LIMIT", "1") or "1"))
                 knowledge_limit = max(0, int(os.environ.get(
                     "AIDON_KNOWLEDGE_RECALL_LIMIT", "3") or "3"))
+                semantic_limit = max(0, int(os.environ.get(
+                    "AIDON_SEMANTIC_RECALL_LIMIT", "3") or "3"))
                 recall_tokens = max(0, int(os.environ.get(
                     "AIDON_RECALL_MAX_TOKENS", "2000") or "2000"))
                 episodes, knowledge = self.memory.recall_both(
                     goal, episode_limit, knowledge_limit)
+                # General facts (extracted + promoted semantic points)
+                # are a third recall leg: direct hits only, no graph
+                # expansion, so the section stays facts, not neighbours.
+                semantic = self.memory.recall(
+                    "semantic", goal, limit=semantic_limit,
+                    graph=False) if semantic_limit else []
                 sections = []
                 for label, hits in (("Earlier experiences", episodes),
-                                    ("Relevant knowledge", knowledge)):
+                                    ("Relevant knowledge", knowledge),
+                                    ("General facts", semantic)):
                     texts = []
                     for hit in hits:
-                        payload = getattr(getattr(hit, "point", None),
-                                          "payload", {}) or {}
-                        text = str(payload.get("text", "")).strip()
+                        point = getattr(hit, "point", None)
+                        payload = getattr(point, "payload", {}) or {}
+                        # Point text first: Qdrant payloads carry it,
+                        # but InMemory/SQLite points keep it on the
+                        # point itself, and plan recall read only the
+                        # payload, so those stores recalled empty.
+                        text = str(getattr(point, "text", "") or
+                                   payload.get("text", "")).strip()
                         if text:
                             texts.append(text)
                     if texts:
@@ -1675,6 +1689,18 @@ class GoalRunner:
                 self.memory.promote_to_ltm(episodic, kind="semantic")
             except Exception:
                 pass
+        # Background fact extraction for this turn pair (user prompt +
+        # assistant response): facts + understandings into episodic /
+        # semantic only. Procedural learning below is separate and
+        # untouched. Best effort, never fails the finished run.
+        if report.status == "chat":
+            try:
+                from ..memory.extraction import spawn_extraction
+                spawn_extraction(self.memory, self.project_id,
+                                 f"User: {report.goal}\nAssistant: {report.chat_reply or ''}",
+                                 self.client)
+            except Exception:
+                pass
         # Proven-run DAG learn, successful runs only, best
         # effort: a learn failure must never fail the run.
         if report.status == "done":
@@ -1688,6 +1714,18 @@ class GoalRunner:
                         report.goal, nodes)
                     if dag_id:
                         report.learned_dag = f"{action}:{dag_id}"
+            except Exception:
+                pass
+            # Background fact extraction for the whole agentic run
+            # (not per step): same mechanism as chat turns, once at
+            # the end. Procedural learning above is separate.
+            try:
+                from ..memory.extraction import spawn_extraction
+                deliverables = ", ".join(report.plan.deliverables or [])
+                files = ", ".join(report.files or [])
+                spawn_extraction(self.memory, self.project_id,
+                                 f"Goal: {report.goal}\nDeliverables: {deliverables}\nFiles: {files}",
+                                 self.client)
             except Exception:
                 pass
         # Failed-example learning: a failed run is evidence

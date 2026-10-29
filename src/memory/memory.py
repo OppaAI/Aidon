@@ -190,6 +190,30 @@ class Hit:
     graph_expanded: bool = False
 
 
+def retention_rank(hits, limit: int):
+    """Re-rank recall hits by vector score + extraction importance.
+
+    Extracted facts/understandings carry an importance payload from
+    the strong-model extraction pass. A small bonus (0.25 x
+    importance) lifts important items above equally relevant ones
+    without ever outranking a clearly more relevant vector hit —
+    the same restrained-bonus spirit as the halved graph-expansion
+    score. Plain points carry no importance and keep their vector
+    score. Returns at most limit hits, best first.
+    """
+    def key(hit):
+        payload = getattr(hit.point, "payload", {}) or {}
+        bonus = 0.0
+        if payload.get("kind") in ("fact", "understanding"):
+            try:
+                bonus = 0.25 * float(payload.get("importance", 0.5))
+            except (TypeError, ValueError):
+                bonus = 0.0
+        return hit.score + bonus
+
+    return sorted(hits, key=key, reverse=True)[:max(0, limit)]
+
+
 def _cosine(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a)) or 1.0
@@ -857,6 +881,7 @@ class Memory:
         vector = self.embedder.embed_query(query)
         sparse = self.embedder.embed_sparse(query)
         hits = self.store.search(collection, vector, query, limit, sparse=sparse)
+        hits = retention_rank(hits, len(hits))
         for hit in hits:
             self.record_access(collection, hit.point)
         if not graph:
@@ -884,10 +909,19 @@ class Memory:
 
     def recall_both(self, query: str, episode_limit: int = 5,
                     knowledge_limit: int = 5):
-        """One embed, two recalls: episodic + knowledge, same query."""
+        """One embed, two recalls: episodic + knowledge, same query.
+
+        Episodes over-fetch (5x) and are retention-ranked before
+        truncation, so an important extracted fact can win the
+        episode slot over a merely similar episode. The limit stays
+        a display budget for the plan prompt; the ranking decides
+        which memories are retained into the next phase.
+        """
         vector = self.embedder.embed_query(query)
         sparse = self.embedder.embed_sparse(query)
-        episodes = self.store.search("episodic", vector, query, episode_limit, sparse=sparse)
+        over = episode_limit * 5 if episode_limit else 0
+        episodes = self.store.search("episodic", vector, query, over, sparse=sparse) if over else []
+        episodes = retention_rank(episodes, episode_limit)
         knowledge = self.store.search("knowledge", vector, query, knowledge_limit, sparse=sparse)
         for hit in episodes:
             self.record_access("episodic", hit.point)

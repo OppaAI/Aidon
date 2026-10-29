@@ -2276,6 +2276,7 @@ class WebUIServer:
             {"key": "AIDON_CRITIC_ENABLED", "label": "Plan critic on/off", "type": "int", "default": "1", "desc": "Reflection pass on each valid plan before execution; 0 skips it.", "secret": False},
             {"key": "AIDON_CRITIC_MAX_ROUNDS", "label": "Critic repair rounds", "type": "int", "default": "1", "desc": "Critic-issue repair rounds; 0 runs the critic without repairing.", "secret": False},
             {"key": "AIDON_CRITIC_MAX_ISSUES", "label": "Critic issues per round", "type": "int", "default": "5", "desc": "Most issues the critic returns per review round; repairs address them in order.", "secret": False},
+            {"key": "AIDON_MEMORY_EXTRACT", "label": "Background fact extraction", "type": "int", "default": "1", "desc": "Extract facts and understandings in the background after chats and runs; 0 disables it.", "secret": False},
             {"key": "AIDON_DAG_SIMILARITY", "label": "DAG similarity threshold", "type": "string", "default": "0.3", "desc": "Goal-shape overlap (0-1) for DAG replacement, experience adaptation, and failure matching; lower merges more aggressively.", "secret": False},
         ]},
     ]
@@ -2360,6 +2361,7 @@ class WebUIServer:
             "AIDON_CRITIC_ENABLED": (0, 1, 1),
             "AIDON_CRITIC_MAX_ROUNDS": (0, 5, 1),
             "AIDON_CRITIC_MAX_ISSUES": (1, 20, 5),
+            "AIDON_MEMORY_EXTRACT": (0, 1, 1),
             "AIDON_SLACK_POLL_SECONDS": (3, 3600, 1),
             "AIDON_SLACK_ACK_AFTER_SECONDS": (0, 3600, 1),
             "AIDON_APPROVAL_NUDGE_MIN": (0, 1440, 1),
