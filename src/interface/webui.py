@@ -3501,7 +3501,8 @@ class WebUIServer:
                     return
                 data = candidate.read_bytes()
                 if candidate.name in {"index.html", "dag.html", "capabilities.html",
-                                      "memory.html", "knowledge.html", "reports.html"}:
+                                      "memory.html", "knowledge.html", "reports.html",
+                                      "graph.html"}:
                     # Version the document against its dependent core assets
                     # too.  Otherwise a CSS/JS edit made after index.html
                     # keeps the browser's old cached files indefinitely.
@@ -3538,7 +3539,7 @@ class WebUIServer:
                 elif parsed.path == "/":
                     self._send_static("index.html")
                 elif parsed.path in ("/dag", "/capabilities", "/memory", "/knowledge",
-                                     "/reports", "/practice"):
+                                     "/reports", "/practice", "/graph"):
                     self._send_static(parsed.path.lstrip("/") + ".html")
                 elif parsed.path == "/settings":
                     keys = server.auth_store.list_keys() if server.auth_store else []
