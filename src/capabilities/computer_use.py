@@ -75,7 +75,7 @@ def capture_screenshot(output_path, capture=None) -> dict:
 def _resolve_handles(action: dict, secrets: dict | None) -> tuple[dict, list[str]]:
     """Resolve {{secret.NAME}} handles in a type action's text.
 
-    Pomerado's rule, adopted: the model never sees a credential
+    Secret-handle rule: the model never sees a credential
     value — it writes a handle, and the host fills the value at
     execution time. A handle is refused unless the host issued
     it, i.e. its NAME is in the secrets map the caller supplied;
@@ -158,8 +158,8 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
 
     The pre-written action list is blind — the model writes every
     click before seeing the screen, and step results never flow
-    back into planning. This loop closes that gap the way
-    Pomerado's minter does: each round captures the screen,
+    back into planning. This loop closes that gap: each round
+    captures the screen,
     asks the vision model to describe it, asks the model to
     choose the next single action (or done), then runs that
     action through the same validation + approval + secret

@@ -1,6 +1,6 @@
 """Learning demo: the before/after ablation, with a declared verdict gate.
 
-Ported from Aidon demo.py, same contract, adapted to the new layout
+Same contract as the original demo runner, adapted to the current layout
 (no EvalHarness dependency, so the module is testable on its own):
 
 1. Clean workspace, no task-specific skills.

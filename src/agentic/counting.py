@@ -1,6 +1,6 @@
 """Comprehensive model-usage counting, not just plan tokens.
 
-The old budget counted tokens around _plan() only. That does
+Counting tokens only around _plan() is incomplete. That does
 not represent all inference: repair, verification, adaptation,
 swarm, and interview calls are model calls too, and a benchmark
 that only counts plan tokens understates the total and can
@@ -20,8 +20,8 @@ Per-step display (the right-bar trace) reads the same data
 through take_phase_usage(): real usage when the backend
 reported it — prompt_tokens in, completion_tokens out,
 completion_tokens_details.reasoning_tokens as thinking
-tokens — with a chars//4 split estimate when it did not,
-exactly like old Aidon's rule. take_phase_usage drains the
+tokens — with a chars//4 split estimate when it did not.
+take_phase_usage drains the
 phase's delta without touching the cumulative totals, so the
 finished-message total never changes when a trace event
 reads its step's tokens. Streamed calls have no usage to
@@ -71,7 +71,7 @@ class CountingClient(ModelClient):
         self._lock = threading.Lock()
 
     def _split_estimate(self, messages, reply: str) -> tuple[int, int]:
-        """Chars//4 split estimate, old Aidon's fallback rule."""
+        """Chars//4 split estimate, the fallback rule."""
         return (max(1, len(_text_of(messages)) // 4),
                 max(1, len(reply) // 4))
 

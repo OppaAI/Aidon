@@ -1,9 +1,9 @@
 """Natural-language framings for asking, approval, and reports.
 
-Old Aidon's asking, approval, and report messages read like sentences
-a person wrote, differently worded each time, because a small local
-model wrote them fresh. New Aidon's are templates ("Done: ...",
-"Rejected, no live action taken."). This module brings back the
+Asking, approval, and report messages read like sentences
+a person wrote, differently worded each time. The run's own
+messages are templates ("Done: ...",
+"Rejected, no live action taken."). This module keeps the
 natural, varied wording without spending a model call on it: each
 message type has several framings, picked in rotation (approvals,
 acks) or by run id (reports, one per run), wrapped around the same

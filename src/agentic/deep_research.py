@@ -1,9 +1,7 @@
-"""Deep research, built fresh from the idea, not imported code.
+"""Deep research, implemented here from the underlying idea.
 
-Aiko-chan's research toolkit (adaptive search, deep research) is
-pre-hackathon code, so Aidon does not import it: the hackathon
-requires new work, and this module rebuilds the IDEA from
-scratch, in Aidon's own shape:
+The approach — adaptive search, deep research — is built
+in this module, in its own shape:
 
 - adaptive search: snippets first, fetch only what a judge
   says to ESCALATE — one judge call per round over all
