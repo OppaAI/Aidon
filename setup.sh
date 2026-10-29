@@ -534,6 +534,9 @@ for spec in \
   "ebooklib:ebooklib:EPUB building:docs" \
   "markdown:markdown:EPUB building:docs" \
   "markitdown:markitdown:universal document reading:docs" \
+  "openpyxl:openpyxl:spreadsheet output:office" \
+  "python-pptx:pptx:presentation output:office" \
+  "pytesseract:pytesseract:OCR support:office" \
   ; do
   pkg=$(printf '%s' "$spec" | cut -d: -f1)
   mod=$(printf '%s' "$spec" | cut -d: -f2)

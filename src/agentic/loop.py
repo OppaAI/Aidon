@@ -1123,8 +1123,15 @@ class GoalRunner:
             if str(exc).startswith("unknown tool:") and self.plugins is not None:
                 try:
                     return self.plugins.call(name, args)
-                except Exception:
-                    pass
+                except ValueError as plugin_exc:
+                    if str(plugin_exc).startswith("unknown plugin tool:"):
+                        pass
+                    else:
+                        raise ValueError(
+                            f"plugin tool {name} failed: {plugin_exc}") from plugin_exc
+                except Exception as plugin_exc:
+                    raise ValueError(
+                        f"plugin tool {name} failed: {plugin_exc}") from plugin_exc
             if str(exc).startswith("unknown tool:") and name in self.extra_tools:
                 # Extra tools are outside the confined set, so a
                 # post or send tool is approval-gated here, before

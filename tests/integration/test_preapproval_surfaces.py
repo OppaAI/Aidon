@@ -192,6 +192,18 @@ def test_wrapper_exposes_the_inner_gate(tmp_path):
 
 # ── WebUI, WhatsApp, Slack ──────────────────────────────────────────
 
+def _sign(secret, raw):
+    """Valid Slack HMAC headers for raw, as production sends them."""
+    import hashlib
+    import hmac
+    import time
+
+    ts = str(int(time.time()))
+    sig = "v0=" + hmac.new(secret.encode(), f"v0:{ts}:".encode() + raw,
+                            hashlib.sha256).hexdigest()
+    return {"x-slack-request-timestamp": ts, "x-slack-signature": sig}
+
+
 def _server(tmp_path):
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
@@ -204,7 +216,7 @@ def _server(tmp_path):
         whatsapp_token="fake-wa", whatsapp_phone_id="12345",
         whatsapp_verify_token="verify123", whatsapp_app_secret="",
         whatsapp_owner="+16045551234",
-        slack_bot_token="xoxb-fake", slack_signing_secret="")
+        slack_bot_token="xoxb-test", slack_signing_secret="secret123")
     server = WebUIServer(
         home, dispatcher=dispatcher, messaging_config=config,
         whatsapp_sender=lambda to, text: whatsapp_replies.append((to, text)),
@@ -240,7 +252,8 @@ def test_slack_command_grants_and_confirms(tmp_path):
     body = {"type": "event", "event": {
         "type": "message", "text": "preapprove dinner live 4",
         "channel": "C123", "ts": "1700000000.000100"}}
-    status, result = server.handle_slack_post(json.dumps(body).encode(), {}, body)
+    raw = json.dumps(body).encode()
+    status, result = server.handle_slack_post(raw, _sign("secret123", raw), body)
     assert status == 200
     assert "Pre-approved live for dinner" in result["replies"][0]
     assert replies[0][0] == "C123"

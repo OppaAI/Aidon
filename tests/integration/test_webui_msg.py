@@ -210,3 +210,17 @@ def test_slack_signature_verified_before_parse(tmp_path):
         assert result.get("ok") is True
     finally:
         httpd.shutdown()
+
+
+def test_slack_rejected_without_signing_secret(tmp_path):
+    server, httpd, base, _, _, replies = _start_server(tmp_path)
+    try:
+        server.slack_signing_secret = ""
+        payload = {"event": {"type": "message", "text": "Hello Slack",
+                             "channel": "C1", "ts": "10.0"}}
+        status, _ = server.handle_slack_post(
+            json.dumps(payload).encode(), {}, payload)
+        assert status == 401
+        assert replies == []
+    finally:
+        httpd.shutdown()

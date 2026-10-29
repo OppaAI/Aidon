@@ -21,6 +21,8 @@ Rules, fail closed:
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 _LOCALHOSTS = {"127.0.0.1", "::1", "[::1]", "localhost"}
 
 
@@ -52,3 +54,29 @@ def is_authorized(headers: dict, token: str | None, remote_addr: str = "127.0.0.
         return _is_localhost(remote_addr)
     expected = f"Bearer {token}"
     return _authorization(headers) == expected
+
+
+def is_allowed_origin(headers: dict, host: str) -> bool:
+    """Same-origin check for browser POSTs to the WebUI.
+
+    A missing Origin header (curl, non-browser clients) is allowed:
+    those callers still pass the localhost/token auth check. A present
+    Origin must match the request Host exactly (host and port); a
+    foreign Origin is a cross-site POST and is rejected. Origin
+    "null" (sandboxed iframe, file URL) is rejected: the WebUI page
+    is never served from such a context.
+    """
+    origin = None
+    if isinstance(headers, dict):
+        for key, value in headers.items():
+            if str(key).lower() == "origin":
+                if isinstance(value, (list, tuple)):
+                    value = value[0] if value else None
+                origin = str(value).strip() if value is not None else None
+                break
+    if origin is None or origin == "":
+        return True
+    netloc = urlparse(origin).netloc
+    if not netloc:
+        return False
+    return netloc.lower() == (host or "").strip().lower()

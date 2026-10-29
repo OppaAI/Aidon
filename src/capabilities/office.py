@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import re
+import sys
 import zipfile
 from pathlib import Path
 from xml.sax.saxutils import escape as _xml_escape
@@ -81,6 +82,8 @@ def make_spreadsheet(sheets, output) -> str:
                 ws.append(row)
         wb.save(path)
         return str(path)
+    print("warning: openpyxl is not installed; wrote CSV files plus a manifest instead of XLSX",
+          file=sys.stderr)
     base = path.with_suffix("")
     manifest_lines = []
     for name, headers, rows in cleaned:

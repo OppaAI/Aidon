@@ -227,7 +227,7 @@ def test_catalog_new_group_placement(tmp_path):
     assert "AIDON_CHOICE_POLICY" in groups["Agentic"]
     assert "AIDON_WHATSAPP_TOKEN" in groups["Social"]
     assert "AIDON_SEARCH_BACKEND" in groups["Research"]
-    assert "AIDON_TICK_AUTOSTART" in groups["Scheduler"]
+    assert "AIDON_DAILY_REPORT_TIME" in groups["Scheduler"]
     assert "AIDON_SEMANTIC_RECALL_LIMIT" in groups["Memory"]
     assert "AIDON_CRITIC_MODE" in groups["Agentic"]
     assert "AIDON_CRITIC_RISK_MAX_STEPS" in groups["Agentic"]

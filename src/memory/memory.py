@@ -320,7 +320,8 @@ class SQLiteStore(InMemoryStore):
     def __init__(self, home: Path):
         self._db_path = Path(home) / "memory.sqlite3"
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(str(self._db_path), check_same_thread=False)
+        self._db = sqlite3.connect(str(self._db_path), check_same_thread=False, timeout=30.0)
+        self._lock = threading.RLock()
         self._db.row_factory = sqlite3.Row
         self._db.execute(
             "CREATE TABLE IF NOT EXISTS memory_points ("
@@ -342,29 +343,32 @@ class SQLiteStore(InMemoryStore):
         )
 
     def upsert(self, collection: str, point: Point) -> None:
-        self._db.execute(
-            "INSERT INTO memory_points(collection,id,text,vector,sparse,payload) "
-            "VALUES(?,?,?,?,?,?) ON CONFLICT(collection,id) DO UPDATE SET "
-            "text=excluded.text, vector=excluded.vector, sparse=excluded.sparse, "
-            "payload=excluded.payload",
-            (collection, point.id, point.text, json.dumps(point.vector),
-             json.dumps([list(point.sparse[0]), list(point.sparse[1])]),
-             json.dumps(point.payload)),
-        )
-        self._db.commit()
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO memory_points(collection,id,text,vector,sparse,payload) "
+                "VALUES(?,?,?,?,?,?) ON CONFLICT(collection,id) DO UPDATE SET "
+                "text=excluded.text, vector=excluded.vector, sparse=excluded.sparse, "
+                "payload=excluded.payload",
+                (collection, point.id, point.text, json.dumps(point.vector),
+                 json.dumps([list(point.sparse[0]), list(point.sparse[1])]),
+                 json.dumps(point.payload)),
+            )
+            self._db.commit()
 
     def get(self, collection: str, point_id: str) -> Point | None:
-        row = self._db.execute(
-            "SELECT * FROM memory_points WHERE collection=? AND id=?",
-            (collection, str(point_id))).fetchone()
-        return self._point(row) if row else None
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM memory_points WHERE collection=? AND id=?",
+                (collection, str(point_id))).fetchone()
+            return self._point(row) if row else None
 
     def delete(self, collection: str, point_id: str) -> bool:
-        cur = self._db.execute(
-            "DELETE FROM memory_points WHERE collection=? AND id=?",
-            (collection, str(point_id)))
-        self._db.commit()
-        return cur.rowcount > 0
+        with self._lock:
+            cur = self._db.execute(
+                "DELETE FROM memory_points WHERE collection=? AND id=?",
+                (collection, str(point_id)))
+            self._db.commit()
+            return cur.rowcount > 0
 
     def set_payload(self, collection: str, point_id: str,
                     payload: dict) -> None:
@@ -376,15 +380,16 @@ class SQLiteStore(InMemoryStore):
 
     def _rows(self, collection: str, limit: int = 100000,
               filters: dict | None = None):
-        rows = self._db.execute(
-            "SELECT * FROM memory_points WHERE collection=?",
-            (collection,)).fetchall()
-        points = [self._point(row) for row in rows]
-        if filters:
-            points = [p for p in points if all(
-                p.payload.get(k) == v for k, v in filters.items())]
-        points.sort(key=lambda p: p.payload.get("created_at", ""))
-        return points[:limit]
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM memory_points WHERE collection=?",
+                (collection,)).fetchall()
+            points = [self._point(row) for row in rows]
+            if filters:
+                points = [p for p in points if all(
+                    p.payload.get(k) == v for k, v in filters.items())]
+            points.sort(key=lambda p: p.payload.get("created_at", ""))
+            return points[:limit]
 
     def delete_where(self, collection: str, filters: dict) -> int:
         doomed = [p.id for p in self._rows(collection) if all(
