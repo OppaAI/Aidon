@@ -395,7 +395,7 @@
     if (!waveCvs && !avatarWaveCvs) return;
     let freq = null;
     let micTime = null;
-    if (recorder && micAnalyser) {
+    if ((micLive || micFallback) && micAnalyser) {
       if (!micAnalyserData || micAnalyserData.length !== micAnalyser.fftSize)
         micAnalyserData = new Uint8Array(micAnalyser.fftSize);
       micAnalyser.getByteTimeDomainData(micAnalyserData);
@@ -439,7 +439,7 @@
     }
     paint(waveCvs, micTime, true);       // your microphone input
     paint(avatarWaveCvs, freq, false);   // Aidon's voice output
-    if (recorder || ttsPlaying) requestAnimationFrame(drawWave);
+    if (micLive || micFallback || ttsPlaying) requestAnimationFrame(drawWave);
   }
 
   function mouthLoop() {
