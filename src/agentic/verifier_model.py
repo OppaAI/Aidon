@@ -48,9 +48,14 @@ class ModelVerifier:
             if path.is_file():
                 try:
                     size = path.stat().st_size
-                    full = path.read_text()
-                    shown = full[:2000]
-                    if len(full) > 2000:
+                    # Read the head only: a large deliverable must not
+                    # be pulled into memory just to show 2000 characters.
+                    # One character past the cut tells us whether there
+                    # is more, so the truncation marker stays honest.
+                    with path.open("r", encoding="utf-8") as handle:
+                        head = handle.read(2001)
+                    shown = head[:2000]
+                    if len(head) > 2000:
                         shown += "\n[content truncated to 2000 chars]"
                     files_text.append(f"--- {name} ({size} bytes) ---\n{shown}")
                 except Exception:
