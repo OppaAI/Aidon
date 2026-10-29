@@ -165,7 +165,7 @@ def test_settings_catalog_carries_threshold(tmp_path):
     server = WebUIServer(home)
     groups = {g["group"]: g["settings"]
               for g in server.settings_catalog()["groups"]}
-    entry = [e for e in groups["Loop"] if e["key"] == "AIDON_DAG_SIMILARITY"]
+    entry = [e for e in groups["Memory"] if e["key"] == "AIDON_DAG_SIMILARITY"]
     assert len(entry) == 1 and entry[0]["default"] == "0.3"
     assert "AIDON_DAG_SIMILARITY" in WebUIServer._CATALOG_FLOAT_KEYS
     assert server.settings_set_env("AIDON_DAG_SIMILARITY", "0.5")["ok"] is True
