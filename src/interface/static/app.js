@@ -896,10 +896,12 @@
         (failed ? " think-failed" : "");
       const hasTokenFields = ("tokens_in" in e) || ("tokens_out" in e);
       // Thinking is internal and encrypted on Meta, but its token
-      // count arrives in usage, so show the cost beside in→out
-      // instead of hiding it until the row is expanded.
+      // count arrives in usage. Per Meta's docs, reasoning tokens
+      // are output tokens and already inside completion_tokens,
+      // so show the count in parentheses: a subset of out, never
+      // an addition on top of it.
       const thinkSuffix = ((e.thinking_tokens || 0) > 0)
-        ? (" · " + e.thinking_tokens + " think") : "";
+        ? (" (" + e.thinking_tokens + " think)") : "";
       const meta = hasTokenFields
         ? ((e.seconds || 0) + "s · " + (e.tokens_in || 0) + "→" + (e.tokens_out || 0) + " tok" + thinkSuffix)
         : ((e.tokens_in || e.tokens_out)
