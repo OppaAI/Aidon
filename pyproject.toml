@@ -36,6 +36,7 @@ kb = [
 ]
 docs = [
     "ebooklib>=0.20",
+    "markdown>=3.11.2",
     "markitdown>=0.1.9",
 ]
 

@@ -31,7 +31,8 @@ def test_catalog_groups_and_dead_keys_absent(tmp_path):
     server = _server(tmp_path)
     catalog = server.settings_catalog()
     assert [group["group"] for group in catalog["groups"]] == [
-        "Model", "Sandbox", "Memory", "Research", "Messaging", "WebUI"]
+        "Interface", "Scheduler", "System", "Cognitive", "Memory", "Voice",
+        "Agentic", "Social", "Research"]
     keys = _catalog_keys(server)
     assert "AIDON_MODEL" in keys and "AIDON_BACKEND" in keys
     assert "AIDON_QDRANT_URL" in keys and "AIDON_WEBUI_TOKEN" in keys
@@ -170,7 +171,7 @@ def test_http_catalog_and_project_delete_routes(tmp_path):
     try:
         status, data = _request(base, "GET", "/api/settings/catalog")
         assert status == 200
-        assert [group["group"] for group in data["groups"]][0] == "Model"
+        assert [group["group"] for group in data["groups"]][0] == "Interface"
         assert all(entry["value"] in ("", "****") for group in data["groups"]
                    for entry in group["settings"] if entry["secret"])
         # POST /api/settings still handles settings.json keys…
@@ -195,3 +196,42 @@ def test_http_catalog_and_project_delete_routes(tmp_path):
         assert status == 404
     finally:
         httpd.shutdown()
+
+
+def test_catalog_carries_vm_and_revision_settings(tmp_path):
+    server = _server(tmp_path)
+    entries = {entry["key"]: entry for group in server.settings_catalog()["groups"]
+               for entry in group["settings"]}
+    backend = entries["AIDON_EXECUTION_BACKEND"]
+    assert "vm" in backend["options"]
+    assert entries["AIDON_VM_HOST"]["default"] == ""
+    assert entries["AIDON_VM_USER"]["default"] == ""
+    assert entries["AIDON_VM_USE_SUDO"]["default"] == "0"
+    password = entries["AIDON_VM_SUDO_PASSWORD"]
+    assert password["secret"] is True
+    assert "stdin" in password["desc"]
+    revision = entries["AIDON_EMBEDDING_REVISION"]
+    assert revision["default"] == "f9972ac22e696a105c482202646979e33e4b5a1e"
+    assert "Default:" in revision["desc"]
+    assert "Default:" in entries["AIDON_VM_HOST"]["desc"]
+
+
+def test_catalog_new_group_placement(tmp_path):
+    server = _server(tmp_path)
+    groups = {group["group"]: {entry["key"] for entry in group["settings"]}
+              for group in server.settings_catalog()["groups"]}
+    assert groups["Interface"] == {"AIDON_WEBUI_TOKEN", "AIDON_WEBUI_PORT",
+                                   "AIDON_WEBUI_ALLOWED_HOSTS", "AIDON_VRM_PATH"}
+    assert "AIDON_FISH_API_KEY" in groups["Voice"]
+    assert "AIDON_VM_HOST" in groups["System"]
+    assert "AIDON_CHOICE_POLICY" in groups["Agentic"]
+    assert "AIDON_WHATSAPP_TOKEN" in groups["Social"]
+    assert "AIDON_SEARCH_BACKEND" in groups["Research"]
+    assert "AIDON_TICK_AUTOSTART" in groups["Scheduler"]
+    assert "AIDON_SEMANTIC_RECALL_LIMIT" in groups["Memory"]
+    assert "AIDON_CRITIC_MODE" in groups["Agentic"]
+    assert "AIDON_CRITIC_RISK_MAX_STEPS" in groups["Agentic"]
+    assert "AIDON_MODEL_VERIFIER" in groups["Agentic"]
+    # No key lives in two groups.
+    all_keys = [key for keys in groups.values() for key in keys]
+    assert len(all_keys) == len(set(all_keys))

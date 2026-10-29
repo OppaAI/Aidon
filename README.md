@@ -27,10 +27,10 @@
 
 Give Aidon a goal in plain language, in chat, on WhatsApp or Slack, or on the command line. Aidon will:
 
-1. **Interview** — chat questions only if needed, to a verified spec, or skip with an attached spec sheet
+1. **Interview** — Ask mode is the default: chat questions first, to a verified spec; skip with an attached spec sheet, or run straight through in Execute mode
 2. **Research and recall** — web search and YouTube, plus hybrid Qdrant recall over past episodes and knowledge, facts only if a source excerpt contains them
 3. **Plan** — steps, deliverables, and criteria, as a DAG, not a loose list
-4. **Sandbox** — execute in bubblewrap or Docker, verify by code, repair only failed steps, at most 3 attempts
+4. **Sandbox** — execute in bubblewrap, Docker, subprocess, or on a VM over SSH, verify by code (with an optional model second opinion, off by default), repair only failed steps, at most 3 attempts
 5. **Approve (you)** — one decision card before any live action, fail-closed on timeout
 6. **Live** — execute only what was approved, verify, rollback on failure
 7. **Learn** — persist the DAG and new skills, so the next similar goal reuses and adapts, saving tokens and calls

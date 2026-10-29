@@ -43,8 +43,7 @@ project id. Schedule strings supported:
 - "monthly HH:MM day D" (day of month, 1 to 28)
 - "cron M H DOM MON DOW" (5 fields, * or a single number)
 next_due(after) returns the next occurrence after a
-time, in local time, no timezone conversion in the
-scheduler itself. check_due(now) returns jobs whose
+time, in local time, or in the job's tz when one is set. check_due(now) returns jobs whose
 next occurrence after their last run is at or before
 now, and updates last run, so a job does not fire
 twice for the same occurrence.
@@ -231,23 +230,68 @@ class SchedulerJob:
     # field in an existing scheduler.json is a normal goal job.  This is
     # placed last so existing positional construction keeps its meaning.
     kind: str = "goal"
+    # Expiry: ISO datetime; the job never fires after it.
+    until: str = ""
+    # IANA timezone for interpreting the schedule; "" keeps the
+    # historical server-local naive behavior.
+    tz: str = ""
+    # Wall-clock time limit per run, seconds; 0 = unlimited.
+    time_limit: int = 0
 
     def next_due(self, after: datetime) -> datetime | None:
+        """Next run after `after`, capped by expiry (until).
+
+        A naive `until` reads as wall time in the job zone (or
+        server-local when no zone); an aware `until` compares
+        directly. A candidate past `until` never fires.
+        """
+        candidate = self._next_due_uncapped(after)
+        if candidate is None or not self.until.strip():
+            return candidate
+        try:
+            until = datetime.fromisoformat(self.until.strip())
+        except ValueError:
+            return None
+        if candidate.tzinfo is None and until.tzinfo is not None:
+            until = until.astimezone().replace(tzinfo=None)
+        elif candidate.tzinfo is not None and until.tzinfo is None:
+            until = until.replace(tzinfo=candidate.tzinfo)
+        return candidate if candidate <= until else None
+
+    def _next_due_uncapped(self, after: datetime) -> datetime | None:
         schedule = self.schedule.strip()
         if not schedule:
             return None
+        zone = None
+        if self.tz.strip():
+            try:
+                from zoneinfo import ZoneInfo
+                zone = ZoneInfo(self.tz.strip())
+            except Exception:
+                return None
+            # Naive `after` (last_run is stored naive) reads as
+            # wall time in the job zone.
+            after = after.replace(tzinfo=zone) if after.tzinfo is None \
+                else after.astimezone(zone)
+
+        def _zoned(dt):
+            return dt.replace(tzinfo=zone) \
+                if zone is not None and dt.tzinfo is None else dt
+
         if schedule.startswith("at:"):
             # One-shot: fire once at the given ISO time, never again.
+            # A naive one-shot reads as wall time in the job zone.
             try:
                 when = datetime.fromisoformat(schedule[3:].strip())
             except ValueError:
                 return None
+            when = _zoned(when)
             return when if when > after else None
         parts = schedule.split()
         try:
             if parts[0] == "daily" and len(parts) == 2:
                 hour, minute = (int(v) for v in parts[1].split(":"))
-                candidate = datetime.combine(after.date(), time(hour, minute))
+                candidate = _zoned(datetime.combine(after.date(), time(hour, minute)))
                 if candidate <= after:
                     candidate += timedelta(days=1)
                 return candidate
@@ -255,8 +299,8 @@ class SchedulerJob:
                 weekday = WEEKDAYS[parts[1]]
                 hour, minute = (int(v) for v in parts[2].split(":"))
                 days_ahead = (weekday - after.weekday()) % 7
-                candidate = datetime.combine(
-                    after.date() + timedelta(days=days_ahead), time(hour, minute))
+                candidate = _zoned(datetime.combine(
+                    after.date() + timedelta(days_ahead), time(hour, minute)))
                 if candidate <= after:
                     candidate += timedelta(days=7)
                 return candidate
@@ -268,9 +312,9 @@ class SchedulerJob:
                                     else (after.year, after.month + 1)):
                     first = datetime(year, month, 1)
                     days_ahead = (weekday - first.weekday()) % 7
-                    candidate = datetime.combine(
+                    candidate = _zoned(datetime.combine(
                         first.date() + timedelta(days=days_ahead),
-                        time(hour, minute))
+                        time(hour, minute)))
                     if candidate > after:
                         return candidate
                 return None
@@ -282,7 +326,7 @@ class SchedulerJob:
                                     else (after.year, after.month + 1)):
                     if day > 28:
                         continue
-                    candidate = datetime(year, month, day, hour, minute)
+                    candidate = _zoned(datetime(year, month, day, hour, minute))
                     if candidate > after:
                         return candidate
                 return None
@@ -338,17 +382,53 @@ class Scheduler:
                 failures = ["chain goal must be a JSON object or array"]
             if failures:
                 raise ValueError("invalid chain: " + "; ".join(failures))
+        # A schedule that never fires is a silent dead job: the
+        # daemon only understands next_due forms (at:/daily/
+        # weekly/monthly/cron). "every …" and bare ISO datetimes
+        # parse elsewhere but never fire, so reject them here,
+        # where the creator sees the failure and can retry with
+        # a firing form. A one-shot in the past never fires either.
+        if job.until.strip():
+            try:
+                datetime.fromisoformat(job.until.strip())
+            except ValueError:
+                raise ValueError(f"until {job.until!r} is not an ISO datetime")
+        if job.tz.strip():
+            try:
+                from zoneinfo import ZoneInfo
+                ZoneInfo(job.tz.strip())
+            except Exception:
+                raise ValueError(f"unknown timezone {job.tz!r}")
+        try:
+            job.time_limit = int(job.time_limit or 0)
+        except (TypeError, ValueError):
+            raise ValueError(f"time_limit {job.time_limit!r} is not seconds")
+        if job.time_limit < 0:
+            raise ValueError("time_limit must be 0 (unlimited) or positive")
+        if job.next_due(datetime.now()) is None:
+            raise ValueError(
+                f"schedule {job.schedule!r} never fires; use at:<ISO datetime>, "
+                "daily HH:MM, weekly DAY HH:MM, monthly ..., or a 5-field cron")
         self.jobs = [j for j in self.jobs if j.name != job.name]
         self.jobs.append(job)
         self.save()
 
     def check_due(self, now: datetime) -> list[SchedulerJob]:
-        """Jobs due now, with last run updated so they do not double-fire."""
+        """Jobs due now, with last run updated so they do not double-fire.
+
+        A zoned job's next run is timezone-aware; a naive `now`
+        reads as server-local for the comparison.
+        """
         due: list[SchedulerJob] = []
         for job in self.jobs:
             after = datetime.fromisoformat(job.last_run) if job.last_run else datetime(2000, 1, 1)
             nxt = job.next_due(after)
-            if nxt is not None and nxt <= now:
+            if nxt is None:
+                continue
+            now_cmp = now
+            if nxt.tzinfo is not None and now.tzinfo is None:
+                now_cmp = now.astimezone(nxt.tzinfo)
+            if nxt <= now_cmp:
                 due.append(job)
                 job.last_run = now.isoformat(timespec="seconds")
         if due:

@@ -40,12 +40,14 @@ flowchart LR
 5. Plan: steps, deliverables, and criteria, as JSON,
    from the model, bound by the frozen spec.
 6. Sandbox: steps run with sandbox tools, or with
-   adopted plugin tools, in a bubblewrap sandbox or
-   in a Docker container, chosen by the owner, never
-   by the model.
+   adopted plugin tools, in a bubblewrap sandbox, a
+   Docker container, or on a VM over SSH, chosen by
+   the owner, never by the model.
 7. Verify: deliverables must exist and be non-empty,
    criteria are checked by code, ledger totals are
-   recomputed by code, never by the model.
+   recomputed by code. An optional model second opinion
+   (AIDON_MODEL_VERIFIER, off by default) judges content
+   only after code passes, and never overrides code.
 8. Repair: only failed steps are repaired, passed
    files are untouched, at most 3 attempts in total.
 9. Approval: a decision card, fail-closed on timeout,
@@ -57,8 +59,8 @@ flowchart LR
     non-empty, rollback restores snapshots on failure.
 11. Learn: episodic memory, Experience, research report,
     and live record, with promotion to long-term memory
-    on request or by flag, never automatically without
-    that flag or that request.
+    that is automatic, deduplicated when identical and
+    superseding when the same shape recurs.
 
 ## 🧩 Components
 
@@ -68,7 +70,7 @@ flowchart TB
     T[⚡ Trigger dispatcher]
     LOOP[🔁 Goal runner]
     TOOLS[🧰 Tools and plugins]
-    SANDBOX[🔒 Bubblewrap or Docker]
+    SANDBOX[🔒 Bubblewrap, Docker, or VM]
     MEMORY[(🧠 Qdrant / memory)]
     APPROVAL[👤 Approval gate]
     REPORT[📊 Trace, reports, metrics]
@@ -101,8 +103,10 @@ flowchart TB
   ingest folder, webhook, and manual, all as
   TriggerEvents that start a goal run, never bypassing
   approval, spec, or verification. No Telegram source.
-- Execution: bubblewrap backend, Docker backend, and
-  VM as post-hackathon future only. Docker is
+- Execution: bubblewrap backend, Docker backend,
+  subprocess backend, and VM backend over SSH to a VM
+  you already run. Setup does not provision a VM;
+  disposable VM per run is post-hackathon. Docker is
   disposable, workdir only mounted, non-root, all
   capabilities dropped, network off by default,
   resource limits, pinned image, no docker.sock,

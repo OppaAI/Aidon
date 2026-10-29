@@ -106,7 +106,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .embedder import Embedder, HashEmbedder, sparse_weights
+from .embedder import Embedder, HashEmbedder, sparse_weights, tokens
 
 COLLECTIONS = ("working", "episodic", "semantic", "experience",
                "knowledge")
@@ -188,6 +188,30 @@ class Hit:
     point: Point
     score: float
     graph_expanded: bool = False
+
+
+def retention_rank(hits, limit: int):
+    """Re-rank recall hits by vector score + extraction importance.
+
+    Extracted facts/understandings carry an importance payload from
+    the strong-model extraction pass. A small bonus (0.25 x
+    importance) lifts important items above equally relevant ones
+    without ever outranking a clearly more relevant vector hit —
+    the same restrained-bonus spirit as the halved graph-expansion
+    score. Plain points carry no importance and keep their vector
+    score. Returns at most limit hits, best first.
+    """
+    def key(hit):
+        payload = getattr(hit.point, "payload", {}) or {}
+        bonus = 0.0
+        if payload.get("kind") in ("fact", "understanding"):
+            try:
+                bonus = 0.25 * float(payload.get("importance", 0.5))
+            except (TypeError, ValueError):
+                bonus = 0.0
+        return hit.score + bonus
+
+    return sorted(hits, key=key, reverse=True)[:max(0, limit)]
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -411,7 +435,6 @@ class SQLiteStore(InMemoryStore):
 
 
 def _sparse_from_text(text: str):
-    from .embedder import Embedder as _E
     # Keyword sparse, via the base embedder helper, without
     # constructing an embedder instance.
     weights = sparse_weights(text)
@@ -487,7 +510,7 @@ class QdrantStore:
     EmbeddingGemma 2, 128 for HashEmbedder) and ``sparse``
     (SPLADE or keyword). A collection created with a
     different dense size cannot hold the new vectors; a
-    fresh home, or a recreated collection, is the migration,
+    new home, or a recreated collection, is the migration,
     never a silent resize.
     """
 
@@ -670,6 +693,27 @@ def make_store(home: Path, dim: int = 768):
     return QdrantStore(home, url=url, dim=dim)
 
 
+# Promotion supersede bar: at least half the shape tokens,
+# the same bar experience merging uses for "the same thing
+# in new words".
+_PROMOTE_SUPERSEDE_SHAPE = 0.5
+
+_PROMOTE_STOPWORDS = frozenset({
+    "a", "an", "the", "and", "or", "to", "of", "for", "in", "on",
+    "with", "is", "it", "be", "i", "me", "my",
+})
+
+
+def _text_shape(text: str) -> set[str]:
+    return {t for t in tokens(str(text or "")) if t not in _PROMOTE_STOPWORDS}
+
+
+def _shape_overlap(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
 class Memory:
     """STM + episodic + semantic + experience + knowledge, Qdrant for all."""
 
@@ -692,11 +736,6 @@ class Memory:
         return str(uuid.uuid5(uuid.NAMESPACE_URL,
                               text + str(time.time_ns())))
 
-    def _access_payload(self) -> dict:
-        now = _now_iso()
-        return {"created_at": now, "last_accessed": now,
-                "last_access_day": _today_iso(),
-                "access_count": 1, "access_day_count": 1}
 
     def _record_with_vector(self, collection: str, text: str,
                             vector: list[float],
@@ -836,6 +875,7 @@ class Memory:
         vector = self.embedder.embed_query(query)
         sparse = self.embedder.embed_sparse(query)
         hits = self.store.search(collection, vector, query, limit, sparse=sparse)
+        hits = retention_rank(hits, len(hits))
         for hit in hits:
             self.record_access(collection, hit.point)
         if not graph:
@@ -863,10 +903,19 @@ class Memory:
 
     def recall_both(self, query: str, episode_limit: int = 5,
                     knowledge_limit: int = 5):
-        """One embed, two recalls: episodic + knowledge, same query."""
+        """One embed, two recalls: episodic + knowledge, same query.
+
+        Episodes over-fetch (5x) and are retention-ranked before
+        truncation, so an important extracted fact can win the
+        episode slot over a merely similar episode. The limit stays
+        a display budget for the plan prompt; the ranking decides
+        which memories are retained into the next phase.
+        """
         vector = self.embedder.embed_query(query)
         sparse = self.embedder.embed_sparse(query)
-        episodes = self.store.search("episodic", vector, query, episode_limit, sparse=sparse)
+        over = episode_limit * 5 if episode_limit else 0
+        episodes = self.store.search("episodic", vector, query, over, sparse=sparse) if over else []
+        episodes = retention_rank(episodes, episode_limit)
         knowledge = self.store.search("knowledge", vector, query, knowledge_limit, sparse=sparse)
         for hit in episodes:
             self.record_access("episodic", hit.point)
@@ -899,41 +948,59 @@ class Memory:
 
     def promote_to_ltm(self, episodic_point: Point,
                        kind: str = "semantic") -> Point | None:
-        """Copy an episodic point to LTM, payload copied, link survives."""
+        """Copy an episodic point to LTM: deduped or superseding.
+
+        Memory needs no approval. An identical text already in
+        LTM is a duplicate: nothing new is recorded, the
+        episodic point is just marked promoted. A point
+        sharing at least half its shape tokens is the same
+        memory in new words, so the old copy is deleted and
+        the new one recorded — the same bar experience
+        merging uses. Anything else is recorded alongside.
+        """
         if kind not in ("semantic", "experience"):
             return None
+        try:
+            hits = self.recall(kind, episodic_point.text,
+                               limit=5, graph=False)
+        except Exception:
+            hits = []
+        new_shape = _text_shape(episodic_point.text)
+        best, best_overlap, best_text = None, 0.0, ""
+        for hit in hits:
+            point = getattr(hit, "point", None)
+            if point is None:
+                continue
+            payload = point.payload or {}
+            old_text = str(getattr(point, "text", "")
+                           or payload.get("text", "") or "")
+            overlap = _shape_overlap(new_shape, _text_shape(old_text))
+            if overlap > best_overlap:
+                best, best_overlap, best_text = point, overlap, old_text
+        if best is not None and (
+                best_overlap >= 1.0
+                or best_text.strip() == str(episodic_point.text or "").strip()):
+            self._mark_promoted(episodic_point)
+            return best
+        if best is not None and best_overlap >= _PROMOTE_SUPERSEDE_SHAPE:
+            try:
+                self.store.delete(kind, best.id)
+            except Exception:
+                pass
         target = self.record(kind, episodic_point.text,
                              {**episodic_point.payload,
                               "promoted_from": episodic_point.id,
                               "kind": kind})
+        self._mark_promoted(episodic_point)
+        return target
+
+    def _mark_promoted(self, episodic_point: Point) -> None:
         episodic_point.payload["promoted"] = True
         if hasattr(self.store, "set_payload"):
             self.store.set_payload("episodic", episodic_point.id,
                                    {"promoted": True})
         else:
             self.store.upsert("episodic", episodic_point)
-        return target
-
-    def promote_with_ask(self, episodic_point: Point, ask,
-                         kind: str = "semantic") -> Point | None:
-        """Promotion with a caller-supplied ask callback.
-
-        If auto-promote is on, promote without asking.
-        Otherwise ask() must return True to promote; a False
-        or an exception leaves episodic project-scoped only.
-        ask is a chat question, not an approval card.
-        """
-        if self.auto_promote_enabled():
-            return self.promote_to_ltm(episodic_point, kind=kind)
-        try:
-            approved = bool(ask(episodic_point))
-        except Exception:
-            approved = False
-        return self.promote_to_ltm(episodic_point, kind=kind) if approved else None
-
-    @staticmethod
-    def auto_promote_enabled() -> bool:
-        return os.environ.get("AIDON_AUTO_PROMOTE_TO_LTM", "0") == "1"
 
     def list_points(self, collection: str, limit: int = 50) -> list[Point]:
         return self.store.list_points(collection, limit)

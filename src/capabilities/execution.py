@@ -44,12 +44,14 @@ Backends:
   does not silently fall back to a host subprocess.
   That is the difference from the bwrap fallback,
   which is labeled, not silent, and which stays.
-- VMBackend is post-hackathon, future only. It is
-  documented here, not implemented, and there is no
-  stub that pretends to run a VM. When it is built,
-  it will be a disposable VM running a Docker
-  container inside it, for untrusted code and for
-  work that needs a separate kernel.
+- VMBackend runs commands over SSH on a VM the owner
+  already runs (no provisioning here: lifecycle stays
+  future work). The local workdir is tarred up to a
+  remote dir, the command runs there, results tar back.
+  With use_sudo, commands run under sudo -S, the
+  password arriving on stdin only — never in argv,
+  never logged. A disposable VM per run, and a Docker
+  container inside it, remain future work.
 
 Docker does not give Aidon learning. Learning comes
 from planning, experience storage, retrieval, and
@@ -61,6 +63,7 @@ outputs and files, never just an exit code.
 
 from __future__ import annotations
 
+import shlex
 import shutil
 import subprocess
 import uuid
@@ -168,11 +171,152 @@ class DockerBackend(ExecutionBackend):
                                    image=self.image)
 
 
+class VMBackend(ExecutionBackend):
+    """SSH to a VM the owner already runs. No provisioning.
+
+    The workdir is tarred to a remote dir, the command runs
+    there, results tar back. The host never runs the command.
+    Fail-closed like DockerBackend: missing ssh raises, a
+    failed sync returns a failed result, never a silent host
+    fallback. The sudo password, when configured, travels
+    on stdin only: it never appears in argv, logs, or errors.
+    """
+
+    name = "vm"
+
+    def __init__(self, host: str, user: str | None = None,
+                 remote_workspace: str | None = None,
+                 sudo_password: str | None = None,
+                 use_sudo: bool = False,
+                 ssh_path: str | None = None, port: int = 22):
+        if not host:
+            raise ValueError(
+                "VM backend needs a host (AIDON_VM_HOST)")
+        if use_sudo and not sudo_password:
+            raise ValueError(
+                "VM sudo requested but no sudo password configured "
+                "(AIDON_VM_SUDO_PASSWORD)")
+        self.host = host
+        self.user = user
+        self.remote_workspace = remote_workspace
+        self.sudo_password = sudo_password
+        self.use_sudo = use_sudo
+        self.ssh_path = ssh_path or shutil.which("ssh")
+        self.port = port
+        self._last_remote: str | None = None
+
+    def _target(self) -> str:
+        return f"{self.user}@{self.host}" if self.user else self.host
+
+    def _ssh_base(self) -> list[str]:
+        cmd = [self.ssh_path, "-o", "ConnectTimeout=10"]
+        if self.port != 22:
+            cmd += ["-p", str(self.port)]
+        cmd.append(self._target())
+        return cmd
+
+    def _remote_dir(self, workspace: Path) -> str:
+        if self.remote_workspace:
+            return self.remote_workspace
+        return f"~/aidon-work/{workspace.name}"
+
+    def _sync_up(self, workspace: Path, remote: str,
+                 timeout_seconds: int) -> bool:
+        tar = subprocess.Popen(
+            ["tar", "-cf", "-", "-C", str(workspace), "."],
+            stdout=subprocess.PIPE)
+        try:
+            proc = subprocess.run(
+                [*self._ssh_base(),
+                 f"mkdir -p {shlex.quote(remote)} && "
+                 f"tar -xf - -C {shlex.quote(remote)}"],
+                stdin=tar.stdout, capture_output=True, text=True,
+                timeout=timeout_seconds)
+            return proc.returncode == 0
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+        finally:
+            if tar.stdout is not None:
+                tar.stdout.close()
+            tar.wait()
+
+    def _sync_back(self, workspace: Path, remote: str,
+                   timeout_seconds: int) -> bool:
+        ssh = subprocess.Popen(
+            [*self._ssh_base(), f"tar -cf - -C {shlex.quote(remote)} ."],
+            stdout=subprocess.PIPE)
+        try:
+            proc = subprocess.run(
+                ["tar", "-xf", "-", "-C", str(workspace)],
+                stdin=ssh.stdout, capture_output=True, text=True,
+                timeout=timeout_seconds)
+            return proc.returncode == 0 and ssh.wait() == 0
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+        finally:
+            if ssh.stdout is not None:
+                ssh.stdout.close()
+
+    def run(self, command: list[str], workspace: Path,
+            timeout_seconds: int = 120) -> ExecutionResult:
+        if not command:
+            raise ValueError("command must not be empty")
+        if self.ssh_path is None:
+            # Fail closed, never silently fall back to a host subprocess.
+            raise RuntimeError("ssh is not installed, VM backend cannot run")
+        workspace = Path(workspace)
+        workspace.mkdir(parents=True, exist_ok=True)
+        remote = self._remote_dir(workspace)
+        self._last_remote = remote
+        if not self._sync_up(workspace, remote, timeout_seconds):
+            return ExecutionResult(1, "", "workspace sync to VM failed",
+                                   isolated=True, backend=self.name)
+        shell_cmd = f"cd {shlex.quote(remote)} && {shlex.join(command)}"
+        if self.use_sudo:
+            shell_cmd = f"sudo -S -- sh -c {shlex.quote(shell_cmd)}"
+        try:
+            proc = subprocess.run(
+                [*self._ssh_base(), shell_cmd],
+                input=(self.sudo_password + "\n") if self.use_sudo else None,
+                capture_output=True, text=True, timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            return ExecutionResult(124, exc.stdout or "", "timeout",
+                                   isolated=True, backend=self.name)
+        if not self._sync_back(workspace, remote, timeout_seconds):
+            return ExecutionResult(1, proc.stdout,
+                                   "workspace sync back from VM failed",
+                                   isolated=True, backend=self.name)
+        return ExecutionResult(proc.returncode, proc.stdout, proc.stderr,
+                               isolated=True, backend=self.name)
+
+    def cleanup(self) -> None:
+        if self._last_remote and self.ssh_path:
+            try:
+                subprocess.run(
+                    [*self._ssh_base(),
+                     f"rm -rf {shlex.quote(self._last_remote)}"],
+                    capture_output=True, text=True, timeout=60)
+            except Exception:
+                pass
+            self._last_remote = None
+
+
 def make_backend(name: str, sandbox: Sandbox, image: str = "python:3.12-slim",
-                 allow_network: bool = False) -> ExecutionBackend:
+                 allow_network: bool = False,
+                 vm_host: str | None = None, vm_user: str | None = None,
+                 vm_remote_workspace: str | None = None,
+                 vm_sudo_password: str | None = None,
+                 vm_use_sudo: bool = False) -> ExecutionBackend:
     """Owner-chosen backend, never model-chosen."""
     if name == "docker":
         return DockerBackend(image=image, allow_network=allow_network)
+    if name == "vm":
+        if not vm_host:
+            raise ValueError("VM backend needs a host (AIDON_VM_HOST)")
+        return VMBackend(host=vm_host, user=vm_user,
+                         remote_workspace=vm_remote_workspace,
+                         sudo_password=vm_sudo_password,
+                         use_sudo=vm_use_sudo)
     if name in ("bubblewrap", "sandbox", ""):
         return BubblewrapBackend(sandbox)
     raise ValueError(f"unknown execution backend: {name}")

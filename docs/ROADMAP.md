@@ -21,7 +21,9 @@ post-hackathon, NOT built, NOT demoed, at the end.
 - Tool, skill, and plugin system: loader, registry,
   security scan, adoption gate, CLI plugin commands.
 - Execution backends: bubblewrap sandbox, Docker
-  backend, VM documented only, not implemented.
+  backend, subprocess backend, and VM backend over SSH
+  to a VM you already run; disposable VM per run is
+  still post-hackathon.
 - Triggers: scheduler, WhatsApp and Slack trigger
   interfaces, WebUI trigger interface, ingest folder,
   webhook, manual, no Telegram.
@@ -185,14 +187,33 @@ post-hackathon, NOT built, NOT demoed, at the end.
   pattern as the ffmpeg skip, instead of failing on a
   missing optional package.
 
+- Run modes Ask, Plan, and Execute, with Ask the
+  default on every interactive surface, a Run Mode
+  chooser in the WebUI, and Proceed resuming the
+  frozen plan or spec without re-planning; daemon
+  and scheduled runs execute directly.
+- Risk-based critic by default, and model verifier
+  modes off, selective, and always (default off),
+  with incremental repair: a model NO naming a file
+  re-runs only that file, passed files untouched.
+- Settings catalog in 9 groups (Interface, Scheduler,
+  System, Cognitive, Memory, Voice, Agentic, Social,
+  Research); .env.example heads follow the same groups.
+- Binary deliverable verification with containment,
+  plus the encryption policy: verify before encrypt,
+  AES-256-GCM by default, plaintext never sent to
+  the model verifier.
+- Episode adaptation floor documented as fixed at 5:
+  composition always uses at least 5 episodes.
+
 ## 🔮 Post-hackathon, NOT built, NOT demoed
 
-The VM remains intentionally out of the current setup. Adding it is a
+A disposable VM remains intentionally out of the current setup. Adding it is a
 separate isolation project: it needs a disposable image, lifecycle and
 resource limits, network and file-mount policy, persistence rules, and
 explicit boundaries for display, audio, credentials, and computer
-control. The current UI, CLI, and voice changes do not require a VM and
-will be available inside a future VM once that backend exists.
+control. The current UI, CLI, and voice changes do not require a disposable
+VM and will be available inside a future VM once that backend exists.
 
 - Full VM backend: disposable VM running Docker
   inside it, for untrusted code and separate-kernel work.
@@ -245,6 +266,35 @@ will be available inside a future VM once that backend exists.
   claimed here, and no mouse is moved in a
   headless run, because there is no display to
   move it on.
+
+- Conscience Laya as safeguard model: a small conscience
+  model as an independent guardrail over Aidon's plans
+  and live actions — verifying an outcome met its goal
+  and refusing or flagging what fails, before anything
+  goes live. Post-hackathon; the safeguard role is the
+  definite, checkable kind (outcome verification,
+  guardrail classification), not a general moral sense.
+
+- Scheduler serve as one process: the standalone schedule
+  serve daemon is broken since the practice-windows change —
+  it references server and msg that only the webui serve
+  branch constructs, so it crashes at startup and its
+  practice delivery would silently drop. The fix extracts
+  the WebUI construction into a shared helper, calls it in
+  the serve branch, runs the server in a thread, and wires
+  practice_session_runner and the two senders, with a
+  sandbox smoke test of the daemon. Until then the live
+  scheduler path stays the timer plus the WebUI process.
+  Post-hackathon.
+
+- Post-hackathon cleanup, one entry: research-cache search index and
+  single persistence registry. The research cache is bounded by small
+  caps now (file, scan, and match limits); an FTS5 full-text index
+  replaces full-file scans when the cache grows, so search stays fast
+  without reading every entry. Separately, the goal loop opens two
+  Registry instances per runner (mission registry and checkpoint
+  registry); unify them into one or document the split, so checkpoint
+  and mission state stop living in two handles. Post-hackathon.
 
 - Aidon fly-brain biological layer: the MaleCNS, the
   male Drosophila central nervous system connectome,

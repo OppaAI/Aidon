@@ -13,6 +13,10 @@ from __future__ import annotations
 
 VRM_LIP_SYNC_JS = """
 // VRM lip sync, Web Audio AnalyserNode, RMS to mouth morphs, blink timer to eye morphs.
+// Follows old Aidon's chat loop: float time-domain RMS, a noise floor,
+// asymmetric smoothing, and morph targets driven directly. This model's
+// VRM expression groups are empty, so the expression manager alone moves
+// nothing; it is only the fallback for models that have groups.
 function startVrmLipSync(vrm, audioElement) {
   const ctx = new AudioContext();
   const source = ctx.createMediaElementSource(audioElement);
@@ -20,28 +24,60 @@ function startVrmLipSync(vrm, audioElement) {
   analyser.fftSize = 256;
   source.connect(analyser);
   analyser.connect(ctx.destination);
-  const data = new Uint8Array(analyser.frequencyBinCount);
-  let blinkTimer = null;
-  function tick() {
-    analyser.getByteTimeDomainData(data);
+  const data = new Float32Array(analyser.fftSize);
+  const morphs = [];
+  if (vrm && vrm.scene) {
+    vrm.scene.traverse((o) => {
+      if (o.morphTargetDictionary && o.morphTargetInfluences) {
+        morphs.push(o);
+      }
+    });
+  }
+  function setMorph(name, value) {
+    let hit = false;
+    for (const mesh of morphs) {
+      const idx = mesh.morphTargetDictionary[name];
+      if (idx !== undefined) { mesh.morphTargetInfluences[idx] = value; hit = true; }
+    }
+    return hit;
+  }
+  let level = 0;
+  let stopped = false;
+  let t = 0, blinkAt = 2.5, blinkT = -1, last = performance.now();
+  function tick(now) {
+    if (stopped) return;
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    t += dt;
+    analyser.getFloatTimeDomainData(data);
     let sum = 0;
-    for (const v of data) { const x = (v - 128) / 128; sum += x * x; }
+    for (const v of data) { sum += v * v; }
     const rms = Math.sqrt(sum / data.length);
-    const mouth = Math.min(1, rms * 4);
-    if (vrm && vrm.expressionManager) {
-      vrm.expressionManager.setValue('Fcl_MTH_Small', mouth * 0.5);
-      vrm.expressionManager.setValue('Fcl_MTH_Large', mouth);
+    const target = Math.max(0, Math.min(1, (rms - 0.012) * 9.5));
+    const coeff = target > level ? 0.65 : 0.28;
+    level += (target - level) * coeff;
+    // Blink: 120ms sin curve every 2.5-6s.
+    let blinkW = 0;
+    if (blinkT < 0 && t > blinkAt) blinkT = 0;
+    if (blinkT >= 0) {
+      blinkT += dt;
+      const kb = blinkT / 0.12;
+      if (kb >= 1) { blinkT = -1; blinkAt = t + 2.5 + Math.random() * 3.5; }
+      else blinkW = Math.sin(Math.PI * kb);
+    }
+    let direct = false;
+    direct = setMorph('Fcl_MTH_Small', level * 0.95) || direct;
+    direct = setMorph('Fcl_MTH_Large', level * 0.60) || direct;
+    direct = setMorph('Fcl_MTH_A', level * 0.85) || direct;
+    direct = setMorph('Fcl_EYE_Close', blinkW) || direct;
+    if (!direct && vrm && vrm.expressionManager) {
+      try { vrm.expressionManager.setValue('aa', level); } catch (e) {}
+      try { vrm.expressionManager.setValue('blink', blinkW); } catch (e) {}
     }
     requestAnimationFrame(tick);
   }
-  tick();
-  blinkTimer = setInterval(() => {
-    if (vrm && vrm.expressionManager) {
-      vrm.expressionManager.setValue('Fcl_EYE_Close', 1);
-      setTimeout(() => vrm.expressionManager.setValue('Fcl_EYE_Close', 0), 120);
-    }
-  }, 4000);
-  return blinkTimer;
+  requestAnimationFrame(tick);
+  return function stop() { stopped = true; };
 }
 """
 

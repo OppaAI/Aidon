@@ -291,7 +291,9 @@ def test_slack_handler_plain_text_unchanged(tmp_path):
     status, _payload = server.handle_slack_post(b"", {}, body)
     assert status == 200
     assert seen[0].goal == "hello"
-    assert seen[0].payload == {"force_web": False, "channel": "C1",
+    assert seen[0].payload == {"force_web": False, "think_max": False,
+                               "research_mode": False, "mode": "ask",
+                               "channel": "C1",
                                "thread_ts": None}
 
 
@@ -433,10 +435,12 @@ def test_slack_image_attached_like_whatsapp_marker():
     event = parse_slack_event(payload)
     assert event is not None
     assert "[image slack_file_id=F1" in event.goal
-    assert "F2" not in event.goal  # non-image files are not attached
+    assert "[file slack_file_id=F2" in event.goal  # documents attach too
     assert len(event.payload["images"]) == 1
     assert event.payload["images"][0]["name"] == "plant.jpg"
     assert event.payload["images"][0]["downloaded"] is False
+    assert len(event.payload["files"]) == 1
+    assert event.payload["files"][0]["name"] == "notes.txt"
 
 
 def test_slack_image_only_message_still_becomes_goal():
@@ -1237,8 +1241,8 @@ def _tools(tmp_path, **kw):
     return _goal_extra_tools(cfg, tmp_path / "work", **kw)
 
 
-def test_cli_gate_default_timeout_is_180(tmp_path):
-    assert _cli_gate(tmp_path).timeout_seconds == 180
+def test_cli_gate_default_timeout_is_900(tmp_path):
+    assert _cli_gate(tmp_path).timeout_seconds == 900
 
 
 def test_cli_gate_accepts_configured_timeout(tmp_path):

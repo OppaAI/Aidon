@@ -24,13 +24,15 @@ At most 3 attempts in total (1 initial + 2 repairs),
 then the run fails, it does not ask for approval, and
 it does not go live.
 
-Memory, blank by design: a fresh Aidon starts with empty
+Memory, blank by design: a new home starts with empty
 collections, no import from previous projects. When a
 memory is present, the loop recalls Experiences before
 planning fresh, records episodic memory scoped by
 project_id, and builds an Experience after a successful
-run only. Promotion is auto if the flag says so,
-otherwise via promotion_ask, otherwise left to the caller.
+run only. Promotion to long-term memory is automatic:
+a done run's episodic record and a chat exchange are
+copied to LTM, deduplicated when identical and
+superseding when the same shape recurs.
 """
 
 from __future__ import annotations
@@ -40,6 +42,7 @@ import json
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -51,6 +54,115 @@ from .verify import verify_plan
 from .elapsed import ElapsedTimer
 
 MAX_ATTEMPTS = 3
+MAX_REPLANS = 1
+MAX_PLAN_REPAIRS = 2
+# Full skill text budget per skill on a level-2 load: about
+# 5000 tokens, so one huge skill file cannot flood the plan
+# prompt. The head (200 chars) stays the always-on level 1.
+_SKILL_FULL_CHARS = 20000
+
+
+def _resolve_count(env_name: str, default: int, minimum: int) -> int:
+    """Resolve a "how many times" knob: env var, else default, clamped.
+
+    Invalid values fall back to the default, never to 0 for
+    attempts (a run with zero attempts could never execute)
+    or below the given minimum. Settings and .env.example
+    carry the same names; the loop reads them per run, so a
+    changed value applies to the next run.
+    """
+    try:
+        value = int(os.environ.get(env_name, "") or default)
+    except ValueError:
+        return default
+    return max(minimum, value)
+
+
+def _resolve_critic_mode() -> str:
+    """Critic scope: "risk" (default) or "always".
+
+    Unknown values fall back to "risk": the default is the
+    safe side for token spend, and a typo must never silently
+    turn the critic into always-on (or off — off is
+    AIDON_CRITIC_ENABLED=0, not a mode).
+    """
+    mode = (os.environ.get("AIDON_CRITIC_MODE", "") or "risk").strip().lower()
+    return "always" if mode == "always" else "risk"
+
+
+def _resolve_model_verifier_mode() -> str:
+    """Model verifier scope: "off" (default), "selective", or "always".
+
+    The default is the lowest: code verification decides alone and
+    no model call is spent on a second opinion. Unknown values fall
+    back to "off", so a typo must never silently turn the verifier
+    into always-on.
+    """
+    mode = (os.environ.get("AIDON_MODEL_VERIFIER", "") or "off").strip().lower()
+    return mode if mode in ("selective", "always") else "off"
+
+
+def _model_verifier_wanted(mode: str, deliverables) -> bool:
+    """True when the model verifier should run for these deliverables.
+
+    "off" never runs; "always" always runs. "selective" runs unless
+    every deliverable is structured data (JSON, JSONL, CSV, TSV),
+    where code checks are complete -- existence, contents, and
+    recomputed totals -- and a model opinion adds no quality
+    signal. A prose, document, or image deliverable earns the
+    second opinion.
+    """
+    if mode == "always":
+        return True
+    if mode != "selective":
+        return False
+    structured = {".json", ".jsonl", ".csv", ".tsv"}
+    return any(
+        Path(str(name)).suffix.lower() not in structured
+        for name in (deliverables or []))
+
+
+def _mentions_file(msg: str, name: str) -> bool:
+    """True when a failure message names this exact file.
+
+    A mention is an exact filename match, not a substring: the name
+    must not be glued to another filename character on either side.
+    A failure mentioning data.txt therefore does not mention a.txt,
+    even though "a.txt" appears inside "data.txt" as text.
+    """
+    return re.search(r"(?<![A-Za-z0-9_.-])" + re.escape(name) +
+                     r"(?![A-Za-z0-9_.-])", msg) is not None
+
+
+def _critic_wanted(plan, adapted_from: str = "") -> bool:
+    """True when the plan critic should run on this plan.
+
+    In "always" mode it runs on every valid plan, the previous
+    behavior. In "risk" mode (default) it runs only when the
+    plan earns scrutiny: a fresh plan (not adapted from a past
+    success) that is not small, or any plan with a live step —
+    a tool whose name carries post/send/publish, the same
+    signal the dispatcher uses for the live gate. Adapted
+    plans already proved their shape, small plans have little
+    to sense-check, and live steps always earn a second look.
+    A plan whose steps cannot be read is treated as risky:
+    the critic runs. AIDON_CRITIC_ENABLED=0 disables the
+    critic entirely and is checked at the call site, not here.
+    """
+    if _resolve_critic_mode() == "always":
+        return True
+    try:
+        steps = plan.normalized_steps()
+    except Exception:
+        return True
+    live = any(
+        any(word in (getattr(step, "tool", "") or "")
+            for word in ("post", "send", "publish"))
+        for step in steps)
+    if live:
+        return True
+    small = len(steps) <= _resolve_count("AIDON_CRITIC_RISK_MAX_STEPS", 3, 0)
+    return not (adapted_from or small)
 
 
 @dataclass
@@ -60,6 +172,14 @@ class Step:
     deliverable: str = ""
     criteria: str = ""
     executor: str = "tool"
+    # DAG identity: steps from a DAG carry the node id and its
+    # declared dependencies, so the executor can schedule
+    # independent steps concurrently. Free-form model plans
+    # leave these empty and always run sequentially: an
+    # undeclared dependency must never be mistaken for
+    # independence.
+    id: str = ""
+    depends_on: list[str] = field(default_factory=list)
 
 
 # Tool-name fragments that mean the step leaves the workdir, touches a
@@ -75,15 +195,22 @@ SIDE_EFFECT_TOOL_WORDS = (
 )
 
 
-def plan_is_reversible(plan: Plan) -> bool:
+def plan_is_reversible(plan: Plan, allowed_tools=None) -> bool:
     """True when every step stays inside the run's own workdir.
 
     Used by the pre-approval gate: a pre-approved "live" card is
     honoured only for a plan that cannot send, publish, spend,
-    delete, or install anything.
+    delete, or install anything. allowed_tools names steps a
+    caller has already made safe — practice tools, whose
+    destinations are forced to the owner and whose files are
+    confined to the practice folder — so they do not trip
+    the trigger-word check.
     """
+    allowed = {str(t).lower() for t in (allowed_tools or ())}
     for step in plan.normalized_steps():
         name = str(getattr(step, "tool", "") or "").lower()
+        if name in allowed:
+            continue
         if any(word in name for word in SIDE_EFFECT_TOOL_WORDS):
             return False
     return True
@@ -95,11 +222,23 @@ class Plan:
     deliverables: list[str] = field(default_factory=list)
     criteria: list[str] = field(default_factory=list)
     needs_research: list[str] = field(default_factory=list)
+    # True only for plans built from a DAG, where every
+    # dependency is declared and undeclared means
+    # independent. The executor runs such a plan's levels
+    # concurrently; every other plan runs sequentially.
+    parallel_ok: bool = False
+    # Skill names the planner asked to have loaded in full
+    # (level 2). Read by _plan for one expansion pass, then
+    # ignored: the expanded plan's own list never triggers
+    # a further pass.
+    skills: list = field(default_factory=list)
 
     def normalized_steps(self) -> list[Step]:
         out = []
-        for step in self.steps:
+        for index, step in enumerate(self.steps):
             if isinstance(step, Step):
+                if not step.id:
+                    step.id = f"step-{index}"
                 out.append(step)
             elif isinstance(step, dict):
                 out.append(Step(
@@ -107,11 +246,15 @@ class Plan:
                     args=dict(step.get("args", {})),
                     deliverable=str(step.get("deliverable", "")),
                     criteria=str(step.get("criteria", "")),
-                    executor=str(step.get("executor", "tool"))))
+                    executor=str(step.get("executor", "tool")),
+                    id=str(step.get("id", "") or f"step-{index}"),
+                    depends_on=[str(d) for d in step.get("depends_on", [])]
+                    if isinstance(step.get("depends_on", []), list) else []))
             else:
                 out.append(Step(tool="write", args={"file": "deliverable.md",
                                                     "text": str(step)},
-                                deliverable="deliverable.md"))
+                                deliverable="deliverable.md",
+                                id=f"step-{index}"))
         return out
 
 
@@ -128,6 +271,9 @@ class RunReport:
     backend: str = "bubblewrap"
     model_calls: int = 0
     model_tokens_estimated: int = 0
+    model_tokens_in_estimated: int = 0
+    model_tokens_out_estimated: int = 0
+    model_thinking_tokens: int = 0
     adapted: bool = False
     adapted_from: str = ""
     replan_note: str = ""
@@ -137,13 +283,31 @@ class RunReport:
     step_lines: list[str] = field(default_factory=list)
     narration: str = ""
     delivery_summary: str = ""
+    # Approval gates this run hit but never passed: rejected by a
+    # human, or timed out while the owner was away. Rendered as
+    # the "blocked actions" section of the final report, so a run
+    # never silently dies at a gate.
+    blocked: list[str] = field(default_factory=list)
     # Sandbox network state for this run: True means the
     # sandbox had network on (announced on stderr, shown on
     # approval cards), False means network off, None means
     # unknown (nothing announced, nothing shown).
     network: bool | None = None
+    # Stopped Ask/Plan run: {"stop_id", "mode", "goal", ...} when
+    # this report is a stop, else {}. The surface turns it into
+    # the Proceed button (WebUI) or the proceed <id> reply text.
+    mode_stop: dict = field(default_factory=dict)
     elapsed_seconds: float = 0.0
     approval_wait_seconds: float = 0.0
+    # Token basis for the finished-run total: "actual" when every
+    # model call reported provider usage (the in/out fields then
+    # hold real counts), "estimated" otherwise (chars//4 split).
+    # The in/out estimated fields always carry the
+    # basis-appropriate values, so the footer breakdown sums to
+    # the total; the actual fields hold the real counts alone.
+    model_tokens_basis: str = "estimated"
+    model_tokens_in_actual: int = 0
+    model_tokens_out_actual: int = 0
 
 
 def format_duration(seconds: float | int | None) -> str:
@@ -175,14 +339,26 @@ def format_run_stats(report: RunReport) -> str:
     elapsed = max(0.0, float(getattr(report, "elapsed_seconds", 0.0) or 0.0))
     elapsed_text = format_duration(elapsed)
     tokens = int(getattr(report, "model_tokens_estimated", 0) or 0)
+    in_tok = int(getattr(report, "model_tokens_in_estimated", 0) or 0)
+    out_tok = int(getattr(report, "model_tokens_out_estimated", 0) or 0)
+    think_tok = int(getattr(report, "model_thinking_tokens", 0) or 0)
+    basis = str(getattr(report, "model_tokens_basis", "estimated")
+                or "estimated")
     waited = float(getattr(report, "approval_wait_seconds", 0.0) or 0.0)
     waiting = (f" (plus {format_duration(waited)} waiting for you)"
                if waited >= 1 else "")
-    return f"⏱️ {elapsed_text}{waiting} · {tokens:,} total workflow tokens (estimated)"
+    if in_tok or out_tok or think_tok:
+        usage = (f"IN: {in_tok:,} OUT: {out_tok:,} "
+                 f"(Think: {think_tok:,}) TOT: {tokens:,} tokens ({basis})")
+    else:
+        # No breakdown recorded (a non-counting client): keep the
+        # old single-number line rather than three zeros.
+        usage = f"{tokens:,} total workflow tokens (estimated)"
+    return f"⏱️ {elapsed_text}{waiting} · {usage}"
 
 
-def run_react(client, messages: list, tools, *, max_rounds: int = 8,
-              phase: str = "live", budgets=None) -> dict:
+def run_react(client, messages: list, tools, *, max_rounds: int | None = None,
+              phase: str = "live", budgets=None, max_workers: int | None = None) -> dict:
     """Optional compatibility ReAct loop for native model tool calls.
 
     Plan-first execution remains the default. This helper restores the old
@@ -190,10 +366,26 @@ def run_react(client, messages: list, tools, *, max_rounds: int = 8,
     ``chat_response`` method returning ``ChatResponse.tool_calls`` (or a
     compatible response object). A JSON response containing ``tool_calls``
     is accepted as a fallback for simple model adapters.
+
+    Rounds are sequential by nature: each round's model call
+    depends on the previous round's tool results. Tool calls
+    within one round run concurrently (AIDON_REACT_MAX_WORKERS,
+    default 3): the model emits them without knowing any
+    result, so they are independent by construction, and
+    results are appended in call order, never completion
+    order, like swarm's merge. A failing call propagates
+    like the sequential version, though already-started
+    calls finish first. Tools that share mutable state
+    should use max_workers=1. Round count is
+    AIDON_REACT_MAX_ROUNDS (default 8).
     """
     history = list(messages or [])
     total_calls = 0
     total_rounds = 0
+    rounds = (_resolve_count("AIDON_REACT_MAX_ROUNDS", 8, 1)
+              if max_rounds is None else max(1, int(max_rounds)))
+    workers = (_resolve_count("AIDON_REACT_MAX_WORKERS", 3, 1)
+               if max_workers is None else max(1, int(max_workers)))
 
     def _message(role, content):
         return Message(role, str(content))
@@ -205,7 +397,16 @@ def run_react(client, messages: list, tools, *, max_rounds: int = 8,
             return tools[name](**arguments) if isinstance(arguments, dict) else tools[name](arguments)
         raise ValueError(f"unknown tool: {name}")
 
-    for _ in range(max(1, int(max_rounds))):
+    def _run_call(call):
+        name = getattr(call, "name", "")
+        if not name and isinstance(call, dict):
+            name = call.get("name", "")
+        arguments = getattr(call, "arguments", None)
+        if isinstance(call, dict) and arguments is None:
+            arguments = call.get("arguments", {})
+        return _call_tool(str(name), arguments or {})
+
+    for _ in range(rounds):
         total_rounds += 1
         if budgets is not None and hasattr(budgets, "add_step"):
             budgets.add_step()
@@ -233,14 +434,13 @@ def run_react(client, messages: list, tools, *, max_rounds: int = 8,
             return {"text": str(text or ""), "messages": history,
                     "tool_calls": total_calls - 1, "rounds": total_rounds}
         history.append(_message("assistant", text or ""))
-        for call in calls:
-            name = getattr(call, "name", "")
-            if not name and isinstance(call, dict):
-                name = call.get("name", "")
-            arguments = getattr(call, "arguments", None)
-            if arguments is None and isinstance(call, dict):
-                arguments = call.get("arguments", {})
-            result = _call_tool(str(name), arguments or {})
+        if len(calls) > 1 and workers > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(workers, len(calls))) as pool:
+                results = list(pool.map(_run_call, calls))
+        else:
+            results = [_run_call(call) for call in calls]
+        for result in results:
             if budgets is not None and hasattr(budgets, "add_tokens"):
                 budgets.add_tokens(str(result))
             history.append(_message("tool", result))
@@ -251,7 +451,7 @@ def run_react(client, messages: list, tools, *, max_rounds: int = 8,
 class GoalRunner:
     def __init__(self, client: ModelClient, sandbox: Sandbox,
                  gate: ApprovalGate, home: Path, memory=None,
-                 promotion_ask=None, project_id: str = "default",
+                 project_id: str = "default",
                  plugins=None, execution_backend=None,
                  budget=None, trace=None, model_verifier=None,
                  kernel_mode: bool = False, semantic_router=None,
@@ -262,7 +462,12 @@ class GoalRunner:
                  network_available: bool | None = None,
                  guidance: str = "", image_paths=None, force_web: bool = False,
                  stream_callback=None, conversation_context: str = "",
-                 route_callback=None, trace_callback=None):
+                 route_callback=None, trace_callback=None,
+                 allowed_side_effect_tools=None, gate_context=None,
+                 think_max: bool = False, research_mode: bool = False,
+                 deep_researcher=None, deadline_seconds: float | None = None,
+                 mode: str | None = None, question_ask=None,
+                 conversation_key: str = "", resume_plan=None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -273,7 +478,6 @@ class GoalRunner:
         self.gate = gate
         self.home = Path(home)
         self.memory = memory
-        self.promotion_ask = promotion_ask
         self.project_id = project_id
         self.network_available = network_available
         # Optional human guidance, binding on the planner: carried
@@ -296,8 +500,15 @@ class GoalRunner:
                               **_registry_kwargs)
         self.plugins = plugins
         self.execution_backend = execution_backend
+        self.allowed_side_effect_tools = frozenset(
+            str(t).lower() for t in (allowed_side_effect_tools or ()))
+        # Run context handed to approval cards: run_id,
+        # conversation_id, source, and a WhatsApp destination
+        # when the run warrants one. None means no context.
+        self.gate_context = gate_context
         self.budget = budget
         self.trace = trace
+        self._trace_started = {}
         self.model_verifier = model_verifier
         self._effort_escalated = False
         if self.model_verifier is not None:
@@ -307,6 +518,7 @@ class GoalRunner:
         self.use_semantic_router_skip = use_semantic_router_skip
         self._adapted = False
         self._adapted_from = ""
+        self._blocked: list[str] = []
         self.run_id = run_id
         self.run_control = run_control
         self._replan_note = ""
@@ -315,10 +527,73 @@ class GoalRunner:
         self.researcher = researcher
         self.extra_tools = extra_tools or {}
         self.force_web = bool(force_web)
+        # /think or the 🧠 button: every phase at maximum thinking
+        # for this run (reasoning_effort max on backends that take
+        # it, think=True on boolean backends).
+        self.think_max = bool(think_max)
+        # /research mode: deep research first, at max thinking, for
+        # this run. research_mode implies think_max (see _chat);
+        # deep_researcher is the injected loop-side deep research
+        # callable (query, chat) -> report dict, built by main.py
+        # from the configured search backend. None means the mode
+        # still max-thinks, but research stays the standard kind.
+        self.research_mode = bool(research_mode)
+        self.deep_researcher = deep_researcher
+        self._deep_research_context = ""
+        # Ask/Plan/Execute mode. None means undecided: the interpret
+        # pass may detect Ask/Plan from the goal, else Execute.
+        # A chosen mode ("ask", "plan", "execute") always wins over
+        # detection. question_ask is the chat callback the Ask
+        # interview asks through (no clock, no card); None means
+        # Ask mode cannot interview and fails the run instead.
+        # conversation_key routes a bare proceed to this run's stop.
+        # resume_plan skips planning: the proceed of a Plan stop
+        # executes the saved plan directly.
+        self.mode = mode if mode in ("ask", "plan", "execute") else None
+        self.question_ask = question_ask
+        self.conversation_key = str(conversation_key or "")
+        self.resume_plan = resume_plan
+        # Wall-clock time box for the run, seconds from run()
+        # start; None means unlimited. Enforced between execution
+        # steps (see _deadline_exceeded), never mid-step.
+        self.deadline_seconds = deadline_seconds
         self.stream_callback = stream_callback
         self.conversation_context = str(conversation_context or "")
         self.route_callback = route_callback
         self.trace_callback = trace_callback
+
+    def _counting_clients(self) -> list:
+        """Counting clients whose phase deltas feed trace events.
+
+        The main client plus the router's tier clients. Taking
+        a delta twice from the same object is harmless (the
+        second take is zero, drained), so a shared client
+        cannot double-count.
+
+        Routers hide their tiers: a RoutedClient keeps them as
+        fast_client/strong_client and a RouterClient keeps them
+        in clients/default, so unwrap one level or the trace
+        drains nothing and every phase honestly shows 0→0.
+        """
+        clients: list = []
+        candidates = [getattr(self, "client", None),
+                      getattr(self, "router", None)]
+        expanded = list(candidates)
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            expanded.append(getattr(candidate, "fast_client", None))
+            expanded.append(getattr(candidate, "strong_client", None))
+            tier_map = getattr(candidate, "clients", None)
+            if isinstance(tier_map, dict):
+                expanded.extend(tier_map.values())
+            expanded.append(getattr(candidate, "default", None))
+        for candidate in expanded:
+            if candidate is not None and \
+                    callable(getattr(candidate, "take_phase_usage", None)) \
+                    and candidate not in clients:
+                clients.append(candidate)
+        return clients
 
     def _trace(self, kind: str, status: str, detail: str = "") -> None:
         # Attribute to this runner's own run id: sub-runners share
@@ -327,14 +602,43 @@ class GoalRunner:
         # with no run id passes None, and record() falls back to
         # the recorder's own run id, so unregistered runs behave
         # exactly as before.
+        # Seconds are measured between a kind's "started" event
+        # and its terminal event. Tokens drain
+        # from the counting clients on terminal events only: a
+        # "started" event precedes its calls, so it carries
+        # zeros. Non-model steps (sandbox, checkpoint) drain
+        # nothing and honestly show 0→0.
+        started = getattr(self, "_trace_started", None)
+        if started is None:
+            started = self._trace_started = {}
+        seconds = 0.0
+        tokens_in = tokens_out = thinking_tokens = 0
+        thinking = ""
+        if status == "started":
+            started[kind] = time.monotonic()
+        else:
+            begin = started.pop(kind, None)
+            if begin is not None:
+                seconds = round(time.monotonic() - begin, 1)
+            for client in self._counting_clients():
+                usage = client.take_phase_usage(kind)
+                tokens_in += usage["tokens_in"]
+                tokens_out += usage["tokens_out"]
+                thinking_tokens += usage["thinking_tokens"]
+                if usage["thinking"]:
+                    thinking = usage["thinking"]
         if self.trace is not None:
             event = self.trace.record(kind, status, detail, run_id=self.run_id)
             if callable(self.trace_callback):
-                self.trace_callback({
+                payload = {
                     "phase": kind, "status": status, "title": detail,
-                    "detail": detail, "seconds": 0,
-                    "tokens_in": 0, "tokens_out": 0,
-                })
+                    "detail": detail, "seconds": seconds,
+                    "tokens_in": tokens_in, "tokens_out": tokens_out,
+                    "thinking_tokens": thinking_tokens,
+                }
+                if thinking:
+                    payload["thinking"] = thinking
+                self.trace_callback(payload)
         if self.run_control is not None and self.run_id:
             stage_map = {
                 "interpret": "interpret", "research": "research",
@@ -500,11 +804,86 @@ class GoalRunner:
             "approval",
             lambda prompt: self._chat("respond", [Message("user", prompt)]))
         body = f"{lead or approval_lead_in()}\n\n{body}"
+        # Run context for the deciding surface: which run and
+        # conversation this card belongs to, and where a copy
+        # goes (e.g. WhatsApp). Gates that do not understand
+        # context ignore it; the WebUI gate delivers from it.
+        if "context" not in kwargs and getattr(self, "gate_context", None):
+            kwargs["context"] = self.gate_context
         timer = getattr(self, "_elapsed_timer", None)
         if timer is None:
-            return self.gate.ask(kind, title, body, **kwargs)
-        with timer.approval_wait():
-            return self.gate.ask(kind, title, body, **kwargs)
+            decision = self.gate.ask(kind, title, body, **kwargs)
+        else:
+            with timer.approval_wait():
+                decision = self.gate.ask(kind, title, body, **kwargs)
+        if getattr(decision, "verdict", "") == "rejected":
+            # A blocked action is evidence, not a silent failure:
+            # the final report lists it for the morning. A timeout
+            # is still awaiting, a human rejection is declined.
+            note = f"{kind}: {title}"
+            if getattr(decision, "reason", "") == "timeout":
+                note += " (timed out, still awaiting)"
+            else:
+                note += " (declined)"
+            blocked = getattr(self, "_blocked", None)
+            if blocked is None:
+                blocked = self._blocked = []
+            blocked.append(note)
+        return decision
+
+    def _route_judge(self):
+        """Fast-model second opinion for routing, or None.
+
+        Only when the loop's client is a RoutedClient (i.e. a
+        fast model is configured): the judge calls the fast
+        tier, never the strong one. Without a fast model there
+        is no judge and routing stays embedding-only. The judge
+        returns a route or None (abstain); any failure abstains,
+        so routing never breaks on a judge error.
+        """
+        fast = getattr(getattr(self, "client", None), "fast_client", None)
+        if fast is None:
+            return None
+
+        def judge(text):
+            prompt = (
+                "Classify this user message as exactly one of: "
+                "chat, webchat, agentic, artifact.\n"
+                "chat = chatting, asking a question, or talking about "
+                "something, including telling the assistant to wait "
+                "while the user checks something themselves.\n"
+                "webchat = asking to look something up on the web.\n"
+                "agentic = asking the assistant to DO something, change "
+                "state, or produce a file.\n"
+                "artifact = asking for a document or artifact to keep.\n"
+                "Reply with only JSON like {\"route\": \"chat\"}.\n"
+                f"Message: {text}")
+            try:
+                try:
+                    reply = fast.chat([Message("user", prompt)],
+                                      phase="route")
+                except TypeError:
+                    reply = fast.chat([Message("user", prompt)])
+            except Exception:
+                return None
+            try:
+                route = str(json.loads(reply).get("route", "")).strip().lower()
+            except Exception:
+                route = ""
+            if route not in ("chat", "webchat", "agentic", "artifact"):
+                match = re.search(
+                    r'"route"\s*:\s*"(chat|webchat|agentic|artifact)"',
+                    str(reply).lower())
+                if match:
+                    route = match.group(1)
+                elif str(reply).strip().lower() in (
+                        "chat", "webchat", "agentic", "artifact"):
+                    route = str(reply).strip().lower()
+                else:
+                    return None
+            return route
+
+        return judge
 
     def _chat(self, phase: str, messages) -> str:
         """One model call, router-aware.
@@ -543,7 +922,9 @@ class GoalRunner:
             sampling = sampling_for(
                 phase,
                 escalate=self._effort_escalated and str(phase) in ("repair", "verify"),
-                creative=bool(getattr(self, "_creative_mode", False)))
+                creative=bool(getattr(self, "_creative_mode", False)),
+                think_max=bool(getattr(self, "think_max", False) or
+                               getattr(self, "research_mode", False)))
         except Exception:
             sampling = None
         if (self.stream_callback is not None
@@ -553,9 +934,14 @@ class GoalRunner:
             if callable(stream):
                 chunks = []
                 try:
-                    iterator = (stream(str(phase), messages, sampling=sampling)
-                                if self.router is not None
-                                else stream(messages, sampling=sampling))
+                    if self.router is not None:
+                        iterator = stream(str(phase), messages, sampling=sampling)
+                    else:
+                        try:
+                            iterator = stream(messages, sampling=sampling,
+                                              phase=str(phase))
+                        except TypeError:
+                            iterator = stream(messages, sampling=sampling)
                 except TypeError:
                     try:
                         iterator = (stream(str(phase), messages)
@@ -772,7 +1158,8 @@ class GoalRunner:
             raise
 
     def _plan(self, goal: str, failure_context: str = "",
-              spec=None, research_context: str = "") -> Plan:
+              spec=None, research_context: str = "",
+              skill_full: dict | None = None) -> Plan:
         if self.kernel_mode:
             system = ("Propose a short plan as JSON with keys steps, "
                       "deliverables, criteria. Each step is an object "
@@ -782,7 +1169,7 @@ class GoalRunner:
                       "the workdir.")
         else:
             system = ("Propose a short plan as JSON with keys steps, "
-                      "deliverables, criteria. Each step is an object "
+                      "deliverables, criteria, skills. Each step is an object "
                       "with tool, args, deliverable. Tools: write, read, "
                       "list, shell, calculate. Keep every file inside "
                       "the workdir.")
@@ -790,6 +1177,32 @@ class GoalRunner:
                    "one step; never return deliverables with an empty or "
                    "missing steps array. For GUI requests, use the "
                    "computer_use tool when it is listed as available.")
+        system += (" Terminology: the user calls the workdir the 'workspace "
+                   "folder'. They are the same folder — this run's "
+                   "timestamped folder. When the user says 'workspace "
+                   "folder', resolve it to the workdir, and write criteria "
+                   "in checkable forms such as 'NAME exists in the "
+                   "workspace folder'.")
+        system += (" Criteria must be checkable, one assertion each, no "
+                   "parenthetical hedges. Forms that verify: 'NAME exists', "
+                   "'NAME exists in the workspace folder', 'NAME is "
+                   "non-empty', 'NAME contains TEXT', 'ledger NAME total is "
+                   "CENTS'. Anything else fails verification even when the "
+                   "files exist.")
+        system += (" Attempt outputs are numbered from the first attempt: "
+                   "if a deliverable may be produced more than once, name "
+                   "attempt outputs NAME_1, NAME_2, ... starting at 1, never "
+                   "reusing the exact requested name mid-run. Add a final "
+                   "step that renames the best attempt output to the exact "
+                   "requested name inside the workdir (shell mv), so "
+                   "verification and delivery see the exact name.")
+        system += (" Encryption: when a goal asks to encrypt a file, "
+                   "verify the content BEFORE encryption (criteria "
+                   "checked on the plaintext), then encrypt, then verify "
+                   "the container by properties and by a code round-trip "
+                   "(decrypt inside the sandbox and compare hashes), "
+                   "never send plaintext to the model verifier. Default "
+                   "cipher AES-256-GCM unless the user specifies another.")
         if self.plugins is not None and not self.kernel_mode:
             plugin_tools = self.plugins.tool_names()
             if plugin_tools:
@@ -798,11 +1211,39 @@ class GoalRunner:
             if skill_texts:
                 system += " Skills, follow them when relevant: " + " ".join(
                     f"{name}: {text[:200]}" for name, text in skill_texts.items())
+                system += (" Grounding rule: skills are guidance text, "
+                           "not callable tools — never put a skill name "
+                           "in a step's tool field, and never invent a "
+                           "skill name outside this list.")
+                if skill_full is None:
+                    system += (" If a skill above holds the procedure "
+                               "this goal needs, list its name in the "
+                               "plan JSON 'skills' array; the full text "
+                               "will be loaded and planning will repeat "
+                               "with it.")
+                else:
+                    for full_name, full_text in skill_full.items():
+                        body = str(full_text)[:_SKILL_FULL_CHARS]
+                        system += (f" Full skill text for {full_name}, "
+                                   f"loaded on your request, follow it: {body}")
+                        if len(str(full_text)) > _SKILL_FULL_CHARS:
+                            system += " [cut here at the full-text budget]"
         if self.extra_tools and not self.kernel_mode:
             # Kernel mode restricts _call_tool to seed tools, so
             # extra tools are advertised only outside kernel mode.
             system += (" Extra tools available to plan steps: "
                        + ", ".join(sorted(self.extra_tools)) + ".")
+            if "schedule_job" in self.extra_tools:
+                system += (" schedule_job takes name, kind, schedule, goal, "
+                           "and optional until (ISO datetime, the job "
+                           "never fires after it), tz (IANA timezone "
+                           "name for interpreting the schedule), and "
+                           "time_limit (per-run seconds, 0 = unlimited; "
+                           "a run cut by it ends partial with files "
+                           "kept). Schedules that fire: at:<ISO>, "
+                           "daily HH:MM, weekly DAY HH:MM, monthly ..., "
+                           "or a 5-field cron — never 'every N …' or a "
+                           "bare ISO datetime, which never fire.")
             if "computer_use" in self.extra_tools:
                 system += (" For GUI tasks such as opening an application or "
                            "typing into it, use computer_use with validated "
@@ -850,18 +1291,33 @@ class GoalRunner:
                     "AIDON_EPISODE_RECALL_LIMIT", "1") or "1"))
                 knowledge_limit = max(0, int(os.environ.get(
                     "AIDON_KNOWLEDGE_RECALL_LIMIT", "3") or "3"))
+                semantic_limit = max(0, int(os.environ.get(
+                    "AIDON_SEMANTIC_RECALL_LIMIT", "3") or "3"))
                 recall_tokens = max(0, int(os.environ.get(
                     "AIDON_RECALL_MAX_TOKENS", "2000") or "2000"))
                 episodes, knowledge = self.memory.recall_both(
                     goal, episode_limit, knowledge_limit)
+                # General facts (extracted + promoted semantic points)
+                # are a third recall leg, recalled the same full way
+                # as everything else: hybrid dense + sparse keyword
+                # search fused by RRF, retention-ranked by extraction
+                # importance, plus entity-graph node expansion.
+                semantic = self.memory.recall(
+                    "semantic", goal, limit=semantic_limit) if semantic_limit else []
                 sections = []
                 for label, hits in (("Earlier experiences", episodes),
-                                    ("Relevant knowledge", knowledge)):
+                                    ("Relevant knowledge", knowledge),
+                                    ("General facts", semantic)):
                     texts = []
                     for hit in hits:
-                        payload = getattr(getattr(hit, "point", None),
-                                          "payload", {}) or {}
-                        text = str(payload.get("text", "")).strip()
+                        point = getattr(hit, "point", None)
+                        payload = getattr(point, "payload", {}) or {}
+                        # Point text first: Qdrant payloads carry it,
+                        # but InMemory/SQLite points keep it on the
+                        # point itself, and plan recall read only the
+                        # payload, so those stores recalled empty.
+                        text = str(getattr(point, "text", "") or
+                                   payload.get("text", "")).strip()
                         if text:
                             texts.append(text)
                     if texts:
@@ -887,6 +1343,13 @@ class GoalRunner:
         if failure_context:
             user = user + (f"\n\nPrevious attempt failed, repair only the "
                            f"failed parts, do not rewrite passed files:\n{failure_context}")
+        # Research-mode deep findings ride along with any targeted
+        # research context, on every plan call in the run (fresh,
+        # spec, repair, replan) — set once by run(), read here.
+        deep_context = str(getattr(self, "_deep_research_context", "") or "")
+        if deep_context:
+            research_context = (deep_context + "\n" + research_context).strip() \
+                if research_context else deep_context
         if research_context:
             user = user + ("\n\nTargeted research findings for the plan's "
                            "open questions, use them to fill those gaps, "
@@ -915,9 +1378,13 @@ class GoalRunner:
                 deliverables = [str(s.get("deliverable", ""))
                                 for s in steps if isinstance(s, dict)
                                 and s.get("deliverable")]
-            return Plan(steps=steps, deliverables=deliverables,
+            raw_skills = data.get("skills", []) or []
+            if isinstance(raw_skills, str):
+                raw_skills = [raw_skills]
+            plan = Plan(steps=steps, deliverables=deliverables,
                         criteria=[str(c) for c in data.get("criteria", [])],
-                        needs_research=[str(x) for x in data.get("needs_research", []) or []])
+                        needs_research=[str(x) for x in data.get("needs_research", []) or []],
+                        skills=[str(s) for s in raw_skills])
         except (json.JSONDecodeError, AttributeError):
             return Plan(
                 steps=[Step(tool="write", args={"file": "deliverable.md",
@@ -925,6 +1392,32 @@ class GoalRunner:
                             deliverable="deliverable.md")],
                 deliverables=["deliverable.md"],
                 criteria=["deliverable.md exists"])
+        # Level 2, one expansion pass at most: the planner asked
+        # for full skill texts by name. Unknown names are
+        # ignored, never a failure; the expanded plan's own
+        # list is never expanded again (skill_full is set).
+        if skill_full is None and not self.kernel_mode \
+                and self.plugins is not None and plan.skills:
+            try:
+                texts = self.plugins.skill_texts()
+            except Exception:
+                texts = {}
+            resolved = {}
+            for wanted in plan.skills:
+                if wanted in texts and wanted not in resolved:
+                    resolved[wanted] = texts[wanted]
+                    continue
+                bare = [k for k in texts
+                        if k.rsplit("/", 1)[-1] == wanted]
+                if len(bare) == 1 and bare[0] not in resolved:
+                    resolved[bare[0]] = texts[bare[0]]
+            if resolved:
+                self._trace("plan", "skills-expanded", ", ".join(resolved))
+                return self._plan(goal, failure_context=failure_context,
+                                  spec=spec,
+                                  research_context=research_context,
+                                  skill_full=resolved)
+        return plan
 
     def _attachment_message(self, text: str) -> Message:
         """Preserve the user text and attach WebUI images when present."""
@@ -935,54 +1428,70 @@ class GoalRunner:
 
     def _research_and_replan(self, plan: Plan, goal: str,
                              spec=None) -> Plan:
-        """One plan-first research + replan pass, before execution.
+        """Up to AIDON_MAX_REPLANS research + replan passes (default 1).
 
-        When the plan names open questions (needs_research), each
-        one is researched through the loop's researcher callable,
-        then the planner is called exactly once more with those
-        notes as context, and the replanned plan replaces the
-        original. Exactly one pass, never a loop: a replanned
-        plan's own needs_research is not researched again.
+        Each pass researches the current plan's open questions
+        (needs_research), then calls the planner once more with
+        those notes as context, and the replanned plan replaces
+        the original. At the default of 1 this is exactly the
+        old single pass: a replanned plan's own needs_research
+        is not researched again. Above 1, each further pass
+        researches the replanned plan's new open questions.
         No researcher means no research: the original plan is
-        kept. A failed or invalid replan keeps the original
-        plan and records the failure in _replan_note (copied
-        onto the report by _finalize); it never fails the run.
+        kept. A failed or invalid replan keeps the plan it
+        started that pass from and records the failure in
+        _replan_note (copied onto the report by _finalize);
+        it never fails the run.
         """
-        items = [str(x) for x in (getattr(plan, "needs_research", None) or [])]
-        if not items or self.researcher is None:
-            return plan
-        notes = []
-        for item in items:
+        max_replans = _resolve_count("AIDON_MAX_REPLANS", MAX_REPLANS, 0)
+        current = plan
+        for _ in range(max_replans):
+            items = [str(x) for x in (getattr(current, "needs_research", None) or [])]
+            if not items or self.researcher is None:
+                return current
+            notes = []
+            for item in items:
+                try:
+                    result = self.researcher(item)
+                except Exception as exc:
+                    notes.append(f"{item}: research failed ({exc})")
+                    continue
+                if isinstance(result, (list, tuple)):
+                    notes.append(f"{item}: " + "; ".join(str(r) for r in result))
+                elif isinstance(result, str):
+                    notes.append(f"{item}: {result}")
+                else:
+                    notes.append(f"{item}: {result!r}")
             try:
-                result = self.researcher(item)
+                replanned = self._plan(
+                    goal, spec=spec,
+                    research_context="\n".join(notes))
             except Exception as exc:
-                notes.append(f"{item}: research failed ({exc})")
-                continue
-            if isinstance(result, (list, tuple)):
-                notes.append(f"{item}: " + "; ".join(str(r) for r in result))
-            elif isinstance(result, str):
-                notes.append(f"{item}: {result}")
-            else:
-                notes.append(f"{item}: {result!r}")
-        try:
-            replanned = self._plan(
-                goal, spec=spec,
-                research_context="\n".join(notes))
-        except Exception as exc:
-            self._replan_note = (f"replan after research failed ({exc}), "
-                                 "keeping the original plan")
-            return plan
-        if not isinstance(replanned, Plan) or (not replanned.steps
-                                               and not replanned.deliverables):
-            self._replan_note = ("replan after research returned an invalid "
-                                 "plan (no steps or deliverables), keeping "
-                                 "the original plan")
-            return plan
-        return replanned
+                self._replan_note = (f"replan after research failed ({exc}), "
+                                     "keeping the original plan")
+                return current
+            if not isinstance(replanned, Plan) or (not replanned.steps
+                                                   and not replanned.deliverables):
+                self._replan_note = ("replan after research returned an invalid "
+                                     "plan (no steps or deliverables), keeping "
+                                     "the original plan")
+                return current
+            current = replanned
+        return current
 
     def run(self, goal: str, spec=None, research_report=None,
             live_actions=None) -> RunReport:
         self._elapsed_timer = ElapsedTimer().start()
+        # Time box starts here, covering research, planning, and
+        # execution. A deadline consumed by planning or research
+        # trips at the first execution step instead of cutting
+        # those phases off mid-call.
+        self._timeboxed = False
+        try:
+            deadline = float(getattr(self, "deadline_seconds", None) or 0)
+        except (TypeError, ValueError):
+            deadline = 0
+        self._deadline_at = (time.monotonic() + deadline) if deadline > 0 else None
         # Creative requests get a wider response distribution. Keep this
         # narrow and phrase-based so ordinary tasks remain deterministic;
         # callers can still use AIDON_TEMP_* and AIDON_TOP_P_* overrides.
@@ -1014,14 +1523,73 @@ class GoalRunner:
         self._current_spec = spec
         self._research_report = research_report
         self._live_actions = live_actions or []
+        # Proceed of a Plan stop: the saved plan executes directly,
+        # no routing, no fresh planning, no mode re-detection.
+        if getattr(self, "resume_plan", None) is not None:
+            return self._finalize(self._execute_plan(goal, self.resume_plan))
         if self.semantic_router is not None:
             try:
-                self.last_route = self.semantic_router.classify(goal)
+                try:
+                    self.last_route = self.semantic_router.classify(
+                        goal, judge=self._route_judge())
+                except TypeError:
+                    # Duck-typed routers with the old one-argument
+                    # classify keep working; the TypeError fires at
+                    # call binding, before any routing work runs.
+                    self.last_route = self.semantic_router.classify(goal)
                 self._trace("interpret", "done", f"semantic route {self.last_route[0]} {self.last_route[1]:.2f}")
                 if callable(self.route_callback):
                     self.route_callback(self.last_route)
             except Exception:
                 self.last_route = None
+        # Mode detection rides the interpret pass: only when no mode
+        # was chosen (command, chooser, sticky flag) and no spec was
+        # frozen. A chosen mode always wins; detection never
+        # overrides it, and a frozen spec always executes.
+        if (getattr(self, "mode", None) is None and spec is None
+                and self.semantic_router is not None):
+            try:
+                detected = self.semantic_router.mode_for(goal)
+            except Exception:
+                detected = None
+            if detected in ("ask", "plan"):
+                self.mode = detected
+                self._trace("interpret", "done", f"mode detected: {detected}")
+        # Ask mode: interview, then stop. The interview asks through
+        # the chat callback (no clock, no card); the spec decision is
+        # the Proceed button, not an approval card, so no gate is
+        # passed and no spec approval is asked here.
+        if getattr(self, "mode", None) == "ask" and spec is None:
+            if getattr(self, "question_ask", None) is None:
+                return self._finalize(RunReport(
+                    "failed", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                    False, False,
+                    error="ask mode needs a question channel; use /ask in chat, WebUI, or the CLI",
+                    backend=self._backend_name()))
+            try:
+                from .interview import InterviewRunner
+                interviewer = InterviewRunner(
+                    self.client, self.home, memory=self.memory, gate=None,
+                    project_id=self.project_id)
+                result = interviewer.start_from_message(
+                    goal, ask=self.question_ask, approve=None)
+            except Exception as exc:
+                return self._finalize(RunReport(
+                    "failed", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                    False, False, error=f"interview failed: {exc}"[:500],
+                    backend=self._backend_name()))
+            from ..interface.mode_stops import save_mode_stop
+            spec_dict = (result.spec.to_dict()
+                         if hasattr(result.spec, "to_dict") else {"goal": goal})
+            stop_id = save_mode_stop(
+                self.home, mode="ask", goal=goal, spec=spec_dict,
+                conversation_key=getattr(self, "conversation_key", ""),
+                project_id=self.project_id)
+            return self._finalize(RunReport(
+                "stopped", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                False, False,
+                mode_stop={"stop_id": stop_id, "mode": "ask", "goal": goal},
+                backend=self._backend_name()))
         # Write-intent guard, from Aidon: the router is a hint, not a
         # safety boundary. A goal that asks for a write, a save, or a file
         # is never answered by a path with no write tools, even if the
@@ -1037,6 +1605,34 @@ class GoalRunner:
                         "agentic route selected because the request changes state")
             if callable(self.route_callback):
                 self.route_callback(self.last_route)
+        # Research mode: deep research first, before recall and
+        # planning, so every plan call in the run carries the
+        # findings. A chat/webchat route is forced to agentic:
+        # the user asked for research, not a chat answer. Sticky
+        # mode means exactly that for the whole conversation;
+        # toggle it off with /research when chat is wanted again.
+        # force_web still wins: it is the explicit override.
+        self._deep_research_context = ""
+        if self.research_mode and not self.force_web:
+            if self.last_route and self.last_route[0] in ("chat", "webchat"):
+                self.last_route = ("agentic", 1.0)
+                self._trace("interpret", "done",
+                            "agentic route selected because research mode is on")
+                if callable(self.route_callback):
+                    self.route_callback(self.last_route)
+            if self.deep_researcher is not None:
+                self._trace("research", "started", "deep research")
+                try:
+                    report = self.deep_researcher(
+                        goal,
+                        lambda messages: self._chat("research", messages))
+                    report = report or {}
+                    self._deep_research_context = str(report.get("summary", "") or "")
+                    sources = report.get("citations", []) or []
+                    self._trace("research", "done",
+                                f"deep research: {len(sources)} source(s)")
+                except Exception as exc:
+                    self._trace("research", "failed", str(exc)[:100])
         if self.force_web and self.researcher is not None and spec is None and not _write_intent:
             from ..capabilities.webchat import webchat_reply
             reply = webchat_reply(goal, self.researcher, self.client,
@@ -1079,17 +1675,48 @@ class GoalRunner:
                 plan.deliverables = list(spec_deliverables)
             plan = self._research_and_replan(plan, goal, spec=spec)
             return self._finalize(self._execute_plan(goal, plan))
+        failure_note = ""
         if self.memory is not None:
             try:
-                from ..memory.experience import recall_experiences
+                from ..memory.experience import recall_experiences, matching_failure
                 try:
                     recall_limit = max(0, int(os.environ.get(
                         "AIDON_EPISODE_RECALL_LIMIT", "1") or "1"))
                 except ValueError:
                     recall_limit = 1
+                # Composition floor, fixed at 5: the adaptation path
+                # always considers at least five past experiences, even
+                # when AIDON_EPISODE_RECALL_LIMIT is set lower. The
+                # floor cannot go lower; the setting only raises the
+                # count above it. The plan-prompt block honors the
+                # setting as written.
                 experiences = recall_experiences(
-                    self.memory, goal, limit=recall_limit)
-                if experiences and experiences[0].dag_nodes:
+                    self.memory, goal, limit=max(recall_limit, 5))
+                failure = matching_failure(self.memory, goal)
+                if failure is None:
+                    # DAG composition first: when the goal spans
+                    # distinct known workflows, sequencing them
+                    # beats adapting any single one and silently
+                    # dropping the rest.
+                    composed = self._composed_plan(experiences, goal)
+                    if composed is not None:
+                        plan, source_goals = composed
+                        if plan.deliverables:
+                            self._adapted = True
+                            self._adapted_from = " + ".join(source_goals)
+                            return self._finalize(self._execute_plan(goal, plan))
+                else:
+                    # Failed-example learning: a previous run
+                    # failed for a similar goal, so the adapt
+                    # fast-path is skipped and the planner gets
+                    # the failure as repair context instead of
+                    # replaying the failed approach.
+                    failure_note = (
+                        f"A previous run for a similar goal failed: {failure.lesson} "
+                        f"(failed tools: {', '.join(failure.failed_tools) or 'none'}; "
+                        f"failed deliverables: {', '.join(failure.failed_deliverables) or 'none'}). "
+                        f"Do not repeat that approach.")
+                if failure is None and experiences and experiences[0].dag_nodes:
                     # Adaptive DAG first: add, remove, modify, reorder,
                     # validated, with rollback to the saved graph on failure.
                     # A sequential adapt is the fallback, never a broken graph.
@@ -1105,7 +1732,7 @@ class GoalRunner:
                         plan = Plan(
                             steps=steps,
                             deliverables=[str(s["deliverable"]) for s in steps if s.get("deliverable")],
-                            criteria=[])
+                            criteria=[], parallel_ok=True)
                         # Adapted plans get the same plan-first
                         # research + replan pass as fresh and
                         # spec-bound plans. Neither adapt output
@@ -1146,7 +1773,7 @@ class GoalRunner:
             except Exception:
                 pass
         try:
-            plan = self._plan(goal)
+            plan = self._plan(goal, failure_context=failure_note)
         except Exception as exc:
             # Same rule as the spec branch above: an initial
             # plan failure (including a budget breach) fails
@@ -1158,6 +1785,168 @@ class GoalRunner:
         plan = self._research_and_replan(plan, goal)
         return self._finalize(self._execute_plan(goal, plan))
 
+    def _propose_join_step(self, goal, dags):
+        """One model call proposing a final combining step, or None.
+
+        The model sees the goal and the combined workflows'
+        deliverables and returns at most one step (tool, args,
+        deliverable) that combines or synthesizes them all, or
+        no step when no combining step is needed. The step's
+        dependencies are forced to every combined sink by
+        combine_dags, never taken from the model, so the
+        synthesis cannot run before its inputs exist. A
+        failed or unparseable reply keeps the join-less union.
+        """
+        if self.client is None:
+            return None
+        try:
+            import json as _json
+            from ..system.model_client import Message
+            workflows = [[n.deliverable for n in dag.topological_order()
+                          if n.deliverable] for dag in dags]
+            prompt = (
+                f"Goal: {goal}\nParallel workflows and their deliverables: "
+                f"{_json.dumps(workflows)}\nReturn JSON only, with key 'steps': "
+                "a list with at most one final step that combines or "
+                "synthesizes all the workflows' deliverables into one "
+                "result, or an empty list when no combining step is "
+                "needed. Each step is an object with tool, args, "
+                "deliverable. Do not invent tools.")
+            reply = self._chat("plan", [Message("system", "Return JSON only."),
+                                        Message("user", prompt)])
+            data = _json.loads(reply)
+            steps = data.get("steps", []) if isinstance(data, dict) else []
+            if not steps or not isinstance(steps[0], dict):
+                return None
+            first = steps[0]
+            if not first.get("deliverable"):
+                return None
+            from .dag import DAGNode
+            return DAGNode(
+                id="join", tool=str(first.get("tool", "write")),
+                args=dict(first.get("args", {}))
+                if isinstance(first.get("args", {}), dict) else {},
+                deliverable=str(first["deliverable"]))
+        except Exception:
+            return None
+
+    def _composed_plan(self, experiences, goal):
+        """Build a plan by combining distinct recalled workflows, or None.
+
+        Trigger: at least two recalled experiences with DAG
+        nodes, each matching the goal shape (>= the DAG
+        similarity threshold, AIDON_DAG_SIMILARITY, default
+        0.3) and pairwise distinct from each other
+        (shape overlap < 0.5, the store-merge threshold, so
+        near-duplicate workflows are not combined twice).
+        Up to five recalled workflows are considered.
+
+        The union is parallel, not sequential: combined
+        workflows keep only their own dependencies, so
+        independent checks run concurrently and only a step
+        that declares a dependency waits. A sequential
+        A-then-B composition stays available as compose_dags
+        for callers that order workflows explicitly.
+
+        Join: one model call at most proposes the final
+        combining step (a synthesis node depending on every
+        combined sink, such as a forecast from three
+        independent checks). The model may return no step
+        when no combining step is needed; a failed join
+        keeps the join-less union.
+        """
+        from ..memory.experience import dag_similarity_threshold, goal_shape_for
+        from .dag import combine_dags, dag_from_experience
+
+        def overlap(a: str, b: str) -> float:
+            set_a, set_b = set(a.split()), set(b.split())
+            return len(set_a & set_b) / len(set_a | set_b) if (set_a | set_b) else 0.0
+
+        goal_shape = goal_shape_for(goal)
+        candidates = []
+        for exp in experiences:
+            if not exp.dag_nodes:
+                continue
+            exp_shape = exp.goal_shape or goal_shape_for(exp.goal)
+            if overlap(exp_shape, goal_shape) < dag_similarity_threshold():
+                continue
+            if any(overlap(exp_shape, cand.goal_shape or goal_shape_for(cand.goal)) >= 0.5
+                   for cand in candidates):
+                continue
+            candidates.append(exp)
+            if len(candidates) >= 5:
+                break
+        if len(candidates) < 2:
+            return None
+        dags = [dag_from_experience(exp) for exp in candidates]
+        combined = combine_dags(dags, join=self._propose_join_step(goal, dags))
+        if combined is None:
+            combined = combine_dags(dags)
+        if combined is None:
+            return None
+        try:
+            combined = combined.relativize(self.sandbox.workdir)
+        except Exception:
+            pass
+        steps = combined.to_plan_steps()
+        plan = Plan(
+            steps=steps,
+            deliverables=[str(s["deliverable"]) for s in steps if s.get("deliverable")],
+            criteria=[], parallel_ok=True)
+        plan = self._research_and_replan(plan, goal)
+        if not plan.deliverables:
+            return None
+        return plan, [exp.goal for exp in candidates]
+
+    def _usage_totals(self) -> dict:
+        """Finished-run usage across every counting tier.
+
+        Sums the unwrapped counting clients, deduped, so fast-tier
+        calls count even when the run's client is a plain client
+        and only the router holds counting tiers. Basis is
+        "actual" when every call reported provider usage — then
+        in/out are the real counts and agree with the trace rows
+        by construction — and "estimated" otherwise, when in/out
+        are the chars//4 split. Think is always the real
+        reasoning count: the estimate basis (prompt + reply
+        text) never contains thinking text, so adding it cannot
+        double-count it. Total is in + out + think on the
+        chosen basis, so the footer breakdown always sums.
+        """
+        if self._counting_clients():
+            clients = self._counting_clients()
+            calls = sum(int(getattr(c, "calls", 0) or 0)
+                        for c in clients)
+            with_usage = sum(int(getattr(c, "calls_with_usage", 0) or 0)
+                             for c in clients)
+            basis = "actual" if calls and with_usage == calls else "estimated"
+            if basis == "actual":
+                in_tok = sum(int(getattr(c, "in_tokens_actual", 0) or 0)
+                             for c in clients)
+                out_tok = sum(int(getattr(c, "out_tokens_actual", 0) or 0)
+                              for c in clients)
+            else:
+                in_tok = sum(int(getattr(c, "in_tokens_estimated", 0) or 0)
+                             for c in clients)
+                out_tok = sum(int(getattr(c, "out_tokens_estimated", 0) or 0)
+                              for c in clients)
+            think = sum(int(getattr(c, "thinking_tokens_total", 0) or 0)
+                        for c in clients)
+            in_actual = sum(int(getattr(c, "in_tokens_actual", 0) or 0)
+                            for c in clients)
+            out_actual = sum(int(getattr(c, "out_tokens_actual", 0) or 0)
+                             for c in clients)
+            return {"calls": calls, "in": in_tok, "out": out_tok,
+                    "think": think, "total": in_tok + out_tok + think,
+                    "basis": basis, "in_actual": in_actual,
+                    "out_actual": out_actual}
+        client = self.client
+        if hasattr(client, "calls") and hasattr(client, "tokens_estimated"):
+            return {"calls": int(client.calls), "in": 0, "out": 0,
+                    "think": 0, "total": int(client.tokens_estimated),
+                    "basis": "estimated", "in_actual": 0, "out_actual": 0}
+        return {"calls": 0, "in": 0, "out": 0, "think": 0, "total": 0,
+                "basis": "estimated", "in_actual": 0, "out_actual": 0}
 
     def _finalize(self, report: RunReport) -> RunReport:
         """Fill model-usage and adaptation fields, from the counting client if present."""
@@ -1166,10 +1955,16 @@ class GoalRunner:
             timer.stop()
             report.elapsed_seconds = round(timer.elapsed_active(), 1)
             report.approval_wait_seconds = round(timer.approval_wait_seconds(), 1)
-        client = self.client
-        if hasattr(client, "calls") and hasattr(client, "tokens_estimated"):
-            report.model_calls = int(client.calls)
-            report.model_tokens_estimated = int(client.tokens_estimated)
+        totals = self._usage_totals()
+        report.model_calls = totals["calls"]
+        report.model_tokens_estimated = totals["total"]
+        report.model_tokens_in_estimated = totals["in"]
+        report.model_tokens_out_estimated = totals["out"]
+        report.model_thinking_tokens = totals["think"]
+        report.model_tokens_basis = totals.get("basis", "estimated")
+        report.model_tokens_in_actual = totals.get("in_actual", 0)
+        report.model_tokens_out_actual = totals.get("out_actual", 0)
+        report.blocked = list(getattr(self, "_blocked", []))
         report.network = self.network_available
         report.adapted = bool(self._adapted)
         report.adapted_from = str(self._adapted_from)
@@ -1181,10 +1976,23 @@ class GoalRunner:
         # the verbatim turn, while this point is the durable summary hook.
         if report.status == "chat" and self.memory is not None:
             try:
-                self.memory.record_episodic(
+                episodic = self.memory.record_episodic(
                     self.project_id, report.goal,
                     {"kind": "chat", "outcome": report.chat_reply or "",
                      "status": "done"})
+                self.memory.promote_to_ltm(episodic, kind="semantic")
+            except Exception:
+                pass
+        # Background fact extraction for this turn pair (user prompt +
+        # assistant response): facts + understandings into episodic /
+        # semantic only. Procedural learning below is separate and
+        # untouched. Best effort, never fails the finished run.
+        if report.status == "chat":
+            try:
+                from ..memory.extraction import spawn_extraction
+                spawn_extraction(self.memory, self.project_id,
+                                 f"User: {report.goal}\nAssistant: {report.chat_reply or ''}",
+                                 self.client)
             except Exception:
                 pass
         # Proven-run DAG learn, successful runs only, best
@@ -1200,6 +2008,40 @@ class GoalRunner:
                         report.goal, nodes)
                     if dag_id:
                         report.learned_dag = f"{action}:{dag_id}"
+            except Exception:
+                pass
+            # Background fact extraction for the whole agentic run
+            # (not per step): same mechanism as chat turns, once at
+            # the end. Procedural learning above is separate.
+            try:
+                from ..memory.extraction import spawn_extraction
+                deliverables = ", ".join(report.plan.deliverables or [])
+                files = ", ".join(report.files or [])
+                spawn_extraction(self.memory, self.project_id,
+                                 f"Goal: {report.goal}\nDeliverables: {deliverables}\nFiles: {files}",
+                                 self.client)
+            except Exception:
+                pass
+        # Failed-example learning: a failed run is evidence
+        # too. Record what failed (goal, error, tools, the
+        # deliverables never produced) so a similar goal plans
+        # fresh instead of replaying the failed approach.
+        # Rejected and cancelled runs are not recorded: a
+        # human rejection or an interruption is not evidence
+        # that the approach was wrong. Best effort, as above.
+        if report.status == "failed" and self.memory is not None:
+            try:
+                from ..memory.experience import record_failure
+                produced = set(report.files or [])
+                failed_deliverables = [d for d in report.plan.deliverables
+                                       if d not in produced]
+                failed_tools = []
+                for step in report.plan.normalized_steps():
+                    if step.tool not in failed_tools:
+                        failed_tools.append(step.tool)
+                record_failure(self.memory, report.goal,
+                               (report.error or "")[:500],
+                               failed_tools, failed_deliverables)
             except Exception:
                 pass
         try:
@@ -1261,6 +2103,264 @@ class GoalRunner:
             self._checkpoint_registry = None
         return report
 
+    def _run_plan_step(self, step, goal, current_plan, passed, verified,
+                       attempt, lock=None, save_checkpoint=True):
+        """Execute one plan step in the sandbox run.
+
+        Returns None on success, "cancelled" when cancellation
+        was requested, or a failure message. Shared by the
+        sequential loop and the parallel level driver, so both
+        paths run the same step semantics: budget, llm-tier
+        routing, deliverable binding, step lines, traces, and
+        the passed set. In the parallel path, shared mutations
+        go under the caller's lock, and per-step checkpoints
+        are skipped — the level driver checkpoints once per
+        level instead.
+        """
+        from contextlib import nullcontext
+        guard = lock if lock is not None else nullcontext()
+        if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
+            return "cancelled"
+        try:
+            if self.budget is not None:
+                self.budget.add_step()
+            if not hasattr(self, "_step_lines"):
+                self._step_lines = []
+            from .step_lines import record_attempt
+            with guard:
+                record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "started")
+            self._trace("sandbox", "started", step.tool)
+            if step.tool == "write" and not step.args:
+                step.args = {"file": step.deliverable,
+                             "text": f"Goal: {goal}\n"}
+            if step.tool == "llm":
+                # DAG tier routing: an llm node runs on the
+                # tier it declares — fast via the respond
+                # phase, strong via the plan phase — and its
+                # reply becomes the deliverable file.
+                _prompt = str(step.args.get("prompt", "") or step.args.get("text", ""))
+                _reply = self._chat("respond" if step.executor == "fast" else "plan",
+                                    [Message("user", _prompt)])
+                if step.deliverable:
+                    self._call_tool("write", {"file": step.deliverable, "text": _reply})
+            else:
+                tool_result = self._call_tool(step.tool, step.args)
+                # File-producing extra tools return their actual
+                # path. Bind that path to the step when the model
+                # supplied a prose deliverable such as
+                # "Aidon introduction PDF" instead of a filename.
+                if step.tool in {"generate_document", "write_file"}:
+                    artifact_path = getattr(tool_result, "path", "")
+                    raw_result = str(tool_result).strip()
+                    # Structured ToolResult is authoritative. Keep
+                    # the prose fallback for older plugins/tools.
+                    raw_path = artifact_path or (
+                        raw_result[6:].strip()
+                        if raw_result.lower().startswith("wrote ")
+                        else raw_result)
+                    candidate = Path(raw_path)
+                    if not candidate.is_absolute():
+                        candidate = self.sandbox.workdir / candidate
+                    if candidate.is_file():
+                        try:
+                            actual = candidate.resolve().relative_to(
+                                self.sandbox.workdir.resolve())
+                            with guard:
+                                old = step.deliverable
+                                step.deliverable = str(actual)
+                                current_plan.deliverables = [
+                                    str(actual) if item == old else item
+                                    for item in current_plan.deliverables]
+                                # Criteria are model-authored too. Replace
+                                # a prose filename with the path proven by
+                                # the tool, so verification cannot ask for
+                                # a non-existent label after a successful
+                                # generation.
+                                current_plan.criteria = [
+                                    str(item).replace(str(old), str(actual))
+                                    if old else item
+                                    for item in current_plan.criteria]
+                                if step.criteria and old:
+                                    step.criteria = str(step.criteria).replace(
+                                        str(old), str(actual))
+                        except ValueError:
+                            pass
+            with guard:
+                record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "done")
+            self._trace("sandbox", "done", step.tool)
+            if step.deliverable:
+                with guard:
+                    passed.add(step.deliverable)
+            if save_checkpoint:
+                self._save_checkpoint(
+                    "sandbox", goal, current_plan, passed,
+                    verified=verified, attempt=attempt)
+            return None
+        except Exception as exc:
+            msg = f"step {step.tool} failed: {exc}"
+            try:
+                from .step_lines import record_attempt
+                with guard:
+                    record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "failed", str(exc)[:100])
+            except Exception:
+                pass
+            self._trace("sandbox", "failed", str(exc)[:100])
+            return msg
+
+    def _run_plan_levels(self, goal, current_plan, passed, verified, attempt):
+        """Execute a DAG-derived plan level by level, concurrently.
+
+        Returns (failures, cancelled). Levels come from
+        compute_levels over the steps' declared dependencies:
+        a level runs only after every earlier level finished,
+        so a step never runs before its dependencies, and
+        steps in one level run together in a thread pool
+        (workers from AIDON_PARALLEL_WORKERS, default 3, the
+        same cap as swarm). A step whose dependency failed
+        is skipped with a failure message, and the skip
+        propagates to its dependents, so a failed check never
+        feeds a synthesis step. Streaming is suppressed for
+        the run of a level: parallel llm steps must not
+        interleave deltas into one chat stream.
+        """
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        from .dag import compute_levels
+        from .dag_executor import resolve_parallel_workers
+
+        steps = current_plan.normalized_steps()
+        by_id = {step.id: step for step in steps}
+        try:
+            levels = compute_levels([(step.id, list(step.depends_on or []))
+                                     for step in steps])
+        except ValueError as exc:
+            return [f"parallel schedule failed: {exc}"], False
+        workers = resolve_parallel_workers()
+        lock = threading.Lock()
+        failures: list[str] = []
+        done_ids: set[str] = set()
+        failed_ids: set[str] = set()
+        skipped_ids: set[str] = set()
+        cancelled = False
+        saved_callback = self.stream_callback
+        if saved_callback is not None:
+            self.stream_callback = None
+        try:
+            for level in levels:
+                if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
+                    cancelled = True
+                    break
+                if self._deadline_exceeded():
+                    self._timeboxed = True
+                    break
+                runnable = []
+                for step_id in level:
+                    step = by_id[step_id]
+                    if step.deliverable and step.deliverable in passed:
+                        done_ids.add(step_id)
+                        continue
+                    blocked = [d for d in step.depends_on
+                               if d in failed_ids or d in skipped_ids]
+                    if blocked:
+                        skipped_ids.add(step_id)
+                        failures.append(
+                            f"step {step.tool} skipped: dependency {blocked[0]} failed")
+                        continue
+                    runnable.append(step)
+                if not runnable:
+                    continue
+
+                def _one(step):
+                    return step.id, self._run_plan_step(
+                        step, goal, current_plan, passed, verified, attempt,
+                        lock=lock, save_checkpoint=False)
+
+                with ThreadPoolExecutor(max_workers=min(workers, len(runnable))) as pool:
+                    outcomes = list(pool.map(_one, runnable))
+                for step_id, error in outcomes:
+                    if error == "cancelled":
+                        cancelled = True
+                    elif error is not None:
+                        failed_ids.add(step_id)
+                        failures.append(error)
+                    else:
+                        done_ids.add(step_id)
+                try:
+                    self._save_checkpoint(
+                        "sandbox", goal, current_plan, passed,
+                        verified=verified, attempt=attempt)
+                except Exception as exc:
+                    failures.append(f"checkpoint failed: {exc}")
+                if cancelled:
+                    break
+        finally:
+            self.stream_callback = saved_callback
+        return failures, cancelled
+
+    def _deadline_exceeded(self) -> bool:
+        """True when the run's wall-clock deadline has passed.
+
+        Enforced between execution steps, never mid-step: a step
+        already running (including a shell step, capped by the
+        sandbox timeout) finishes first. Planning and research
+        phases are not interrupted; a deadline consumed there
+        trips at the first execution step instead.
+        """
+        deadline = getattr(self, "_deadline_at", None)
+        return deadline is not None and time.monotonic() >= deadline
+
+    def _repair_criteria(self, goal: str, criteria: list[str],
+                         failures: list[str]) -> list[str] | None:
+        """Rewrite unverifiable criteria into checkable forms.
+
+        Returns the full replacement criteria list, or None when
+        the repair cannot be trusted (model error, unparsable
+        reply, empty list). The caller re-verifies the SAME
+        workdir against the new list without re-executing
+        anything: files are untouched, only the assertions
+        change. One call per run, guarded by the caller.
+        """
+        failed = [f[len("unverified criterion: "):] for f in failures]
+        try:
+            files = sorted(p.name for p in self.sandbox.workdir.iterdir()
+                           if p.is_file())
+        except Exception:
+            files = []
+        prompt = (
+            f"Goal: {goal}\n"
+            f"Files in the workdir: {', '.join(files) or '(none)'}\n"
+            "These criteria failed verification because they are not "
+            "in a checkable form:\n"
+            + "\n".join(f"- {c}" for c in failed)
+            + "\nAll criteria (keep the ones that already verify, "
+            "rewrite the failed ones):\n"
+            + "\n".join(f"- {c}" for c in criteria)
+            + "\nRewrite the failed criteria into checkable forms only: "
+            "'NAME exists', 'NAME exists in the workspace folder', "
+            "'NAME is non-empty', 'NAME contains TEXT', 'ledger NAME "
+            "total is CENTS'. One assertion each, no parenthetical "
+            "hedges. Return JSON only: {\"criteria\": [...]}")
+        try:
+            reply = self._chat("plan", [Message("user", prompt)])
+        except Exception:
+            return None
+        try:
+            data = json.loads(reply)
+        except Exception:
+            match = re.search(r"\{.*\}", reply, re.DOTALL)
+            if match is None:
+                return None
+            try:
+                data = json.loads(match.group(0))
+            except Exception:
+                return None
+        items = data.get("criteria") if isinstance(data, dict) else None
+        if not isinstance(items, list) or not items:
+            return None
+        cleaned = [str(c).strip() for c in items if str(c).strip()]
+        return cleaned or None
+
     def _execute_plan(self, goal: str, plan: Plan) -> RunReport:
         if self.budget is not None:
             self.budget.start()
@@ -1280,13 +2380,26 @@ class GoalRunner:
                 _allowed.update(self.plugins.tool_names())
             except Exception:
                 pass
-        plan_failures = validate_plan(plan, allowed_tools=_allowed)
+        # Skill names for grounding: plugin skills ("plugin/skill")
+        # plus bare names, so a model writing either form in the
+        # tool slot gets the skill-not-tool rejection, not a
+        # generic unknown-tool failure.
+        _skill_names: set[str] = set()
+        if self.plugins is not None:
+            try:
+                _texts = self.plugins.skill_texts()
+                _skill_names = set(_texts) | \
+                    {name.rsplit("/", 1)[-1] for name in _texts}
+            except Exception:
+                pass
+        plan_failures = validate_plan(plan, allowed_tools=_allowed,
+                                      skill_names=_skill_names)
         if plan_failures:
             # A model can describe desired outputs while omitting executable
             # steps. Give it a bounded repair pass before rejecting the run.
             failure_text = "; ".join(plan_failures)
             repaired = None
-            for _ in range(2):
+            for _ in range(_resolve_count("AIDON_MAX_PLAN_REPAIRS", MAX_PLAN_REPAIRS, 0)):
                 try:
                     candidate = self._plan(
                         goal,
@@ -1296,7 +2409,8 @@ class GoalRunner:
                                          "JSON plan with executable steps; "
                                          "each deliverable must match a step."))
                     candidate_failures = validate_plan(candidate,
-                                                       allowed_tools=_allowed)
+                                                       allowed_tools=_allowed,
+                                                       skill_names=_skill_names)
                     if not candidate_failures:
                         repaired = candidate
                         break
@@ -1309,6 +2423,57 @@ class GoalRunner:
                 return RunReport("failed", goal, plan, False, False,
                                  error=failure_text[:500])
             plan = repaired
+        # Critic (reflection) pass, after deterministic validation
+        # passes: one model judgment on coverage and ordering,
+        # before any step runs. Issues feed the same bounded
+        # repair path as validation failures. When rounds run
+        # out, the latest plan proceeds with the issues traced
+        # — the critic advises, never blocks. In risk mode the
+        # pass is skipped for adapted or small plans with no
+        # live steps, and the skip is traced so the saving is
+        # visible: flip AIDON_CRITIC_MODE to "always" to restore
+        # a critic pass on every plan.
+        _critic_enabled = bool(_resolve_count("AIDON_CRITIC_ENABLED", 1, 0))
+        _run_critic = _critic_enabled and _critic_wanted(plan, self._adapted_from)
+        if _critic_enabled and not _run_critic:
+            self._trace("critic", "skipped",
+                        "risk-based: adapted or small plan, no live steps")
+        if _run_critic:
+            from .critic import review_plan
+            for _ in range(_resolve_count("AIDON_CRITIC_MAX_ROUNDS", 1, 0)):
+                self._trace("critic", "started", "reviewing plan")
+                try:
+                    issues = review_plan(
+                        plan, goal, _allowed, skill_names=_skill_names,
+                        chat=lambda messages: self._chat("critic", messages))
+                except Exception:
+                    issues = []
+                self._trace("critic", "done",
+                            f"{len(issues)} issue(s)" if issues
+                            else "plan clean")
+                if not issues:
+                    break
+                try:
+                    candidate = self._plan(
+                        goal,
+                        failure_context=("The plan critic found these "
+                                         "gaps; fix them and return a "
+                                         "complete JSON plan: " +
+                                         "; ".join(issues)))
+                    candidate_failures = validate_plan(
+                        candidate, allowed_tools=_allowed,
+                        skill_names=_skill_names)
+                except Exception as exc:
+                    self._trace("critic", "failed",
+                                f"critic repair failed: {exc}"[:100])
+                    break
+                if candidate_failures:
+                    # The critic's repair broke validation: keep the
+                    # valid plan the critic reviewed, stop advising.
+                    self._trace("critic", "failed",
+                                "critic repair failed validation")
+                    break
+                plan = candidate
         # A document goal must have a document-producing step. A model can
         # occasionally substitute ``list`` and then claim that the listing
         # proves a PDF exists; that can never satisfy the user's request.
@@ -1361,8 +2526,29 @@ class GoalRunner:
         if not plan.deliverables:
             return RunReport("failed", goal, plan, False, False,
                              error="plan has no deliverables")
+        # Plan mode stops here: the plan passed validation, the
+        # critic pass, the document fallback, and the cycle guard,
+        # so the plan shown is the plan that would execute. No step
+        # runs; the Proceed button resumes it via resume_plan.
+        if getattr(self, "mode", None) == "plan":
+            from .checkpoint import plan_to_dict
+            from ..interface.mode_stops import save_mode_stop
+            stop_id = save_mode_stop(
+                self.home, mode="plan", goal=goal, plan=plan_to_dict(plan),
+                conversation_key=getattr(self, "conversation_key", ""),
+                project_id=self.project_id)
+            return RunReport("stopped", goal, plan, False, False,
+                             mode_stop={"stop_id": stop_id, "mode": "plan",
+                                        "goal": goal,
+                                        "deliverables": list(plan.deliverables)},
+                             backend=self._backend_name())
         passed: set[str] = set()
         verified: list[str] = []
+        # One criterion repair per run: when verification fails only
+        # because criteria are unverifiable, rewriting the criteria
+        # and re-verifying the untouched files beats re-executing
+        # the plan and minting another attempt's files.
+        self._criterion_repaired = False
         resume = self._load_checkpoint(self.sandbox.workdir, goal=goal,
                                        plan=plan)
         if resume is not None and resume.phase in ("sandbox", "verified", "approved"):
@@ -1371,7 +2557,8 @@ class GoalRunner:
             self._trace("checkpoint", "resumed",
                         f"phase={resume.phase} passed={len(passed)}")
         current_plan = plan
-        for attempt in range(1, MAX_ATTEMPTS + 1):
+        max_attempts = _resolve_count("AIDON_MAX_ATTEMPTS", MAX_ATTEMPTS, 1)
+        for attempt in range(1, max_attempts + 1):
             failures: list[str] = []
             # Cancellation, checked before every attempt, and steer,
             # applied to the next repair attempt, not to passed work.
@@ -1381,91 +2568,43 @@ class GoalRunner:
                                  backend=self._backend_name())
             # Execute steps, skipping steps whose deliverable
             # already passed in an earlier attempt (repair rule).
-            for step in current_plan.normalized_steps():
-                if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
+            if current_plan.parallel_ok:
+                level_failures, level_cancelled = self._run_plan_levels(
+                    goal, current_plan, passed, verified, attempt)
+                if level_cancelled:
                     return RunReport("cancelled", goal, current_plan, False, False,
                                      files=sorted(passed), attempts=attempt,
                                      backend=self._backend_name())
-                if step.deliverable and step.deliverable in passed:
-                    continue
-                try:
-                    if self.budget is not None:
-                        self.budget.add_step()
-                    if not hasattr(self, "_step_lines"):
-                        self._step_lines = []
-                    from .step_lines import record_attempt
-                    record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "started")
-                    self._trace("sandbox", "started", step.tool)
-                    if step.tool == "write" and not step.args:
-                        step.args = {"file": step.deliverable,
-                                     "text": f"Goal: {goal}\n"}
-                    if step.tool == "llm":
-                        # DAG tier routing: an llm node runs on the
-                        # tier it declares — fast via the respond
-                        # phase, strong via the plan phase — and its
-                        # reply becomes the deliverable file.
-                        _prompt = str(step.args.get("prompt", "") or step.args.get("text", ""))
-                        _reply = self._chat("respond" if step.executor == "fast" else "plan",
-                                            [Message("user", _prompt)])
-                        if step.deliverable:
-                            self._call_tool("write", {"file": step.deliverable, "text": _reply})
-                    else:
-                        tool_result = self._call_tool(step.tool, step.args)
-                        # File-producing extra tools return their actual
-                        # path. Bind that path to the step when the model
-                        # supplied a prose deliverable such as
-                        # "Aidon introduction PDF" instead of a filename.
-                        if step.tool in {"generate_document", "write_file"}:
-                            artifact_path = getattr(tool_result, "path", "")
-                            raw_result = str(tool_result).strip()
-                            # Structured ToolResult is authoritative. Keep
-                            # the prose fallback for older plugins/tools.
-                            raw_path = artifact_path or (
-                                raw_result[6:].strip()
-                                if raw_result.lower().startswith("wrote ")
-                                else raw_result)
-                            candidate = Path(raw_path)
-                            if not candidate.is_absolute():
-                                candidate = self.sandbox.workdir / candidate
-                            if candidate.is_file():
-                                try:
-                                    actual = candidate.resolve().relative_to(
-                                        self.sandbox.workdir.resolve())
-                                    old = step.deliverable
-                                    step.deliverable = str(actual)
-                                    current_plan.deliverables = [
-                                        str(actual) if item == old else item
-                                        for item in current_plan.deliverables]
-                                    # Criteria are model-authored too. Replace
-                                    # a prose filename with the path proven by
-                                    # the tool, so verification cannot ask for
-                                    # a non-existent label after a successful
-                                    # generation.
-                                    current_plan.criteria = [
-                                        str(item).replace(str(old), str(actual))
-                                        if old else item
-                                        for item in current_plan.criteria]
-                                    if step.criteria and old:
-                                        step.criteria = str(step.criteria).replace(
-                                            str(old), str(actual))
-                                except ValueError:
-                                    pass
-                    from .step_lines import record_attempt
-                    record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "done")
-                    self._trace("sandbox", "done", step.tool)
-                    if step.deliverable:
-                        passed.add(step.deliverable)
-                    self._save_checkpoint(
-                        "sandbox", goal, current_plan, passed,
-                        verified=verified, attempt=attempt)
-                except Exception as exc:
-                    failures.append(f"step {step.tool} failed: {exc}")
-                    try:
-                        from .step_lines import record_attempt
-                        record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "failed", str(exc)[:100])
-                    except Exception:
-                        pass
-                    self._trace("sandbox", "failed", str(exc)[:100])
+                failures.extend(level_failures)
+            else:
+                for step in current_plan.normalized_steps():
+                    if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
+                        return RunReport("cancelled", goal, current_plan, False, False,
+                                         files=sorted(passed), attempts=attempt,
+                                         backend=self._backend_name())
+                    if step.deliverable and step.deliverable in passed:
+                        continue
+                    if self._deadline_exceeded():
+                        self._timeboxed = True
+                        break
+                    error = self._run_plan_step(
+                        step, goal, current_plan, passed, verified, attempt)
+                    if error is not None:
+                        failures.append(error)
+            # Time box: stop here, before verification. Verifying
+            # a partial plan would fail on the missing
+            # deliverables and misreport a clean cut as a failure.
+            # Partial is its own outcome: files kept, no failed
+            # example recorded (a time cut is not evidence the
+            # approach was wrong), no DAG learned from it.
+            if getattr(self, "_timeboxed", False):
+                self._trace("live", "done",
+                            "time limit reached; partial results kept")
+                return RunReport("partial", goal, current_plan, False, False,
+                                 files=sorted(passed), attempts=attempt,
+                                 error=(f"time limit reached; "
+                                        f"{len(passed)} deliverable(s) kept"),
+                                 backend=self._backend_name())
             # Verify: deliverables + plan criteria + step criteria.
             criteria = list(current_plan.criteria)
             for step in current_plan.normalized_steps():
@@ -1477,10 +2616,16 @@ class GoalRunner:
             self._trace("verify", "done" if ok else "failed", f"verified={len(verified)}")
             failures.extend(verify_failures)
             # Model verifier, second opinion only, after code
-            # verification passes. A "no" triggers repair,
-            # an "unknown" reply does not override code.
+            # verification passes. A "no" triggers incremental repair,
+            # an "unknown" reply does not override code. The mode
+            # is tunable (AIDON_MODEL_VERIFIER off/selective/
+            # always, default off); a skipped verifier is traced
+            # so the saving is visible.
             model_failed = False
-            if ok and self.model_verifier is not None:
+            verifier_mode = _resolve_model_verifier_mode()
+            verifier_wanted = _model_verifier_wanted(
+                verifier_mode, current_plan.deliverables)
+            if ok and self.model_verifier is not None and verifier_wanted:
                 try:
                     mv = self.model_verifier.verify(goal, current_plan.deliverables, self.sandbox.workdir, criteria)
                     self._trace("verify", mv["verdict"], f"model verifier {mv['reason'][:100]}")
@@ -1489,6 +2634,9 @@ class GoalRunner:
                         failures.append(f"model verifier: {mv['reason']}")
                 except Exception as exc:
                     self._trace("verify", "failed", str(exc)[:100])
+            elif ok and self.model_verifier is not None:
+                self._trace("verify", "skipped",
+                            f"model verifier {verifier_mode}")
             # Passed means existence AND no failure mentions
             # it. A ledger file that exists but totals wrong
             # is not passed, so repair can rewrite it, while
@@ -1496,21 +2644,55 @@ class GoalRunner:
             # A step that wrote its file is provisionally passed
             # above; a verification failure on that file must
             # take it back out, or the repair attempt would skip
-            # the very step it has to fix.
+            # the very step it has to fix. A mention is an exact
+            # filename match, not a substring, so a data.txt
+            # failure never takes a.txt out.
             for name in list(passed):
-                if any(name in msg for msg in failures):
+                if any(_mentions_file(msg, name) for msg in failures):
                     passed.discard(name)
             for name in verified:
-                if not any(name in msg for msg in failures):
+                if not any(_mentions_file(msg, name) for msg in failures):
                     passed.add(name)
-            if model_failed:
-                passed.clear()
+            if (not ok and not model_failed
+                    and not self._criterion_repaired and failures
+                    and all(f.startswith("unverified criterion: ")
+                            for f in failures)):
+                # Unverifiable-only failure: no step failed, no file
+                # is missing, the assertions themselves are the
+                # problem. Rewrite them and re-verify the same
+                # files; re-execution would only mint duplicates.
+                self._criterion_repaired = True
+                new_criteria = self._repair_criteria(
+                    goal, criteria, failures)
+                if new_criteria is not None:
+                    self._trace("verify", "criterion-repair",
+                                f"repaired {len(new_criteria)} criteria")
+                    ok2, failures2, verified2 = verify_plan(
+                        self.sandbox.workdir, current_plan.deliverables,
+                        new_criteria)
+                    if ok2:
+                        current_plan.criteria = new_criteria
+                        # The repaired set is the whole verification
+                        # set now; stale step criteria must not be
+                        # re-added on a later verification pass.
+                        for step in current_plan.normalized_steps():
+                            step.criteria = ""
+                        ok, verify_failures, verified = True, [], verified2
+                        failures = []
+                        # The passed computation above already ran
+                        # against the failed verification; credit
+                        # the repaired verification here.
+                        for name in verified2:
+                            passed.add(name)
+                    else:
+                        self._trace("verify", "criterion-repair-failed",
+                                    "; ".join(failures2)[:200])
             if ok and not model_failed:
                 self._save_checkpoint(
                     "verified", goal, current_plan, passed,
                     verified=verified, attempt=attempt)
                 break
-            if attempt == MAX_ATTEMPTS:
+            if attempt == max_attempts:
                 return RunReport("failed", goal, current_plan, False, False,
                                  files=sorted(passed),
                                  error="; ".join(failures)[:500],
@@ -1547,7 +2729,7 @@ class GoalRunner:
                                  error="repair plan has no deliverables",
                                  attempts=attempt)
         else:
-            attempt = MAX_ATTEMPTS
+            attempt = max_attempts
         files = sorted(passed) if passed else list(current_plan.deliverables)
         self._mission_prepare_review(goal, current_plan, files, sorted(verified))
         self._trace("approval", "started", "live approval requested")
@@ -1555,7 +2737,8 @@ class GoalRunner:
             "live", "Approve live execution?",
             self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"),
             force_ask=True,
-            reversible=plan_is_reversible(current_plan),
+            reversible=plan_is_reversible(
+                current_plan, self.allowed_side_effect_tools),
         )
         # edited means "change the proposal" — not approve the original.
         # Live card has no apply-edit path; require a clean approved.
@@ -1602,8 +2785,18 @@ class GoalRunner:
                 nodes = []
                 tools_used = []
                 for step in current_plan.normalized_steps():
-                    nodes.append({"tool": step.tool, "args": step.args,
-                                  "deliverable": step.deliverable})
+                    # Store the full node, not just tool/args/
+                    # deliverable: a recalled workflow must
+                    # restore its real dependencies and tier,
+                    # not a sequential chain invented at recall
+                    # time. criteria rides as expected, the
+                    # step's own success condition.
+                    nodes.append({"id": step.id,
+                                  "tool": step.tool, "args": step.args,
+                                  "deliverable": step.deliverable,
+                                  "depends_on": list(step.depends_on or []),
+                                  "executor": step.executor,
+                                  "expected": step.criteria})
                     if step.tool not in tools_used:
                         tools_used.append(step.tool)
                 # Incremental improving: the lesson for the
@@ -1636,11 +2829,7 @@ class GoalRunner:
             except Exception:
                 pass
             try:
-                if self.promotion_ask is not None:
-                    self.memory.promote_with_ask(
-                        episodic, self.promotion_ask, kind="semantic")
-                elif self.memory.auto_promote_enabled():
-                    self.memory.promote_to_ltm(episodic, kind="semantic")
+                self.memory.promote_to_ltm(episodic, kind="semantic")
             except Exception:
                 pass
         self._trace("learn", "done", "experience recorded")

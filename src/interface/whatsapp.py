@@ -10,7 +10,7 @@ surface, so a WhatsApp change does not touch Slack code.
 
 from __future__ import annotations
 
-from .messaging import MessagingConfig, send_whatsapp, verify_whatsapp_signature
+from .messaging import MessagingConfig, send_whatsapp
 from .triggers import TriggerEvent
 
 

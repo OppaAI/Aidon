@@ -17,7 +17,7 @@ def _steps(plan: dict) -> list[dict]:
     return steps if isinstance(steps, list) else []
 
 
-def validate_plan(plan: dict, available_tools) -> list[str]:
+def validate_plan(plan: dict, available_tools, skill_names=None) -> list[str]:
     """Return failure strings, empty when the plan is valid."""
     failures = []
     if not isinstance(plan, dict):
@@ -26,6 +26,7 @@ def validate_plan(plan: dict, available_tools) -> list[str]:
     if not steps:
         return ["plan has no steps"]
     tools = set(available_tools or [])
+    skills = set(skill_names or [])
     ids = []
     deliverables = []
     for index, step in enumerate(steps):
@@ -42,7 +43,12 @@ def validate_plan(plan: dict, available_tools) -> list[str]:
         if not tool:
             failures.append(f"{where} ({step_id or '?'}) has no tool")
         elif tool not in tools:
-            failures.append(f"{where} ({step_id}) uses unknown tool {tool!r}")
+            if tool in skills:
+                failures.append(f"{where} ({step_id}) uses skill {tool!r} "
+                                "as a tool; skills are guidance text, "
+                                "not callable steps")
+            else:
+                failures.append(f"{where} ({step_id}) uses unknown tool {tool!r}")
         args = step.get("args")
         if args is None:
             failures.append(f"{where} ({step_id}) has no args")

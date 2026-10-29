@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memory Graph — Aidon</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  /* Standalone page: the shared stylesheet locks body overflow for
+     the chat app shell — unlock it here so the page scrolls. */
+  html, body { height: auto; }
+  body { overflow: auto; }
+  .cap-wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 60px; }
+  .cap-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .cap-head h1 { font-size: 22px; margin: 0; }
+  .cap-head a { color: var(--muted); text-decoration: none; font-size: 13px; }
+  .cap-head a:hover { color: var(--accent); }
+  .cap-sub { color: var(--muted); font-size: 13px; margin: 6px 0 18px; }
+  .graph-controls { display: flex; gap: 8px; align-items: center;
+    margin-bottom: 12px; flex-wrap: wrap; }
+  .graph-controls select { background: var(--panel); border: 1px solid var(--line);
+    color: var(--text); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+  .graph-controls button { background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--text); border-radius: 10px; padding: 8px 14px; cursor: pointer;
+    font-size: 13px; }
+  .graph-controls button:hover { border-color: var(--accent); }
+  #graph-count { color: var(--muted); font-size: 13px; }
+  #graph-canvas { display: block; width: 100%; height: 620px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; cursor: grab; }
+  #graph-canvas:active { cursor: grabbing; }
+  #graph-detail { margin-top: 12px; font-size: 13px; color: var(--text);
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 12px; min-height: 20px;
+    white-space: pre-wrap; word-break: break-word; }
+  #graph-detail:empty { display: none; }
+  .graph-error { display: none; background: var(--panel);
+    border: 1px solid var(--red, #e5534b); color: var(--text);
+    border-radius: 10px; padding: 10px 12px; font-size: 13px;
+    margin-bottom: 14px; }
+  .graph-legend { display: flex; gap: 14px; flex-wrap: wrap;
+    color: var(--muted); font-size: 12px; margin-top: 10px; }
+  .graph-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .graph-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+</style>
+</head>
+<body>
+<div class="cap-wrap">
+  <div class="cap-head">
+    <h1>🕸️ Memory Graph</h1>
+    <a href="/">← back to Aidon</a>
+    <a href="/memory">Memory Studio</a>
+    <a href="/knowledge">Knowledge Studio</a>
+  </div>
+  <p class="cap-sub">Memory and knowledge points, joined by the entities they
+    share — the same graph recall uses. Drag a node to move it, click
+    one to highlight its neighbours.</p>
+  <div class="graph-error" id="graph-error"></div>
+  <div class="graph-controls">
+    <select id="graph-collection" aria-label="Collection">
+      <option value="">All collections</option>
+      <option value="working">working</option>
+      <option value="episodic">episodic</option>
+      <option value="semantic">semantic</option>
+      <option value="experience">experience</option>
+      <option value="knowledge">knowledge</option>
+    </select>
+    <button id="graph-refresh">Refresh</button>
+    <span id="graph-count"></span>
+  </div>
+  <canvas id="graph-canvas"></canvas>
+  <div id="graph-detail"></div>
+  <div class="graph-legend">
+    <span><span class="graph-dot" style="background:#e3b341"></span>entity</span>
+    <span><span class="graph-dot" style="background:#8b949e"></span>working</span>
+    <span><span class="graph-dot" style="background:#6cb6ff"></span>episodic</span>
+    <span><span class="graph-dot" style="background:#4caf7d"></span>semantic</span>
+    <span><span class="graph-dot" style="background:#d29922"></span>experience</span>
+    <span><span class="graph-dot" style="background:#b392f0"></span>knowledge</span>
+  </div>
+</div>
+<script src="/static/graph.js"></script>
+</body>
+</html>

@@ -9,7 +9,6 @@ No PDF generation here: Markdown is the deliverable, PDF is a separate climb, as
 
 from __future__ import annotations
 
-import json
 import re
 import textwrap
 from pathlib import Path

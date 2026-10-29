@@ -10,7 +10,7 @@ from src.agentic.router import RoutedClient
 from src.interface.run_control import RunControl
 from src.interface.v1 import AuthStore, GoalStore, handle
 from src.interface.webui import FACTORY_HTML, WebUIGate
-from src.interface.scheduler_loop import AutonomyTracker, NudgeTracker
+from src.interface.scheduler_loop import NudgeTracker
 
 
 def test_auth_revoke():
@@ -47,15 +47,6 @@ def test_routed_client_fast_and_strong_phases():
     assert client.chat_phase("plan", [Message("user", "hi")]) == "strong"
     assert client.chat_phase("verify", [Message("user", "hi")]) == "strong"
     assert client.stats() == {"fast_calls": 1, "strong_calls": 2}
-
-
-def test_autonomy_never_auto_approves_live():
-    tracker = AutonomyTracker(enabled=True, threshold=1)
-    tracker.record_approval("low", 1000.0)
-    assert tracker.should_auto_approve("low", 1001.0) is True
-    assert tracker.should_auto_approve("high", 1001.0) is False
-    tracker.record_approval("high", 1000.0)
-    assert tracker.should_auto_approve("high", 1001.0) is False
 
 
 def test_nudge_once_per_card():

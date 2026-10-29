@@ -49,6 +49,18 @@ def test_verifier_prompt_carries_criteria_sizes_and_truncation(tmp_path):
         "You verify deliverables against explicit criteria")
 
 
+def test_verifier_reads_head_only(tmp_path):
+    # P2 pin: a large deliverable is shown from its first 2000
+    # chars only, so a tail marker must never reach the prompt.
+    body = "head-" + "x" * 5000 + "-TAIL-MARKER-" + "y" * 100000
+    (tmp_path / "big.md").write_text(body)
+    rec = _Rec("YES")
+    ModelVerifier(rec).verify("Write a report", ["big.md"], tmp_path)
+    prompt = _prompt_of(rec)
+    assert "content truncated to 2000 chars" in prompt
+    assert "-TAIL-MARKER-" not in prompt
+
+
 def test_verifier_prompt_without_criteria_still_works(tmp_path):
     (tmp_path / "a.md").write_text("body")
     rec = _Rec("NO: a.md is incomplete")

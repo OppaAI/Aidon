@@ -17,6 +17,16 @@ Aidon can write files, execute generated commands in a sandbox, and connect to e
 - A Docker container mounts only the workdir, never
   docker.sock, never host credentials, never a host home.
 
+- Encryption: content is verified before encryption,
+  on the plaintext; the container is then verified by
+  properties plus a sandbox decrypt-and-hash round-trip;
+  plaintext is never sent to the model verifier; the
+  default cipher is AES-256-GCM unless you specify
+  another; in Ask mode Aidon asks which algorithm
+  when none is specified.
+- Opaque files are judged on properties only, never
+  failed for unreadability.
+
 
 Other boundaries, from the main guides:
 

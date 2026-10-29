@@ -33,12 +33,6 @@ from ..system.model_client import Message, ModelClient
 DEFAULT_FAST_PHASES = {"interpret", "learn", "respond", "webchat"}
 
 
-def parse_fast_phases(value: str) -> set[str]:
-    if not value:
-        return set(DEFAULT_FAST_PHASES)
-    return {part.strip().lower() for part in value.split(",") if part.strip()}
-
-
 class RoutedClient(ModelClient):
     def __init__(self, fast_client: ModelClient, strong_client: ModelClient,
                  fast_phases: set[str] | None = None):
@@ -52,17 +46,23 @@ class RoutedClient(ModelClient):
         return self.chat_phase("", messages, sampling=sampling)
 
     def chat_phase(self, phase: str, messages: list[Message], sampling=None) -> str:
+        # Forward the phase to a counting tier so its usage lands
+        # in that phase's trace bucket. Without this, every tier
+        # call records under the CountingClient default ("chat")
+        # and per-phase trace events drain 0. Plain tiers keep
+        # the old call shape.
         if phase.lower() in self.fast_phases:
             self.fast_calls += 1
-            try:
-                return self.fast_client.chat(messages, sampling=sampling)
-            except TypeError:
-                return self.fast_client.chat(messages)
-        self.strong_calls += 1
+            tier = self.fast_client
+        else:
+            self.strong_calls += 1
+            tier = self.strong_client
+        if callable(getattr(tier, "take_phase_usage", None)):
+            return tier.chat(messages, phase=phase, sampling=sampling)
         try:
-            return self.strong_client.chat(messages, sampling=sampling)
+            return tier.chat(messages, sampling=sampling)
         except TypeError:
-            return self.strong_client.chat(messages)
+            return tier.chat(messages)
 
     def stats(self) -> dict:
         return {"fast_calls": self.fast_calls, "strong_calls": self.strong_calls}

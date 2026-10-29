@@ -112,7 +112,10 @@ def test_clear_staged():
 
 def test_help_lists_new_commands_and_old_behaviour():
     out, history, _ = _drive(["/help", "goal", "/history", "/quit"], lambda line: "reply")
-    assert any("/attach" in line and "/staged" in line and "/clear" in line for line in out)
+    assert any("/think" in line for line in out)
+    assert any("/attach" in line for line in out)
+    assert any("/staged" in line for line in out)
+    assert any("/clear" in line for line in out)
     assert "reply" in out
     assert "goal" in out  # /history echoes it
     assert history == ["goal"]

@@ -31,6 +31,7 @@ import re
 import sys
 import threading
 from datetime import datetime
+from pathlib import Path
 
 from ..interface.approval import ApprovalGate, Decision
 from .config import Config
@@ -55,7 +56,7 @@ def _startup_style(kind: str, text: str) -> None:
         print(text, file=sys.stderr)
 
 
-def _cli_gate(home, timeout_seconds: int = 180,
+def _cli_gate(home, timeout_seconds: int = 900,
               project_id: str = "default") -> ApprovalGate:
     from ..interface.autonomy import policy_for
 
@@ -78,6 +79,57 @@ def _cli_gate(home, timeout_seconds: int = 180,
         return PreapprovalGate(gate, PreapprovalStore(home), project_id)
     except Exception:
         return gate
+
+
+def _scheduled_gate(sandboxed: bool = False) -> ApprovalGate:
+    """Non-blocking gate for unattended scheduled runs.
+
+    A daemon tick loop must never block on stdin: _cli_gate's
+    input() either hangs the loop or dies on EOF in a headless
+    daemon. This gate decides immediately, with no policy
+    auto-approval and no prompt: email tools are approved (the
+    email tool itself enforces owner-only delivery for scheduled
+    runs, so the gate cannot leak mail to other recipients),
+    sandboxed shell commands that pass the practice safety scan
+    are approved, and everything else is rejected fail-closed
+    and fast. A scheduled goal that needs install, publish, or
+    live approval therefore fails with a clear rejection
+    instead of hanging the tick loop — it never worked
+    unattended before either, it just failed slowly.
+    """
+    def decide(kind: str, title: str, body: str) -> Decision:
+        if kind == "live" and title in ("Extra tool email_send",
+                                        "Extra tool email_make_draft"):
+            return Decision("approved")
+        if kind == "mandatory" and sandboxed:
+            from ..interface.practice import _mandatory_safe_for_practice
+            if _mandatory_safe_for_practice(body):
+                return Decision("approved",
+                                reason="scheduled shell command")
+        return Decision("rejected")
+
+    return ApprovalGate(decide, policy=None)
+
+
+def _make_web_researcher(config, conversation_context: str = ""):
+    """Snippet researcher from config, shared by interactive and
+    scheduled runs. Returns title/snippet strings (no URLs — the
+    deep researcher is the citation-carrying path)."""
+    def _researcher(goal_text):
+        try:
+            from ..agentic.research_allow import DomainGrants, load_allowlist
+            from ..capabilities.search import search as _s
+            search_text = goal_text
+            if conversation_context:
+                search_text = (f"Conversation topic:\n{conversation_context}\n\n"
+                               f"Current request:\n{goal_text}")
+            _r = _s(search_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url,
+                    allowlist=load_allowlist(config.home, config.research_allowlist),
+                    grants=DomainGrants(config.home))
+            return [f"{x.get('title', '')}: {x.get('snippet', '')}" for x in _r.get("results", [])]
+        except Exception:
+            return []
+    return _researcher
 
 
 def _network_available(execution_backend, sandbox) -> bool:
@@ -110,14 +162,65 @@ def _run_sandbox(config: Config, run_id: str) -> Sandbox:
         require_isolation=config.sandbox_require_isolation)
 
 
-def _promotion_ask(point) -> bool:
-    answer = input(
-        f"\nPromote this run's episodic memory to long-term memory? "
-        f"[y/N] ").strip().lower()
-    return answer in ("y", "yes")
 
 
-def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None) -> dict:
+def _env_int(name, default):
+    try:
+        return max(1, int(os.environ.get(name, default)))
+    except Exception:
+        return default
+
+
+def _deep_search_fns(config):
+    """Search + fetch callables for deep research, from config.
+
+    Shared by the deep_research plan tool (extractive, no model
+    client) and the loop-side deep researcher (judge + synthesis
+    via the run's client). Search returns result dicts with
+    title/url/snippet, so citations survive — the researcher
+    callable used by web_search returns strings only, no URLs.
+    """
+    from ..agentic.research_allow import DomainGrants, load_allowlist
+    from ..capabilities.documents import read_document as _read_doc
+    from ..capabilities.search import search as _search
+
+    def _search_fn(query_text):
+        result = _search(query_text, backend=config.search_backend,
+                         tavily_key=config.tavily_api_key,
+                         searxng_url=config.searxng_url,
+                         allowlist=load_allowlist(config.home, config.research_allowlist),
+                         grants=DomainGrants(config.home))
+        return result.get("results", []) if isinstance(result, dict) else result
+
+    def _fetch_fn(url):
+        try:
+            return _read_doc(str(url))
+        except Exception as exc:
+            return f"fetch failed: {type(exc).__name__}: {exc}"
+
+    return _search_fn, _fetch_fn
+
+
+def make_deep_researcher(config):
+    """Loop-side deep researcher: (query, chat) -> report dict.
+
+    chat is the run's model callable (loop._chat with phase
+    "research"), so the judge and synthesis run at the run's
+    thinking level — max in research mode. Rounds/sources come
+    from the deep-research env params.
+    """
+    from ..agentic.deep_research import deep_research as _deep
+    search_fn, fetch_fn = _deep_search_fns(config)
+
+    def deep_researcher(query, chat):
+        return _deep(str(query), search_fn, fetch_fn, chat=chat,
+                     max_rounds=_env_int("AIDON_DEEP_RESEARCH_ROUNDS", 2),
+                     max_sources=_env_int("AIDON_DEEP_RESEARCH_SOURCES", 5))
+
+    return deep_researcher
+
+
+def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     The loop approval-gates any extra tool whose name contains
@@ -313,9 +416,38 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             return make_draft(config.home, to, subject, body)
 
         def email_send(draft, owner_email=""):
+            # The tool used to pass sender=None, so it could only
+            # keep the draft and always reported "no sender". With
+            # Gmail keys present it now sends for real. Safety is
+            # layered, not repeated: interactive runs already pass
+            # the loop's send-gate (a human card) before dispatch,
+            # so their approve callback stays permissive; scheduled
+            # runs pass the ScheduledGate (email tools only) and
+            # then this callback refuses every non-owner recipient
+            # — send_draft skips the callback entirely for owner
+            # sends, so owner mail is the only mail a scheduled
+            # run can ever deliver.
+            sender = None
+            if (os.environ.get("GMAIL_CLIENT_ID", "")
+                    and os.environ.get("GMAIL_CLIENT_SECRET", "")
+                    and os.environ.get("GMAIL_REFRESH_TOKEN", "")):
+                from ..capabilities.gmail import gmail_sender as _gs
+                _real = _gs(os.environ["GMAIL_CLIENT_ID"],
+                            os.environ["GMAIL_CLIENT_SECRET"],
+                            os.environ["GMAIL_REFRESH_TOKEN"])
+
+                def sender(to, subject, body):
+                    result = _real(to, subject, body)
+                    if isinstance(result, dict) and result.get("id") \
+                            and "ok" not in result:
+                        result = dict(result)
+                        result["ok"] = True
+                    return result
+            approve = (lambda kind, body: False) if scheduled \
+                else (lambda kind, body: True)
             return send_draft(config.home, draft,
                               owner_email or getattr(config, "owner_email", ""),
-                              approve=lambda kind, body: True, sender=None)
+                              approve=approve, sender=sender)
 
         tools["email_make_draft"] = email_make_draft
         tools["email_send"] = email_send
@@ -439,6 +571,41 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         except Exception as exc:
             return False, f"approval failed: {exc}"
 
+    def _computer_secrets() -> dict:
+        """Secrets the owner authorized for computer use.
+
+        AIDON_COMPUTER_SECRETS lists env names (kept in .env, which
+        Config already loads into os.environ); only listed names
+        resolve. The model names a handle, never a value, and an
+        unlisted handle is refused inside run_computer_use.
+        """
+        names = os.environ.get("AIDON_COMPUTER_SECRETS", "")
+        secrets = {}
+        for name in names.split(","):
+            name = name.strip()
+            if name and name in os.environ:
+                secrets[name] = os.environ[name]
+        return secrets
+
+    def _guided_computer_task(driver, approve_fn):
+        """computer_use_task closure over one driver + approval path.
+
+        Only wired when a model chat is available: the guided
+        loop needs vision, and without it the tool would act
+        blind. Scheduled runs never pass model_chat, so they
+        never get this tool.
+        """
+        def computer_use_task(description, max_actions=10,
+                              screenshot_dir="computer-screenshots"):
+            from ..capabilities.computer_use import run_guided_task
+            target = _confined(screenshot_dir)
+            result = run_guided_task(
+                description, model_chat, approve=approve_fn,
+                driver=driver, screenshot_dir=target,
+                max_actions=max_actions, secrets=_computer_secrets())
+            return json.dumps(result, ensure_ascii=False)
+        return computer_use_task
+
     # The WebUI goal runner receives this dictionary as its extra toolset.
     # Keep desktop control here as well as in the CLI tool builder; otherwise
     # the status panel can say x11 while the planner cannot select
@@ -456,21 +623,25 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                 raise RuntimeError("no discoverable X11 driver")
             desktop_driver = X11Driver()
 
+            def _desktop_approve(kind, detail):
+                ok, _ = _approval(
+                    "live_execute", "Approve desktop action",
+                    f"Run X11 computer action {kind}: {detail}",
+                    force_ask=True,
+                )
+                return ok
+
             def computer_use(actions, screenshot_dir="computer-screenshots"):
-                def approve(kind, detail):
-                    ok, _ = _approval(
-                        "live_execute", "Approve desktop action",
-                        f"Run X11 computer action {kind}: {detail}",
-                        force_ask=True,
-                    )
-                    return ok
                 target = _confined(screenshot_dir)
                 result = run_computer_use(
-                    actions, approve=approve, driver=desktop_driver,
-                    screenshot_dir=target)
+                    actions, approve=_desktop_approve, driver=desktop_driver,
+                    screenshot_dir=target, secrets=_computer_secrets())
                 return json.dumps(result, ensure_ascii=False)
 
             tools["computer_use"] = computer_use
+            if model_chat is not None:
+                tools["computer_use_task"] = _guided_computer_task(
+                    desktop_driver, _desktop_approve)
         except Exception:
             # A missing xdotool or DISPLAY must not make other tools vanish.
             pass
@@ -590,23 +761,26 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
 
             _desktop_driver = X11Driver()
 
-            def computer_use(actions, screenshot_dir="computer-screenshots"):
-                def approve(kind, detail):
-                    ok, why = _approval(
-                        "live_execute", "Approve desktop action",
-                        f"Run X11 computer action {kind}: {detail}",
-                        force_ask=True,
-                    )
-                    return ok
+            def _desktop_approve2(kind, detail):
+                ok, why = _approval(
+                    "live_execute", "Approve desktop action",
+                    f"Run X11 computer action {kind}: {detail}",
+                    force_ask=True,
+                )
+                return ok
 
+            def computer_use(actions, screenshot_dir="computer-screenshots"):
                 target = _confined(screenshot_dir)
                 result = run_computer_use(
-                    actions, approve=approve, driver=_desktop_driver,
-                    screenshot_dir=target,
+                    actions, approve=_desktop_approve2, driver=_desktop_driver,
+                    screenshot_dir=target, secrets=_computer_secrets(),
                 )
                 return json.dumps(result, ensure_ascii=False)
 
             tools["computer_use"] = computer_use
+            if model_chat is not None:
+                tools["computer_use_task"] = _guided_computer_task(
+                    _desktop_driver, _desktop_approve2)
         except Exception:
             # A missing display or driver leaves the capability unavailable.
             pass
@@ -731,16 +905,25 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         from ..agentic.direction import blocked_note
         return f"[blocked] {blocked_note(reason)['reason']}"
 
-    def schedule_job(name, kind="", schedule="", goal=""):
+    def schedule_job(name, kind="", schedule="", goal="", until="", tz="", time_limit=0):
         from ..interface.triggers import Scheduler, SchedulerJob
         scheduler = Scheduler(config.home)
         try:
             scheduler.add_job(SchedulerJob(name=name, schedule=schedule,
                                            goal=goal, kind=kind or "goal",
-                                           project_id="default"))
+                                           project_id="default",
+                                           until=until, tz=tz,
+                                           time_limit=time_limit))
         except ValueError as exc:
             return f"schedule failed: {exc}"
-        return f"scheduled {name} ({kind}) {schedule}: {goal}"
+        detail = f"scheduled {name} ({kind}) {schedule}: {goal}"
+        if until:
+            detail += f" until {until}"
+        if tz:
+            detail += f" ({tz})"
+        if time_limit:
+            detail += f" time limit {time_limit}s"
+        return detail
 
     def web_search(query):
         try:
@@ -829,6 +1012,34 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         except Exception as exc:
             return f"whatsapp send failed: {type(exc).__name__}: {exc}"
 
+    def slack_send_file(channel, file, title=""):
+        """Upload a workdir file to a Slack channel (bytes, not a localhost link)."""
+        try:
+            from ..interface.messaging import send_slack_file
+            target = _confined(str(file))
+            if not target.is_file():
+                return f"slack send file failed: not found in workdir: {file}"
+            result = send_slack_file(_msg_config(), str(channel), target, str(title))
+            if result.get("ok"):
+                return f"slack file sent to {channel} (file {result.get('file_id', '')})"
+            return f"slack send file failed: {result.get('error', 'unknown error')}"
+        except Exception as exc:
+            return f"slack send file failed: {type(exc).__name__}: {exc}"
+
+    def whatsapp_send_media(to, file, caption=""):
+        """Send a workdir file over WhatsApp via the media API (bytes, not a link)."""
+        try:
+            from ..interface.messaging import send_whatsapp_media
+            target = _confined(str(file))
+            if not target.is_file():
+                return f"whatsapp send media failed: not found in workdir: {file}"
+            result = send_whatsapp_media(_msg_config(), str(to), target, str(caption))
+            if result.get("ok"):
+                return f"whatsapp media sent to {to} (id {result.get('message_id', '')})"
+            return f"whatsapp send media failed: {result.get('error', 'unknown error')}"
+        except Exception as exc:
+            return f"whatsapp send media failed: {type(exc).__name__}: {exc}"
+
     def list_schedule():
         try:
             from ..interface.triggers import Scheduler
@@ -859,11 +1070,58 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     tools["schedule_job"] = schedule_job
     tools["web_search"] = web_search
     tools["fetch_url"] = fetch_url
+
+    def fetch_feed(url, state_file=""):
+        # Native feed reading with new-item dedupe. The state file
+        # defaults to .rss_seen.json in the run workdir; a given
+        # name must stay inside the workdir, like other file tools.
+        # Scheduled runs share the serve workdir, so their state
+        # persists across ticks; interactive runs get a fresh state
+        # per run (every current item reads as new) unless a shared
+        # state file is named.
+        try:
+            from ..capabilities.rss import fetch_feed as _fetch_feed
+            from pathlib import Path as _FeedPath
+            root = _FeedPath(workdir).resolve()
+            if state_file:
+                candidate = (root / str(state_file)).resolve()
+                if not candidate.is_relative_to(root):
+                    return "feed failed: state file outside workdir"
+                state_path = candidate
+            else:
+                state_path = root / ".rss_seen.json"
+            return _fetch_feed(str(url), state_path)
+        except Exception as exc:
+            return f"feed failed: {type(exc).__name__}: {exc}"
+
+    tools["fetch_feed"] = fetch_feed
     tools["read_document"] = read_document
+
+    def deep_research_tool(query):
+        # Multi-round search + fetch + condense with citations.
+        # The plan tool runs without a model client, so the judge
+        # is heuristic (top sources) and the summary extractive;
+        # the module's judge/synthesis activate when a caller
+        # passes a client (the loop-side researcher does).
+        try:
+            from ..agentic.deep_research import deep_research as _deep
+            search_fn, fetch_fn = _deep_search_fns(config)
+            out = _deep(str(query), search_fn, fetch_fn, chat=None,
+                        max_rounds=_env_int("AIDON_DEEP_RESEARCH_ROUNDS", 2),
+                        max_sources=_env_int("AIDON_DEEP_RESEARCH_SOURCES", 5))
+            head = (f"Deep research: {out['query']} "
+                    f"({out['rounds']} round(s), {len(out['evidence'])} source(s))")
+            return head + "\n\n" + out["summary"]
+        except Exception as exc:
+            return f"deep research failed: {type(exc).__name__}: {exc}"
+
+    tools["deep_research"] = deep_research_tool
     tools["search_document"] = search_document
     tools["search_research_cache"] = search_research_cache
     tools["slack_send"] = slack_send
     tools["whatsapp_send"] = whatsapp_send
+    tools["slack_send_file"] = slack_send_file
+    tools["whatsapp_send_media"] = whatsapp_send_media
     tools["list_schedule"] = list_schedule
     tools["cancel_schedule"] = cancel_schedule
     return tools
@@ -1053,6 +1311,7 @@ def main(argv: list[str] | None = None) -> int:
     dag_parser.add_argument("action", choices=["list", "show", "run"], help="list = list saved DAGs, show = show one DAG, run = execute one DAG's tool nodes")
     dag_parser.add_argument("id", nargs="?", default="", help="DAG id for show/run")
     dag_parser.add_argument("--run-id", default=None, help="Run id for dag run checkpoints; reuse it to resume a killed run")
+    dag_parser.add_argument("--parallel", action="store_true", help="Run independent DAG nodes concurrently instead of one at a time")
     mission_parser = sub.add_parser("mission", help="Mission lifecycle records")
     mission_parser.add_argument("action", choices=["list", "show", "discard", "create"], help="list = list missions, show = show one, discard = discard a rejected mission, create = create a draft mission")
     mission_parser.add_argument("id", nargs="?", default="", help="Project id")
@@ -1075,6 +1334,17 @@ def main(argv: list[str] | None = None) -> int:
                                  help="Job kind; chain uses JSON in --goal")
     schedule_parser.add_argument("--schedule", default="0 9 * * *", help="Cron schedule for add, default daily 9am")
     schedule_parser.add_argument("--project", default="default", help="Project id for add")
+    practice_parser = sub.add_parser("practice", help="Free-time practice windows, same store as the Practice page")
+    practice_parser.add_argument("action", choices=["add", "list", "remove", "run"], help="add = add a schedule, list = list schedules, remove = remove one, run = run one now (60 min)")
+    practice_parser.add_argument("--name", default="", help="Schedule name")
+    practice_parser.add_argument("--date", default="", help="One date YYYY-MM-DD; empty means days/every day")
+    practice_parser.add_argument("--days", default="", help="Weekdays, comma separated, e.g. Mon,Wed,Fri; empty means every day")
+    practice_parser.add_argument("--start", default="21:00", help="Window start HH:MM")
+    practice_parser.add_argument("--end", default="22:00", help="Window end HH:MM")
+    practice_parser.add_argument("--goal", action="append", default=[], help="Goal text, repeatable")
+    practice_parser.add_argument("--spec", action="append", default=[], help="Spec name per goal, positionally paired with --goal")
+    practice_parser.add_argument("--preapprove", dest="preapprove", action="store_true", default=True, help="Pre-approve the schedule (default): reversible steps auto-approve, destructive steps are rejected")
+    practice_parser.add_argument("--no-preapprove", dest="preapprove", action="store_false", help="Do not pre-approve: practice stops for approval like any other run")
     sandbox_parser = sub.add_parser("sandbox", help="Sandbox isolation boundary")
     sandbox_parser.add_argument("action", choices=["check"], help="check = report sandbox backend and workdir, fail closed if backend missing")
     chain_parser = sub.add_parser("chain", help="Declarative tool chains, zero-LLM scheduled jobs")
@@ -1104,8 +1374,8 @@ def main(argv: list[str] | None = None) -> int:
     tick_parser = sub.add_parser("tick", help="Run due scheduler jobs once, Aidon tick")
     repl_parser = sub.add_parser("repl", help="Full REPL, Aidon repl, /help, /history, /quit, or a goal")
     learn_parser = sub.add_parser("learn", help="Idle learn cycle: re-test candidate skills, promote passers, consolidate validated duplicates")
-    skill_lib_parser = sub.add_parser("skill-library", help="Full skill library: list, show, promote, trust, retire, rollback, versions")
-    skill_lib_parser.add_argument("action", choices=["list", "show", "promote", "trust", "retire", "rollback", "versions"], help="list = list skills, show = show one, promote/trust/retire = lifecycle, rollback = restore a version, versions = version history")
+    skill_lib_parser = sub.add_parser("skill-library", help="Full skill library: list, show, promote, trust, retire, rollback, versions, from-experience")
+    skill_lib_parser.add_argument("action", choices=["list", "show", "promote", "trust", "retire", "rollback", "versions", "from-experience"], help="list = list skills, show = show one, promote/trust/retire = lifecycle, rollback = restore a version, versions = version history, from-experience = promote a successful run's workflow to a discoverable skill file")
     skill_lib_parser.add_argument("name", nargs="?", default="", help="Skill name")
     skill_lib_parser.add_argument("--version", type=int, default=0, help="Version for rollback")
     conversations_parser = sub.add_parser("conversations", help="SQLite conversation store: list, history, record, delete")
@@ -1262,7 +1532,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "inventory":
         from pathlib import Path as _Path
-        from ..agentic.artifact_inventory import inventory, inventory_markdown
+        from ..agentic.artifact_inventory import inventory_markdown
         workdir = _Path(args.workdir) if args.workdir else config.workdir
         print(inventory_markdown(workdir))
         return 0
@@ -1274,7 +1544,7 @@ def main(argv: list[str] | None = None) -> int:
         print(delivery_summary(report))
         return 0
     if args.command == "think":
-        from ..agentic.think_effort import effort_for, resolve_effort, sampling_for
+        from ..agentic.think_effort import resolve_effort, sampling_for
         level = resolve_effort(args.phase, requested=args.level or None, escalate=args.escalate)
         print(f"phase={args.phase} effort={level} sampling={sampling_for(args.phase)}")
         return 0
@@ -1293,7 +1563,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "vrm-check":
         from pathlib import Path as _P
-        from ..capabilities.vrm_check import check_vrm, used_morph_names, used_names_from_audio
+        from ..capabilities.vrm_check import check_vrm
         vrm_path = _P(args.vrm) if args.vrm else config.home / "avatar.vrm"
         if args.js:
             js_source = _P(args.js).read_text()
@@ -1311,7 +1581,19 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{skill.name} v{skill.version} {skill.state} privileged={skill.privileged}")
             return 0
         if not args.name:
-            print("skill-library show/promote/trust/retire/rollback/versions need a name"); return 2
+            print("skill-library show/promote/trust/retire/rollback/versions/from-experience need a name"); return 2
+        if args.action == "from-experience":
+            from ..memory.experience import (
+                promote_experience_to_skill, recall_experiences)
+            memory = _make_memory(config)
+            matches = recall_experiences(memory, args.name, limit=1)
+            if not matches:
+                print(f"No successful experience matches {args.name!r}"); return 2
+            try:
+                path = promote_experience_to_skill(config.home, matches[0])
+            except FileExistsError as exc:
+                print(str(exc)); return 1
+            print(f"Promoted {matches[0].goal!r} to skill: {path}"); return 0
         if args.action == "show":
             skill = lib.get(args.name)
             print(skill if skill else f"No skill {args.name}"); return 0 if skill else 2
@@ -1557,7 +1839,7 @@ def main(argv: list[str] | None = None) -> int:
                     return registry.call(node.tool, args_dict)
                 run_id = args.run_id or _dag_uuid.uuid4().hex[:12]
                 executor = DAGExecutor(dag, _run_node, state=Registry(config.home), run_id=run_id)
-                result = executor.execute()
+                result = executor.execute_parallel() if getattr(args, "parallel", False) else executor.execute()
             except Exception as exc:
                 print(f"dag run {args.id} failed: {exc}")
                 return 1
@@ -1666,10 +1948,133 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Removed {args.name}" if len(scheduler.jobs) < before else f"No job {args.name}")
             return 0 if len(scheduler.jobs) < before else 2
         return 2
+    if args.command == "practice":
+        from ..interface.practice import (add_schedule, get_schedule,
+                                          load_schedules, remove_schedule)
+        if args.action == "list":
+            for s in load_schedules(config.home):
+                goals = "; ".join(g["goal"] for g in s.get("goals", []))
+                when = s.get("date") or ",".join(
+                    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d]
+                    for d in s.get("days", [])) or "every day"
+                print(f"{s['name']}: {when} {s.get('start')}-{s.get('end')} goals=[{goals}]")
+            return 0
+        if args.action == "add":
+            if not args.name or not args.goal:
+                print("practice add needs --name and at least one --goal"); return 2
+            goals = []
+            for i, g in enumerate(args.goal):
+                # "goal || spec" splits like the Practice page; an
+                # explicit --spec in the same position wins.
+                text, _, inline_spec = g.partition("||")
+                spec = (args.spec[i] if i < len(args.spec) else ""
+                        ) or inline_spec.strip()
+                goals.append({"goal": text.strip(), "spec": spec})
+            _padd, _perr = add_schedule(config.home, {
+                "name": args.name, "date": args.date,
+                "days": [d.strip() for d in args.days.split(",") if d.strip()],
+                "start": args.start, "end": args.end, "goals": goals,
+                "preapprove": args.preapprove})
+            if _perr:
+                print(f"practice add failed: {_perr}"); return 2
+            print(f"Added practice schedule {args.name}")
+            return 0
+        if args.action == "remove":
+            removed = remove_schedule(config.home, args.name)
+            print(f"Removed {args.name}" if removed else f"No practice schedule {args.name}")
+            return 0 if removed else 2
+        if args.action == "run":
+            from datetime import datetime, timedelta
+            from ..interface.practice import (get_schedule, record_session,
+                                              run_practice_session)
+            schedule = get_schedule(config.home, args.name)
+            if schedule is None:
+                print(f"No practice schedule {args.name}"); return 2
+            from ..agentic.budgets import Budget as _PB
+            from ..agentic.trace import TraceRecorder as _PT
+            from ..agentic.verifier_model import ModelVerifier as _PMV
+            from ..capabilities.plugins import PluginRegistry as _PPR
+            from ..capabilities.sandbox import Sandbox as _PSB
+            from ..interface.practice import (PRACTICE_TOOL_NAMES, PracticeGate,
+                                              coerce_preapprove, practice_tools)
+            import os as _pos
+            import re as _pre
+            _pdir = config.home / "practice" / _pre.sub(
+                r"[^A-Za-z0-9_-]+", "-", schedule["name"]).strip("-")
+            _pdir.mkdir(parents=True, exist_ok=True)
+            _psandbox = _PSB(_pdir, config.sandbox_timeout_seconds,
+                             mem_mb=config.sandbox_mem_mb, nproc=config.sandbox_nproc,
+                             fsize_mb=config.sandbox_fsize_mb,
+                             cpu_seconds=config.sandbox_cpu_seconds,
+                             backend=config.sandbox_backend,
+                             allow_network=config.sandbox_network,
+                             require_isolation=config.sandbox_require_isolation)
+            _pplugins = _PPR(config.home); _pplugins.load_all()
+            try:
+                from ..capabilities.execution import make_backend as _pmb
+                _pbackend = _pmb(config.execution_backend, _psandbox, image=config.docker_image, allow_network=config.docker_network)
+            except Exception:
+                _pbackend = None
+            if coerce_preapprove(schedule.get("preapprove", True)):
+                _pgate = PracticeGate(_pdir, sandboxed=_pbackend is not None)
+            else:
+                _pgate = _cli_gate(config.home, config.approval_timeout_seconds)
+            from ..interface.messaging import MessagingConfig as _PMC
+            _pmcfg = _PMC.from_env()
+            _prunner = GoalRunner(client, _psandbox, _pgate, config.home, memory=memory, project_id="default", plugins=_pplugins, execution_backend=_pbackend, budget=_PB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_PT(config.home, project_id="default"), model_verifier=_PMV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_pbackend, _psandbox),
+                                  extra_tools=practice_tools(
+                                      _pdir, _pmcfg, owner_email=config.owner_email,
+                                      gmail_client_id=_pos.environ.get("GMAIL_CLIENT_ID", ""),
+                                      gmail_client_secret=_pos.environ.get("GMAIL_CLIENT_SECRET", ""),
+                                      gmail_refresh_token=_pos.environ.get("GMAIL_REFRESH_TOKEN", "")),
+                                  allowed_side_effect_tools=set(PRACTICE_TOOL_NAMES))
+
+            def _p_run_goal(goal_text, spec):
+                _report = _prunner.run(goal_text, spec=spec)
+                return {"status": _report.status, "files": list(_report.files or []),
+                        "error": _report.error or "",
+                        "elapsed_seconds": getattr(_report, "elapsed_seconds", 0),
+                        "tokens": _report.model_tokens_estimated,
+                        "run_id": getattr(_prunner, "run_id", "") or "",
+                        "dag": _report.dag_summary or {}}
+
+            def _p_deliver(text, goal, result):
+                print(text)
+                try:
+                    from ..interface.messaging import (MessagingConfig as _MC,
+                                                        send_slack as _ss,
+                                                        send_whatsapp as _sw)
+                    _mcfg = _MC.from_env()
+                    if _mcfg.slack_outbound_channel:
+                        _ss(_mcfg, _mcfg.slack_outbound_channel, text)
+                    if _mcfg.whatsapp_owner:
+                        _sw(_mcfg, _mcfg.whatsapp_owner, text)
+                except Exception as exc:
+                    print(f"Practice report delivery failed: {exc}")
+
+            summary = run_practice_session(schedule, _p_run_goal,
+                                           datetime.now() + timedelta(minutes=60),
+                                           home=config.home, on_report=_p_deliver,
+                                           on_progress=lambda live: print(
+                                               f"Practice live: {live['goal']} "
+                                               f"(attempt {live['attempt']})")
+                                           if live else None,
+                                           preapprove=coerce_preapprove(
+                                               schedule.get("preapprove", True)))
+            if not summary["passed"]:
+                summary["report"] = (
+                    f"Practice session {schedule['name']}: no pass in this window "
+                    f"({len(summary['attempts'])} attempts).")
+            record_session(config.home, schedule["name"], summary)
+            print(f"Practice session {schedule['name']}: "
+                  f"{'passed: ' + summary['goal'] if summary['passed'] else 'no pass'} "
+                  f"({len(summary['attempts'])} attempts)")
+            return 0
+        return 2
     if args.command == "sandbox":
         from ..capabilities.execution import make_backend
         try:
-            backend = make_backend(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
+            backend = make_backend(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network, vm_host=config.vm_host, vm_user=config.vm_user or None, vm_sudo_password=config.vm_sudo_password or None, vm_use_sudo=config.vm_use_sudo)
             print(f"Sandbox backend: {config.execution_backend}, workdir: {sandbox.workdir}, backend: {backend}")
             return 0
         except Exception as exc:
@@ -1854,6 +2259,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "repl":
         from ..interface.repl import Repl
+        _cli_think_state = {"on": False}
+        _cli_research_state = {"on": False}
+        _cli_mode_state = {"mode": "ask"}
+
         def _repl_handler(goal: str) -> str:
             from ..agentic.budgets import Budget as _B2
             from ..agentic.trace import TraceRecorder as _T2
@@ -1865,20 +2274,99 @@ def main(argv: list[str] | None = None) -> int:
                 _backend = _mb2(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _backend = None
-            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox))
-            report = runner.run(goal)
+            from ..interface.surfaces import parse_think_command as _cli_think
+            from ..interface.surfaces import parse_research_command as _cli_research
+            _cli_cmd = _cli_think(goal)
+            _cli_once = False
+            if _cli_cmd is not None and _cli_cmd["action"] == "once":
+                goal = _cli_cmd["goal"]
+                _cli_once = True
+            _cli_rcmd = _cli_research(goal)
+            _cli_research_once = False
+            if _cli_rcmd is not None:
+                if _cli_rcmd["action"] == "toggle":
+                    _cli_research_state["on"] = not _cli_research_state["on"]
+                    return (f"Deep-research mode {'on' if _cli_research_state['on'] else 'off'} "
+                            "for this REPL session.")
+                goal = _cli_rcmd["goal"]
+                _cli_research_once = True
+            from ..interface.surfaces import parse_mode_command as _cli_mode
+            from ..interface.surfaces import parse_proceed_command as _cli_proceed
+            _cli_mode_once = None
+            _cli_mcmd = _cli_mode(goal)
+            if _cli_mcmd is not None:
+                if _cli_mcmd["action"] == "set":
+                    _cli_mode_state["mode"] = _cli_mcmd["mode"]
+                    if _cli_mcmd["mode"] == "execute":
+                        return "Execute mode on for this REPL session — goals run directly."
+                    return f"{_cli_mcmd['mode'].capitalize()} mode on for this REPL session."
+                goal = _cli_mcmd["goal"]
+                _cli_mode_once = _cli_mcmd["mode"]
+            _cli_resume_plan = None
+            _cli_resume_spec = None
+            _cli_resume_stop_id = ""
+            _cli_pcmd = _cli_proceed(goal)
+            if _cli_pcmd is not None:
+                from ..interface.mode_stops import load_mode_stop as _cli_load_stop
+                from ..interface.mode_stops import latest_mode_stop as _cli_latest_stop
+                _stop = (_cli_load_stop(config.home, _cli_pcmd["stop_id"])
+                         if _cli_pcmd["stop_id"]
+                         else _cli_latest_stop(config.home, "cli"))
+                if _stop is None:
+                    if _cli_pcmd["stop_id"]:
+                        return f"No stopped run with id {_cli_pcmd['stop_id']}."
+                    return "No stopped run to proceed with."
+                goal = _stop["goal"]
+                _cli_mode_once = "execute"
+                _cli_resume_stop_id = _stop["stop_id"]
+                if _stop["mode"] == "plan" and isinstance(_stop.get("plan"), dict) and _stop["plan"].get("steps"):
+                    from ..agentic.loop import Plan as _CliPlan
+                    _rp = _stop["plan"]
+                    _cli_resume_plan = _CliPlan(
+                        steps=_rp.get("steps", []),
+                        deliverables=[str(d) for d in _rp.get("deliverables", [])],
+                        criteria=[str(c) for c in _rp.get("criteria", [])])
+                elif _stop["mode"] == "ask" and isinstance(_stop.get("spec"), dict):
+                    from ..agentic.interview import Spec as _CliSpec
+                    _cli_resume_spec = _CliSpec.from_dict(_stop["spec"])
+            try:
+                from ..agentic.semantic_router import SemanticRouter as _CliRouter
+                _cli_router = _CliRouter(memory.embedder, cache_path=config.home / "semantic_router_vectors.json")
+            except Exception:
+                _cli_router = None
+            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), think_max=_cli_once or _cli_think_state["on"], research_mode=_cli_research_once or _cli_research_state["on"], deep_researcher=make_deep_researcher(config), mode=_cli_mode_once or _cli_mode_state["mode"], question_ask=lambda q: input(f"\nAidon: {q}\nYou: "), conversation_key="cli", resume_plan=_cli_resume_plan, semantic_router=_cli_router)
+            if _cli_resume_spec is not None:
+                report = runner.run(goal, spec=_cli_resume_spec)
+            else:
+                report = runner.run(goal)
+            if _cli_resume_stop_id and report.status == "done":
+                try:
+                    from ..interface.mode_stops import delete_mode_stop as _cli_del_stop
+                    _cli_del_stop(config.home, _cli_resume_stop_id)
+                except Exception:
+                    pass
             if report.status == "chat":
                 return report.chat_reply or "Received."
+            if report.status == "stopped":
+                _sid = (report.mode_stop or {}).get("stop_id", "")
+                _smode = (report.mode_stop or {}).get("mode", "") or "run"
+                return f"[stopped] {_smode} ready — run /proceed {_sid} to continue."
             return f"[{report.status}] {', '.join(report.files)} {report.error}".strip()
         def _remember(text: str) -> str:
             point = memory.remember(text, source="cli-command")
             return f"Remembered in long-term memory: {text} (id {point.id})"
 
-        Repl(_repl_handler, on_remember=_remember).run()
+        def _on_think() -> str:
+            _cli_think_state["on"] = not _cli_think_state["on"]
+            return ("Maximum thinking on for this REPL session."
+                    if _cli_think_state["on"]
+                    else "Maximum thinking off for this REPL session.")
+
+        Repl(_repl_handler, on_remember=_remember, on_think=_on_think).run()
         return 0
     if args.command == "webui":
         from ..interface.messaging import MessagingConfig, send_slack, send_whatsapp
-        from ..interface.triggers import TriggerDispatcher
+        from ..interface.triggers import TriggerDispatcher, TriggerEvent
         from ..interface.v1 import AuthStore
         from ..interface.webui import WebUIServer
         msg = MessagingConfig.from_env()
@@ -1960,6 +2448,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             server.webui_gate.autonomy_tracker = None
             server.webui_gate.slack_sender = slack_sender
+            server.webui_gate.whatsapp_sender = whatsapp_sender
             plugins = PluginRegistry(config.home)
             plugins.load_all()
             budget = Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps,
@@ -1969,7 +2458,10 @@ def main(argv: list[str] | None = None) -> int:
                 from ..capabilities.execution import make_backend
                 execution_backend = make_backend(
                     config.execution_backend, run_sandbox,
-                    image=config.docker_image, allow_network=config.docker_network)
+                    image=config.docker_image, allow_network=config.docker_network,
+                    vm_host=config.vm_host, vm_user=config.vm_user or None,
+                    vm_sudo_password=config.vm_sudo_password or None,
+                    vm_use_sudo=config.vm_use_sudo)
             except Exception:
                 execution_backend = None
             try:
@@ -1993,20 +2485,7 @@ def main(argv: list[str] | None = None) -> int:
                 _gate = PreapprovalGate(server.webui_gate.gate, PreapprovalStore(config.home), event.project_id)
             except Exception:
                 _gate = server.webui_gate.gate
-            def _web_researcher(goal_text):
-                try:
-                    from ..agentic.research_allow import DomainGrants, load_allowlist
-                    from ..capabilities.search import search as _s
-                    search_text = goal_text
-                    if conversation_context:
-                        search_text = (f"Conversation topic:\n{conversation_context}\n\n"
-                                       f"Current request:\n{goal_text}")
-                    _r = _s(search_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url,
-                            allowlist=load_allowlist(config.home, config.research_allowlist),
-                            grants=DomainGrants(config.home))
-                    return [f"{x.get('title', '')}: {x.get('snippet', '')}" for x in _r.get("results", [])]
-                except Exception:
-                    return []
+            _web_researcher = _make_web_researcher(config, conversation_context)
             # Slack/WhatsApp runs have no WebUI waiter callback in the
             # payload, so build one: send the question straight to the
             # surface (not via the reply list, which is only flushed
@@ -2022,14 +2501,44 @@ def main(argv: list[str] | None = None) -> int:
                 _qkey = "whatsapp:" + str(event.payload.get("from", ""))
             if _qkey and not _qkey.endswith(":"):
                 def _question_callback(question, _key=_qkey):
-                    if event.source == "slack" and slack_sender is not None:
+                    from ..interface.surfaces import waiter_keys_for_slack
+                    also: list[str] = []
+                    if event.source == "slack":
+                        if slack_sender is not None:
+                            try:
+                                slack_sender(
+                                    str(event.payload.get("channel", "")),
+                                    str(question),
+                                    event.payload.get("thread_ts"))
+                            except Exception:
+                                pass
+                        # The thread is visible in WebUI under
+                        # slack:<channel>, question included.
                         try:
-                            slack_sender(
-                                str(event.payload.get("channel", "")),
-                                str(question),
-                                event.payload.get("thread_ts"))
+                            server._conversations_db().record_exchange(
+                                "slack:" + str(event.payload.get("channel", "")),
+                                "assistant", str(question))
                         except Exception:
                             pass
+                        also = waiter_keys_for_slack(
+                            config.home, str(event.payload.get("channel", "")),
+                            str(msg.whatsapp_owner or ""))
+                        # A linked WebUI conversation shows the
+                        # question, so the owner can answer there.
+                        for key in also:
+                            if key.startswith("whatsapp:"):
+                                continue
+                            try:
+                                server._conversations_db().record_exchange(
+                                    key, "assistant", str(question))
+                            except Exception:
+                                pass
+                        for key in also:
+                            if key.startswith("whatsapp:") and whatsapp_sender is not None:
+                                try:
+                                    whatsapp_sender(key[len("whatsapp:"):], str(question))
+                                except Exception:
+                                    pass
                     elif event.source == "whatsapp" and whatsapp_sender is not None:
                         try:
                             whatsapp_sender(
@@ -2037,7 +2546,7 @@ def main(argv: list[str] | None = None) -> int:
                                 str(question))
                         except Exception:
                             pass
-                    return server.ask_question(run_id, _key, question)
+                    return server.ask_question(run_id, _key, question, also_keys=tuple(also))
             def _say(prompt):
                 from ..system.model_client import Message as _Message
                 messages = [_Message("user", prompt)]
@@ -2052,6 +2561,56 @@ def main(argv: list[str] | None = None) -> int:
                 from ..interface.phrasing import phrase_with_model as _pwm
                 return _pwm(kind, _say)
 
+            # Approval cards carry this run's context so the
+            # WebUI gate can deliver a copy to WhatsApp when
+            # the run warrants one: a run that started on
+            # WhatsApp, or a WebUI/Slack conversation the
+            # owner mirrored to WhatsApp. Mirroring is the
+            # opt-in; an unmirrored run gets no WhatsApp card.
+            _whatsapp_to = None
+            if event.source == "whatsapp":
+                _whatsapp_to = str(event.payload.get("from", "") or "")
+            elif msg.whatsapp_owner:
+                from ..interface.surfaces import (
+                    whatsapp_mirrored_for_conversation,
+                    whatsapp_mirrored_for_slack)
+                if event.source == "webui" and conversation_id and \
+                        whatsapp_mirrored_for_conversation(
+                            config.home, conversation_id):
+                    _whatsapp_to = msg.whatsapp_owner
+                elif event.source == "slack" and \
+                        whatsapp_mirrored_for_slack(
+                            config.home,
+                            str(event.payload.get("channel", ""))):
+                    _whatsapp_to = msg.whatsapp_owner
+            _gate_context = {"run_id": run_id,
+                             "conversation_id": conversation_id,
+                             "source": event.source}
+            if _whatsapp_to:
+                _gate_context["whatsapp_to"] = _whatsapp_to
+
+            # Mode resume + conversation key for the stop record.
+            _conversation_key = ""
+            if event.source == "webui":
+                _conversation_key = str(event.payload.get("conversation_id", "") or "")
+            elif event.source == "slack":
+                _conversation_key = "slack:" + str(event.payload.get("channel", "") or "")
+            elif event.source == "whatsapp":
+                _conversation_key = "whatsapp:" + str(event.payload.get("from", "") or "")
+            _resume_stop_id = str(event.payload.get("resume_stop_id", "") or "")
+            _resume_plan = None
+            _resume_spec = None
+            if isinstance(event.payload.get("resume_plan"), dict):
+                _rp = event.payload["resume_plan"]
+                if _rp.get("steps"):
+                    from ..agentic.loop import Plan as _ResumePlan
+                    _resume_plan = _ResumePlan(
+                        steps=_rp.get("steps", []),
+                        deliverables=[str(d) for d in _rp.get("deliverables", [])],
+                        criteria=[str(c) for c in _rp.get("criteria", [])])
+            if isinstance(event.payload.get("resume_spec"), dict):
+                from ..agentic.interview import Spec as _ResumeSpec
+                _resume_spec = _ResumeSpec.from_dict(event.payload["resume_spec"])
             runner = GoalRunner(client, run_sandbox, _gate,
                                 config.home, memory=memory,
                                 project_id=event.project_id, plugins=plugins,
@@ -2061,14 +2620,91 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"))
-            def _surface_reply(text):
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages)), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan)
+            def _deliver_files(files, target):
+                """Upload run deliverables as bytes to a Slack/WhatsApp target.
+
+                target is ("slack", channel) or ("whatsapp", number).
+                Slack and WhatsApp cannot open localhost file links,
+                so a run's files reach those surfaces as uploads,
+                not links. Paths are confined to the run workdir;
+                anything outside it, or not a file, is skipped.
+                Failures are reported as a reply, never silent.
+                """
+                if not files or not target:
+                    return
+                from pathlib import Path as _P
+                root = _P(run_sandbox.workdir).resolve()
+                kind, recipient = target
+                if not recipient:
+                    return
+                for name in files:
+                    candidate = (_P(name) if _P(name).is_absolute()
+                                 else root / str(name))
+                    try:
+                        resolved = candidate.resolve()
+                    except Exception:
+                        continue
+                    if resolved != root and root not in resolved.parents:
+                        continue
+                    if not resolved.is_file():
+                        continue
+                    try:
+                        from ..interface.messaging import (
+                            send_slack_file as _ssf, send_whatsapp_media as _swm)
+                        if kind == "slack":
+                            result = _ssf(msg, recipient, resolved)
+                        else:
+                            result = _swm(msg, recipient, resolved)
+                        if not result.get("ok"):
+                            event.send_reply(
+                                f"File delivery failed for {resolved.name}: "
+                                f"{result.get('error', 'unknown error')}")
+                    except Exception as exc:
+                        event.send_reply(
+                            f"File delivery failed for {resolved.name}: {exc}")
+
+            def _surface_reply(text, files=None):
                 # The WebUI already displays and polls the run ID. Keep the
                 # ID in Slack/WhatsApp replies where it is needed for
                 # cross-surface control commands, but do not show it in chat.
                 rendered = str(text) if event.source == "webui" \
                     else f"[{run_id}] {text}"
                 event.send_reply(rendered)
+                # Unified surfaces: a linked surface gets the same
+                # result, so WebUI and Slack stay in sync no matter
+                # where the run started. WhatsApp only when mirrored
+                # (or specified via result delivery, below).
+                try:
+                    from ..interface.surfaces import (
+                        conversation_for_slack, slack_for_conversation,
+                        whatsapp_mirrored_for_conversation,
+                        whatsapp_mirrored_for_slack)
+                    _cid = str(event.payload.get("conversation_id", "") or "")
+                    _slack_ch = (slack_for_conversation(config.home, _cid)
+                                 if _cid else None)
+                    if _slack_ch and event.source != "slack" and slack_sender is not None:
+                        slack_sender(_slack_ch, rendered)
+                    if event.source == "slack":
+                        _linked = conversation_for_slack(
+                            config.home, str(event.payload.get("channel", "")))
+                        if _linked:
+                            try:
+                                server._conversations_db().record_exchange(
+                                    _linked, "assistant", rendered)
+                            except Exception:
+                                pass
+                    _wa_mirrored = False
+                    if _cid:
+                        _wa_mirrored = whatsapp_mirrored_for_conversation(config.home, _cid)
+                    elif event.source == "slack":
+                        _wa_mirrored = whatsapp_mirrored_for_slack(
+                            config.home, str(event.payload.get("channel", "")))
+                    if (_wa_mirrored and event.source != "whatsapp"
+                            and whatsapp_sender is not None and msg.whatsapp_owner):
+                        whatsapp_sender(msg.whatsapp_owner, rendered)
+                except Exception:
+                    pass
                 delivery = event.payload.get("result_delivery") or {}
                 channel = str(delivery.get("channel", "")).lower()
                 if not channel or event.source != "webui":
@@ -2086,15 +2722,55 @@ def main(argv: list[str] | None = None) -> int:
                 if not result.get("ok"):
                     event.send_reply(f"Result delivery to {channel} failed: "
                                      f"{result.get('error', 'unknown error')}")
+                else:
+                    # A delivered result carries its files as bytes
+                    # too — the phone cannot open a localhost link.
+                    _deliver_files(files, (channel, recipient))
             # WebUI goals run once. Swarm remains an explicit CLI option;
             # automatically splitting ordinary chat made conversational
             # questions appear multiple times and multiplied model calls.
-            report = runner.run(event.goal)
+            if _resume_spec is not None:
+                report = runner.run(event.goal, spec=_resume_spec)
+            else:
+                report = runner.run(event.goal)
             route_callback = event.payload.get("_route_callback")
             if callable(route_callback):
                 route_callback(runner.last_route)
             run_control.set_status(run_id, report.status)
-            if report.status == "chat":
+            # A stopped run hands the frontend its Proceed button
+            # through the run record (the poll returns the record),
+            # and a finished proceed consumes the stop record so a
+            # failed proceed can still be retried.
+            if report.status == "stopped" and report.mode_stop:
+                try:
+                    if run_id in server._web_runs:
+                        server._web_runs[run_id]["mode_stop"] = dict(report.mode_stop)
+                except Exception:
+                    pass
+            if _resume_stop_id and report.status == "done":
+                try:
+                    from ..interface.mode_stops import delete_mode_stop
+                    delete_mode_stop(config.home, _resume_stop_id)
+                except Exception:
+                    pass
+            if report.status == "stopped":
+                _stopped = report.mode_stop or {}
+                _sid = str(_stopped.get("stop_id", "") or "")
+                if _stopped.get("mode") == "ask":
+                    _shead = "Spec ready — the interview is done."
+                else:
+                    _delivs = _stopped.get("deliverables") or []
+                    _shead = ("Plan ready" + (f" ({len(_delivs)} deliverable(s): "
+                                              + ", ".join(str(d) for d in _delivs[:5])
+                                              + ")" if _delivs else "") + ".")
+                if event.source == "webui":
+                    _saction = "Tap Proceed below to continue."
+                elif event.source in ("slack", "whatsapp"):
+                    _saction = f"Reply proceed {_sid} to continue."
+                else:
+                    _saction = f"Run /proceed {_sid} to continue."
+                _surface_reply(f"{_shead}\n{_saction}\n" + format_run_stats(report))
+            elif report.status == "chat":
                 _surface_reply((report.chat_reply or "Received.") + "\n" + format_run_stats(report))
             else:
                 from ..interface.phrasing import (
@@ -2104,7 +2780,19 @@ def main(argv: list[str] | None = None) -> int:
                                                 "cancelled") else None)
                 _surface_reply(_report_text(
                     report.status, report.files, report.error, run_id,
-                    format_run_stats(report), phrase=_phrase))
+                    format_run_stats(report), phrase=_phrase,
+                    blocked=report.blocked), files=report.files)
+            # A run that started on Slack or WhatsApp gets its
+            # deliverables as uploads on that same surface, after
+            # the text report above — localhost links are dead
+            # from a phone.
+            if report.status == "done" and report.files:
+                if event.source == "slack":
+                    _deliver_files(report.files,
+                                   ("slack", str(event.payload.get("channel", ""))))
+                elif event.source == "whatsapp":
+                    _deliver_files(report.files,
+                                   ("whatsapp", str(event.payload.get("from", ""))))
 
         dispatcher.register("webui", _goal_handler)
         dispatcher.register("whatsapp", _goal_handler)
@@ -2492,6 +3180,15 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{item['spec_id']} {item['action_kind']}: undo: {item['undo']}")
             return 0
         # serve: poll due jobs every 60 seconds, run each via GoalRunner.
+        # KNOWN BUG, documented, not fixed (decision 2026-10-28: keep
+        # the live timer/WebUI path, fix this post-hackathon): this
+        # branch references server and msg, which are only assigned
+        # in the webui serve branch, so they are unbound locals
+        # here. The branch crashes at startup on
+        # server.practice_session_runner, and the practice-runner
+        # and practice-delivery uses would crash or silently drop
+        # after it. Do not run schedule serve until the WebUI
+        # construction is shared with this branch (see ROADMAP).
         from datetime import datetime
         from ..interface.triggers import Scheduler
         print("Scheduler daemon, polling every 60 seconds, Ctrl-C to stop.")
@@ -2514,6 +3211,110 @@ def main(argv: list[str] | None = None) -> int:
         _slack_ts_path = config.home / "slack_last_ts.txt"
         if _slack_ts_path.is_file():
             _slack_last_ts = _slack_ts_path.read_text().strip()
+        # Practice sessions: the serve daemon owns the window tick
+        # and the report delivery. Each schedule gets its own
+        # practice folder in the sandbox, and a runner built for
+        # it: core tools live in that folder, the gate is the
+        # PracticeGate for pre-approved schedules (the WebUI
+        # gate otherwise, so it stops for approval), and the
+        # only extra tools are the owner-only practice tools.
+        def _practice_runner(schedule):
+            from ..agentic.budgets import Budget as _B3
+            from ..agentic.trace import TraceRecorder as _T3
+            from ..agentic.verifier_model import ModelVerifier as _M3
+            from ..capabilities.plugins import PluginRegistry as _P3
+            from ..capabilities.sandbox import Sandbox as _S3
+            from ..interface.practice import (PRACTICE_TOOL_NAMES, PracticeGate,
+                                              coerce_preapprove, practice_tools)
+            import os as _os3
+            practice_dir = config.home / "practice" / server._safe_name(schedule["name"])
+            practice_dir.mkdir(parents=True, exist_ok=True)
+            _psandbox = _S3(practice_dir, config.sandbox_timeout_seconds,
+                            mem_mb=config.sandbox_mem_mb, nproc=config.sandbox_nproc,
+                            fsize_mb=config.sandbox_fsize_mb,
+                            cpu_seconds=config.sandbox_cpu_seconds,
+                            backend=config.sandbox_backend,
+                            allow_network=config.sandbox_network,
+                            require_isolation=config.sandbox_require_isolation)
+            _pl = _P3(config.home); _pl.load_all()
+            try:
+                from ..capabilities.execution import make_backend as _mb3
+                _be = _mb3(config.execution_backend, _psandbox, image=config.docker_image, allow_network=config.docker_network)
+            except Exception:
+                _be = None
+            if coerce_preapprove(schedule.get("preapprove", True)):
+                _gate = PracticeGate(practice_dir, sandboxed=_be is not None)
+            else:
+                _gate = server.webui_gate.gate
+            return GoalRunner(client, _psandbox, _gate, config.home, memory=memory,
+                              project_id="default", plugins=_pl, execution_backend=_be,
+                              budget=_B3(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
+                              trace=_T3(config.home, project_id="default"), model_verifier=_M3(client),
+                              kernel_mode=config.kernel_mode,
+                              network_available=_network_available(_be, _psandbox),
+                              extra_tools=practice_tools(
+                                  practice_dir, msg, owner_email=config.owner_email,
+                                  gmail_client_id=_os3.environ.get("GMAIL_CLIENT_ID", ""),
+                                  gmail_client_secret=_os3.environ.get("GMAIL_CLIENT_SECRET", ""),
+                                  gmail_refresh_token=_os3.environ.get("GMAIL_REFRESH_TOKEN", "")),
+                              allowed_side_effect_tools=set(PRACTICE_TOOL_NAMES))
+
+        def _practice_deliver(text, goal, result):
+            # Practice reports are isolated to the Practice
+            # page (the session record) plus the owner's
+            # specified surfaces below. They are deliberately
+            # NOT recorded into any chat conversation, so a
+            # practice run never shows up among real runs.
+            try:
+                if msg.slack_outbound_channel:
+                    slack_sender(msg.slack_outbound_channel, text)
+            except Exception:
+                pass
+            # Practice reports are explicitly specified outputs,
+            # so WhatsApp delivery here follows the owner's rule.
+            try:
+                if msg.whatsapp_owner:
+                    whatsapp_sender(msg.whatsapp_owner, text)
+            except Exception:
+                pass
+
+        def _practice_session_sync(schedule, end):
+            from ..interface.practice import (coerce_preapprove,
+                                              run_practice_session as _rps,
+                                              record_session as _rec,
+                                              update_live as _live)
+
+            def _run_goal(goal_text, spec):
+                _runner = _practice_runner(schedule)
+                _report = _runner.run(goal_text, spec=spec)
+                return {"status": _report.status, "files": list(_report.files or []),
+                        "error": _report.error or "",
+                        "elapsed_seconds": getattr(_report, "elapsed_seconds", 0),
+                        "tokens": _report.model_tokens_estimated,
+                        "run_id": getattr(_runner, "run_id", "") or "",
+                        "dag": _report.dag_summary or {}}
+
+            def _on_progress(live):
+                try:
+                    _live(config.home, schedule["name"], live)
+                except Exception:
+                    pass
+
+            summary = _rps(schedule, _run_goal, end, home=config.home,
+                           on_report=_practice_deliver, on_progress=_on_progress,
+                           preapprove=coerce_preapprove(schedule.get("preapprove", True)))
+            if not summary["passed"]:
+                # Window closed with no pass: the no-pass note
+                # lives in the session record on the Practice
+                # page, so a silent failure never looks like
+                # a pass — and never lands in a chat conversation.
+                summary["report"] = (
+                    f"Practice session {schedule['name']}: no pass in this window "
+                    f"({len(summary['attempts'])} attempts).")
+            _rec(config.home, schedule["name"], summary)
+            print(f"Practice session {schedule['name']}: "
+                  f"{'passed' if summary['passed'] else 'no pass'}")
+        server.practice_session_runner = _practice_session_sync
         while True:
             scheduler = Scheduler(config.home)
             # Tick wiring: SchedulerLoop carries the outbox drain
@@ -2628,14 +3429,65 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"Job {job.name}: brief delivery {_sent}")
                     _handled = True
                 if not _handled:
-                    runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home,
+                    # Scheduled runs get the same extra tools as
+                    # interactive runs (fetch, email, web search),
+                    # but behind the scheduled gate: email to the
+                    # owner goes through, everything else fails
+                    # fast instead of blocking the tick on stdin.
+                    # Questions have no channel here, so ask_user
+                    # tells the model to proceed with its best
+                    # judgment and note the assumption. The runner
+                    # itself keeps researcher=None on purpose: a
+                    # researcher would newly let scheduled goals
+                    # route to webchat replies instead of the
+                    # agentic pipeline; the web_search plan tool
+                    # carries its own researcher.
+                    _job_researcher = _make_web_researcher(config)
+                    # Sandboxed shell for the gate: a real backend
+                    # (bwrap/Docker) isolates, and a host Sandbox
+                    # with bwrap present is offline; a host Sandbox
+                    # without bwrap is not isolated, so its shell
+                    # approvals stay rejected.
+                    _job_sandboxed = _backend is not None or bool(
+                        getattr(sandbox, "bwrap", False))
+                    _job_gate = _scheduled_gate(sandboxed=_job_sandboxed)
+                    _job_tools = _goal_extra_tools(config, sandbox.workdir, gate=_job_gate, researcher=_job_researcher, question_answer=None, scheduled=True)
+                    try:
+                        _job_deadline = float(job.time_limit or 0) or None
+                    except (TypeError, ValueError):
+                        _job_deadline = None
+                    runner = GoalRunner(client, sandbox, _job_gate, config.home,
                                         memory=memory, project_id=job.project_id, plugins=_plugins,
                                         execution_backend=_backend, budget=_Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
                                         trace=_Trace(config.home, project_id=job.project_id), model_verifier=_MV(client),
                                         kernel_mode=config.kernel_mode, semantic_router=_router2,
-                                        use_semantic_router_skip=True, network_available=_network_available(_backend, sandbox), run_id=_serve_run_id, run_control=_serve_control)
+                                        use_semantic_router_skip=True, network_available=_network_available(_backend, sandbox), run_id=_serve_run_id, run_control=_serve_control,
+                                        extra_tools=_job_tools,
+                                        deadline_seconds=_job_deadline)
                     report = runner.run(job.goal)
                     print(f"Job {job.name}: {report.status}, files: {', '.join(report.files)}")
+                    # Failure notification for goal jobs, mirroring
+                    # the brief kind's WhatsApp send. Failed and
+                    # partial (time-box cut) both notify: either
+                    # way the job did not complete. Unconfigured
+                    # messaging fails soft, like everything else
+                    # in this loop — the print above is the floor.
+                    if report.status in ("failed", "partial"):
+                        try:
+                            from ..interface.messaging import MessagingConfig, send_whatsapp
+                            _notify_cfg = MessagingConfig(
+                                whatsapp_token=config.whatsapp_token,
+                                whatsapp_phone_id=config.whatsapp_phone_id,
+                                whatsapp_verify_token=config.whatsapp_verify_token,
+                                whatsapp_app_secret=config.whatsapp_app_secret,
+                                whatsapp_owner=config.whatsapp_owner)
+                            _detail = (report.error or "")[:500]
+                            _text = (f"Scheduled job {job.name} {report.status}: "
+                                     f"{_detail or ', '.join(report.files) or 'no output'}")
+                            _sent = send_whatsapp(_notify_cfg, config.whatsapp_owner, _text)
+                            print(f"Job {job.name}: failure notification {_sent}")
+                        except Exception as exc:
+                            print(f"Job {job.name}: failure notification failed: {exc}")
             # Tick drain: once per tick, due notifications only,
             # cadence-spaced by the Outbox itself.
             _serve_loop.drain_outbox()
@@ -2665,6 +3517,28 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"Slack poll job: {_poll_report.status}")
             except Exception as exc:
                 print(f"Slack poll error: {exc}")
+            # Practice windows, same loop: start at most one session
+            # per schedule per day while its window is open.
+            try:
+                from ..interface.practice import (due_for_session, load_schedules,
+                                                  save_schedules, window_end)
+                from datetime import datetime as _dt
+                _now = _dt.now()
+                _schedules = load_schedules(config.home)
+                _changed = False
+                for _sched in _schedules:
+                    if due_for_session(_sched, _now):
+                        _sched["last_session_date"] = _now.strftime("%Y-%m-%d")
+                        _changed = True
+                        _end = window_end(_sched, _now)
+                        import threading as _th
+                        _th.Thread(target=_practice_session_sync, args=(_sched, _end),
+                                   daemon=True, name=f"practice-{_sched.get('name')}").start()
+                        print(f"Practice session started: {_sched.get('name')}")
+                if _changed:
+                    save_schedules(config.home, _schedules)
+            except Exception as exc:
+                print(f"Practice tick error: {exc}")
             import time as _sleep
             _sleep.sleep(60)
     if args.command == "benchmark":
@@ -2731,7 +3605,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         execution_backend = make_backend(
             config.execution_backend, sandbox,
-            image=config.docker_image, allow_network=config.docker_network)
+            image=config.docker_image, allow_network=config.docker_network,
+            vm_host=config.vm_host, vm_user=config.vm_user or None,
+            vm_sudo_password=config.vm_sudo_password or None,
+            vm_use_sudo=config.vm_use_sudo)
     except Exception as exc:
         print(f"execution backend error: {exc}")
         return 2
@@ -2830,7 +3707,7 @@ def main(argv: list[str] | None = None) -> int:
         _i_control.register(_i_run_id, args.text, args.project)
         print(f"interview run id: {_i_run_id}")
         goal_runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home,
-                                 memory=memory, promotion_ask=_promotion_ask,
+                                 memory=memory,
                                  project_id=args.project, plugins=plugins, execution_backend=execution_backend, researcher=_interview_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds), researcher=_interview_researcher), router=model_router, versioned_writes=True,
                                  budget=_IBudget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
                                  trace=_ITrace(config.home, project_id=args.project),
@@ -2881,12 +3758,12 @@ def main(argv: list[str] | None = None) -> int:
     _goal_control.register(_goal_run_id, args.text, args.project)
     print(f"run id: {_goal_run_id}")
     runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds, args.project), config.home,
-                        memory=memory, promotion_ask=_promotion_ask,
+                        memory=memory,
                         project_id=args.project, plugins=plugins, execution_backend=execution_backend,
                         budget=budget, trace=trace, model_verifier=model_verifier,
                         kernel_mode=config.kernel_mode, semantic_router=_cli_router,
                         use_semantic_router_skip=True, researcher=_researcher,
-                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds, args.project), researcher=_researcher),
+                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds, args.project), researcher=_researcher, model_chat=lambda messages: client.chat(messages)),
                         router=model_router, versioned_writes=True,
                         run_id=_goal_run_id, run_control=_goal_control,
                         network_available=_network_available(execution_backend, sandbox),
@@ -2913,7 +3790,6 @@ def main(argv: list[str] | None = None) -> int:
                 _goal_control.register(_sub_id, subgoal, args.project)
                 sub_runner = GoalRunner(client, sandbox, runner.gate,
                                         config.home, memory=memory,
-                                        promotion_ask=_promotion_ask,
                                         project_id=args.project, plugins=plugins,
                                         execution_backend=execution_backend,
                                         budget=budget, trace=trace,

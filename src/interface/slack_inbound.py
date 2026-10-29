@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import time
 
 from .triggers import TriggerEvent
@@ -35,17 +34,20 @@ def verify_slack_signature(signing_secret: str, timestamp: str, body: bytes, sig
     return hmac.compare_digest(expected, signature)
 
 
-def _image_files(event: dict) -> list[dict]:
-    """Image file shares carried by the event payload, if any.
+def _shared_files(event: dict) -> tuple[list[dict], list[dict]]:
+    """Shared files carried by the event payload, images and the rest.
 
     Slack sends shared files under "files" (current) or "file_shares"
-    (older events). Only image MIME types are kept. No download is
-    attempted here: Slack file URLs need a bot token the inbound
-    path does not carry, so the payload metadata is attached as-is
-    and the marker says so — the bytes are not fetched, and no
-    credential flow is invented.
+    (older events). Images keep the existing shape for the vision
+    path; every other file is returned alongside, so a PDF, a doc,
+    or a spreadsheet attached to a message reaches Aidon too.
+    No download is attempted here: Slack file URLs need a bot
+    token the inbound path does not carry, so the payload
+    metadata is attached as-is and the marker says so — the
+    bytes are not fetched, and no credential flow is invented.
     """
-    seen: dict[str, dict] = {}
+    seen_images: dict[str, dict] = {}
+    seen_files: dict[str, dict] = {}
     for key in ("files", "file_shares"):
         for item in event.get(key, []) or []:
             if not isinstance(item, dict):
@@ -54,20 +56,19 @@ def _image_files(event: dict) -> list[dict]:
             filetype = (item.get("filetype", "") or "").lower()
             is_image = mimetype.startswith("image/") or filetype in (
                 "jpg", "jpeg", "png", "gif", "webp")
-            if not is_image:
-                continue
-            file_id = str(item.get("id", ""))
-            seen[file_id or item.get("name", "")] = {
-                "id": file_id,
+            record = {
+                "id": str(item.get("id", "")),
                 "name": item.get("name", ""),
-                "mimetype": mimetype or f"image/{filetype}",
+                "mimetype": mimetype or f"{'image' if is_image else 'application'}/{filetype}",
                 "url_private": item.get("url_private", ""),
                 "downloaded": False,
                 "download_note": ("Slack file URLs need a bot token; "
                                   "the inbound path carries payload "
                                   "metadata only, not the file bytes."),
             }
-    return list(seen.values())
+            seen = seen_images if is_image else seen_files
+            seen[record["id"] or record["name"]] = record
+    return list(seen_images.values()), list(seen_files.values())
 
 
 def parse_slack_event(payload: dict, project_id: str = "default") -> TriggerEvent | None:
@@ -75,13 +76,17 @@ def parse_slack_event(payload: dict, project_id: str = "default") -> TriggerEven
     if event.get("type") != "message" or event.get("bot_id"):
         return None
     text = event.get("text", "")
-    images = _image_files(event)
-    if not text and not images:
+    images, files = _shared_files(event)
+    if not text and not images and not files:
         return None
     # Same downstream shape as the WhatsApp path: the image rides
-    # with the goal text as an [image ...] marker, and the file
-    # metadata rides in the event payload.
+    # with the goal text as an [image ...] marker, a document
+    # rides as a [file ...] marker, and the file metadata rides
+    # in the event payload.
     for image in images:
         text = (text + f" [image slack_file_id={image['id']} "
                 f"mimetype={image['mimetype']} name={image['name']}]").strip()
-    return TriggerEvent(source="slack", project_id=project_id, goal=text, payload={"channel": event.get("channel", ""), "user": event.get("user", ""), "images": images}, reply=lambda reply: None)
+    for shared in files:
+        text = (text + f" [file slack_file_id={shared['id']} "
+                f"mimetype={shared['mimetype']} name={shared['name']}]").strip()
+    return TriggerEvent(source="slack", project_id=project_id, goal=text, payload={"channel": event.get("channel", ""), "user": event.get("user", ""), "images": images, "files": files}, reply=lambda reply: None)

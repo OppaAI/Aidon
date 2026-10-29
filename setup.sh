@@ -20,9 +20,11 @@
 #   only if it does not already exist, never overwriting it.
 # Install every optional package without asking:
 #   ./setup.sh --with-optional
-# Install the Qdrant vector-memory server (binary + systemd)
+# Run the Qdrant vector-memory server in Docker
 # without asking:
 #   ./setup.sh --with-qdrant
+# Run SearXNG web search in Docker without asking:
+#   ./setup.sh --with-searxng
 #
 # What it does, besides asking:
 # - Checks python3, reports the version, does not install python.
@@ -37,7 +39,7 @@
 # - Secrets live in $AIDON_HOME/.env only, never in chat, source,
 #   or skills. Setup never prints a key back.
 #
-# Usage: ./setup.sh [--non-interactive] [--with-optional] [--with-qdrant]
+# Usage: ./setup.sh [--non-interactive] [--with-optional] [--with-qdrant] [--with-searxng]
 set -eu
 
 # Meta-inspired terminal palette: deep blue, cyan, violet, green, amber.
@@ -67,13 +69,15 @@ AIDON_HOME=${AIDON_HOME:-$HOME/.aidon}
 NONINTERACTIVE=0
 WITH_OPTIONAL=0
 WITH_QDRANT=0
+WITH_SEARXNG=0
 for arg in "$@"; do
   case "$arg" in
     --non-interactive) NONINTERACTIVE=1 ;;
     --with-optional) WITH_OPTIONAL=1 ;;
     --with-qdrant) WITH_QDRANT=1 ;;
+    --with-searxng) WITH_SEARXNG=1 ;;
     -h|--help)
-      say "usage: ./setup.sh [--non-interactive] [--with-optional] [--with-qdrant]"
+      say "usage: ./setup.sh [--non-interactive] [--with-optional] [--with-qdrant] [--with-searxng]"
       exit 0 ;;
     *) fail "I don't recognize '$arg'. Try --help."; exit 1 ;;
   esac
@@ -235,101 +239,130 @@ install_package() {
   fi
 }
 
-install_qdrant_server() {
-  # Qdrant vector-memory server, binary + systemd, ported from the old
-  # Aidon setup. Embedded local mode allows only ONE Aidon process at
-  # a time; the WebUI + tick loop + listeners need a server. Pinned
-  # version for reproducible installs. No docker: the binary starts
-  # faster and idles lighter than a container + daemon.
-  # Returns 0 when the binary is installed, 1 when it cannot be.
+install_qdrant_docker() {
+  # Qdrant vector-memory server, Docker. Embedded local mode allows
+  # only ONE Aidon process at a time; the WebUI + tick loop +
+  # listeners need a server. Pinned image for reproducible installs.
+  # Reuses a container named aidon-qdrant when it already exists
+  # (starts it if stopped); otherwise creates it with data in
+  # $AIDON_HOME/qdrant-server. Note: the retired binary install
+  # kept its data one level down, in $datadir/storage — if you
+  # migrate with data, move that directory's contents up one
+  # level into $datadir first.
+  # Returns 0 when the server is running, 1 when it cannot be.
   qver="v1.19.1"
-  arch=""
-  case "$(uname -m)" in
-    x86_64) arch="x86_64-unknown-linux-gnu" ;;
-    aarch64|arm64) arch="aarch64-unknown-linux-gnu" ;;
-    *) warn "Unsupported arch $(uname -m) for the Qdrant binary — install Qdrant yourself."; return 1 ;;
-  esac
-  if ! command -v curl >/dev/null 2>&1; then
-    warn "curl is required to download Qdrant; install curl, then run ./setup.sh again."
+  if ! command -v docker >/dev/null 2>&1; then
+    warn "Docker is not installed; install it, then run ./setup.sh again."
     return 1
   fi
-  bindir="$AIDON_HOME/bin"
-  datadir="$AIDON_HOME/qdrant-server"
-  mkdir -p "$bindir" "$datadir"
-  download_qdrant() {
-    info "Downloading Qdrant $qver ($arch)."
-    curl -sL -o /tmp/qdrant-aidon.tar.gz \
-      "https://github.com/qdrant/qdrant/releases/download/$qver/qdrant-$arch.tar.gz" || return 1
-    tar -xzf /tmp/qdrant-aidon.tar.gz -C /tmp qdrant || return 1
-    install -m 0755 /tmp/qdrant "$bindir/qdrant" || return 1
-    rm -f /tmp/qdrant-aidon.tar.gz /tmp/qdrant
-  }
-  upgraded=0
-  if [ ! -x "$bindir/qdrant" ]; then
-    download_qdrant || return 1
-    upgraded=1
-  else
-    have_ver="$("$bindir/qdrant" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-    if [ -n "$have_ver" ] && [ "$have_ver" != "${qver#v}" ]; then
-      info "Upgrading Qdrant $have_ver -> ${qver#v}."
-      download_qdrant || return 1
-      upgraded=1
-    else
-      ok "Qdrant present: $bindir/qdrant${have_ver:+ ($have_ver)}."
-    fi
+  if ! docker info >/dev/null 2>&1; then
+    warn "Docker is not running or not accessible; start it, then run ./setup.sh again."
+    return 1
   fi
-  if command -v systemctl >/dev/null 2>&1; then
-    unit_dir="$HOME/.config/systemd/user"
-    unit="$unit_dir/aidon-qdrant.service"
-    mkdir -p "$unit_dir"
-    cat > "$unit" <<EOF
-[Unit]
-Description=Aidon Qdrant vector memory server
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=$datadir
-ExecStart=$bindir/qdrant
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=default.target
-EOF
-    systemctl --user daemon-reload
-    if [ "$upgraded" = 1 ] && systemctl --user is-active --quiet aidon-qdrant.service 2>/dev/null; then
-      systemctl --user restart aidon-qdrant.service
-      ok "Restarted aidon-qdrant.service (binary installed/upgraded)."
-    else
-      systemctl --user enable --now aidon-qdrant.service
-      ok "Installed + started: $unit."
-    fi
-    i=0
-    healthy=0
-    while [ "$i" -lt 20 ]; do
-      if curl -sf http://127.0.0.1:6333/healthz >/dev/null 2>&1; then
-        healthy=1
-        break
-      fi
-      sleep 1
-      i=$((i + 1))
-    done
-    if [ "$healthy" = 1 ]; then
-      ok "Qdrant healthy: http://127.0.0.1:6333."
-    else
-      warn "Qdrant not healthy after 20s — check its log (systemctl --user status aidon-qdrant)."
-    fi
+  # Retire the old binary + systemd install when present: it would
+  # bind the same port and fight the container.
+  if [ -f "$HOME/.config/systemd/user/aidon-qdrant.service" ]; then
+    systemctl --user stop aidon-qdrant.service >/dev/null 2>&1 || true
+    systemctl --user disable aidon-qdrant.service >/dev/null 2>&1 || true
+    rm -f "$HOME/.config/systemd/user/aidon-qdrant.service"
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+    info "Retired the old aidon-qdrant systemd service."
+  fi
+  datadir="$AIDON_HOME/qdrant-server"
+  mkdir -p "$datadir"
+  if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'aidon-qdrant'; then
+    info "Qdrant container aidon-qdrant already exists — reusing it."
+    docker start aidon-qdrant >/dev/null 2>&1 || true
   else
-    info "No systemctl — start it yourself:"
-    info "  cd $datadir && nohup $bindir/qdrant >/tmp/qdrant.log 2>&1 &"
+    info "Starting Qdrant $qver in Docker (aidon-qdrant)."
+    docker run -d --name aidon-qdrant --restart unless-stopped \
+      -p 127.0.0.1:6333:6333 \
+      -v "$datadir:/qdrant/storage" \
+      "qdrant/qdrant:$qver" >/dev/null || return 1
+  fi
+  i=0
+  healthy=0
+  while [ "$i" -lt 20 ]; do
+    if curl -sf http://127.0.0.1:6333/healthz >/dev/null 2>&1; then
+      healthy=1
+      break
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  if [ "$healthy" = 1 ]; then
+    ok "Qdrant healthy: http://127.0.0.1:6333."
+  else
+    warn "Qdrant not healthy after 20s — check its log (docker logs aidon-qdrant)."
   fi
   if [ -z "$(dotenv_get AIDON_QDRANT_URL)" ]; then
     dotenv_set AIDON_QDRANT_URL "http://127.0.0.1:6333"
     ok "Set AIDON_QDRANT_URL=http://127.0.0.1:6333 in .env."
   else
     info "AIDON_QDRANT_URL already set — leaving it."
+  fi
+  return 0
+}
+
+install_searxng_docker() {
+  # SearXNG web-search server, Docker, for the searxng search
+  # backend (AIDON_SEARXNG_URL, default http://localhost:8888).
+  # Reuses a container named aidon-searxng when it already exists;
+  # otherwise creates it. Settings live in $AIDON_HOME/searxng and
+  # are written only once, so later setup runs never overwrite
+  # your tweaks. Returns 0 when the server is running, 1 when it
+  # cannot be.
+  if ! command -v docker >/dev/null 2>&1; then
+    warn "Docker is not installed; install it, then run ./setup.sh again."
+    return 1
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    warn "Docker is not running or not accessible; start it, then run ./setup.sh again."
+    return 1
+  fi
+  confdir="$AIDON_HOME/searxng"
+  mkdir -p "$confdir"
+  if [ ! -f "$confdir/settings.yml" ]; then
+    # JSON format for Aidon's /search?format=json calls, and the
+    # limiter off: a local agent's query rate trips it otherwise.
+    # Other settings stay at the image defaults (merged, not replaced).
+    cat > "$confdir/settings.yml" <<EOF
+general:
+  instance_name: "aidon-searxng"
+search:
+  formats:
+    - html
+    - json
+server:
+  limiter: false
+EOF
+  fi
+  if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'aidon-searxng'; then
+    info "SearXNG container aidon-searxng already exists — reusing it."
+    docker start aidon-searxng >/dev/null 2>&1 || true
+  else
+    info "Starting SearXNG in Docker (aidon-searxng)."
+    secret=$(openssl rand -hex 32 2>/dev/null || echo aidon-searxng-local)
+    docker run -d --name aidon-searxng --restart unless-stopped \
+      -p 127.0.0.1:8888:8080 \
+      -e "SEARXNG_SECRET=$secret" \
+      -v "$confdir:/etc/searxng:rw" \
+      searxng/searxng >/dev/null || return 1
+  fi
+  i=0
+  healthy=0
+  while [ "$i" -lt 20 ]; do
+    if curl -sf http://127.0.0.1:8888/healthz >/dev/null 2>&1; then
+      healthy=1
+      break
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  if [ "$healthy" = 1 ]; then
+    ok "SearXNG healthy: http://127.0.0.1:8888."
+  else
+    warn "SearXNG not healthy after 20s — check its log (docker logs aidon-searxng)."
   fi
   return 0
 }
@@ -421,13 +454,22 @@ if [ "$NONINTERACTIVE" = 0 ]; then
   ask_key "AIDON_TTS_VOICE_ID" "Fish Audio TTS voice ID (empty = default voice)"
   ask_setting "AIDON_SEARCH_BACKEND" "Search backend, tavily or searxng" "tavily"
   ask_setting "AIDON_SEARXNG_URL" "SearXNG URL (only used when backend is searxng)" "http://localhost:8888"
+  if [ "$(dotenv_get AIDON_SEARCH_BACKEND)" = "searxng" ]; then
+    if [ "$WITH_SEARXNG" = 1 ]; then
+      install_searxng_docker || warn "SearXNG Docker install failed; continuing without it."
+    elif ask_yes_no "Run SearXNG in Docker (aidon-searxng on localhost:8888)?"; then
+      install_searxng_docker || warn "SearXNG Docker install failed; continuing without it."
+    else
+      info "Skipped; SearXNG stays off until a server URL is set."
+    fi
+  fi
   section "Qdrant vector memory"
   info "Local mode works for one process; a server shares memory across WebUI, tick loop, and listeners."
   QDRANT_URL_DEFAULT=""
   if [ "$WITH_QDRANT" = 1 ]; then
-    if install_qdrant_server; then QDRANT_URL_DEFAULT="http://127.0.0.1:6333"; fi
-  elif ask_yes_no "Install + run a local Qdrant server (binary + systemd)?"; then
-    if install_qdrant_server; then QDRANT_URL_DEFAULT="http://127.0.0.1:6333"; fi
+    if install_qdrant_docker; then QDRANT_URL_DEFAULT="http://127.0.0.1:6333"; fi
+  elif ask_yes_no "Run Qdrant in Docker (aidon-qdrant on localhost:6333)?"; then
+    if install_qdrant_docker; then QDRANT_URL_DEFAULT="http://127.0.0.1:6333"; fi
   else
     info "Skipped; memory stays on local mode until a Qdrant server URL is set."
   fi
@@ -447,7 +489,13 @@ fi
 # skipped, so install here instead (interactive runs already handled it).
 if [ "$WITH_QDRANT" = 1 ] && [ "$NONINTERACTIVE" = 1 ]; then
   section "Qdrant vector memory"
-  install_qdrant_server || warn "Qdrant server install failed; continuing without it."
+  install_qdrant_docker || warn "Qdrant Docker install failed; continuing without it."
+fi
+
+# --with-searxng on a non-interactive run: same shape as Qdrant above.
+if [ "$WITH_SEARXNG" = 1 ] && [ "$NONINTERACTIVE" = 1 ]; then
+  section "SearXNG web search"
+  install_searxng_docker || warn "SearXNG Docker install failed; continuing without it."
 fi
 
 if command -v bwrap >/dev/null 2>&1; then

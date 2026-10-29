@@ -53,8 +53,6 @@ class ConversationStore:
     def context(self, conversation_id: str, limit: int = 10) -> str:
         return "\n".join(f"{t.get('role')}: {t.get('text')}" for t in self.history(conversation_id, limit=limit))
 
-    def list_ids(self) -> list:
-        return sorted(p.stem for p in self.dir.glob("*.json"))
 
     def forget(self, conversation_id: str) -> bool:
         path = self._path(conversation_id)

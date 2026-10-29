@@ -69,14 +69,18 @@ def effort_for(phase: str, overrides: dict | None = None) -> str:
 
 
 def sampling_for(phase: str, *, escalate: bool = False,
-                 creative: bool = False) -> dict:
+                 creative: bool = False, think_max: bool = False) -> dict:
     """Sampling parameters for a phase with graceful effort degradation.
 
     Backends that expose only a thinking on/off switch receive ``think``.
     Backends that do not understand that hint simply ignore it and still
-    receive the portable temperature/top-p settings.
+    receive the portable temperature/top-p settings. With think_max,
+    every phase runs at the top of the ladder and the payload carries
+    the model's own maximum reasoning effort (``reasoning_effort``):
+    an explicit run-time toggle wins over .env effort pins, because
+    it is the newer, more specific user decision.
     """
-    level = resolve_effort(phase, escalate=escalate)
+    level = "high" if think_max else resolve_effort(phase, escalate=escalate)
     result = dict(_SAMPLING_TABLE.get(phase, _DEFAULT_SAMPLING))
     if creative and str(phase).lower() in {"respond", "learn"}:
         # Open-ended writing benefits from a wider distribution than
@@ -122,7 +126,17 @@ def sampling_for(phase: str, *, escalate: bool = False,
     else:
         # Native backends may only support a boolean thinking switch. All
         # positive effort levels degrade to that supported representation.
-        result["think"] = level != "off"
+        result["think"] = think_max or level != "off"
+    if think_max:
+        # The model's own maximum: Meta's chat completions accept
+        # reasoning_effort up to "max" for muse-spark-1.3 standard
+        # (the API schema and Reasoning guide both list it; the
+        # feature page omits it). The Contributor variant does NOT
+        # support "max" and tops at "xhigh" — the HTTP client
+        # downgrades there. Backends that do not know the field
+        # ignore it, like the think hint above.
+        result["think"] = True
+        result["reasoning_effort"] = "max"
     return result
 
 

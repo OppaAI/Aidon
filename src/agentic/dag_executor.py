@@ -40,6 +40,27 @@ def _is_transient(exc: BaseException) -> bool:
     return "transient" in str(exc).lower()
 
 
+def resolve_parallel_workers(max_workers=None) -> int:
+    """Resolve the parallel-worker count: explicit arg, else env, else 3.
+
+    The single knob for both parallel executors (the loop's
+    level driver and DAGExecutor): AIDON_PARALLEL_WORKERS in
+    .env, the settings page, and .env.example. An invalid
+    value falls back to 3, never to 0 or negative, so a typo
+    cannot serialize or crash a run.
+    """
+    if max_workers is not None:
+        try:
+            return max(1, int(max_workers))
+        except (TypeError, ValueError):
+            pass
+    try:
+        import os
+        return max(1, int(os.environ.get("AIDON_PARALLEL_WORKERS", "3") or "3"))
+    except ValueError:
+        return 3
+
+
 class DAGExecutor:
     """Run a DAG's nodes in order, checkpointing each completion."""
 
@@ -56,15 +77,14 @@ class DAGExecutor:
         return f"node:{node_id}"
 
     def _dag_fingerprint(self) -> str:
-        nodes = []
-        for node in self.dag.topological_order():
-            nodes.append({
-                "id": node.id,
-                "tool": node.tool,
-                "args": node.args,
-                "deliverable": node.deliverable,
-                "depends_on": list(node.depends_on or []),
-            })
+        # Every field that can affect a node's execution or
+        # whether its result stays valid. Fingerprinting a
+        # subset once let a changed precondition, expected
+        # result, assumption, or executor reuse a stale
+        # checkpoint; to_dict already carries the full node,
+        # so hash that instead of a hand-picked subset.
+        nodes = [node.to_dict()
+                 for node in self.dag.topological_order()]
         canonical = json.dumps(nodes, sort_keys=True,
                                ensure_ascii=False, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -173,6 +193,69 @@ class DAGExecutor:
             "completed": completed,
             "failed": failed,
         }
+
+    def execute_parallel(self, max_workers: int | None = None) -> dict:
+        """Run a DAG level by level, nodes in one level concurrently.
+
+        Levels come from compute_levels: a level runs only after
+        every earlier level finished, so a node never runs before
+        its dependencies, and independent nodes share a level and
+        run together. Workers resolve via resolve_parallel_workers
+        (explicit arg, else AIDON_PARALLEL_WORKERS, else 3). A
+        failure in a level stops the run — later levels never
+        start — while completed nodes and their checkpoints are
+        preserved, exactly like the sequential execute().
+        Checkpoints are written under a lock, so concurrent
+        completions cannot interleave.
+        """
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        from .dag import compute_levels
+
+        self._ensure_identity()
+        results = self.partial_results()
+        completed = list(results)
+        failed = None
+        lock = threading.Lock()
+        try:
+            levels = compute_levels([(node.id, list(node.depends_on or []))
+                                     for node in self.dag.nodes.values()])
+        except ValueError as exc:
+            return {"status": "failed", "results": results, "completed": completed,
+                    "failed": {"__schedule__": str(exc)}}
+        by_id = dict(self.dag.nodes)
+        workers = resolve_parallel_workers(max_workers)
+
+        def _run(node_id):
+            try:
+                return node_id, str(self.run_node(by_id[node_id])), None
+            except Exception as exc:
+                if _is_transient(exc):
+                    try:
+                        return node_id, str(self.run_node(by_id[node_id])), None
+                    except Exception as retry_exc:
+                        return node_id, None, str(retry_exc)
+                return node_id, None, str(exc)
+
+        for level in levels:
+            pending = [node_id for node_id in level if node_id not in results]
+            if not pending:
+                continue
+            with ThreadPoolExecutor(max_workers=min(workers, len(pending))) as pool:
+                outcomes = list(pool.map(_run, pending))
+            for node_id, result, error in outcomes:
+                if error is not None:
+                    failed = {node_id: error}
+                else:
+                    with lock:
+                        self._set_checkpoint(node_id, result)
+                    results[node_id] = result
+                    completed.append(node_id)
+            if failed is not None:
+                break
+        return {"status": "failed" if failed is not None else "done",
+                "results": results, "completed": completed, "failed": failed}
 
     def resume(self) -> dict:
         """Continue a killed run: execute() already skips checkpoints."""

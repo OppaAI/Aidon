@@ -57,6 +57,46 @@ def test_embeddinggemma2_stub_is_768_and_uses_prompts():
     assert doc != query
 
 
+def _fake_sentence_transformers(monkeypatch):
+    import sys
+    import types
+
+    calls = {}
+
+    class _FakeST:
+        def __init__(self, name, **kwargs):
+            calls["name"] = name
+            calls.update(kwargs)
+
+        def encode(self, *args, **kwargs):
+            return [[0.0] * 768]
+
+    mod = types.ModuleType("sentence_transformers")
+    mod.SentenceTransformer = _FakeST
+    monkeypatch.setitem(sys.modules, "sentence_transformers", mod)
+    return calls
+
+
+def test_embedder_pins_revision(monkeypatch):
+    from src.memory.embedder import (
+        EMBEDDINGGEMMA2_REVISION, EmbeddingGemma2Embedder)
+
+    calls = _fake_sentence_transformers(monkeypatch)
+    monkeypatch.delenv("AIDON_EMBEDDING_REVISION", raising=False)
+    emb = EmbeddingGemma2Embedder()
+    assert calls["revision"] == EMBEDDINGGEMMA2_REVISION
+    assert emb.revision == EMBEDDINGGEMMA2_REVISION
+
+
+def test_embedder_revision_env_override(monkeypatch):
+    from src.memory.embedder import EmbeddingGemma2Embedder
+
+    calls = _fake_sentence_transformers(monkeypatch)
+    monkeypatch.setenv("AIDON_EMBEDDING_REVISION", "abc123")
+    EmbeddingGemma2Embedder()
+    assert calls["revision"] == "abc123"
+
+
 def test_make_embedder_hash_and_default():
     assert isinstance(make_embedder("hash"), HashEmbedder)
     # Default is EmbeddingGemma 2 only when sentence-transformers

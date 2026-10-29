@@ -23,7 +23,6 @@ demo and testing part, done after work, not here.
 
 from __future__ import annotations
 
-from .counting import CountingClient
 
 
 def _quality_ok(files: dict[str, str], new_word: str, old_word: str) -> bool:
@@ -76,5 +75,3 @@ def benchmark_total(learn_calls: int, learn_tokens: int, fresh_calls: int, fresh
             "tokens_saved_total_estimated": (learn_tokens + fresh_tokens) - (learn_tokens + adapted_tokens)}
 
 
-def counting_report(client: CountingClient) -> dict:
-    return client.report()

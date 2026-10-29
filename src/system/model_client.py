@@ -13,12 +13,128 @@ against files and evidence, never against a model's word alone.
 
 from __future__ import annotations
 
+import http.client
+import io
 import json
+import ssl
+import threading
 import uuid
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
+
+
+class _KeepAlive:
+    """Per-thread keep-alive connections, one per origin.
+
+    A model call is one POST, and a run makes many of them. Without
+    pooling every call pays a fresh TCP handshake and, over https, a
+    full TLS handshake, measured at ~55ms per call to the Meta
+    endpoint. Reusing the connection removes that cost for every call
+    after the first.
+
+    One connection per (thread, origin): the WebUI is threaded, and a
+    connection must never be shared across threads mid-request.
+    Connections are never shared across processes either, so this
+    holds nothing that a forked child could corrupt.
+    """
+
+    def __init__(self) -> None:
+        self._local = threading.local()
+
+    def _conns(self) -> dict:
+        conns = getattr(self._local, "conns", None)
+        if conns is None:
+            conns = {}
+            self._local.conns = conns
+        return conns
+
+    def get(self, origin: tuple, timeout: float):
+        conn = self._conns().get(origin)
+        if conn is not None:
+            return conn
+        scheme, host, port = origin
+        if scheme == "https":
+            conn = http.client.HTTPSConnection(
+                host, port, timeout=timeout,
+                context=ssl.create_default_context())
+        else:
+            conn = http.client.HTTPConnection(host, port, timeout=timeout)
+        self._conns()[origin] = conn
+        return conn
+
+    def drop(self, origin: tuple) -> None:
+        conn = self._conns().pop(origin, None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+_KEEPALIVE = _KeepAlive()
+
+# Stale keep-alive sockets fail like this when the peer closed them
+# between calls. They are retried once on a fresh connection; anything
+# else (DNS, TLS, auth) propagates at once instead of being retried.
+_STALE = (http.client.RemoteDisconnected, http.client.CannotSendRequest,
+          http.client.BadStatusLine, ConnectionResetError, BrokenPipeError)
+
+
+def _origin(url: str) -> tuple:
+    """(scheme, host, port) and the request path for a URL."""
+    parsed = urllib.parse.urlsplit(url)
+    scheme = parsed.scheme or "http"
+    host = parsed.hostname or "localhost"
+    port = parsed.port or (443 if scheme == "https" else 80)
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    return (scheme, host, port), path
+
+
+def _post(url: str, body: bytes, headers: dict, timeout: float):
+    """POST over a pooled connection, retrying one stale socket.
+
+    Returns (response, origin); the caller must read the response and
+    then call ``_release`` so a half-read body is never reused.
+    """
+    origin, path = _origin(url)
+    for attempt in (0, 1):
+        conn = _KEEPALIVE.get(origin, timeout)
+        try:
+            conn.timeout = timeout
+            if conn.sock is not None:
+                conn.sock.settimeout(timeout)
+            conn.request("POST", path, body=body, headers=headers)
+            return conn.getresponse(), origin
+        except _STALE:
+            _KEEPALIVE.drop(origin)
+            if attempt:
+                raise
+    raise RuntimeError("unreachable")
+
+
+def _release(resp, origin: tuple) -> None:
+    """Keep the connection only if the whole body was read and the
+    peer did not ask to close it."""
+    if resp.will_close or not resp.isclosed():
+        _KEEPALIVE.drop(origin)
+
+
+def _read_json(resp, origin: tuple, url: str) -> dict:
+    """Read a JSON body, mapping HTTP errors onto urllib's HTTPError
+    so existing callers keep their error handling."""
+    try:
+        if resp.status >= 400:
+            data = resp.read()
+            raise urllib.error.HTTPError(url, resp.status, resp.reason,
+                                         resp.headers, io.BytesIO(data))
+        return json.loads(resp.read().decode("utf-8"))
+    finally:
+        _release(resp, origin)
 
 
 @dataclass
@@ -173,6 +289,7 @@ class HttpModelClient(ModelClient):
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        self.last_stream_usage = None
 
     def _payload(self, messages: list[Message], sampling=None, tools=None) -> dict:
         payload = {
@@ -187,6 +304,16 @@ class HttpModelClient(ModelClient):
                 payload["top_p"] = sampling["top_p"]
             if sampling.get("seed") is not None:
                 payload["seed"] = sampling["seed"]
+            if sampling.get("reasoning_effort") is not None:
+                # Meta chat completions: "none" is rejected by Muse
+                # Spark. "max" is the standard model's top level but
+                # is NOT supported by the Contributor variant, which
+                # tops at "xhigh" — downgrade there so a /think run
+                # on the test model does not 400.
+                effort = str(sampling["reasoning_effort"])
+                if effort == "max" and "contributor" in str(self.model).lower():
+                    effort = "xhigh"
+                payload["reasoning_effort"] = effort
         if tools:
             payload["tools"] = tools
         return payload
@@ -195,16 +322,15 @@ class HttpModelClient(ModelClient):
         # A list content is sent as-is, so image parts reach
         # the model, not just the text part. A string content
         # is unchanged, so old text-only calls keep working.
-        req = urllib.request.Request(
-            f"{self.api_base}/chat/completions",
-            data=json.dumps(payload).encode("utf-8"),
-            method="POST",
-            headers={"Content-Type": "application/json",
-                     "Authorization": f"Bearer {self.api_key}"},
+        url = f"{self.api_base}/chat/completions"
+        resp, origin = _post(
+            url,
+            json.dumps(payload).encode("utf-8"),
+            {"Content-Type": "application/json",
+             "Authorization": f"Bearer {self.api_key}"},
+            self.timeout,
         )
-        emitted = False
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        return _read_json(resp, origin, url)
 
     @staticmethod
     def _content(message: dict) -> str:
@@ -232,12 +358,42 @@ class HttpModelClient(ModelClient):
     def chat_stream(self, messages: list[Message], sampling=None):
         payload = self._payload(messages, sampling=sampling)
         payload["stream"] = True
-        req = urllib.request.Request(
-            f"{self.api_base}/chat/completions",
-            data=json.dumps(payload).encode("utf-8"), method="POST",
-            headers={"Content-Type": "application/json",
-                     "Authorization": f"Bearer {self.api_key}"})
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+        # Chat Completions usage chunk: the provider sends one final
+        # chunk with an empty choices array and the whole-request
+        # usage, before [DONE]. Asking for it costs no extra request
+        # and no extra latency; when the provider does not send it,
+        # the caller falls back to the estimate, as before.
+        payload["stream_options"] = {"include_usage": True}
+        self.last_stream_usage = None
+        try:
+            yield from self._stream_payload(messages, sampling, payload)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 400:
+                raise
+            # A provider that rejects stream_options still streams
+            # fine without it. The 400 surfaces before any chunk is
+            # yielded, so retrying once cannot duplicate text; usage
+            # then falls back to the estimate.
+            payload = dict(payload)
+            payload.pop("stream_options", None)
+            self.last_stream_usage = None
+            yield from self._stream_payload(messages, sampling, payload)
+
+    def _stream_payload(self, messages, sampling, payload):
+        url = f"{self.api_base}/chat/completions"
+        resp, origin = _post(
+            url,
+            json.dumps(payload).encode("utf-8"),
+            {"Content-Type": "application/json",
+             "Authorization": f"Bearer {self.api_key}"},
+            self.timeout,
+        )
+        emitted = False
+        try:
+            if resp.status >= 400:
+                data = resp.read()
+                raise urllib.error.HTTPError(url, resp.status, resp.reason,
+                                             resp.headers, io.BytesIO(data))
             for raw in resp:
                 line = raw.decode("utf-8", "replace").strip()
                 if not line or line == "data: [DONE]":
@@ -248,6 +404,9 @@ class HttpModelClient(ModelClient):
                     data = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                usage = data.get("usage")
+                if usage:
+                    self.last_stream_usage = usage
                 choices = data.get("choices") or []
                 if not choices:
                     continue
@@ -256,6 +415,8 @@ class HttpModelClient(ModelClient):
                 if text:
                     emitted = True
                     yield str(text)
+        finally:
+            _release(resp, origin)
         if not emitted:
             # Some compatible gateways ignore stream=true and return one
             # normal JSON response. Preserve compatibility rather than
@@ -282,6 +443,7 @@ class NativeModelClient(ModelClient):
         self.timeout = timeout
         self.think = think
         self.num_ctx = num_ctx
+        self.last_stream_usage = None
 
     def _body(self, messages: list[Message]) -> dict:
         converted = []
@@ -312,15 +474,12 @@ class NativeModelClient(ModelClient):
         return body
 
     def _request(self, body: dict) -> dict:
-        req = urllib.request.Request(
-            f"{self.base}/api/chat",
-            data=json.dumps(body).encode("utf-8"),
-            method="POST",
-            headers={"Content-Type": "application/json"},
-        )
+        url = f"{self.base}/api/chat"
+        resp, origin = _post(url, json.dumps(body).encode("utf-8"),
+                             {"Content-Type": "application/json"},
+                             self.timeout)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+            return _read_json(resp, origin, url)
         except urllib.error.HTTPError as exc:
             detail = ""
             try:
@@ -363,6 +522,7 @@ class NativeModelClient(ModelClient):
     def chat_stream(self, messages: list[Message], sampling=None):
         body = self._body(messages)
         body["stream"] = True
+        self.last_stream_usage = None
         if sampling:
             if sampling.get("think") is not None:
                 body["think"] = bool(sampling["think"])
@@ -370,11 +530,16 @@ class NativeModelClient(ModelClient):
             for key in ("temperature", "top_p", "seed"):
                 if sampling.get(key) is not None:
                     body["options"][key] = sampling[key]
-        req = urllib.request.Request(
-            f"{self.base}/api/chat", data=json.dumps(body).encode("utf-8"),
-            method="POST", headers={"Content-Type": "application/json"})
+        url = f"{self.base}/api/chat"
+        resp, origin = _post(url, json.dumps(body).encode("utf-8"),
+                             {"Content-Type": "application/json"},
+                             self.timeout)
         emitted = False
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+        try:
+            if resp.status >= 400:
+                data = resp.read()
+                raise urllib.error.HTTPError(url, resp.status, resp.reason,
+                                             resp.headers, io.BytesIO(data))
             for raw in resp:
                 line = raw.decode("utf-8", "replace").strip()
                 if not line:
@@ -383,11 +548,18 @@ class NativeModelClient(ModelClient):
                     data = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if data.get("done") and (data.get("prompt_eval_count") is not None
+                                         or data.get("eval_count") is not None):
+                    self.last_stream_usage = {
+                        "prompt_tokens": data.get("prompt_eval_count") or 0,
+                        "completion_tokens": data.get("eval_count") or 0}
                 message = data.get("message") or {}
                 text = message.get("content", "")
                 if text:
                     emitted = True
                     yield str(text)
+        finally:
+            _release(resp, origin)
         if not emitted:
             yield self.chat(messages, sampling=sampling)
 

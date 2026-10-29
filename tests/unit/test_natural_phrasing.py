@@ -1,7 +1,8 @@
 """Natural-language asking, approval, and report styles.
 
-Old Aidon wrote these messages as sentences, worded differently each
-time. New Aidon used fixed templates ("Done: ...", "Rejected, no live
+Asking, approval, and report messages read like sentences, worded
+differently each time, while the run's own messages use fixed
+templates ("Done: ...", "Rejected, no live
 action taken."). The phrasing module varies the framing at zero model
 cost; titles, card ids, approve/reject mechanics, and the stats line
 are untouched. Asking on Slack/WhatsApp also works now: a waiting

@@ -19,8 +19,10 @@ from __future__ import annotations
 ALLOWED_TOOLS = {"write", "read", "list", "shell", "calculate"}
 
 
-def validate_plan(plan, allowed_tools: set[str] | None = None) -> list[str]:
+def validate_plan(plan, allowed_tools: set[str] | None = None,
+                  skill_names: set[str] | None = None) -> list[str]:
     allowed = set(allowed_tools) if allowed_tools is not None else ALLOWED_TOOLS
+    skills = set(skill_names or [])
     failures = []
     steps = plan.normalized_steps() if hasattr(plan, "normalized_steps") else plan.steps
     deliverables = set()
@@ -29,7 +31,17 @@ def validate_plan(plan, allowed_tools: set[str] | None = None) -> list[str]:
         args = step.args if hasattr(step, "args") else step.get("args", {})
         deliverable = step.deliverable if hasattr(step, "deliverable") else step.get("deliverable", "")
         if tool not in allowed:
-            failures.append(f"step {index}: tool {tool} is not allowed")
+            if tool in skills:
+                # The classic tool/skill confusion: the plan prompt
+                # lists skills alongside tools, and a model puts a
+                # skill name in the tool slot. Skills are guidance
+                # text, never callable steps — name the confusion
+                # so the repair pass fixes the right thing.
+                failures.append(f"step {index}: {tool} is a skill, not a "
+                                "callable tool; follow its text, do not "
+                                "call it as a step tool")
+            else:
+                failures.append(f"step {index}: tool {tool} is not allowed")
         if not isinstance(args, dict):
             failures.append(f"step {index}: args must be a dict")
         elif tool in {"write", "write_file"}:

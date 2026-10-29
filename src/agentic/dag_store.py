@@ -24,6 +24,7 @@ import json
 import re
 from pathlib import Path
 
+from ..memory.experience import dag_similarity_threshold
 from .dag import DAG, DAGNode
 
 # Words that carry no goal shape: articles, prepositions,
@@ -36,9 +37,6 @@ _STOPWORDS = frozenset({
     "with", "my", "me", "i", "is", "it", "be", "by", "at", "from",
     "please", "then", "that", "this", "as", "into", "about",
 })
-
-_LEARN_SIMILARITY = 0.3
-
 
 def _goal_words(goal: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9]+", str(goal).lower())
@@ -134,11 +132,12 @@ class DagStore:
 
         One DAG per goal shape: the new goal's content words
         are compared (Jaccard similarity) against every saved
-        DAG's goal. At 0.3 or above, the best match is
-        REPLACED under its existing id — no near-duplicate
-        is added. Below that, the DAG is saved under a new
-        slug id derived from the goal, so distinct shapes
-        coexist. Returns ("replaced", id), ("added", id),
+        DAG's goal. At the configured similarity threshold
+        (AIDON_DAG_SIMILARITY, default 0.3) or above, the
+        best match is REPLACED under its existing id — no
+        near-duplicate is added. Below that, the DAG is saved
+        under a new slug id derived from the goal, so distinct
+        shapes coexist. Returns ("replaced", id), ("added", id),
         or ("invalid", "") when the nodes cannot form a
         valid DAG. This is the learn path only; the editor
         path (save) is untouched.
@@ -175,7 +174,7 @@ class DagStore:
                 score = len(words & other) / len(words | other)
             if score > best_score:
                 best_id, best_score = entry["id"], score
-        if best_id and best_score >= _LEARN_SIMILARITY:
+        if best_id and best_score >= dag_similarity_threshold():
             ok, _failures = self.save(best_id, goal, norm)
             return ("replaced", best_id) if ok else ("invalid", "")
         slug = _goal_slug(goal)

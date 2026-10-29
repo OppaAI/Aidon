@@ -76,6 +76,7 @@
   let lastRoute = null;
   let runTraceHistory = [];
   let cardShownFor = null;
+  let proceedShownFor = null;
   const streamMessages = {};
 
   function esc(s) {
@@ -176,6 +177,15 @@
       body: lines.slice(0, index).join("\n").replace(/\s+$/, ""),
       stats: lines.slice(index).join(" ").replace(/^\s*⏱️?\s*/, "").trim(),
     };
+  }
+
+  // Bodies equal ignoring the ⏱ stats footer and whitespace runs:
+  // the final event appends a stats footer the stream never
+  // carried, and HTML collapses whitespace anyway, so neither
+  // difference is a second message.
+  function sameMessageBody(a, b) {
+    const norm = (s) => String(s || "").replace(/\s+/g, " ").trim();
+    return norm(finalMessageParts(a).body) === norm(finalMessageParts(b).body);
   }
 
   function renderFinalMessage(text, route) {
@@ -394,7 +404,7 @@
     if (!waveCvs && !avatarWaveCvs) return;
     let freq = null;
     let micTime = null;
-    if (recorder && micAnalyser) {
+    if ((micLive || micFallback) && micAnalyser) {
       if (!micAnalyserData || micAnalyserData.length !== micAnalyser.fftSize)
         micAnalyserData = new Uint8Array(micAnalyser.fftSize);
       micAnalyser.getByteTimeDomainData(micAnalyserData);
@@ -438,7 +448,7 @@
     }
     paint(waveCvs, micTime, true);       // your microphone input
     paint(avatarWaveCvs, freq, false);   // Aidon's voice output
-    if (recorder || ttsPlaying) requestAnimationFrame(drawWave);
+    if (micLive || micFallback || ttsPlaying) requestAnimationFrame(drawWave);
   }
 
   function mouthLoop() {
@@ -884,24 +894,39 @@
       const failed = String(e.status || "").toLowerCase() === "failed";
       item.className = "think-item " + (e.kind || "note") +
         (failed ? " think-failed" : "");
-      const meta = (e.tokens_in || e.tokens_out)
-        ? ((e.tokens_in || 0) + " in · " + (e.tokens_out || 0) + " out")
-        : (e.status || ((e.seconds || 0) + "s"));
+      const hasTokenFields = ("tokens_in" in e) || ("tokens_out" in e);
+      // Thinking is internal and encrypted on Meta, but its token
+      // count arrives in usage. Per Meta's docs, reasoning tokens
+      // are output tokens and already inside completion_tokens,
+      // so show the count in parentheses: a subset of out, never
+      // an addition on top of it.
+      const thinkSuffix = ((e.thinking_tokens || 0) > 0)
+        ? (" (" + e.thinking_tokens + " think)") : "";
+      const meta = hasTokenFields
+        ? ((e.seconds || 0) + "s · " + (e.tokens_in || 0) + "→" + (e.tokens_out || 0) + " tok" + thinkSuffix)
+        : ((e.tokens_in || e.tokens_out)
+          ? ((e.tokens_in || 0) + " in · " + (e.tokens_out || 0) + " out")
+          : (e.status || ((e.seconds || 0) + "s")));
       const detail = e.detail || e.title || e.error || "";
       const usefulDetail = detail && detail !== (e.title || "");
-      // Token accounting alone is not expandable content. Only a trace
-      // event carrying actual thinking text gets the arrow and click
-      // handler; statuses, tool names, and errors stay static.
-      const expandable = !!(e.thinking && String(e.thinking).trim());
+      // Expandable when the step carries thinking to show: thinking
+      // text (Ollama) or a thinking-token count (Meta usage). The
+      // body stays collapsed until the row is clicked.
+      const hasThinkingText = !!(e.thinking && String(e.thinking).trim());
+      const hasThinkingTokens = (e.thinking_tokens || 0) > 0;
+      const expandable = hasThinkingText || hasThinkingTokens;
       const detailMarkup = failed
         ? (usefulDetail ? '<div class="think-error-detail">' + esc(detail) + "</div>" : "")
-        : (expandable && (usefulDetail || e.thinking)
+        : (expandable && (usefulDetail || hasThinkingText || hasThinkingTokens)
           ? '<div class="think-body"><div class="think-detail">' + esc(detail) +
-            (e.thinking ? '</div><pre class="think-thinking">' + esc(e.thinking) + "</pre>" : "</div>") +
+            (hasThinkingTokens ? '</div><div class="think-detail">thinking tokens: ' +
+              esc(e.thinking_tokens) + '</div>' : '</div>') +
+            (hasThinkingText ? '<pre class="think-thinking">' + esc(e.thinking) + "</pre>" : "") +
             "</div>"
           : "");
       item.innerHTML =
-        '<div class="think-head-row"' + (expandable ? ' title="click to expand details"' : '') + '>' +
+        '<div class="think-head-row"' + (expandable ? ' title="click to expand' +
+          (hasThinkingTokens ? ' thinking tokens"' : ' details"') : '') + '>' +
         (expandable ? '<button class="think-toggle" title="expand">›</button>' :
           '<span class="think-toggle" style="visibility:hidden">›</span>') +
         '<div class="think-title">' + esc(e.title || e.detail || e.status || phase) + "</div>" +
@@ -1000,6 +1025,57 @@
       decide(run.run_id, "rejected", ""));
   }
 
+  // A stopped Ask/Plan run renders one Proceed button, not an
+  // approval card: proceeding resumes the run, it does not approve
+  // an action. The button posts to /api/proceed and follows the
+  // resume run it returns, like any other new run.
+  function showProceedCard(run, stop) {
+    if (proceedShownFor === run.run_id) return;
+    proceedShownFor = run.run_id;
+    approvalSlot.innerHTML = "";
+    const card = document.createElement("div");
+    card.className = "card approval-card";
+    card.innerHTML =
+      '<div class="kind">stopped — ' + esc(stop.mode) + " ready</div>" +
+      "<h3>" + (stop.mode === "ask" ? "Spec ready" : "Plan ready") + "</h3>" +
+      '<div class="row">' +
+      '<button class="approve" data-d="proceed">Proceed</button>' +
+      "</div>";
+    approvalSlot.appendChild(card);
+    card.querySelector('[data-d="proceed"]').addEventListener("click", async () => {
+      const btn = card.querySelector('[data-d="proceed"]');
+      btn.disabled = true;
+      try {
+        const convCtx = window.aidonConversation ? window.aidonConversation() : {};
+        const r = await fetch("/api/proceed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stop_id: stop.stop_id,
+            conversation_id: convCtx.conversation_id || "",
+          }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.run_id) throw new Error((data && data.detail) || "no run");
+        approvalSlot.innerHTML = "";
+        proceedShownFor = null;
+        cardShownFor = null;
+        currentRun = data.run_id;
+        lastEventCount = 0;
+        lastTraceCount = 0;
+        setStatus("busy", "working");
+        renderStages("interpret");
+        steerRow.hidden = false;
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        pollTimer = setInterval(poll, 2000);
+        poll();
+      } catch (e) {
+        btn.disabled = false;
+        showMiddleStatus("Could not proceed: " + e.message, "error");
+      }
+    });
+  }
+
   async function decide(runId, decision, editedText) {
     try {
       const r = await fetch("/api/runs/" + runId + "/approval", {
@@ -1068,12 +1144,16 @@
           }
           if (m) {
             if (e.kind === "aidon-final" && m._streamText && e.text &&
-                String(e.text).trim() !== String(m._streamText).trim()) {
-              // Streamed intermediate prose differs from the final
-              // summary (agentic runs stream fast-node prose, then
-              // finish with an assembled summary): keep the streamed
-              // bubble and show the final as its own message, instead
-              // of discarding the prose by replacing it.
+                !sameMessageBody(e.text, m._streamText)) {
+              // Streamed intermediate prose genuinely differs from
+              // the final summary (agentic runs stream fast-node
+              // prose, then finish with an assembled summary): keep
+              // the streamed bubble and show the final as its own
+              // message, instead of discarding the prose by
+              // replacing it. A stats footer or whitespace alone is
+              // not a difference: the final always appends a ⏱ stats
+              // line the stream never carried, and keeping both
+              // bubbles then reads as a duplicated reply.
               delete streamMessages[sid];
               m = addMsgTyped("aidon", e.text, e.t, true, lastRoute);
             } else {
@@ -1141,6 +1221,9 @@
         if (!sawDecision) {
           showMiddleStatus("Approval timed out, treated as rejected — card removed", "warning");
         }
+      }
+      if (run.mode_stop) {
+        showProceedCard(run, run.mode_stop);
       }
       if (run.status === "running") {
         // Chat-first questions: while the run waits for a question
@@ -1448,6 +1531,7 @@
     const previousRun = currentRun;
     const guidance = guidanceInput.value.trim();
     const forceWeb = document.getElementById("web-btn")?.classList.contains("active") || false;
+    const runMode = document.getElementById("mode-chooser")?.value || "ask";
     const imgs = pendingImages.slice();
     const fls = pendingFiles.slice();
     const files = imgs.concat(fls);
@@ -1474,6 +1558,7 @@
         const fd = new FormData();
         fd.append("goal", goal);
         fd.append("guidance", guidance);
+        fd.append("mode", runMode);
         if (forceWeb) fd.append("force_web", "true");
         if (convCtx.conversation_id)
           fd.append("conversation_id", convCtx.conversation_id);
@@ -1490,7 +1575,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            goal, guidance, force_web: forceWeb,
+            goal, guidance, force_web: forceWeb, mode: runMode,
             conversation_id: convCtx.conversation_id || "",
             project_id: convCtx.project_id || "",
           }),
@@ -1532,6 +1617,7 @@
     addMsg("user", goal);
     if (data.conversation_id && window.aidonSetConversation)
       window.aidonSetConversation(data.conversation_id);
+    refreshThinkBtn();
     if (previousRun && data.run_id === previousRun) {
       // Answer to a waiting question, not a new run: the server
       // delivered the message to the waiter and returned the same
@@ -1554,6 +1640,7 @@
     document.getElementById("thinking-list").innerHTML = "";
     document.getElementById("thinking-count").textContent = "";
     cardShownFor = null;
+    proceedShownFor = null;
     approvalSlot.innerHTML = "";
     currentRun = data.run_id;
     setStatus("busy", "working");
@@ -1626,6 +1713,66 @@
       ? "Web search enforced for this request."
       : "Web search automatic — Aidon decides when needed.");
   });
+
+  // ── think button: same toggle shape as the globe button, but the
+  // state lives on the server per conversation (shared with typed
+  // /think), so the button, the command, and other surfaces agree.
+  // The mode chooser, when it lands, sits immediately right of this
+  // button in the composer row.
+  const thinkBtn = document.getElementById("think-btn");
+  function thinkConversationId() {
+    try {
+      return (window.aidonConversation ? window.aidonConversation().conversation_id : "") || "";
+    } catch (e) { return ""; }
+  }
+  function setThinkBtn(active) {
+    if (!thinkBtn) return;
+    thinkBtn.classList.toggle("active", active);
+    thinkBtn.title = active ? "Maximum thinking on (click to turn off)" : "Maximum thinking";
+    thinkBtn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+  async function refreshThinkBtn() {
+    try {
+      const r = await fetch("/api/think?conversation_id=" + encodeURIComponent(thinkConversationId()));
+      const data = await r.json().catch(() => ({}));
+      setThinkBtn(!!data.think_max);
+    } catch (e) {}
+  }
+  if (thinkBtn) thinkBtn.addEventListener("click", async () => {
+    try {
+      const r = await fetch("/api/think", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: thinkConversationId() }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+      setThinkBtn(!!data.think_max);
+      showMiddleStatus(data.think_max
+        ? "Maximum thinking on for this conversation."
+        : "Maximum thinking off for this conversation.");
+    } catch (e) {
+      showMiddleStatus("Think toggle failed: " + e.message, "error");
+    }
+  });
+  // The conversation setter is defined by a later script block, so
+  // wrap it once it exists: switching conversations refreshes the
+  // button, and the first refresh picks up the stored conversation.
+  function hookThinkRefresh() {
+    if (window.aidonSetConversation && !window.aidonSetConversation._thinkHooked) {
+      const orig = window.aidonSetConversation;
+      const wrapped = (id) => { orig(id); refreshThinkBtn(); };
+      wrapped._thinkHooked = true;
+      window.aidonSetConversation = wrapped;
+    }
+    refreshThinkBtn();
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", hookThinkRefresh);
+  } else {
+    hookThinkRefresh();
+  }
+  setTimeout(hookThinkRefresh, 500);
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !(e.ctrlKey || e.metaKey)) {
       e.preventDefault();
@@ -1637,7 +1784,7 @@
     const project = window.aidonConversation ? window.aidonConversation() : {};
     const specId = project.project_id || "default";
     const active = preapproveBtn.classList.contains("active");
-    if (!active && !window.confirm("Approve reversible live actions for " + specId + " for 8 hours?")) return;
+    if (!active && !window.confirm("Turn on Auto-Approve for " + specId + "? Eligible reversible live actions will pass without asking for 8 hours. Restricted actions will still pause.")) return;
     preapproveBtn.disabled = true;
     try {
       const r = await fetch(active
@@ -1649,10 +1796,10 @@
       const data = await r.json().catch(() => ({}));
       if (!r.ok || !data.ok) throw new Error(data.error || ("HTTP " + r.status));
       preapproveBtn.classList.toggle("active", !active);
-      preapproveBtn.title = active ? "Approve for me" : "Live actions approved for 8 hours; click to deactivate";
+      preapproveBtn.title = active ? "Auto-Approve" : "Auto-Approve on: eligible reversible actions pass for 8 hours; restricted actions still pause. Click to deactivate.";
       showMiddleStatus(active
-        ? "Approve for me deactivated for " + specId + "."
-        : "Reversible live actions approved for " + specId + " for 8 hours.");
+        ? "Auto-Approve deactivated for " + specId + "."
+        : "Auto-Approve on for " + specId + ": eligible reversible actions pass for 8 hours. Restricted actions still pause.");
     } catch (e) {
       showMiddleStatus("Preapproval failed: " + e.message, "error");
     } finally {
@@ -1733,19 +1880,148 @@
     setTheme(rootEl.dataset.theme === "dark" ? "light" : "dark");
   });
 
-  // ── mic: browser MediaRecorder → /api/transcribe (Muse Voice
-  // Transcribe) → text lands in the goal box. 503 = no key configured.
+  // ── mic: streaming Muse Voice Transcribe → live partials land
+  // in the goal box for review; nothing is sent until you press ➤.
+  // AudioWorklet captures raw PCM, resampled to 24 kHz int16 and
+  // posted in ~0.5 s chunks to /api/transcribe_stream/*; the server
+  // holds the Meta realtime session (the key never reaches the
+  // browser). Partials are CUMULATIVE: each one replaces the last,
+  // never appends. If the streaming session cannot start, the old
+  // whole-blob flow runs instead, and its transcript also lands in
+  // the goal box unsent. While a mic session owns the goal box, a
+  // new partial replaces the mic portion; text already in the box
+  // when you press mic is kept as a prefix.
   const micBtn = document.getElementById("mic");
-  let recorder = null;
-  micBtn.addEventListener("click", async () => {
-    if (recorder) { recorder.stop(); return; } // second click = stop
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (e) {
-      showMiddleStatus("Mic unavailable: " + (e.message || e), "error");
-      return;
+  let micLive = null; // streaming session state, while recording
+  let micFallback = null; // MediaRecorder state, fallback path only
+  function micBaseText() { return input.value; }
+  function micSetBox(base, text) {
+    input.value = base ? (text ? base + " " + text : base) : (text || "");
+  }
+  function micB64(bytes) {
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
     }
+    return btoa(s);
+  }
+  function micStopTracks(stream, ctx) {
+    try { stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
+    if (ctx) ctx.close().catch(() => {});
+    micCtx = null; micAnalyser = null; micAnalyserData = null;
+    micBtn.classList.remove("recording");
+  }
+  async function micPost(path, payload) {
+    const r = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+    return data;
+  }
+  async function micStartStreaming(stream, base) {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    await ctx.audioWorklet.addModule("/static/pcm-worklet.js");
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    micCtx = ctx; micAnalyser = analyser;
+    micAnalyserData = new Uint8Array(analyser.fftSize);
+    const node = new AudioWorkletNode(ctx, "pcm-capture");
+    source.connect(node);
+    node.connect(ctx.destination); // silent output keeps the worklet running
+    const started = await micPost("/api/transcribe_stream/start", {});
+    if (!started.session_id) throw new Error("no stream session");
+    const rate = ctx.sampleRate;
+    const step = rate / 24000;
+    let pos = 0; // fractional resample position across messages
+    let carry = new Float32Array(0);
+    let pcm = []; // int16 samples waiting to be posted
+    let posting = Promise.resolve();
+    function pcmBytes(chunk) {
+      const bytes = new Uint8Array(chunk.length * 2);
+      const view = new DataView(bytes.buffer);
+      chunk.forEach((s, j) => view.setInt16(j * 2, s, true));
+      return bytes;
+    }
+    async function flushPcm() {
+      // Runs after stop, when micLive is already null: only send the
+      // trailing audio, never touch the box. The end call below
+      // overwrites the box with the final transcript anyway.
+      await posting;
+      if (!pcm.length) return;
+      const chunk = pcm; pcm = [];
+      await micPost("/api/transcribe_stream/audio",
+        { session_id: started.session_id, audio_b64: micB64(pcmBytes(chunk)) });
+    }
+    micLive = { session: started.session_id, base: base, partial: "",
+                stream: stream, ctx: ctx, node: node, stopped: false,
+                flush: flushPcm };
+    node.port.onmessage = (e) => {
+      if (!micLive || micLive.stopped) return;
+      const floats = e.data;
+      const joined = new Float32Array(carry.length + floats.length);
+      joined.set(carry); joined.set(floats, carry.length);
+      // Linear-interpolate resample to 24 kHz, then int16 little-endian.
+      const out = [];
+      let i = pos;
+      for (; i + 1 < joined.length; i += step) {
+        const lo = Math.floor(i), frac = i - lo;
+        const v = joined[lo] * (1 - frac) + joined[lo + 1] * frac;
+        const c = Math.max(-1, Math.min(1, v));
+        out.push(c < 0 ? Math.round(c * 32768) : Math.round(c * 32767));
+      }
+      pos = i - (joined.length - 1);
+      carry = joined.slice(Math.max(0, joined.length - 2));
+      if (pos < 0) pos = 0;
+      pcm = pcm.concat(out);
+      if (pcm.length >= 12000) {
+        const chunk = pcm.slice(0, 12000);
+        pcm = pcm.slice(12000);
+        const bytes = pcmBytes(chunk);
+        const session = micLive.session;
+        posting = posting.then(async () => {
+          if (!micLive || micLive.session !== session) return;
+          try {
+            const data = await micPost("/api/transcribe_stream/audio",
+              { session_id: session, audio_b64: micB64(bytes) });
+            if (micLive && micLive.session === session && typeof data.transcript === "string") {
+              micLive.partial = data.transcript;
+              micSetBox(micLive.base, micLive.partial);
+            }
+          } catch (err) {
+            showMiddleStatus("Streaming transcription failed: " + err.message, "error");
+          }
+        });
+      }
+    };
+    micBtn.classList.add("recording");
+    drawWave();
+  }
+  async function micStopStreaming() {
+    const s = micLive; micLive = null;
+    if (!s) return;
+    s.stopped = true;
+    try { s.node.disconnect(); } catch (e) {}
+    micStopTracks(s.stream, s.ctx);
+    // Flush the trailing partial chunk first: the final transcript
+    // only covers audio the session actually received.
+    try { await s.flush(); } catch (e) {}
+    try {
+      const data = await micPost("/api/transcribe_stream/end", { session_id: s.session });
+      micSetBox(s.base, data.transcript || s.partial);
+      input.focus();
+      if (data.error) showMiddleStatus("Transcription ended with: " + data.error, "error");
+    } catch (e) {
+      micSetBox(s.base, s.partial);
+      input.focus();
+      showMiddleStatus("Transcription end failed: " + e.message, "error");
+    }
+  }
+  function micStartFallback(stream, base) {
     const chunks = [];
     const mimeTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
     const mimeType = mimeTypes.find((m) => window.MediaRecorder.isTypeSupported(m)) || "";
@@ -1759,14 +2035,12 @@
     } catch (e) {
       micCtx = null; micAnalyser = null; micAnalyserData = null;
     }
-    recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    micFallback = { recorder: recorder };
     recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
     recorder.onstop = async () => {
-      micBtn.classList.remove("recording");
-      stream.getTracks().forEach((t) => t.stop());
-      if (micCtx) micCtx.close().catch(() => {});
-      micCtx = null; micAnalyser = null; micAnalyserData = null;
-      recorder = null;
+      micFallback = null;
+      micStopTracks(stream, micCtx);
       const audioType = mimeType || "audio/webm";
       const blob = new Blob(chunks, { type: audioType });
       try {
@@ -1780,9 +2054,8 @@
         if (!r.ok) throw new Error(data.error || data.detail || ("HTTP " + r.status));
         const transcript = data.text || data.transcript || "";
         if (transcript) {
-          // Voice input is a complete goal: send it directly. It is
-          // rendered in the user chat bubble, not copied into the composer.
-          startRun(transcript);
+          micSetBox(base, transcript);
+          input.focus();
         } else {
           showMiddleStatus(data.error || data.detail || "Transcription failed", "error");
         }
@@ -1793,6 +2066,29 @@
     recorder.start();
     micBtn.classList.add("recording");
     drawWave();
+  }
+  micBtn.addEventListener("click", async () => {
+    if (micLive) { await micStopStreaming(); return; } // second click = stop
+    if (micFallback) { micFallback.recorder.stop(); return; }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      showMiddleStatus("Mic unavailable: " + (e.message || e), "error");
+      return;
+    }
+    const base = micBaseText();
+    try {
+      await micStartStreaming(stream, base);
+    } catch (e) {
+      // No key, no worklet, or session failure: whole-blob fallback.
+      // The transcript still lands in the goal box unsent.
+      try { micStartFallback(stream, base); }
+      catch (err) {
+        micStopTracks(stream, null);
+        showMiddleStatus("Mic failed: " + err.message, "error");
+      }
+    }
   });
 
   drawWave(); // idle waveform frame on load

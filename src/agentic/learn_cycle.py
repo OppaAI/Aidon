@@ -21,7 +21,6 @@ and skipped.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 _STOPWORDS = frozenset({
     "the", "a", "an", "and", "or", "for", "to", "of", "in", "on",

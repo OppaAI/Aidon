@@ -6,7 +6,7 @@ WebUI, built now, after triggers, after v1 and MCP:
   chat box that sends a message to /api/chat.
 - Approval cards, in the UI, not only in the CLI.
   When the loop asks for approval, a WebUIGate creates
-  a card, waits up to 180 seconds, fail-closed, and
+  a card, waits up to 900 seconds, fail-closed, and
   /api/approve sets the decision. A card is a decision,
   chat is conversation, same rule as everywhere else.
 - Settings APIs expose configuration and key metadata without exposing secrets.
@@ -701,10 +701,24 @@ class WebUIGate:
     Cards and nudges live here; graduated autonomy lives on the
     inner ApprovalGate (same AutonomyPolicy / autonomy.json as CLI).
 
-    - On card creation, a pending time is recorded, and a daemon
-      thread nudges via the Slack sender after
-      AIDON_APPROVAL_NUDGE_MIN minutes, once per card, via
-      NudgeTracker, so an away owner is nudged, not looped.
+    - Each card carries its run context (run_id, conversation
+      id, source, and a WhatsApp destination when one applies),
+      so an approval is no longer an anonymous id: the card
+      knows which run and conversation it belongs to.
+    - On card creation, when the run's context names a
+      WhatsApp destination — the run started on WhatsApp, or
+      its WebUI/Slack conversation is WhatsApp-mirrored —
+      the full card (title, body, id, and the approve/reject
+      reply words) is sent to the owner on WhatsApp at once.
+      The reply path already resolves "approve <id>" from any
+      surface, so delivery was the missing half.
+    - A nudge still goes to Slack via NudgeTracker, once per
+      card, but it now fires before the card times out (the
+      earlier of the configured nudge minutes and half the
+      card timeout — a 15-minute nudge for a 900-second card
+      could only ever arrive for an already-rejected card),
+      carries the card title instead of a bare id, and is
+      skipped when the card already has a verdict.
     - Autonomy: pass policy= into __init__ (or set
       self.gate.policy later). Callers use self.gate.ask(...,
       action_class=..., force_ask=...). High-stakes and
@@ -714,19 +728,22 @@ class WebUIGate:
       double-recorded.
     """
 
-    def __init__(self, timeout_seconds: int = 180, nudge_tracker=None,
-                 autonomy_tracker=None, slack_sender=None, policy=None):
+    def __init__(self, timeout_seconds: int = 900, nudge_tracker=None,
+                 autonomy_tracker=None, slack_sender=None, policy=None,
+                 whatsapp_sender=None):
         self.timeout_seconds = timeout_seconds
         self.nudge_tracker = nudge_tracker
         self.autonomy_tracker = autonomy_tracker  # optional legacy
         self.slack_sender = slack_sender
+        self.whatsapp_sender = whatsapp_sender
         self.cards: dict[str, dict] = {}
         self._events: dict[str, threading.Event] = {}
         self._counter = 0
         # Prefer shared AutonomyPolicy (same file as CLI)
         self.gate = ApprovalGate(self._decide, policy=policy)
 
-    def _decide(self, kind: str, title: str, body: str) -> Decision:
+    def _decide(self, kind: str, title: str, body: str,
+                context: dict | None = None) -> Decision:
         import time as _time
         self._counter += 1
         card_id = f"card-{self._counter}"
@@ -734,17 +751,32 @@ class WebUIGate:
         self._events[card_id] = event
         self.cards[card_id] = {
             "kind": kind, "title": title, "body": body, "verdict": None,
-            "edited_text": "",
+            "edited_text": "", "context": dict(context or {}),
         }
         pending_since = _time.time()
-        if self.nudge_tracker is not None:
+        whatsapp_to = (context or {}).get("whatsapp_to")
+        if whatsapp_to and self.whatsapp_sender is not None:
+            snippet = body if len(body) <= 1000 else body[:1000] + "…"
+            try:
+                self.whatsapp_sender(
+                    whatsapp_to,
+                    f"Approval needed [{card_id}]: {title}\n{snippet}\n"
+                    f"Reply: approve {card_id}  or  reject {card_id}")
+            except Exception:
+                pass
+        if self.nudge_tracker is not None and self.nudge_tracker.nudge_minutes > 0:
+            nudge_delay = min(self.nudge_tracker.nudge_minutes * 60,
+                              self.timeout_seconds / 2)
+
             def _nudge():
-                _time.sleep(max(0, self.nudge_tracker.nudge_minutes * 60))
-                if not event.is_set():
+                _time.sleep(max(0, nudge_delay))
+                if not event.is_set() and \
+                        self.cards[card_id]["verdict"] is None:
                     try:
                         self.nudge_tracker.check(
                             card_id, pending_since, _time.time(),
-                            slack_sender=self.slack_sender)
+                            slack_sender=self.slack_sender, note=title,
+                            min_elapsed_seconds=nudge_delay)
                     except Exception:
                         pass
             threading.Thread(target=_nudge, daemon=True).start()
@@ -753,7 +785,6 @@ class WebUIGate:
         verdict = card["verdict"] or "rejected"
         card["verdict"] = verdict
         return Decision(verdict, edited_text=card.get("edited_text", ""))
-
     def pending_cards(self) -> list[dict]:
         """Cards still awaiting a verdict, in creation order.
 
@@ -826,15 +857,20 @@ class WebUIServer:
             slack_signing_secret or self.messaging_config.slack_signing_secret)
         # Approval timeout comes from config when present, so
         # AIDON_APPROVAL_TIMEOUT_S actually changes the gate;
-        # without a config the gate keeps its 180s default.
-        timeout_seconds = getattr(config, "approval_timeout_seconds", 180)
+        # without a config the gate keeps its 900s default.
+        timeout_seconds = getattr(config, "approval_timeout_seconds", 900)
         if timeout_seconds is None:
-            timeout_seconds = 180
+            timeout_seconds = 900
         self.webui_gate = WebUIGate(timeout_seconds=timeout_seconds)
         self.webhook_only = webhook_only
         self.media_downloader = media_downloader
         self.run_control = run_control
         self._web_runs: dict[str, dict] = {}
+        # Set by the serve daemon: practice_session_runner(schedule, end)
+        # runs one practice session synchronously (report delivery and
+        # session recording included). None without the daemon, so the
+        # Practice page's run-now honestly reports it is unavailable.
+        self.practice_session_runner = None
         # Runs blocked in ask_user, by run id and by conversation id.
         # A question is a chat turn, not an approval card: no clock.
         self._question_waiters: dict[str, dict] = {}
@@ -842,6 +878,10 @@ class WebUIServer:
         self._question_lock = threading.Lock()
         self.webui_token = webui_token
         self.transcribe_key = transcribe_key
+        # Live realtime transcription sessions, by id: the browser
+        # sends PCM chunks and reads partials over HTTP, while the
+        # server holds the Meta realtime WebSocket (and the key).
+        self.realtime_sessions: dict = {}
         self.tts_key = tts_key
         self.tts_voice_id = str(getattr(config, "tts_voice_id", "") or "")
         # Default chat handler: echo, for the server core. A real
@@ -1090,21 +1130,28 @@ class WebUIServer:
             return {"reply": f"Error: {exc}"}
         return {"reply": replies[0] if replies else "Received."}
 
-    def ask_question(self, run_id: str, conversation_id: str, question: str) -> str:
+    def ask_question(self, run_id: str, conversation_id: str, question: str,
+                     also_keys: tuple[str, ...] = ()) -> str:
         """Block the run thread until the owner answers in chat.
 
         The question is posted as a chat event so the owner sees it,
         and run_snapshot reports it as waiting_question so the
-        composer stays usable. Questions carry no 180s clock (chat
+        composer stays usable. Questions carry no 900s clock (chat
         is for conversation, cards are for decisions); the wait ends
-        on an answer or on run cancellation.
+        on an answer or on run cancellation. also_keys registers
+        the same waiter under linked surfaces, so an answer from
+        Slack or WhatsApp resolves a WebUI run's question and
+        vice versa (see surfaces.waiter_keys_*).
         """
         event = threading.Event()
+        keys = [conversation_id] + [key for key in also_keys if key and key != conversation_id]
         waiter = {"run_id": run_id, "conversation_id": conversation_id,
-                  "question": str(question), "event": event, "answer": None}
+                  "question": str(question), "event": event, "answer": None,
+                  "keys": keys}
         with self._question_lock:
             self._question_waiters[run_id] = waiter
-            self._question_by_conversation[conversation_id] = waiter
+            for key in keys:
+                self._question_by_conversation[key] = waiter
         record = self._web_runs.get(run_id)
         if record is not None:
             record["events"].append({"kind": "aidon", "text": str(question)})
@@ -1119,8 +1166,9 @@ class WebUIServer:
             with self._question_lock:
                 if self._question_waiters.get(run_id) is waiter:
                     del self._question_waiters[run_id]
-                if self._question_by_conversation.get(conversation_id) is waiter:
-                    del self._question_by_conversation[conversation_id]
+                for key in waiter.get("keys", [conversation_id]):
+                    if self._question_by_conversation.get(key) is waiter:
+                        del self._question_by_conversation[key]
 
     def answer_question(self, conversation_id: str, answer: str) -> str | None:
         """Deliver a chat answer to the waiting run in this conversation."""
@@ -1136,6 +1184,50 @@ class WebUIServer:
         with self._question_lock:
             waiter = self._question_waiters.get(run_id)
             return waiter["question"] if waiter else None
+
+    def _mirror_command(self, conversation_id: str, goal: str,
+                        project_id: str) -> dict | None:
+        """Handle a /mirror command in WebUI chat; None when not one."""
+        from .surfaces import (link_slack, unlink_slack, set_whatsapp_mirror,
+                               mirror_status_text, parse_mirror_command)
+        command = parse_mirror_command(goal)
+        if command is None:
+            return None
+        action = command["action"]
+        if action == "link_slack":
+            link_slack(self.home, conversation_id, command["channel"])
+            text = f"Linked this conversation to Slack #{command['channel']}."
+        elif action == "unlink_slack":
+            removed = unlink_slack(self.home, conversation_id)
+            text = ("Slack link removed." if removed
+                    else "No Slack link to remove.")
+        elif action == "whatsapp":
+            set_whatsapp_mirror(self.home, conversation_id, command["enabled"])
+            text = ("WhatsApp mirror on for this conversation."
+                    if command["enabled"]
+                    else "WhatsApp mirror off for this conversation.")
+        elif action == "link_webui":
+            text = ("You are already in this conversation; from Slack, "
+                    "use /mirror webui <id> to link a channel here.")
+        else:
+            text = mirror_status_text(self.home, conversation_id=conversation_id)
+        try:
+            self._conversations_db().record_exchange(conversation_id, "assistant", text)
+        except Exception:
+            pass
+        if self.memory is not None:
+            try:
+                self.memory.record_stm("assistant", text, project_id=project_id,
+                                       conversation_id=conversation_id)
+            except Exception:
+                pass
+        from .run_control import new_run_id
+        run_id = new_run_id()
+        self._web_runs[run_id] = {"run_id": run_id, "goal": goal,
+                                  "project_id": project_id, "status": "done",
+                                  "events": [{"kind": "aidon-final", "text": text,
+                                              "stream_id": ""}], "trace": []}
+        return {"run_id": run_id, "conversation_id": conversation_id, "goal": goal}
 
     def start_goal(self, body: dict) -> dict:
         """Start the same dispatcher path used by messaging triggers."""
@@ -1181,6 +1273,78 @@ class WebUIServer:
         if answered_run is not None:
             return {"run_id": answered_run, "conversation_id": conversation_id,
                     "goal": goal}
+        mirror_response = self._mirror_command(conversation_id, goal, project_id)
+        if mirror_response is not None:
+            return mirror_response
+        from .mode_stops import latest_mode_stop, load_mode_stop
+        from .surfaces import (HELP_TEXT, mode_enabled, parse_mode_command,
+                               parse_proceed_command, parse_research_command,
+                               parse_think_command, research_enabled,
+                               set_mode, think_enabled, toggle_research,
+                               toggle_think)
+        if goal.strip() == "/help":
+            return self._simple_command_response(conversation_id, goal, project_id,
+                                                 HELP_TEXT)
+        think_max = False
+        think_cmd = parse_think_command(goal)
+        if think_cmd is not None:
+            if think_cmd["action"] == "toggle":
+                state = toggle_think(self.home, conversation_id)
+                return self._simple_command_response(
+                    conversation_id, goal, project_id,
+                    f"Maximum thinking {'on' if state else 'off'} for this conversation.")
+            goal = think_cmd["goal"]
+            think_max = True
+        think_max = think_max or think_enabled(self.home, conversation_id)
+        research_mode = False
+        research_cmd = parse_research_command(goal)
+        if research_cmd is not None:
+            if research_cmd["action"] == "toggle":
+                state = toggle_research(self.home, conversation_id)
+                return self._simple_command_response(
+                    conversation_id, goal, project_id,
+                    f"Deep-research mode {'on' if state else 'off'} for this conversation.")
+            goal = research_cmd["goal"]
+            research_mode = True
+        research_mode = research_mode or research_enabled(self.home, conversation_id)
+        # Modes: a typed one-shot wins, then the composer's chooser
+        # (payload "mode"), then the sticky flag for the conversation.
+        # /proceed resumes a stopped run instead of starting a goal.
+        mode = None
+        resume_stop_id = ""
+        resume_spec = None
+        resume_plan = None
+        mode_cmd = parse_mode_command(goal)
+        if mode_cmd is not None:
+            if mode_cmd["action"] == "set":
+                set_mode(self.home, conversation_id, mode_cmd["mode"])
+                if mode_cmd["mode"] == "execute":
+                    _mtext = "Execute mode on for this conversation — goals run directly."
+                else:
+                    _mtext = f"{mode_cmd['mode'].capitalize()} mode on for this conversation."
+                return self._simple_command_response(conversation_id, goal, project_id, _mtext)
+            goal = mode_cmd["goal"]
+            mode = mode_cmd["mode"]
+        proceed_cmd = parse_proceed_command(goal)
+        if proceed_cmd is not None:
+            stop = (load_mode_stop(self.home, proceed_cmd["stop_id"])
+                    if proceed_cmd["stop_id"]
+                    else latest_mode_stop(self.home, conversation_id))
+            if stop is None:
+                if proceed_cmd["stop_id"]:
+                    _ptext = f"No stopped run with id {proceed_cmd['stop_id']}."
+                else:
+                    _ptext = "No stopped run to proceed with."
+                return self._simple_command_response(conversation_id, goal, project_id, _ptext)
+            goal = stop["goal"]
+            mode = "execute"
+            resume_stop_id = stop["stop_id"]
+            resume_spec = stop.get("spec")
+            resume_plan = stop.get("plan")
+        if mode is None and str(body.get("mode", "") or "") in ("ask", "plan", "execute"):
+            mode = str(body.get("mode"))
+        if mode is None:
+            mode = mode_enabled(self.home, conversation_id) or "ask"
         run_id = new_run_id()
         if self.run_control is not None:
             self.run_control.register(run_id, goal, project_id)
@@ -1209,7 +1373,32 @@ class WebUIServer:
                 record["trace"].append(dict(item))
 
         def question_callback(question):
-            return self.ask_question(run_id, conversation_id, question)
+            # Fan out to linked surfaces now, and register the
+            # waiter under their keys, so an answer from Slack or
+            # WhatsApp resolves this WebUI run's question.
+            from .surfaces import (slack_for_conversation,
+                                   waiter_keys_for_conversation,
+                                   whatsapp_mirrored_for_conversation)
+            owner = ""
+            try:
+                owner = str(self.messaging_config.whatsapp_owner or "")
+            except Exception:
+                pass
+            channel = slack_for_conversation(self.home, conversation_id)
+            if channel and self.slack_sender is not None:
+                try:
+                    self.slack_sender(channel, str(question))
+                except Exception:
+                    pass
+            if (owner and whatsapp_mirrored_for_conversation(self.home, conversation_id)
+                    and self.whatsapp_sender is not None):
+                try:
+                    self.whatsapp_sender(owner, str(question))
+                except Exception:
+                    pass
+            return self.ask_question(run_id, conversation_id, question,
+                                     also_keys=tuple(waiter_keys_for_conversation(
+                                         self.home, conversation_id, owner)))
 
         def reply(text):
             record["events"].append({"kind": "aidon-final", "text": str(text),
@@ -1230,6 +1419,8 @@ class WebUIServer:
         payload = {"run_id": run_id,
                    "guidance": str(body.get("guidance", "")),
                    "force_web": force_web,
+                   "think_max": think_max,
+                   "research_mode": research_mode,
                    "_stream_callback": stream_delta,
                    "_route_callback": route_update,
                    "_trace_callback": trace_update,
@@ -1239,6 +1430,13 @@ class WebUIServer:
                        if str(path).strip()]
         if image_paths:
             payload["image_paths"] = image_paths
+        payload["mode"] = mode
+        if resume_stop_id:
+            payload["resume_stop_id"] = resume_stop_id
+        if isinstance(resume_spec, dict):
+            payload["resume_spec"] = resume_spec
+        if isinstance(resume_plan, dict):
+            payload["resume_plan"] = resume_plan
         event = TriggerEvent(source="webui", kind="goal", goal=goal,
                              project_id=project_id,
                              payload={**payload, "conversation_id": conversation_id},
@@ -1266,7 +1464,7 @@ class WebUIServer:
         out = dict(record or {})
         if control:
             terminal = control.get("status") in {
-                "done", "failed", "rejected", "cancelled"}
+                "done", "failed", "rejected", "cancelled", "stopped"}
             out.update({"status": control.get("status", out.get("status", "running")),
                         "goal": control.get("goal", out.get("goal", "")),
                         "stage": ("done" if terminal else
@@ -1333,6 +1531,32 @@ class WebUIServer:
                                         text = f"{caption} [image library_id={saved['id']}]".strip()
                                 except Exception as exc:
                                     text = caption or f"image received, could not save: {exc}"
+                        elif not text and message.get("type") in ("document", "video", "audio"):
+                            # Same download path as images (the Graph
+                            # media-download API, two steps), no vision
+                            # step: the file lands in the library and
+                            # the goal text carries its library id.
+                            mtype = message["type"]
+                            media = message.get(mtype, {}) or {}
+                            media_id = media.get("id", "")
+                            caption = media.get("caption", "")
+                            filename = media.get("filename", "") or f"whatsapp-{mtype}"
+                            text = caption
+                            if self.media_downloader is not None and media_id:
+                                try:
+                                    data = self.media_downloader(media_id)
+                                    from ..memory.library import Library
+                                    safe = self._safe_name(filename)
+                                    tmp = self.home / "library" / f"whatsapp-{media_id}-{safe}"
+                                    tmp.parent.mkdir(parents=True, exist_ok=True)
+                                    tmp.write_bytes(data)
+                                    library = Library(self.home)
+                                    saved = library.add_file(tmp, kind="attachment",
+                                                             description=f"WhatsApp {mtype}")
+                                    text = (f"{caption} [file library_id={saved['id']} "
+                                            f"kind={mtype}]").strip()
+                                except Exception as exc:
+                                    text = caption or f"{mtype} received, could not save: {exc}"
                         sender = message.get("from", "")
                         if not owner or normalize_number(sender) != owner:
                             continue
@@ -1356,6 +1580,80 @@ class WebUIServer:
                                 if self.whatsapp_sender is not None:
                                     self.whatsapp_sender(sender, ack)
                                 continue
+                        from .surfaces import (HELP_TEXT as _WA_HELP,
+                                                mode_enabled as _wa_mode_enabled,
+                                                parse_mode_command as _wa_mode_cmd,
+                                                parse_proceed_command as _wa_proceed,
+                                                parse_research_command as _wa_research,
+                                                parse_think_command as _wa_think,
+                                                research_enabled as _wa_research_enabled,
+                                                set_mode as _wa_set_mode,
+                                                think_enabled as _wa_enabled,
+                                                toggle_research as _wa_research_toggle,
+                                                toggle_think as _wa_toggle)
+                        from .mode_stops import (latest_mode_stop as _wa_latest_stop,
+                                                 load_mode_stop as _wa_load_stop)
+                        wa_key = "whatsapp:" + str(sender)
+                        wa_think_max = False
+                        wa_research_mode = False
+                        wa_mode = None
+                        wa_resume_stop_id = ""
+                        wa_resume_spec = None
+                        wa_resume_plan = None
+                        if decision_reply is None:
+                            wa_cmd = _wa_think(text)
+                            if wa_cmd is not None:
+                                if wa_cmd["action"] == "toggle":
+                                    state = _wa_toggle(self.home, wa_key)
+                                    decision_reply = (
+                                        f"Maximum thinking {'on' if state else 'off'} "
+                                        "for this chat.")
+                                else:
+                                    text = wa_cmd["goal"]
+                                    wa_think_max = True
+                            else:
+                                wa_rcmd = _wa_research(text)
+                                if wa_rcmd is not None:
+                                    if wa_rcmd["action"] == "toggle":
+                                        state = _wa_research_toggle(self.home, wa_key)
+                                        decision_reply = (
+                                            f"Deep-research mode {'on' if state else 'off'} "
+                                            "for this chat.")
+                                    else:
+                                        text = wa_rcmd["goal"]
+                                        wa_research_mode = True
+                                elif text.strip() == "/help":
+                                    decision_reply = _WA_HELP
+                            if decision_reply is None:
+                                wa_mcmd = _wa_mode_cmd(text)
+                                if wa_mcmd is not None:
+                                    if wa_mcmd["action"] == "set":
+                                        _wa_set_mode(self.home, wa_key, wa_mcmd["mode"])
+                                        if wa_mcmd["mode"] == "execute":
+                                            decision_reply = "Execute mode on for this chat — goals run directly."
+                                        else:
+                                            decision_reply = (f"{wa_mcmd['mode'].capitalize()} mode on "
+                                                              "for this chat.")
+                                    else:
+                                        text = wa_mcmd["goal"]
+                                        wa_mode = wa_mcmd["mode"]
+                                else:
+                                    wa_pcmd = _wa_proceed(text)
+                                    if wa_pcmd is not None:
+                                        _stop = (_wa_load_stop(self.home, wa_pcmd["stop_id"])
+                                                 if wa_pcmd["stop_id"]
+                                                 else _wa_latest_stop(self.home, wa_key))
+                                        if _stop is None:
+                                            if wa_pcmd["stop_id"]:
+                                                decision_reply = f"No stopped run with id {wa_pcmd['stop_id']}."
+                                            else:
+                                                decision_reply = "No stopped run to proceed with."
+                                        else:
+                                            text = _stop["goal"]
+                                            wa_mode = "execute"
+                                            wa_resume_stop_id = _stop["stop_id"]
+                                            wa_resume_spec = _stop.get("spec")
+                                            wa_resume_plan = _stop.get("plan")
                         if decision_reply is None:
                             text, force_web = self._force_web_prefix(text)
                             if not text:
@@ -1368,9 +1666,19 @@ class WebUIServer:
                                 self.whatsapp_sender(sender, decision_reply)
                             continue
                         local_replies: list[str] = []
+                        _wa_payload = {"from": sender,
+                                       "force_web": force_web,
+                                       "think_max": wa_think_max or _wa_enabled(self.home, wa_key),
+                                       "research_mode": wa_research_mode or _wa_research_enabled(self.home, wa_key),
+                                       "mode": wa_mode or _wa_mode_enabled(self.home, wa_key) or "ask"}
+                        if wa_resume_stop_id:
+                            _wa_payload["resume_stop_id"] = wa_resume_stop_id
+                        if isinstance(wa_resume_spec, dict):
+                            _wa_payload["resume_spec"] = wa_resume_spec
+                        if isinstance(wa_resume_plan, dict):
+                            _wa_payload["resume_plan"] = wa_resume_plan
                         event = TriggerEvent(source="whatsapp", kind="message",
-                                             goal=text, payload={"from": sender,
-                                                                 "force_web": force_web},
+                                             goal=text, payload=_wa_payload,
                                              reply=local_replies.append)
                         self.dispatcher.dispatch(event)
                         for reply in local_replies:
@@ -1380,6 +1688,68 @@ class WebUIServer:
         except Exception as exc:
             return 200, {"error": str(exc)}
         return 200, {"replies": replies}
+
+    def _record_surface_exchange(self, conversation_id: str, role: str, text: str) -> None:
+        """Best-effort conversation-store record for a non-WebUI surface."""
+        try:
+            self._conversations_db().record_exchange(conversation_id, role, text)
+        except Exception:
+            pass
+
+    def _simple_command_response(self, conversation_id: str, goal: str,
+                               project_id: str, text: str) -> dict:
+        """Reply to a chat command without running a goal.
+
+        Same shape as a mirror-command reply: the assistant text is
+        recorded in the conversation and a done run carries it to the
+        frontend, so /think and /help behave like any other answer.
+        """
+        try:
+            self._conversations_db().record_exchange(conversation_id, "assistant", text)
+        except Exception:
+            pass
+        if self.memory is not None:
+            try:
+                self.memory.record_stm("assistant", text, project_id=project_id,
+                                       conversation_id=conversation_id)
+            except Exception:
+                pass
+        from .run_control import new_run_id
+        run_id = new_run_id()
+        self._web_runs[run_id] = {"run_id": run_id, "goal": goal,
+                                  "project_id": project_id, "status": "done",
+                                  "events": [{"kind": "aidon-final", "text": text,
+                                              "stream_id": ""}], "trace": []}
+        return {"run_id": run_id, "conversation_id": conversation_id, "goal": goal}
+
+    def _slack_mirror_command(self, channel: str, text: str) -> str | None:
+        """Handle a /mirror command from Slack; None when not one."""
+        from .surfaces import (conversation_for_slack, link_slack, unlink_slack,
+                               mirror_status_text, parse_mirror_command,
+                               set_whatsapp_mirror)
+        command = parse_mirror_command(text)
+        if command is None:
+            return None
+        action = command["action"]
+        if action == "link_webui":
+            link_slack(self.home, command["conversation"], channel)
+            return (f"Linked this channel to WebUI conversation "
+                    f"{command['conversation']}.")
+        if action == "unlink_slack":
+            conversation = conversation_for_slack(self.home, channel)
+            if conversation and unlink_slack(self.home, conversation):
+                return "Slack link removed."
+            return "No Slack link to remove."
+        if action == "whatsapp":
+            conversation = (conversation_for_slack(self.home, channel)
+                            or ("slack:" + channel))
+            set_whatsapp_mirror(self.home, conversation, command["enabled"])
+            return ("WhatsApp mirror on for this channel."
+                    if command["enabled"]
+                    else "WhatsApp mirror off for this channel.")
+        if action == "link_slack":
+            return "From Slack, link with /mirror webui <conversation-id>."
+        return mirror_status_text(self.home, channel=channel)
 
     def handle_slack_post(self, raw: bytes, headers: dict, body: dict) -> tuple[int, dict]:
         # Verify signature before parsing any event as a goal.
@@ -1412,6 +1782,85 @@ class WebUIServer:
                 decision_reply = self._resolve_preapproval(text)
             if decision_reply is None:
                 decision_reply = self._resolve_memory_command(text)
+            mirror_reply = self._slack_mirror_command(channel, text)
+            if mirror_reply is not None:
+                if self.slack_sender is not None:
+                    self.slack_sender(channel, mirror_reply, thread_ts)
+                self._record_surface_exchange("slack:" + channel, "user", text)
+                self._record_surface_exchange("slack:" + channel, "assistant", mirror_reply)
+                return 200, {"replies": [mirror_reply]}
+            from .surfaces import (HELP_TEXT as _SL_HELP,
+                                    mode_enabled as _sl_mode_enabled,
+                                    parse_mode_command as _sl_mode_cmd,
+                                    parse_proceed_command as _sl_proceed,
+                                    parse_research_command as _sl_research,
+                                    parse_think_command as _sl_think,
+                                    research_enabled as _sl_research_enabled,
+                                    set_mode as _sl_set_mode,
+                                    think_enabled as _sl_enabled,
+                                    toggle_research as _sl_research_toggle,
+                                    toggle_think as _sl_toggle)
+            from .mode_stops import (latest_mode_stop as _sl_latest_stop,
+                                     load_mode_stop as _sl_load_stop)
+            sl_key = "slack:" + channel
+            sl_think_max = False
+            sl_research_mode = False
+            sl_mode = None
+            sl_resume_stop_id = ""
+            sl_resume_spec = None
+            sl_resume_plan = None
+            if decision_reply is None:
+                sl_cmd = _sl_think(text)
+                if sl_cmd is not None:
+                    if sl_cmd["action"] == "toggle":
+                        state = _sl_toggle(self.home, sl_key)
+                        decision_reply = (f"Maximum thinking {'on' if state else 'off'} "
+                                          "for this channel.")
+                    else:
+                        text = sl_cmd["goal"]
+                        sl_think_max = True
+                else:
+                    sl_rcmd = _sl_research(text)
+                    if sl_rcmd is not None:
+                        if sl_rcmd["action"] == "toggle":
+                            state = _sl_research_toggle(self.home, sl_key)
+                            decision_reply = (f"Deep-research mode {'on' if state else 'off'} "
+                                              "for this channel.")
+                        else:
+                            text = sl_rcmd["goal"]
+                            sl_research_mode = True
+                    elif text.strip() == "/help":
+                        decision_reply = _SL_HELP
+                if decision_reply is None:
+                    sl_mcmd = _sl_mode_cmd(text)
+                    if sl_mcmd is not None:
+                        if sl_mcmd["action"] == "set":
+                            _sl_set_mode(self.home, sl_key, sl_mcmd["mode"])
+                            if sl_mcmd["mode"] == "execute":
+                                decision_reply = "Execute mode on for this channel — goals run directly."
+                            else:
+                                decision_reply = (f"{sl_mcmd['mode'].capitalize()} mode on "
+                                                  "for this channel.")
+                        else:
+                            text = sl_mcmd["goal"]
+                            sl_mode = sl_mcmd["mode"]
+                    else:
+                        sl_pcmd = _sl_proceed(text)
+                        if sl_pcmd is not None:
+                            _stop = (_sl_load_stop(self.home, sl_pcmd["stop_id"])
+                                     if sl_pcmd["stop_id"]
+                                     else _sl_latest_stop(self.home, sl_key))
+                            if _stop is None:
+                                if sl_pcmd["stop_id"]:
+                                    decision_reply = f"No stopped run with id {sl_pcmd['stop_id']}."
+                                else:
+                                    decision_reply = "No stopped run to proceed with."
+                            else:
+                                text = _stop["goal"]
+                                sl_mode = "execute"
+                                sl_resume_stop_id = _stop["stop_id"]
+                                sl_resume_spec = _stop.get("spec")
+                                sl_resume_plan = _stop.get("plan")
             force_web = False
             if decision_reply is None:
                 text, force_web = self._force_web_prefix(text)
@@ -1425,6 +1874,8 @@ class WebUIServer:
                     ack = _qack()
                     if self.slack_sender is not None:
                         self.slack_sender(channel, ack, thread_ts)
+                    self._record_surface_exchange("slack:" + channel, "user", text)
+                    self._record_surface_exchange("slack:" + channel, "assistant", ack)
                     return 200, {"replies": [ack]}
             if decision_reply is not None:
                 if self.slack_sender is not None:
@@ -1433,18 +1884,21 @@ class WebUIServer:
             caption = text
             replies: list[str] = []
             # Image intake, same shape as parse_slack_event: image
-            # files ride with the goal text as [image ...] markers.
-            # Decision replies above already ran on the raw text, so
-            # replacing the goal text here cannot change an approval
-            # verdict. When the server's messaging config carries a
-            # Slack bot token, the file bytes are downloaded here
+            # files ride with the goal text as [image ...] markers,
+            # other files as [file ...] markers. Decision replies
+            # above already ran on the raw text, so replacing the
+            # goal text here cannot change an approval verdict.
+            # When the server's messaging config carries a Slack
+            # bot token, the file bytes are downloaded here
             # (mirroring the WhatsApp path: library save + vision
-            # message); without a token, markers + metadata only.
+            # message for images, library save for documents);
+            # without a token, markers + metadata only.
             payload: dict = {}
             try:
                 from .slack_inbound import parse_slack_event as _parse_slack
                 _parsed = _parse_slack(body)
-                if _parsed is not None and _parsed.payload.get("images"):
+                if _parsed is not None and (_parsed.payload.get("images")
+                                           or _parsed.payload.get("files")):
                     text = _parsed.goal
                     payload = _parsed.payload
             except Exception:
@@ -1482,7 +1936,45 @@ class WebUIServer:
                         image["downloaded"] = True
                     except Exception:
                         continue
+            # Non-image files: same download, no vision step — the
+            # document lands in the library and the marker carries
+            # its library id, so the run can read it.
+            if payload.get("files") and self.messaging_config.slack_bot_token:
+                from .messaging import download_slack_file as _dl_slack_file
+                for shared in payload["files"]:
+                    url = shared.get("url_private", "")
+                    if not url:
+                        continue
+                    try:
+                        data = _dl_slack_file(self.messaging_config.slack_bot_token, url)
+                    except Exception:
+                        continue
+                    try:
+                        from ..memory.library import Library
+                        safe = self._safe_name(str(shared.get("name", "slack-file")))
+                        tmp = self.home / "library" / f"slack-{shared['id']}-{safe}"
+                        tmp.parent.mkdir(parents=True, exist_ok=True)
+                        tmp.write_bytes(data)
+                        library = Library(self.home)
+                        saved = library.add_file(tmp, kind="attachment",
+                                                 description="Slack file")
+                        marker = (f"[file slack_file_id={shared['id']} "
+                                  f"mimetype={shared['mimetype']} name={shared['name']}]")
+                        text = text.replace(
+                            marker, f"[file library_id={saved['id']}]")
+                        shared["downloaded"] = True
+                    except Exception:
+                        continue
             payload["force_web"] = force_web
+            payload["think_max"] = sl_think_max or _sl_enabled(self.home, sl_key)
+            payload["research_mode"] = sl_research_mode or _sl_research_enabled(self.home, sl_key)
+            payload["mode"] = sl_mode or _sl_mode_enabled(self.home, sl_key) or "ask"
+            if sl_resume_stop_id:
+                payload["resume_stop_id"] = sl_resume_stop_id
+            if isinstance(sl_resume_spec, dict):
+                payload["resume_spec"] = sl_resume_spec
+            if isinstance(sl_resume_plan, dict):
+                payload["resume_plan"] = sl_resume_plan
             payload["channel"] = channel
             payload["thread_ts"] = thread_ts
             event = TriggerEvent(source="slack", kind="message", goal=text,
@@ -1495,6 +1987,9 @@ class WebUIServer:
             if self.slack_sender is not None:
                 for reply in replies:
                     self.slack_sender(channel, reply, thread_ts)
+            self._record_surface_exchange("slack:" + channel, "user", text)
+            for reply in replies:
+                self._record_surface_exchange("slack:" + channel, "assistant", reply)
             return 200, {"replies": replies}
         return 200, {"ok": True}
 
@@ -1654,13 +2149,47 @@ class WebUIServer:
     # as numbers on write. Secrets are listed so the catalog
     # read can mask them and report is_set, never the value.
     SETTINGS_CATALOG = [
-        {"group": "Model", "settings": [
+        {"group": "Interface", "settings": [
+            {"key": "AIDON_WEBUI_TOKEN", "label": "WebUI token", "type": "string", "default": "", "desc": "Bearer token for the WebUI API.", "secret": True},
+            {"key": "AIDON_WEBUI_PORT", "label": "WebUI port", "type": "int", "default": "8765", "desc": "Port used by launch.sh when starting the WebUI.", "secret": False},
+            {"key": "AIDON_WEBUI_ALLOWED_HOSTS", "label": "WebUI allowed hosts", "type": "string", "default": "", "desc": "Additional Host names accepted by the WebUI.", "secret": False},
+            {"key": "AIDON_VRM_PATH", "label": "Avatar VRM path", "type": "string", "default": "", "desc": "Optional absolute path to the avatar VRM model.", "secret": False},
+        ]},
+        {"group": "Scheduler", "settings": [
+            {"key": "AIDON_DAILY_REPORT_TIME", "label": "Daily report time", "type": "string", "default": "", "desc": "Time of day for the daily report.", "secret": False},
+            {"key": "AIDON_APPROVAL_NUDGE_MIN", "label": "Approval nudge minutes", "type": "int", "default": "15", "desc": "Minutes before an approval card is nudged.", "secret": False},
+            {"key": "AIDON_TICK_AUTOSTART", "label": "Tick autostart", "type": "bool", "default": "1", "desc": "Run the scheduler tick loop inside the WebUI process; off means run `aidon tick --loop` yourself or via the systemd unit. Default: 1.", "secret": False},
+        ]},
+        {"group": "System", "settings": [
+            {"key": "AIDON_APPROVAL_TIMEOUT_S", "label": "Approval timeout seconds", "type": "int", "default": "900", "desc": "Seconds an approval card waits before failing closed.", "secret": False},
+            {"key": "AIDON_EXECUTION_BACKEND", "label": "Execution backend", "type": "enum", "default": "bubblewrap", "desc": "Sandbox backend for shell steps: bubblewrap (local isolation), docker (disposable container), subprocess (no isolation), or vm (SSH to a VM you run; needs AIDON_VM_HOST). The planner never chooses this; only the owner sets it. Default: bubblewrap.", "secret": False, "options": ["bubblewrap", "docker", "subprocess", "vm"]},
+            {"key": "AIDON_DOCKER_IMAGE", "label": "Docker image", "type": "string", "default": "python:3.12-slim", "desc": "Pinned image for the Docker backend.", "secret": False},
+            {"key": "AIDON_DOCKER_NETWORK", "label": "Docker network", "type": "bool", "default": "0", "desc": "Allow network for the Docker backend.", "secret": False},
+            {"key": "AIDON_VM_HOST", "label": "VM host", "type": "string", "default": "", "desc": "Hostname or IP of the VM the VM backend SSHes into. Only used when the execution backend is vm; without it the VM backend refuses to run. Default: empty.", "secret": False},
+            {"key": "AIDON_VM_USER", "label": "VM user", "type": "string", "default": "", "desc": "SSH user for the VM backend. Only used when the execution backend is vm; empty means your current login. Default: empty.", "secret": False},
+            {"key": "AIDON_VM_USE_SUDO", "label": "VM sudo", "type": "bool", "default": "0", "desc": "Run VM commands under sudo -S inside the VM, so runs that need system access work there instead of on the host. Needs AIDON_VM_SUDO_PASSWORD; without it, sudo runs fail closed instead of prompting. Only affects the VM backend. Default: off (0).", "secret": False},
+            {"key": "AIDON_VM_SUDO_PASSWORD", "label": "VM sudo password", "type": "string", "default": "", "desc": "Sudo password inside the VM, sent on stdin to sudo -S only; never in a command line, log, or error message. Only used when VM sudo is on. Leave empty to keep the saved value unchanged. Default: empty.", "secret": True},
+            {"key": "AIDON_MAX_SANDBOX_SECONDS", "label": "Sandbox timeout seconds", "type": "int", "default": "120", "desc": "Timeout for one sandbox command.", "secret": False},
+            {"key": "AIDON_SANDBOX_MEM_MB", "label": "Sandbox memory MB", "type": "int", "default": "1024", "desc": "Maximum address space for a sandbox child; 0 disables this limit.", "secret": False},
+            {"key": "AIDON_SANDBOX_NPROC", "label": "Sandbox process limit", "type": "int", "default": "256", "desc": "Maximum processes for a sandbox child; 0 disables this limit.", "secret": False},
+            {"key": "AIDON_SANDBOX_FSIZE_MB", "label": "Sandbox file-size MB", "type": "int", "default": "512", "desc": "Maximum file size created by a sandbox child; 0 disables this limit.", "secret": False},
+            {"key": "AIDON_SANDBOX_CPU_S", "label": "Sandbox CPU seconds", "type": "int", "default": "0", "desc": "CPU limit for a sandbox child; 0 disables this limit.", "secret": False},
+            {"key": "AIDON_SANDBOX_BACKEND", "label": "Sandbox backend", "type": "enum", "default": "auto", "desc": "Isolation backend selection.", "secret": False, "options": ["auto", "bubblewrap", "subprocess"]},
+            {"key": "AIDON_SANDBOX_NETWORK", "label": "Sandbox network", "type": "bool", "default": "0", "desc": "Allow network access inside sandbox commands.", "secret": False},
+            {"key": "AIDON_SANDBOX_REQUIRE_ISOLATION", "label": "Require isolation", "type": "bool", "default": "0", "desc": "Refuse sandbox commands when bubblewrap isolation is unavailable.", "secret": False},
+            {"key": "AIDON_KERNEL", "label": "Kernel mode", "type": "bool", "default": "0", "desc": "Kernel mode: write/read/list/shell only, no calculate, no plugins.", "secret": False},
+            {"key": "AIDON_COMPUTER_DRIVER", "label": "Computer driver", "type": "enum", "default": "", "desc": "Opt-in desktop driver; requires a graphical session and kernel mode off.", "secret": False, "options": ["", "x11"]},
+            {"key": "AIDON_SLACK_AUTOSTART", "label": "Slack polling autostart", "type": "bool", "default": "1", "desc": "Start Slack polling automatically with the WebUI.", "secret": False},
+            {"key": "AIDON_AUTONOMY_ENABLED", "label": "Autonomy enabled", "type": "bool", "default": "1", "desc": "Trust-based autonomy for repeated skills.", "secret": False},
+            {"key": "AIDON_AUTONOMY_THRESHOLD", "label": "Autonomy threshold", "type": "int", "default": "5", "desc": "Successes before a skill graduates a trust tier.", "secret": False},
+            {"key": "AIDON_AUTONOMY_DECAY_DAYS", "label": "Autonomy decay days", "type": "string", "default": "14", "desc": "Days after which trust decays.", "secret": False},
+            {"key": "AIDON_TIMEZONE", "label": "Timezone", "type": "string", "default": "UTC", "desc": "Timezone for schedules and reports.", "secret": False},
+        ]},
+        {"group": "Cognitive", "settings": [
             {"key": "AIDON_MODEL", "label": "Chat model", "type": "string", "default": "muse-spark", "desc": "Model id for the agent loop.", "secret": False},
             {"key": "AIDON_BACKEND", "label": "Model backend", "type": "enum", "default": "", "desc": "meta, native, http, or fake.", "secret": False, "options": ["meta", "native", "http", "fake"]},
             {"key": "AIDON_API_ENDPOINT", "label": "API endpoint", "type": "string", "default": "", "desc": "Model API endpoint; leave empty until a backend is selected.", "secret": False},
             {"key": "AIDON_API_KEY", "label": "API key", "type": "string", "default": "", "desc": "Key for the Meta Model API or other endpoint.", "secret": True},
-            {"key": "AIDON_EMBED_MODEL", "label": "Embed model", "type": "string", "default": "google/embeddinggemma-2", "desc": "Embedding model for memory.", "secret": False},
-            {"key": "AIDON_SPARSE_MODEL", "label": "Sparse memory model", "type": "string", "default": "prithivida/Splade_PP_en_v1", "desc": "Learned sparse model for hybrid memory recall; empty uses keyword sparse weights.", "secret": False},
             {"key": "AIDON_FAST_MODEL", "label": "Fast model", "type": "string", "default": "", "desc": "Small model for fast phases, else the main model.", "secret": False},
             {"key": "AIDON_FAST_API_ENDPOINT", "label": "Fast model endpoint", "type": "string", "default": "", "desc": "Endpoint for the fast model; empty uses the main API endpoint.", "secret": False},
             {"key": "AIDON_FAST_API_KEY", "label": "Fast model API key", "type": "string", "default": "", "desc": "API key for the fast model endpoint; empty uses the main API key.", "secret": True},
@@ -1690,49 +2219,56 @@ class WebUIServer:
             {"key": "AIDON_EFFORT_WEBCHAT", "label": "Thinking effort (webchat)", "type": "enum", "default": "", "desc": "Webchat-phase thinking effort pin; empty = built-in low. A pin is never raised by escalation.", "secret": False, "options": ["", "off", "low", "medium", "high"]},
             {"key": "AIDON_EFFORT_PLAN", "label": "Thinking effort (plan)", "type": "enum", "default": "", "desc": "Plan-phase thinking effort pin; empty = built-in low. A pin is never raised by escalation.", "secret": False, "options": ["", "off", "low", "medium", "high"]},
             {"key": "AIDON_EFFORT_VERIFY", "label": "Thinking effort (verify)", "type": "enum", "default": "", "desc": "Verify-phase thinking effort pin; empty = built-in low. A pin is never raised by escalation.", "secret": False, "options": ["", "off", "low", "medium", "high"]},
-            {"key": "AIDON_MAX_TOKENS_PER_RUN", "label": "Max tokens per run", "type": "int", "default": "200000", "desc": "Hard token budget for one goal run.", "secret": False},
-            {"key": "AIDON_MAX_STEPS", "label": "Max steps", "type": "int", "default": "50", "desc": "Hard step budget for one goal run.", "secret": False},
-            {"key": "AIDON_MAX_WALLCLOCK_MIN", "label": "Max wallclock minutes", "type": "int", "default": "60", "desc": "Hard wallclock budget for one goal run, in minutes.", "secret": False},
-            {"key": "AIDON_APPROVAL_TIMEOUT_S", "label": "Approval timeout seconds", "type": "int", "default": "180", "desc": "Seconds an approval card waits before failing closed.", "secret": False},
-        ]},
-        {"group": "Sandbox", "settings": [
-            {"key": "AIDON_EXECUTION_BACKEND", "label": "Execution backend", "type": "enum", "default": "bubblewrap", "desc": "Sandbox backend for shell steps.", "secret": False, "options": ["bubblewrap", "docker", "subprocess"]},
-            {"key": "AIDON_DOCKER_IMAGE", "label": "Docker image", "type": "string", "default": "python:3.12-slim", "desc": "Pinned image for the Docker backend.", "secret": False},
-            {"key": "AIDON_DOCKER_NETWORK", "label": "Docker network", "type": "bool", "default": "0", "desc": "Allow network for the Docker backend.", "secret": False},
-            {"key": "AIDON_MAX_SANDBOX_SECONDS", "label": "Sandbox timeout seconds", "type": "int", "default": "120", "desc": "Timeout for one sandbox command.", "secret": False},
-            {"key": "AIDON_SANDBOX_MEM_MB", "label": "Sandbox memory MB", "type": "int", "default": "1024", "desc": "Maximum address space for a sandbox child; 0 disables this limit.", "secret": False},
-            {"key": "AIDON_SANDBOX_NPROC", "label": "Sandbox process limit", "type": "int", "default": "256", "desc": "Maximum processes for a sandbox child; 0 disables this limit.", "secret": False},
-            {"key": "AIDON_SANDBOX_FSIZE_MB", "label": "Sandbox file-size MB", "type": "int", "default": "512", "desc": "Maximum file size created by a sandbox child; 0 disables this limit.", "secret": False},
-            {"key": "AIDON_SANDBOX_CPU_S", "label": "Sandbox CPU seconds", "type": "int", "default": "0", "desc": "CPU limit for a sandbox child; 0 disables this limit.", "secret": False},
-            {"key": "AIDON_SANDBOX_BACKEND", "label": "Sandbox backend", "type": "enum", "default": "auto", "desc": "Isolation backend selection.", "secret": False, "options": ["auto", "bubblewrap", "subprocess"]},
-            {"key": "AIDON_SANDBOX_NETWORK", "label": "Sandbox network", "type": "bool", "default": "0", "desc": "Allow network access inside sandbox commands.", "secret": False},
-            {"key": "AIDON_SANDBOX_REQUIRE_ISOLATION", "label": "Require isolation", "type": "bool", "default": "0", "desc": "Refuse sandbox commands when bubblewrap isolation is unavailable.", "secret": False},
-            {"key": "AIDON_KERNEL", "label": "Kernel mode", "type": "bool", "default": "0", "desc": "Kernel mode: write/read/list/shell only, no calculate, no plugins.", "secret": False},
-            {"key": "AIDON_COMPUTER_DRIVER", "label": "Computer driver", "type": "enum", "default": "", "desc": "Opt-in desktop driver; requires a graphical session and kernel mode off.", "secret": False, "options": ["", "x11"]},
         ]},
         {"group": "Memory", "settings": [
+            {"key": "AIDON_EMBED_MODEL", "label": "Embed model", "type": "string", "default": "google/embeddinggemma-2", "desc": "Embedding model for memory.", "secret": False},
+            {"key": "AIDON_SPARSE_MODEL", "label": "Sparse memory model", "type": "string", "default": "prithivida/Splade_PP_en_v1", "desc": "Learned sparse model for hybrid memory recall; empty uses keyword sparse weights.", "secret": False},
+            {"key": "AIDON_EMBEDDING_REVISION", "label": "Embed model revision", "type": "string", "default": "f9972ac22e696a105c482202646979e33e4b5a1e", "desc": "Pinned snapshot revision of the embedding model. Upstream README edits otherwise mint a new snapshot directory on every HEAD move, which looks like the weights downloading again. Override with another revision hash to use a different snapshot. Default: f9972ac22e696a105c482202646979e33e4b5a1e.", "secret": False},
             {"key": "AIDON_FORGET_HALF_LIFE_DAYS", "label": "Forget half-life days", "type": "string", "default": "21", "desc": "Forgetting-curve half-life, in days.", "secret": False},
             {"key": "AIDON_FORGET_GRACE_DAYS", "label": "Forget grace days", "type": "int", "default": "35", "desc": "Days before forgetting starts.", "secret": False},
             {"key": "AIDON_FORGET_CLEANUP_THRESHOLD", "label": "Forget cleanup threshold", "type": "string", "default": "0.02", "desc": "Recall weight below which a point is pruned.", "secret": False},
-            {"key": "AIDON_EPISODE_RECALL_LIMIT", "label": "Episode recall limit", "type": "int", "default": "1", "desc": "Number of prior experiences considered before a fresh plan.", "secret": False},
+            {"key": "AIDON_EPISODE_RECALL_LIMIT", "label": "Episode recall limit", "type": "int", "default": "1", "desc": "Number of prior experiences considered before a fresh plan. Composition always uses at least 5; that floor is fixed and cannot go lower.", "secret": False},
             {"key": "AIDON_KNOWLEDGE_RECALL_LIMIT", "label": "Knowledge recall limit", "type": "int", "default": "3", "desc": "Number of knowledge points considered before planning.", "secret": False},
             {"key": "AIDON_RECALL_MAX_TOKENS", "label": "Recall token budget", "type": "int", "default": "2000", "desc": "Maximum memory context included in a plan.", "secret": False},
             {"key": "AIDON_LEARN_MAX_SKILLS_PER_DAY", "label": "Learning skills per day", "type": "int", "default": "5", "desc": "Maximum candidate skills promoted by one learn cycle per day.", "secret": False},
             {"key": "AIDON_SKILL_MAX_FAILURES", "label": "Skill failure limit", "type": "int", "default": "3", "desc": "Failures before a skill is retired.", "secret": False},
             {"key": "AIDON_INGEST_DIR", "label": "Ingest directory", "type": "string", "default": "", "desc": "Folder watched for ingest triggers.", "secret": False},
             {"key": "AIDON_QDRANT_URL", "label": "Qdrant URL", "type": "string", "default": "", "desc": "Qdrant server URL, empty = local mode.", "secret": False},
+            {"key": "AIDON_MEMORY_EXTRACT", "label": "Background fact extraction", "type": "int", "default": "1", "desc": "Extract facts and understandings in the background after chats and runs; 0 disables it.", "secret": False},
+            {"key": "AIDON_DAG_SIMILARITY", "label": "DAG similarity threshold", "type": "string", "default": "0.3", "desc": "Goal-shape overlap (0-1) for DAG replacement, experience adaptation, and failure matching; lower merges more aggressively.", "secret": False},
+            {"key": "AIDON_LEARN_MAX_TOKENS_PER_DAY", "label": "Learn tokens per day", "type": "int", "default": "500000", "desc": "Tokens the self-improvement loop may spend per UTC day (learn phase only). Default: 500000.", "secret": False},
+            {"key": "AIDON_SEMANTIC_RECALL_LIMIT", "label": "Semantic recall limit", "type": "int", "default": "3", "desc": "General-fact (semantic) recall limit for plan prompts. Default: 3.", "secret": False},
+            {"key": "AIDON_RECALL_CAP_EPISODES", "label": "Recall cap episodes", "type": "int", "default": "700", "desc": "Per-source cap for episode recall in the fused planning block; one noisy source can't starve the others. Default: 700.", "secret": False},
+            {"key": "AIDON_RECALL_CAP_KNOWLEDGE", "label": "Recall cap knowledge", "type": "int", "default": "700", "desc": "Per-source cap for knowledge recall in the fused planning block. Default: 700.", "secret": False},
+            {"key": "AIDON_RECALL_CAP_SKILLS", "label": "Recall cap skills", "type": "int", "default": "500", "desc": "Per-source cap for skill recall in the fused planning block. Default: 500.", "secret": False},
         ]},
-        {"group": "Research", "settings": [
-            {"key": "AIDON_SEARCH_BACKEND", "label": "Search backend", "type": "enum", "default": "tavily", "desc": "Web search backend.", "secret": False, "options": ["tavily", "searxng"]},
-            {"key": "AIDON_SEARXNG_URL", "label": "SearXNG URL", "type": "string", "default": "http://localhost:8888", "desc": "SearXNG server for the searxng backend.", "secret": False},
-            {"key": "TAVILY_API_KEY", "label": "Tavily API key", "type": "string", "default": "", "desc": "Key for Tavily search.", "secret": True},
-            {"key": "AIDON_RESEARCH_MAX_ROUNDS", "label": "Research max rounds", "type": "int", "default": "10", "desc": "Max research rounds per run.", "secret": False},
+        {"group": "Voice", "settings": [
+            {"key": "AIDON_TTS_VOICE_ID", "label": "TTS voice id", "type": "string", "default": "", "desc": "Voice id for text-to-speech.", "secret": False},
+            {"key": "AIDON_VOICE_ANNOUNCE", "label": "Voice announcements", "type": "bool", "default": "0", "desc": "Automatically play spoken WebUI replies.", "secret": False},
+            {"key": "AIDON_FISH_API_KEY", "label": "Fish API key", "type": "string", "default": "", "desc": "Key for Fish TTS.", "secret": True},
+            {"key": "AIDON_TRANSCRIBE_API_KEY", "label": "Transcribe API key", "type": "string", "default": "", "desc": "Key for voice transcription.", "secret": True},
+        ]},
+        {"group": "Agentic", "settings": [
+            {"key": "AIDON_MAX_TOKENS_PER_RUN", "label": "Max tokens per run", "type": "int", "default": "200000", "desc": "Hard token budget for one goal run.", "secret": False},
+            {"key": "AIDON_MAX_STEPS", "label": "Max steps", "type": "int", "default": "50", "desc": "Hard step budget for one goal run.", "secret": False},
+            {"key": "AIDON_MAX_WALLCLOCK_MIN", "label": "Max wallclock minutes", "type": "int", "default": "60", "desc": "Hard wallclock budget for one goal run, in minutes.", "secret": False},
+            {"key": "AIDON_PARALLEL_WORKERS", "label": "Parallel DAG workers", "type": "int", "default": "3", "desc": "Max concurrent DAG/plan steps in one level; 1 = sequential.", "secret": False},
             {"key": "AIDON_MAX_STUCK_ITERATIONS", "label": "Max stuck iterations", "type": "int", "default": "8", "desc": "Iterations without progress before the run stops.", "secret": False},
             {"key": "AIDON_PARALLEL_TOOLS", "label": "Parallel tools", "type": "int", "default": "4", "desc": "Parallel research/tool workers.", "secret": False},
-            {"key": "AIDON_RESEARCH_ALLOWLIST", "label": "Research allowlist", "type": "string", "default": "", "desc": "Comma-separated domains research may use, empty = unrestricted.", "secret": False},
-            {"key": "AIDON_YOUTUBE_API_KEY", "label": "YouTube API key", "type": "string", "default": "", "desc": "Key for YouTube search.", "secret": True},
+            {"key": "AIDON_MAX_ATTEMPTS", "label": "Repair attempts per run", "type": "int", "default": "3", "desc": "Execute, verify, repair, up to this many tries.", "secret": False},
+            {"key": "AIDON_MAX_REPLANS", "label": "Research-plus-replan passes", "type": "int", "default": "1", "desc": "Replan passes before execution; 0 skips replanning.", "secret": False},
+            {"key": "AIDON_MAX_PLAN_REPAIRS", "label": "Plan repair tries", "type": "int", "default": "2", "desc": "Repair tries when the validator rejects a plan; 0 fails immediately.", "secret": False},
+            {"key": "AIDON_REACT_MAX_ROUNDS", "label": "ReAct max rounds", "type": "int", "default": "8", "desc": "Max rounds for the ReAct compatibility loop.", "secret": False},
+            {"key": "AIDON_REACT_MAX_WORKERS", "label": "ReAct parallel workers", "type": "int", "default": "3", "desc": "Parallel tool workers within one ReAct round; 1 = sequential.", "secret": False},
+            {"key": "AIDON_CRITIC_ENABLED", "label": "Plan critic on/off", "type": "int", "default": "1", "desc": "Reflection pass on each valid plan before execution; 0 skips it.", "secret": False},
+            {"key": "AIDON_CRITIC_MAX_ROUNDS", "label": "Critic repair rounds", "type": "int", "default": "1", "desc": "Critic-issue repair rounds; 0 runs the critic without repairing.", "secret": False},
+            {"key": "AIDON_CRITIC_MAX_ISSUES", "label": "Critic issues per round", "type": "int", "default": "5", "desc": "Most issues the critic returns per review round; repairs address them in order.", "secret": False},
+            {"key": "AIDON_CRITIC_MODE", "label": "Critic mode", "type": "enum", "default": "risk", "desc": "Plan critic scope: risk (review only fresh large plans and plans with live steps; adapted and small plans skip it) or always (review every valid plan). Flip to always if risk-based review misses real plan flaws. Default: risk.", "secret": False, "options": ["risk", "always"]},
+            {"key": "AIDON_CRITIC_RISK_MAX_STEPS", "label": "Critic risk small-plan steps", "type": "int", "default": "3", "desc": "A plan with at most this many steps counts as small for risk-based critic mode and skips review when it has no live steps; 0 means only adapted plans skip. Default: 3.", "secret": False},
+            {"key": "AIDON_MODEL_VERIFIER", "label": "Model verifier mode", "type": "enum", "default": "off", "desc": "Model second opinion after code verification passes: off (code decides alone, fewest tokens), selective (runs unless every deliverable is structured data such as JSON or CSV, where code checks are complete), or always (runs on every passing run). Flip up if code-only verification misses quality flaws. Default: off.", "secret": False, "options": ["off", "selective", "always"]},
+            {"key": "AIDON_CHOICE_POLICY", "label": "Choice policy", "type": "enum", "default": "auto", "desc": "Choice policy when research finds real alternatives: auto (reason and pick) or ask (present ranked candidates at a choice gate). Default: auto.", "secret": False, "options": ["auto", "ask"]},
         ]},
-        {"group": "Messaging", "settings": [
+        {"group": "Social", "settings": [
             {"key": "AIDON_WHATSAPP_TOKEN", "label": "WhatsApp token", "type": "string", "default": "", "desc": "WhatsApp Cloud API token.", "secret": True},
             {"key": "AIDON_WHATSAPP_PHONE_ID", "label": "WhatsApp phone id", "type": "string", "default": "", "desc": "WhatsApp Cloud phone number id.", "secret": False},
             {"key": "AIDON_WHATSAPP_VERIFY_TOKEN", "label": "WhatsApp verify token", "type": "string", "default": "", "desc": "Token WhatsApp uses to verify the webhook.", "secret": True},
@@ -1748,31 +2284,25 @@ class WebUIServer:
             {"key": "AIDON_SLACK_INBOUND_CHANNEL", "label": "Slack inbound channel(s)", "type": "string", "default": "", "desc": "Comma-separated Slack channel or DM IDs for polling.", "secret": False},
             {"key": "AIDON_SLACK_POLL_SECONDS", "label": "Slack poll seconds", "type": "int", "default": "10", "desc": "Polling interval for Slack inbound messages.", "secret": False},
             {"key": "AIDON_SLACK_ACK_AFTER_SECONDS", "label": "Slack acknowledgement delay", "type": "int", "default": "15", "desc": "Seconds before a long-running Slack goal gets an acknowledgement.", "secret": False},
-            {"key": "AIDON_SLACK_AUTOSTART", "label": "Slack polling autostart", "type": "bool", "default": "1", "desc": "Start Slack polling automatically with the WebUI.", "secret": False},
             {"key": "AIDON_OWNER_EMAIL", "label": "Owner email", "type": "string", "default": "", "desc": "Where drafts and reports to the owner are addressed.", "secret": False},
-            {"key": "AIDON_DAILY_REPORT_TIME", "label": "Daily report time", "type": "string", "default": "", "desc": "Time of day for the daily report.", "secret": False},
-            {"key": "AIDON_APPROVAL_NUDGE_MIN", "label": "Approval nudge minutes", "type": "int", "default": "15", "desc": "Minutes before an approval card is nudged.", "secret": False},
             {"key": "AIDON_APPROVAL_NUDGE_CHANNEL", "label": "Approval nudge channel", "type": "string", "default": "", "desc": "Channel approval nudges go to.", "secret": False},
             {"key": "AIDON_CORRECTED_SUBJECT", "label": "Corrected subject", "type": "bool", "default": "1", "desc": "Mark corrected emails with a Corrected subject.", "secret": False},
-            {"key": "AIDON_AUTONOMY_ENABLED", "label": "Autonomy enabled", "type": "bool", "default": "1", "desc": "Trust-based autonomy for repeated skills.", "secret": False},
-            {"key": "AIDON_AUTONOMY_THRESHOLD", "label": "Autonomy threshold", "type": "int", "default": "5", "desc": "Successes before a skill graduates a trust tier.", "secret": False},
-            {"key": "AIDON_AUTONOMY_DECAY_DAYS", "label": "Autonomy decay days", "type": "string", "default": "14", "desc": "Days after which trust decays.", "secret": False},
         ]},
-        {"group": "WebUI", "settings": [
-            {"key": "AIDON_WEBUI_TOKEN", "label": "WebUI token", "type": "string", "default": "", "desc": "Bearer token for the WebUI API.", "secret": True},
-            {"key": "AIDON_TIMEZONE", "label": "Timezone", "type": "string", "default": "UTC", "desc": "Timezone for schedules and reports.", "secret": False},
-            {"key": "AIDON_TTS_VOICE_ID", "label": "TTS voice id", "type": "string", "default": "", "desc": "Voice id for text-to-speech.", "secret": False},
-            {"key": "AIDON_VOICE_ANNOUNCE", "label": "Voice announcements", "type": "bool", "default": "0", "desc": "Automatically play spoken WebUI replies.", "secret": False},
-            {"key": "AIDON_FISH_API_KEY", "label": "Fish API key", "type": "string", "default": "", "desc": "Key for Fish TTS.", "secret": True},
-            {"key": "AIDON_TRANSCRIBE_API_KEY", "label": "Transcribe API key", "type": "string", "default": "", "desc": "Key for voice transcription.", "secret": True},
-            {"key": "AIDON_WEBUI_PORT", "label": "WebUI port", "type": "int", "default": "8765", "desc": "Port used by launch.sh when starting the WebUI.", "secret": False},
-            {"key": "AIDON_WEBUI_ALLOWED_HOSTS", "label": "WebUI allowed hosts", "type": "string", "default": "", "desc": "Additional Host names accepted by the WebUI.", "secret": False},
-            {"key": "AIDON_VRM_PATH", "label": "Avatar VRM path", "type": "string", "default": "", "desc": "Optional absolute path to the avatar VRM model.", "secret": False},
+        {"group": "Research", "settings": [
+            {"key": "AIDON_SEARCH_BACKEND", "label": "Search backend", "type": "enum", "default": "tavily", "desc": "Web search backend.", "secret": False, "options": ["tavily", "searxng"]},
+            {"key": "AIDON_SEARXNG_URL", "label": "SearXNG URL", "type": "string", "default": "http://localhost:8888", "desc": "SearXNG server for the searxng backend.", "secret": False},
+            {"key": "TAVILY_API_KEY", "label": "Tavily API key", "type": "string", "default": "", "desc": "Key for Tavily search.", "secret": True},
+            {"key": "AIDON_RESEARCH_MAX_ROUNDS", "label": "Research max rounds", "type": "int", "default": "10", "desc": "Max research rounds per run.", "secret": False},
+            {"key": "AIDON_RESEARCH_ALLOWLIST", "label": "Research allowlist", "type": "string", "default": "", "desc": "Comma-separated domains research may use, empty = unrestricted.", "secret": False},
+            {"key": "AIDON_YOUTUBE_API_KEY", "label": "YouTube API key", "type": "string", "default": "", "desc": "Key for YouTube search.", "secret": True},
+            {"key": "AIDON_DEEP_RESEARCH_ROUNDS", "label": "Deep research rounds", "type": "int", "default": "2", "desc": "Max search rounds for the deep_research tool.", "secret": False},
+            {"key": "AIDON_DEEP_RESEARCH_SOURCES", "label": "Deep research sources", "type": "int", "default": "5", "desc": "Max pages fetched per deep_research round.", "secret": False},
         ]},
     ]
     _CATALOG_FLOAT_KEYS = frozenset({
         "AIDON_MODEL_TIMEOUT_S", "AIDON_FORGET_HALF_LIFE_DAYS",
         "AIDON_FORGET_CLEANUP_THRESHOLD", "AIDON_AUTONOMY_DECAY_DAYS",
+        "AIDON_DAG_SIMILARITY",
     })
 
     def _catalog_entry(self, env_key: str):
@@ -1837,8 +2367,21 @@ class WebUIServer:
             "AIDON_LEARN_MAX_SKILLS_PER_DAY": (0, 100, 1),
             "AIDON_SKILL_MAX_FAILURES": (0, 100, 1),
             "AIDON_RESEARCH_MAX_ROUNDS": (0, 100, 1),
+            "AIDON_DEEP_RESEARCH_ROUNDS": (1, 5, 1),
+            "AIDON_DEEP_RESEARCH_SOURCES": (1, 10, 1),
             "AIDON_MAX_STUCK_ITERATIONS": (0, 100, 1),
             "AIDON_PARALLEL_TOOLS": (1, 32, 1),
+            "AIDON_PARALLEL_WORKERS": (1, 32, 1),
+            "AIDON_MAX_ATTEMPTS": (1, 100, 1),
+            "AIDON_MAX_REPLANS": (0, 10, 1),
+            "AIDON_MAX_PLAN_REPAIRS": (0, 10, 1),
+            "AIDON_REACT_MAX_ROUNDS": (1, 100, 1),
+            "AIDON_REACT_MAX_WORKERS": (1, 32, 1),
+            "AIDON_CRITIC_ENABLED": (0, 1, 1),
+            "AIDON_CRITIC_MAX_ROUNDS": (0, 5, 1),
+            "AIDON_CRITIC_MAX_ISSUES": (1, 20, 5),
+            "AIDON_CRITIC_RISK_MAX_STEPS": (0, 20, 3),
+            "AIDON_MEMORY_EXTRACT": (0, 1, 1),
             "AIDON_SLACK_POLL_SECONDS": (3, 3600, 1),
             "AIDON_SLACK_ACK_AFTER_SECONDS": (0, 3600, 1),
             "AIDON_APPROVAL_NUDGE_MIN": (0, 1440, 1),
@@ -2344,6 +2887,55 @@ class WebUIServer:
             return {"ok": False}
         path.unlink()
         return {"ok": True}
+
+    def handle_practice_list(self) -> dict:
+        """All practice schedules, with their session history."""
+        from .practice import load_schedules
+        return {"schedules": load_schedules(self.home)}
+
+    def handle_practice_create(self, body: dict) -> dict:
+        """Create a practice schedule from the Practice page or CLI shape."""
+        from .practice import add_schedule
+        schedule, error = add_schedule(self.home, body or {})
+        if error is not None:
+            return {"error": error}
+        return {"schedule": schedule}
+
+    def handle_practice_delete(self, body: dict) -> dict:
+        """Delete a practice schedule by name."""
+        from .practice import remove_schedule
+        return {"deleted": remove_schedule(self.home, str((body or {}).get("name", "")))}
+
+    def handle_practice_run(self, body: dict) -> dict:
+        """Start a practice session now, in the background.
+
+        Run-now uses a 60-minute window from now, not the
+        schedule's window, and does not consume the day's
+        scheduled session. It needs the serve daemon's
+        practice_session_runner; without the daemon it
+        reports that honestly instead of silently doing
+        nothing.
+        """
+        from datetime import datetime, timedelta
+        from .practice import get_schedule
+        if self.practice_session_runner is None:
+            return {"error": "practice runs need the serve daemon (launch.sh serve)"}
+        schedule = get_schedule(self.home, str((body or {}).get("name", "")))
+        if schedule is None:
+            return {"error": "no such practice schedule"}
+        end = datetime.now() + timedelta(minutes=60)
+        runner = self.practice_session_runner
+
+        def _run():
+            try:
+                runner(schedule, end)
+            except Exception as exc:
+                print(f"Practice session {schedule.get('name')} failed: {exc}")
+
+        threading.Thread(target=_run, daemon=True,
+                         name=f"practice-{schedule.get('name')}").start()
+        return {"started": True, "name": schedule.get("name"),
+                "window_minutes": 60}
 
     def handle_brief_get(self, project_id: str):
         return self._read_json_file(
@@ -2931,7 +3523,8 @@ class WebUIServer:
                     return
                 data = candidate.read_bytes()
                 if candidate.name in {"index.html", "dag.html", "capabilities.html",
-                                      "memory.html", "knowledge.html", "reports.html"}:
+                                      "memory.html", "knowledge.html", "reports.html",
+                                      "graph.html", "docs.html"}:
                     # Version the document against its dependent core assets
                     # too.  Otherwise a CSS/JS edit made after index.html
                     # keeps the browser's old cached files indefinitely.
@@ -2968,7 +3561,7 @@ class WebUIServer:
                 elif parsed.path == "/":
                     self._send_static("index.html")
                 elif parsed.path in ("/dag", "/capabilities", "/memory", "/knowledge",
-                                     "/reports"):
+                                     "/reports", "/practice", "/graph", "/documents"):
                     self._send_static(parsed.path.lstrip("/") + ".html")
                 elif parsed.path == "/settings":
                     keys = server.auth_store.list_keys() if server.auth_store else []
@@ -3196,6 +3789,20 @@ loadSettings();
                                                trace_since=trace_since)
                     self._send_json(200 if data is not None else 404,
                                     data or {"error": "run not found"})
+                elif parsed.path == "/api/think":
+                    from .surfaces import think_enabled as _get_think
+                    from urllib.parse import parse_qs as _parse_qs_think
+                    _think_query = _parse_qs_think(parsed.query)
+                    conv = str(_think_query.get("conversation_id", [""])[0])
+                    self._send_json(200, {"think_max": _get_think(server.home, conv)})
+                elif parsed.path == "/api/research":
+                    from .surfaces import research_enabled as _get_research
+                    from urllib.parse import parse_qs as _parse_qs_research
+                    _research_query = _parse_qs_research(parsed.query)
+                    conv = str(_research_query.get("conversation_id", [""])[0])
+                    self._send_json(200, {"research_mode": _get_research(server.home, conv)})
+                elif parsed.path == "/api/practice":
+                    self._send_json(200, server.handle_practice_list())
                 elif parsed.path == "/api/conversations":
                     self._send_json(200, server.handle_conversations_list())
                 elif parsed.path.startswith("/api/conversations/"):
@@ -3371,6 +3978,57 @@ loadSettings();
                 elif parsed.path == "/api/settings/env":
                     result = server.settings_set_env(str(body.get("key", "")), body.get("value", ""))
                     self._send_json(200 if result.get("ok") else 400, result)
+                elif parsed.path == "/api/think":
+                    from .surfaces import toggle_think as _post_think
+                    conv = str(body.get("conversation_id", ""))
+                    state = _post_think(server.home, conv)
+                    self._send_json(200, {"think_max": state})
+                elif parsed.path == "/api/research":
+                    from .surfaces import toggle_research as _post_research
+                    conv = str(body.get("conversation_id", ""))
+                    state = _post_research(server.home, conv)
+                    self._send_json(200, {"research_mode": state})
+                elif parsed.path == "/api/transcribe_stream/start":
+                    if not server.transcribe_key:
+                        self._send_json(501, {"error": "transcribe key not configured"})
+                        return
+                    try:
+                        import uuid as _uuidt
+                        from ..capabilities.voice import RealtimeTranscriber as _RT
+                        sid = _uuidt.uuid4().hex
+                        rt = _RT(server.transcribe_key, session_id=sid)
+                        rt.connect()
+                        server.realtime_sessions[sid] = rt
+                        self._send_json(200, {"session_id": sid})
+                    except Exception as exc:
+                        self._send_json(502, {"error": str(exc)})
+                elif parsed.path == "/api/transcribe_stream/audio":
+                    import base64 as _b64a
+                    rt = server.realtime_sessions.get(str(body.get("session_id", "")))
+                    if rt is None:
+                        self._send_json(404, {"error": "unknown session"})
+                        return
+                    try:
+                        audio = _b64a.b64decode(str(body.get("audio_b64", "")))
+                    except Exception:
+                        self._send_json(400, {"error": "bad base64"})
+                        return
+                    if audio and not rt.send_audio(audio):
+                        detail = rt.error or ""
+                        self._send_json(410, {"error": "session closed" + (": " + detail if detail else "")})
+                        return
+                    self._send_json(200, {"transcript": rt.transcript,
+                                          "final": rt.final})
+                elif parsed.path == "/api/transcribe_stream/end":
+                    rt = server.realtime_sessions.pop(str(body.get("session_id", "")), None)
+                    if rt is None:
+                        self._send_json(404, {"error": "unknown session"})
+                        return
+                    try:
+                        result = rt.end()
+                    finally:
+                        rt.close()
+                    self._send_json(200, result)
                 elif parsed.path == "/api/transcribe":
                     if not server.transcribe_key:
                         self._send_json(501, {"error": "transcribe key not configured"})
@@ -3393,6 +4051,16 @@ loadSettings();
                         self._send_json(500, {"error": str(exc)})
                 elif parsed.path == "/api/goals":
                     result = server.start_goal(body)
+                    self._send_json(200 if "run_id" in result else 400, result)
+                elif parsed.path == "/api/proceed":
+                    # The Proceed button on a stopped run: reuse the
+                    # typed /proceed path, so the button and the
+                    # command dispatch the same resume run.
+                    stop_id = str(body.get("stop_id", "") or "")
+                    result = server.start_goal({
+                        "goal": f"/proceed {stop_id}".strip(),
+                        "conversation_id": str(body.get("conversation_id", "") or ""),
+                    })
                     self._send_json(200 if "run_id" in result else 400, result)
                 elif parsed.path.startswith("/api/runs/") and parsed.path.endswith("/approval"):
                     run_id = parsed.path[len("/api/runs/"):-len("/approval")].strip("/")
@@ -3585,6 +4253,14 @@ loadSettings();
                 elif parsed.path == "/api/plugins/adopt":
                     result = server.handle_plugin_adopt(str(body.get("path", "")))
                     self._send_json(200 if result.get("ok") else 400, result)
+                elif parsed.path == "/api/practice":
+                    result = server.handle_practice_create(body)
+                    self._send_json(200 if "schedule" in result else 400, result)
+                elif parsed.path == "/api/practice/delete":
+                    self._send_json(200, server.handle_practice_delete(body))
+                elif parsed.path == "/api/practice/run":
+                    result = server.handle_practice_run(body)
+                    self._send_json(200 if result.get("started") else 400, result)
                 elif parsed.path in ("/webhook/whatsapp", "/webhooks/whatsapp"):
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     status, payload = server.handle_whatsapp_post(body, raw, headers)

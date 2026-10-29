@@ -106,10 +106,14 @@ class Config:
     sandbox_network: bool = False
     sandbox_require_isolation: bool = False
     max_steps: int = 50
-    approval_timeout_seconds: int = 180
+    approval_timeout_seconds: int = 900
     execution_backend: str = "bubblewrap"
     docker_image: str = "python:3.12-slim"
     docker_network: bool = False
+    vm_host: str = ""
+    vm_user: str = ""
+    vm_sudo_password: str = ""
+    vm_use_sudo: bool = False
     ingest_dir: Path | None = None
     budget_tokens: int = 200000
     budget_seconds: int = 3600
@@ -206,13 +210,18 @@ class Config:
                 "AIDON_SANDBOX_REQUIRE_ISOLATION", "0") == "1",
             max_steps=_env_int("AIDON_MAX_STEPS", 50),
             approval_timeout_seconds=_env_int(
-                "AIDON_APPROVAL_TIMEOUT_S", 180),
+                "AIDON_APPROVAL_TIMEOUT_S", 900),
             execution_backend=os.environ.get("AIDON_EXECUTION_BACKEND",
                                              "bubblewrap"),
             docker_image=os.environ.get("AIDON_DOCKER_IMAGE",
                                         "python:3.12-slim"),
             docker_network=os.environ.get("AIDON_DOCKER_NETWORK",
                                           "0") == "1",
+            vm_host=os.environ.get("AIDON_VM_HOST", ""),
+            vm_user=os.environ.get("AIDON_VM_USER", ""),
+            vm_sudo_password=os.environ.get("AIDON_VM_SUDO_PASSWORD", ""),
+            vm_use_sudo=os.environ.get("AIDON_VM_USE_SUDO",
+                                       "0") == "1",
             ingest_dir=(Path(os.environ["AIDON_INGEST_DIR"]).expanduser()
                         if os.environ.get("AIDON_INGEST_DIR") else None),
             budget_tokens=_env_int(

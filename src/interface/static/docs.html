@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aidon — Documents</title>
+<link rel="stylesheet" href="/static/style.css?v=__ASSET_V__">
+<style>
+.doc-body { max-width: 860px; margin: 0 auto; padding: 24px 20px 64px; line-height: 1.55; }
+.doc-top { display: flex; align-items: baseline; gap: 16px; margin-bottom: 8px; }
+.doc-top a { text-decoration: none; }
+.doc-top h1 { margin: 0; }
+.doc-sub { opacity: 0.75; margin: 0 0 24px; }
+.doc-toc { border: 1px solid #444; border-radius: 8px; padding: 12px 20px; margin-bottom: 32px; }
+.doc-toc a { text-decoration: none; }
+.doc h2 { margin-top: 32px; border-bottom: 1px solid #444; padding-bottom: 4px; }
+.doc code { background: #222; padding: 1px 5px; border-radius: 4px; }
+.doc pre { background: #222; padding: 12px; border-radius: 8px; overflow-x: auto; }
+.doc pre code { background: none; padding: 0; }
+.doc-foot { margin-top: 48px; opacity: 0.7; }
+</style>
+</head>
+<body>
+<main class="doc-body doc">
+<header class="doc-top">
+  <a href="/">◈ Aidon</a>
+  <h1>Documents</h1>
+</header>
+<p class="doc-sub">How to use Aidon, and everything it can do. Aidon is a self-hosted
+agent: you give it a goal in plain language, and it interviews you, plans,
+runs the work in a sandbox, verifies the result, asks before anything live,
+and learns from the run so the next similar goal is cheaper.</p>
+
+<nav class="doc-toc">
+  <strong>On this page:</strong>
+  <a href="#start">Start here</a> ·
+  <a href="#modes">Run modes</a> ·
+  <a href="#interview">Interview and spec sheet</a> ·
+  <a href="#commands">Chat commands</a> ·
+  <a href="#approvals">Approvals and pre-approvals</a> ·
+  <a href="#voice">Voice</a> ·
+  <a href="#memory">Memory</a> ·
+  <a href="#dags">DAGs, factory, replay</a> ·
+  <a href="#capabilities">Capabilities, skills, plugins</a> ·
+  <a href="#sandbox">Sandbox and backends</a> ·
+  <a href="#research">Research</a> ·
+  <a href="#scheduler">Scheduler and practice</a> ·
+  <a href="#settings">Settings</a> ·
+  <a href="#safety">Safety rules</a> ·
+  <a href="#cli">Command line</a>
+</nav>
+
+<h2 id="start">Start here</h2>
+<p>Talk to Aidon in the WebUI chat, on WhatsApp, on Slack, or on the command
+line. Just state the goal: <em>"Plan a dinner for two"</em>,
+<em>"Summarize these invoices into a monthly statement"</em>,
+<em>"Research solar panels and write up the options"</em>. If the goal needs
+no state changes, Aidon answers directly. Otherwise it runs the pipeline:
+interpret, research, recall, plan, sandbox, verify, approve, live, learn.</p>
+<p>Every run lives in its own workspace folder, named by date and time, under
+your Aidon home. Deliverables land there; approved live actions copy a
+verified file to the output you named, with a snapshot backup.</p>
+
+<h2 id="modes">Run modes</h2>
+<p>Aidon runs in one of three modes, picked in the WebUI <strong>Run
+Mode</strong> chooser or with <code>/ask</code>, <code>/plan</code>,
+<code>/execute</code> on WebUI, WhatsApp, Slack, and the CLI.</p>
+<ul>
+  <li><strong>Ask (the default).</strong> A goal starts with chat questions
+  and stops at a frozen spec. Nothing is planned or run until you approve the
+  spec and proceed. This is the mode for regular use: gathering details beats
+  an inaccurate full run.</li>
+  <li><strong>Plan.</strong> Stops after the plan, for review, before any
+  step runs.</li>
+  <li><strong>Execute.</strong> Runs straight through, as before.</li>
+</ul>
+<p><strong>Proceed</strong> resumes the frozen plan or spec exactly, without
+re-planning and without a new interview. Daemon runs, scheduled jobs, and
+practice runs execute directly; they never stall on an interview.</p>
+
+<h2 id="interview">Interview and spec sheet</h2>
+<p>Interview questions are chat turns, not cards, and they have no clock.
+The interview triggers from the chat message itself and ends in a frozen
+spec: goal, deliverables, constraints, budget, deadline, recipients, files,
+notifications, assumptions, with no open questions. The spec is verified by
+code and confirmed on a decision card, then it binds the planner.</p>
+<p>You can skip the interview any time by attaching a spec sheet in the chat
+box, or by choosing Execute mode. A template and a filled example live in
+the repo under <code>examples/</code>, and a copy of the template lives in
+your Aidon home under <code>specs/template.md</code>.</p>
+
+<h2 id="commands">Chat commands</h2>
+<ul>
+  <li><code>/ask</code>, <code>/plan</code>, <code>/execute</code> — set the
+  run mode for the next goal.</li>
+  <li><code>/proceed</code> — resume a stopped plan or spec.</li>
+  <li><code>/think</code> — toggle extended thinking for the run.</li>
+  <li><code>/research</code> — toggle deep research for the run.</li>
+  <li><code>/help</code> — list commands and the approval policy.</li>
+</ul>
+<p>On WhatsApp and Slack, approval cards are answered by message:
+<code>approve &lt;id&gt;</code> or <code>reject &lt;id&gt;</code>. Waiting
+questions from a run are answered by your next message in that
+conversation.</p>
+
+<h2 id="approvals">Approvals and pre-approvals</h2>
+<p>Approval is for decisions, chat is for conversation. A decision card waits
+up to 900 seconds by default (tunable) and fails closed on timeout: no
+answer means no.</p>
+<ul>
+  <li><strong>No approval needed:</strong> sandbox steps, planning, repairs,
+  retries, workspace files, DAG reuse.</li>
+  <li><strong>Auto-approvable when granted:</strong> live, spec, semantic,
+  and sandbox grants, via pre-approvals or the WebUI Auto-Approve button
+  (8 hours by default, up to 30 days).</li>
+  <li><strong>Always asks a human:</strong> sending to other people, external
+  email, publishing, spending, deleting, live execution, plugins, installs,
+  and mandatory actions. External email is never pre-approved; it becomes a
+  draft for the morning. Mail to yourself needs no approval.</li>
+</ul>
+<p>Blocked actions are listed on the finished report, above the run stats,
+so you can see exactly what waited on a human.</p>
+
+<h2 id="voice">Voice</h2>
+<p>Press the mic button to dictate: Aidon transcribes your speech into the
+goal box, and you review and edit it before sending — nothing is sent
+automatically. Replies can be played aloud with text-to-speech. The mic
+uses the Meta transcription service when a key is configured, with a
+browser fallback.</p>
+
+<h2 id="memory">Memory</h2>
+<p>Every completed exchange is remembered. Aidon recalls past episodes,
+knowledge, and skills with hybrid search (dense vectors plus sparse keywords
+over a local store), and it promotes what it learns: identical records are
+deduped, newer records supersede older ones, and the rest sits alongside.
+Memory decays on a forgetting curve, so old, unimportant records fade.</p>
+<p>Explore it in <a href="/memory">Memory</a> (episodes),
+<a href="/knowledge">Knowledge</a> (ingested documents and facts), and
+<a href="/graph">Graph</a> (entities and their connections). Background fact
+extraction runs after a chat or a finished run, on the strong model only,
+and never charges its tokens to the run report.</p>
+
+<h2 id="dags">DAGs, factory, replay</h2>
+<p>Plans are DAGs, not loose lists: steps with dependencies, deliverables,
+and acceptance criteria. <a href="/dag">DAGs</a> lets you view and edit
+saved graphs; <a href="/factory">Factory</a> shows a live run as stations
+on a floor (intake, research, plan, sandbox, verify, approval, live,
+learn); <a href="/reports">Reports</a> holds run summaries and daily
+reports, and replay replays a past run's trace.</p>
+<p>Learning is the point: identical goals replay with zero model calls,
+similar goals adapt with at most one call, and combined goals compose
+earlier graphs. Every reused run is still verified before it counts.</p>
+
+<h2 id="capabilities">Capabilities, skills, plugins</h2>
+<p>Built-in tools cover files, shell, calculation, documents, charts, ebooks,
+web search and fetch, feeds, mail drafts, scheduling, and screenshots.
+Skills are reusable know-how: a short head is always in the plan prompt,
+and full skill texts load when the planner names them. New skills need your
+approval before they are trusted.</p>
+<p>Aidon can also climb to new capabilities itself: research a tool, draft it
+as a plugin, test it in the sandbox, and ask you to adopt it. Adoption
+scans the code, binds the exact file, and needs mandatory approval. MCP
+servers connect per run, tools only, with the same approval gate. In kernel
+mode only the minimal seed toolset is exposed and everything else must be
+earned through that ladder.</p>
+<p>Computer use (screenshot, click, type, scroll, key) is an approval-gated
+tool layer for a live desktop, opt-in via the X11 driver, with every
+click, type, and key press asking you first.</p>
+
+<h2 id="sandbox">Sandbox and backends</h2>
+<p>Everything unproven runs isolated first. The default backend is
+bubblewrap; Docker (disposable container, workdir only, no host credentials,
+pinned image), subprocess (no isolation, only when you choose it), and a VM
+backend over SSH to a VM you already run are owner-chosen in settings — the
+planner never picks a backend. Setup never provisions a VM. One run at a
+time holds the execution ticket per Aidon home, through approval waits.</p>
+
+<h2 id="research">Research</h2>
+<p>Research means source-verified facts: web search plus page fetch, with
+excerpts, sources, and dates recorded, and unverified claims left
+unverified. Deep research runs multiple rounds before planning. Native RSS
+feeds can be fetched as a tool, and a scheduled goal calling the feed tool
+is the poll trigger. Research findings are cached with file, scan, and
+match caps.</p>
+
+<h2 id="scheduler">Scheduler and practice</h2>
+<p>Schedule goals, chains, learning passes, reports, and briefs from the
+scheduler, with time limits and timezones. <a href="/practice">Practice</a>
+runs goals in free-time windows until a pass, under a practice gate that
+rejects publishing and unsafe actions. The daily report summarizes runs,
+and approval nudges remind you about waiting cards.</p>
+
+<h2 id="settings">Settings</h2>
+<p><a href="/settings">Settings</a> is one page in nine groups: Interface,
+Scheduler, System, Cognitive, Memory, Voice, Agentic, Social, Research.
+Secrets are write-only and masked; an empty secret field keeps the saved
+value. Changes are written to your <code>.env</code> and take effect after
+restarting Aidon. The <code>.env</code> file itself is the single source of
+configuration; the settings page edits it field by field.</p>
+
+<h2 id="safety">Safety rules</h2>
+<ul>
+  <li>Nothing goes live without human approval, on a decision card,
+  fail-closed on timeout.</li>
+  <li>Model output, research content, and plugin code are untrusted data,
+  never instructions, and are scanned before adoption.</li>
+  <li>Secrets never appear in chat, traces, scan reports, or key lists —
+  only hash prefixes. Generated keys are shown once.</li>
+  <li>Verification is by code: deliverables must exist, be non-empty, and
+  meet checkable criteria; ledger totals are recomputed, never trusted
+  from the model. An optional model second opinion (off by default) judges
+  content only after code passes and never overrides code.</li>
+  <li>Paths are contained to the run workspace: escaping names resolve to
+  missing, and binary files are judged on extracted text, vision, or
+  properties — never failed just for being unreadable.</li>
+  <li>Never tunnel the full WebUI unauthenticated; use a webhook-only
+  listener for public reachability.</li>
+</ul>
+
+<h2 id="cli">Command line</h2>
+<p>Start everything with <code>./launch.sh</code>, which runs setup first if
+the home is missing and then starts the WebUI. From the repo:</p>
+<pre><code>python -m src.system.main interview "Plan a dinner" --run
+python -m src.system.main goal --spec my-spec.md "Plan a dinner"</code></pre>
+<p>The repo docs (<code>README.md</code> and <code>docs/</code>) carry the
+full reference: usage, configuration, architecture, security, installation,
+and roadmap.</p>
+
+<footer class="doc-foot">
+  Aidon __AIDON_VERSION__ · <a href="/">Back to WebUI</a> ·
+  <a href="/settings">Settings</a> · <a href="/capabilities">Capabilities</a> ·
+  <a href="/dag">DAGs</a>
+</footer>
+</main>
+</body>
+</html>

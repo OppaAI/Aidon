@@ -162,3 +162,32 @@ def test_different_dag_clears_stale_node_ids(tmp_path):
                          state=reg, run_id="same").execute()
     assert result["results"] == {"a": "second-a", "b": "second-b"}
     reg.close()
+
+
+def test_fingerprint_covers_every_execution_relevant_field():
+    """Mutating any execution-relevant field must change the fingerprint.
+
+    A checkpoint keyed by a partial fingerprint would let a
+    node be skipped after its contract changed; the full
+    node dict is hashed, so each field below invalidates
+    prior checkpoints on its own.
+    """
+    base = DAGExecutor(_dag(), lambda node: "x")
+    fingerprint = base._dag_fingerprint()
+    mutations = [
+        lambda d: d.nodes["a"].__dict__.update(tool="read"),
+        lambda d: d.nodes["a"].__dict__.update(args={"path": "other.md"}),
+        lambda d: d.nodes["a"].__dict__.update(deliverable="other.md"),
+        lambda d: d.nodes["b"].__dict__.update(depends_on=[]),
+        lambda d: d.nodes["a"].__dict__.update(inputs=["in.md"]),
+        lambda d: d.nodes["a"].__dict__.update(outputs=["out.md"]),
+        lambda d: d.nodes["a"].__dict__.update(preconditions=["file exists"]),
+        lambda d: d.nodes["a"].__dict__.update(expected="has a title"),
+        lambda d: d.nodes["a"].__dict__.update(assumptions=["game=snake"]),
+        lambda d: d.nodes["a"].__dict__.update(executor="strong"),
+    ]
+    import copy
+    for mutate in mutations:
+        dag = copy.deepcopy(_dag())
+        mutate(dag)
+        assert DAGExecutor(dag, lambda node: "x")._dag_fingerprint() != fingerprint

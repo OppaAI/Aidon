@@ -19,8 +19,10 @@ not install a VM. Docker is installed by you, on the
 machine where Aidon runs, if you want the Docker
 backend: Docker Desktop on macOS or Windows, or
 `docker.io` on Ubuntu, then log out and back in so the
-docker group applies. A VM is post-hackathon, future
-only, not installed by setup, and not needed now.
+docker group applies. A VM is not installed or
+provisioned by setup; the VM backend connects over
+SSH to a VM you already run, and a disposable VM
+per run is post-hackathon.
 `launch.sh` runs setup first if the home is missing,
 then starts the WebUI server with the same home, backend, and
 ingest path.
@@ -38,11 +40,18 @@ for the corresponding capabilities. `./setup.sh --with-optional` installs all op
 
 Vector memory: embedded local mode works for one process. For shared memory
 across the WebUI, tick loop, and listeners, setup offers a Qdrant server
-(binary + systemd, no docker): answer yes at the prompt, or run
-`./setup.sh --with-qdrant`. It installs the pinned binary, starts the
-`aidon-qdrant` service, health-checks port 6333, and sets
+in Docker: answer yes at the prompt, or run `./setup.sh --with-qdrant`.
+It starts the `aidon-qdrant` container (pinned image, data in
+`~/.aidon/qdrant-server`), health-checks port 6333, and sets
 `AIDON_QDRANT_URL=http://127.0.0.1:6333` in `.env`. Without a server,
 the dashboard shows a memory-fallback warning instead of failing silently.
+A previous binary + systemd install is retired automatically: its service
+is stopped and disabled before the container starts.
+
+Web search with the searxng backend works the same way: setup offers a
+SearXNG container (`aidon-searxng` on localhost:8888, settings in
+`~/.aidon/searxng`), or run `./setup.sh --with-searxng`. If you already
+run your own SearXNG, keep its URL in `AIDON_SEARXNG_URL` and skip the offer.
 
 Setup and launch, in that order, are the entry points, as in the Aidon guides.
 
@@ -52,4 +61,4 @@ Setup and launch, in that order, are the entry points, as in the Aidon guides.
 ./launch.sh goal "Plan a dinner for two"
 ```
 
-A VM is post-hackathon, future only, not installed by setup, and not needed now.
+A VM is not installed or provisioned by setup; the VM backend connects over SSH to a VM you already run, and a disposable VM per run is post-hackathon.

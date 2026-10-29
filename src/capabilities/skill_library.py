@@ -334,7 +334,32 @@ class SkillLibrary:
             raise ValueError(f"skill {name!r} is retired")
         skill.state = "trusted"
         self._update(skill)
+        self._sync_discovery(skill)
         return skill
+
+    def _sync_discovery(self, skill: Skill) -> None:
+        """Keep the planner's discovery surface in step with trust.
+
+        The planner discovers skills from <home>/skills/*.md
+        files, not from this JSON library, so a vetted skill
+        that only lives here would never be used. Trusting a
+        skill therefore also publishes its Markdown into the
+        discovery directory; retiring one removes it again.
+        Only trusted skills are published — candidates and
+        validated skills stay unvetted and undiscovered.
+        """
+        import re as _re
+        skills_dir = self.home / "skills"
+        filename = _re.sub(r"[^A-Za-z0-9_.-]+", "-", skill.name) + ".md"
+        path = skills_dir / filename
+        if skill.state == "trusted":
+            skills_dir.mkdir(parents=True, exist_ok=True)
+            path.write_text(skill.to_markdown(), encoding="utf-8")
+        elif skill.state == "retired":
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
 
     def retire(self, name: str, reason: str = "") -> Skill:
         skill = self.get(name)
@@ -343,6 +368,7 @@ class SkillLibrary:
         skill.state = "retired"
         skill.retire_reason = reason
         self._update(skill)
+        self._sync_discovery(skill)
         return skill
 
     def record_failure(self, name: str) -> Skill | None:
@@ -375,6 +401,7 @@ class SkillLibrary:
                 self._data["skills"][name] = skill.to_dict()
                 self._snapshot(skill)
                 self._save()
+                self._sync_discovery(skill)
                 return skill
         raise KeyError(f"no version {version} for skill {name!r}")
 

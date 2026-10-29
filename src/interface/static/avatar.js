@@ -2,9 +2,10 @@
  *
  * The user makes the male VRM himself. Zero-code-change contract:
  *   1. drop the file at aidon/webui/avatar.vrm   (or set AIDON_VRM_PATH)
- *   2. open /avatar-vrm when you want to view it
- * The chat deliberately keeps the robot placeholder as its default even
- * when a VRM is installed. VRM is an explicit, separate view.
+ *   2. open the chat: the VRM loads automatically when one is present,
+ *      otherwise the robot placeholder stays.
+ * The chat loads the VRM when one is present, as old Aidon did; without
+ * one, the robot placeholder stays.
  *
  * Head-only VRM portrait: three.js + @pixiv/three-vrm, camera locked on
  * the head bone, subtle idle sway + blinking.
@@ -15,10 +16,23 @@
   const wrap = document.getElementById("avatar-wrap");
   const canvas = document.getElementById("avatar");
 
-  // Do not auto-load a user's VRM into the chat. The robot is the stable
-  // default; /avatar-vrm is the opt-in VRM viewer.
-  function boot() {
-    if (wrap) wrap.dataset.avatarDefault = "robot";
+  // Load the VRM into the chat when one is present, as old Aidon did;
+  // without one, the robot placeholder stays.
+  async function boot() {
+    let status;
+    try {
+      const r = await fetch("/api/avatar/status");
+      status = await r.json();
+    } catch (e) {
+      return; // backend unreachable — placeholder stays
+    }
+    if (!status || !status.present) return; // clean placeholder state
+    try {
+      await loadModel();
+      if (wrap) wrap.classList.add("has-model");
+    } catch (e) {
+      console.warn("[avatar] VRM load failed, keeping placeholder:", e);
+    }
   }
 
   async function loadModel() {

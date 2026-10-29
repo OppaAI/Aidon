@@ -27,7 +27,6 @@ is 0.
 from __future__ import annotations
 
 import threading
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -97,54 +96,21 @@ class NudgeTracker:
         self._nudged: set[str] = set()
 
     def check(self, approval_id: str, pending_since: float, now: float,
-              slack_sender=None) -> bool:
+              slack_sender=None, note: str = "",
+              min_elapsed_seconds: float | None = None) -> bool:
         if approval_id in self._nudged:
             return False
         if self.nudge_minutes <= 0:
             return False
-        if (now - pending_since) < self.nudge_minutes * 60:
+        threshold = (min_elapsed_seconds if min_elapsed_seconds is not None
+                     else self.nudge_minutes * 60)
+        if (now - pending_since) < threshold:
             return False
         self._nudged.add(approval_id)
         if slack_sender is not None and self.channel:
-            slack_sender(self.channel, f"Approval pending: {approval_id}")
+            text = f"Approval pending: {approval_id}"
+            if note:
+                text += f" — {note}"
+            slack_sender(self.channel, text)
         return True
 
-
-class AutonomyTracker:
-    """Per-stake view over the persistent per-action-class policy.
-
-    The WebUI gate calls this with a stake ("medium" for normal cards,
-    "high" for live execution). Underneath, each stake is an action
-    class in src/interface/autonomy.py, so counts survive a restart
-    when path is given, refusal resets the streak, and decay applies.
-    Timing is unchanged: auto-approve only at the threshold, never
-    for high stakes, never when disabled. The policy's notify tier
-    (act_and_notify at 2 approvals) is reported by permission(), not
-    by this gate, which stays silent-auto-approve at the threshold.
-    """
-
-    def __init__(self, enabled: bool = True, threshold: int = 5,
-                 decay_days: float = 14.0, path=None):
-        from .autonomy import AutonomyPolicy
-        self.enabled = enabled
-        self.threshold = threshold
-        self.decay_days = decay_days
-        self.policy = AutonomyPolicy(
-            threshold=threshold, decay_seconds=decay_days * 86400,
-            path=Path(path) if path is not None else None)
-
-    def record_approval(self, stake: str, now: float):
-        if not self.enabled:
-            return
-        self.policy.record_approval(stake, stakes=stake)
-
-    def record_rejection(self, stake: str):
-        self.policy.record_refusal(stake, stakes=stake)
-
-    def should_auto_approve(self, stake: str, now: float) -> bool:
-        if not self.enabled or stake == "high":
-            return False
-        return self.policy.approvals(stake) >= self.threshold
-
-    def forget(self, stake: str):
-        self.policy.forget(stake)

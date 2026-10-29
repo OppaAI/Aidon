@@ -309,23 +309,66 @@ class DAG:
         return order
 
     def to_plan_steps(self) -> list[dict]:
-        return [{"tool": node.tool, "args": node.args, "deliverable": node.deliverable,
+        return [{"id": node.id, "tool": node.tool, "args": node.args,
+                 "deliverable": node.deliverable, "depends_on": list(node.depends_on),
                  "executor": route_executor(node)}
                 for node in self.topological_order()]
 
 
+def compute_levels(items: list[tuple[str, list[str]]]) -> list[list[str]]:
+    """Group step ids into dependency levels, for parallel execution.
+
+    Level 0 holds steps with no dependencies; each later level
+    holds steps whose dependencies all sit in earlier levels, so
+    every step in one level may run concurrently and every step
+    in a later level waits for its dependencies. Raises
+    ValueError on a missing dependency or a cycle: a parallel
+    schedule must never silently drop a step or loop forever.
+    """
+    deps = {step_id: list(step_deps) for step_id, step_deps in items}
+    for step_id, step_deps in deps.items():
+        for dep in step_deps:
+            if dep not in deps:
+                raise ValueError(f"step {step_id} depends on missing {dep}")
+    levels: list[list[str]] = []
+    placed: dict[str, int] = {}
+    remaining = dict(deps)
+    while remaining:
+        ready = [step_id for step_id, step_deps in remaining.items()
+                 if all(dep in placed for dep in step_deps)]
+        if not ready:
+            raise ValueError("cycle in dependencies, cannot schedule levels")
+        for step_id in ready:
+            placed[step_id] = len(levels)
+        levels.append(ready)
+        for step_id in ready:
+            del remaining[step_id]
+    return levels
+
+
 def dag_from_experience(experience) -> DAG:
-    """Convert a saved sequential Experience to a DAG, chain dependencies."""
+    """Convert a saved Experience to a DAG, restoring dependencies.
+
+    Nodes stored with depends_on keep their real structure;
+    nodes stored without it (older records, which kept only
+    tool/args/deliverable) fall back to the sequential chain,
+    so old experiences still load. The executor is restored
+    when stored, otherwise routed from the tool as before.
+    """
     nodes = []
     previous = None
     for index, step in enumerate(experience.dag_nodes):
         from pathlib import Path as _Path
         node_id = step.get("id") or _Path(str(step.get("deliverable", ""))).stem or f"step-{index}"
+        if "depends_on" in step and isinstance(step.get("depends_on"), list):
+            depends_on = list(step["depends_on"])
+        else:
+            depends_on = [previous] if previous else []
         node = DAGNode(id=node_id, tool=str(step.get("tool", "write")),
                        args=dict(step.get("args", {})),
                        deliverable=str(step.get("deliverable", "")),
                        executor=route_executor(step),
-                       depends_on=[previous] if previous else [],
+                       depends_on=depends_on,
                        inputs=list(step.get("inputs", [])),
                        outputs=[str(step.get("deliverable", ""))] if step.get("deliverable") else [],
                        expected=str(step.get("expected", "")),
@@ -352,7 +395,7 @@ def adapt_dag(experience, new_goal: str, client=None):
     graph, and the summary says rolled_back. That rollback is
     the safety rule: a modified graph is never executed unvalidated.
     """
-    from ..memory.experience import goal_shape_for
+    from ..memory.experience import dag_similarity_threshold, goal_shape_for
     old_goal = experience.goal
     if old_goal == new_goal:
         dag = dag_from_experience(experience)
@@ -362,7 +405,7 @@ def adapt_dag(experience, new_goal: str, client=None):
     shape_new = goal_shape_for(new_goal)
     set_old, set_new = set(shape_old.split()), set(shape_new.split())
     overlap = len(set_old & set_new) / len(set_old | set_new) if (set_old | set_new) else 0.0
-    if overlap < 0.3:
+    if overlap < dag_similarity_threshold():
         return None
     original = dag_from_experience(experience)
     dag = original.snapshot()
@@ -434,3 +477,108 @@ def adapt_dag(experience, new_goal: str, client=None):
     summary = {"kept": kept, "modified": modified, "added": added, "removed": removed,
                "reordered": [n.id for n in dag.topological_order()], "rolled_back": False}
     return dag, summary, model_calls
+
+
+def compose_dags(dags: list[DAG]) -> DAG | None:
+    """Sequence several proven DAGs into one, A-then-B, or None.
+
+    A goal that spans two known workflows ("do A, then B")
+    cannot be served by adapting either one alone: the top-1
+    adapt would silently drop the other half. Composition
+    stitches them in order instead.
+
+    Each source DAG's node ids are prefixed with its position
+    ("0:", "1:", ...) so identical ids in different workflows
+    cannot collide. Every source node of a later DAG (no
+    dependencies inside its own DAG) gains a dependency on
+    every sink node of the previous DAG (no dependents inside
+    its own DAG), so the later workflow runs only after the
+    earlier one finishes. The composed graph is validated
+    strictly; any failure — duplicate deliverable, missing
+    dependency, cycle — returns None instead of a broken
+    graph, and the caller falls back to single-experience
+    adapt or a fresh plan.
+
+    Composition sequences proven workflows verbatim: it does
+    not rename task words, so word-level adaptation stays a
+    single-experience operation, applied to the top-1 match.
+    """
+    if len(dags) < 2:
+        return None
+    if any(len(dag.nodes) == 0 for dag in dags):
+        return None
+    nodes: list[DAGNode] = []
+    previous_sinks: list[str] = []
+    for index, dag in enumerate(dags):
+        prefix = f"{index}:"
+        # Sinks: nodes no other node in this DAG depends on.
+        depended_on = set()
+        for node in dag.nodes.values():
+            depended_on.update(node.depends_on)
+        sinks = [prefix + node.id for node in dag.nodes.values()
+                 if node.id not in depended_on]
+        for node in dag.nodes.values():
+            new_node = copy.deepcopy(node)
+            new_node.id = prefix + node.id
+            new_node.depends_on = [prefix + dep for dep in node.depends_on]
+            if not node.depends_on:
+                # Source node of this DAG: wait for the whole
+                # previous DAG, not just its last node.
+                new_node.depends_on.extend(previous_sinks)
+            nodes.append(new_node)
+        previous_sinks = sinks
+    composed = DAG(nodes)
+    try:
+        composed.validate_strict()
+    except ValueError:
+        return None
+    return composed
+
+
+def combine_dags(dags: list[DAG], join: DAGNode | None = None) -> DAG | None:
+    """Union several independent DAGs into one, for parallel execution.
+
+    Unlike compose_dags, which sequences workflows A-then-B,
+    combine adds NO dependencies between the source DAGs: each
+    node's id is prefixed with its source position ("0:",
+    "1:", ...) so identical ids cannot collide, and nodes
+    from different sources keep only their own dependencies.
+    The parallel executor then runs independent nodes
+    concurrently and dependent nodes after their dependencies.
+
+    When join is given, it is appended as a final node that
+    depends on every sink node of every source DAG — the
+    synthesis step that combines all the parallel outcomes
+    into one result, such as a forecast from three
+    independent checks. The joined graph is validated
+    strictly; any failure returns None, and the caller falls
+    back to the join-less union or a fresh plan.
+    """
+    if len(dags) < 2:
+        return None
+    if any(len(dag.nodes) == 0 for dag in dags):
+        return None
+    nodes: list[DAGNode] = []
+    all_sinks: list[str] = []
+    for index, dag in enumerate(dags):
+        prefix = f"{index}:"
+        depended_on = set()
+        for node in dag.nodes.values():
+            depended_on.update(node.depends_on)
+        for node in dag.nodes.values():
+            new_node = copy.deepcopy(node)
+            new_node.id = prefix + node.id
+            new_node.depends_on = [prefix + dep for dep in node.depends_on]
+            nodes.append(new_node)
+            if node.id not in depended_on:
+                all_sinks.append(new_node.id)
+    if join is not None:
+        join_node = copy.deepcopy(join)
+        join_node.depends_on = list(all_sinks)
+        nodes.append(join_node)
+    combined = DAG(nodes)
+    try:
+        combined.validate_strict()
+    except ValueError:
+        return None
+    return combined

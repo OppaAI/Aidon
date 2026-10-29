@@ -3,9 +3,11 @@
 #
 # Usage:
 #   ./launch.sh
-#     Starts the WebUI server on http://127.0.0.1:8765/,
-#     with WhatsApp and Slack webhooks at
+#     Starts the WebUI server on http://127.0.0.1:8765/ and opens
+#     it in your browser, with WhatsApp and Slack webhooks at
 #     /webhook/whatsapp and /webhook/slack.
+#     AIDON_OPEN_BROWSER=0 skips the browser step (server only),
+#     and no browser opens without a desktop session anyway.
 #   ./launch.sh goal "Plan a dinner for two"
 #   ./launch.sh --cli
 #     Opens the conversational terminal interface.
@@ -111,9 +113,54 @@ if [ "${1:-}" = "--both" ]; then
 fi
 
 if [ $# -eq 0 ]; then
-  info "Opening the WebUI at http://127.0.0.1:${AIDON_WEBUI_PORT:-8765}/"
-  exec "$PYTHON" -m src.system.main webui serve \
-    --port "${AIDON_WEBUI_PORT:-8765}"
+  WEBUI_PORT=${AIDON_WEBUI_PORT:-8765}
+  WEBUI_URL="http://127.0.0.1:$WEBUI_PORT/"
+  info "Opening the WebUI at $WEBUI_URL"
+  # Auto-browser: a background subshell waits for the port and
+  # opens the browser; the server itself stays in the foreground
+  # via exec, exactly as before, so Ctrl+C goes straight to the
+  # server and can never orphan it behind a trap.
+  if [ "${AIDON_OPEN_BROWSER:-1}" != "0" ]; then
+    (
+      _up=0
+      _tries=0
+      while [ "$_tries" -lt 60 ]; do
+        if ! kill -0 "$PPID" 2>/dev/null; then
+          break
+        fi
+        if command -v curl >/dev/null 2>&1; then
+          if curl -sf -o /dev/null "$WEBUI_URL" 2>/dev/null; then
+            _up=1
+            break
+          fi
+        elif command -v ss >/dev/null 2>&1; then
+          if ss -ltn "sport = :$WEBUI_PORT" 2>/dev/null | tail -n +2 | grep -q .; then
+            _up=1
+            break
+          fi
+        else
+          sleep 2
+          _up=1
+          break
+        fi
+        sleep 1
+        _tries=$((_tries + 1))
+      done
+      if [ "$_up" = "1" ]; then
+        if command -v xdg-open >/dev/null 2>&1 && \
+            [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+          xdg-open "$WEBUI_URL" >/dev/null 2>&1 &
+        elif [ "$(uname -s)" = "Darwin" ] && command -v open >/dev/null 2>&1; then
+          open "$WEBUI_URL" >/dev/null 2>&1 &
+        else
+          info "No desktop browser opener found; open $WEBUI_URL yourself."
+        fi
+      elif kill -0 "$PPID" 2>/dev/null; then
+        info "Browser step timed out; open $WEBUI_URL yourself."
+      fi
+    ) &
+  fi
+  exec "$PYTHON" -m src.system.main webui serve --port "$WEBUI_PORT"
 else
   info "Running your Aidon command."
   exec "$PYTHON" -m src.system.main "$@"

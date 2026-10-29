@@ -6,25 +6,32 @@ from src.system.model_client import HttpModelClient, Message, NativeModelClient
 
 
 class _Response:
+    """Minimal stand-in for the pooled http.client response.
+
+    The client reads ``status``/``read()`` and releases the
+    connection through ``will_close``/``isclosed()``, so a fake
+    only needs those four.
+    """
+
+    status = 200
+    will_close = True
+
     def __init__(self, payload):
         self.payload = json.dumps(payload).encode()
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
     def read(self):
         return self.payload
+
+    def isclosed(self):
+        return True
 
 
 def test_native_native_tool_call_is_normalized(monkeypatch):
     seen = {}
 
-    def fake_urlopen(request, timeout):
-        seen["url"] = request.full_url
-        seen["body"] = json.loads(request.data)
+    def fake_post(url, body, headers, timeout):
+        seen["url"] = url
+        seen["body"] = json.loads(body)
         return _Response({
             "message": {
                 "role": "assistant",
@@ -36,9 +43,9 @@ def test_native_native_tool_call_is_normalized(monkeypatch):
                 }}],
             },
             "eval_count": 12,
-        })
+        }), ("http", "fake", 80)
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("src.system.model_client._post", fake_post)
     tool_schema = [{"type": "function", "function": {
         "name": "read_file", "parameters": {"type": "object"}
     }}]
@@ -55,8 +62,8 @@ def test_native_native_tool_call_is_normalized(monkeypatch):
 def test_openai_compatible_tool_call_is_normalized(monkeypatch):
     seen = {}
 
-    def fake_urlopen(request, timeout):
-        seen["body"] = json.loads(request.data)
+    def fake_post(url, body, headers, timeout):
+        seen["body"] = json.loads(body)
         return _Response({
             "choices": [{"message": {
                 "content": "done",
@@ -67,9 +74,9 @@ def test_openai_compatible_tool_call_is_normalized(monkeypatch):
                 }],
             }}],
             "usage": {"total_tokens": 4},
-        })
+        }), ("http", "fake", 80)
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("src.system.model_client._post", fake_post)
     response = HttpModelClient("http://model/v1", "key", "test").chat_response(
         [Message("user", "write x.txt")], tools=[{"type": "function"}])
 

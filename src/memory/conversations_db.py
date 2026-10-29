@@ -295,13 +295,6 @@ class ConversationStoreDB:
             self._conn.commit()
         return {"id": idea_id, "project_id": project_id, "text": text}
 
-    def list_ideas(self, project_id: str) -> list[dict]:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT id, project_id, text, created_at FROM ideas"
-                " WHERE project_id = ? ORDER BY created_at",
-                (project_id,)).fetchall()
-        return [dict(row) for row in rows]
 
     def close(self) -> None:
         with self._lock:

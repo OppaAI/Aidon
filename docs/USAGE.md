@@ -161,6 +161,27 @@ interview.
    workdir, with calculation by AST, never eval, plus any
    adopted plugin tools, and any skills as planner context.
 
+## 🎛️ Run modes: Ask, Plan, Execute
+
+Aidon runs in one of three modes, picked in the WebUI
+Run Mode chooser, or with /ask, /plan, /execute on
+WebUI, WhatsApp, Slack, and the CLI.
+
+- Ask is the default on every interactive surface.
+  A goal in Ask mode starts with chat questions and
+  stops at a frozen spec; nothing is planned or run
+  until you approve the spec and proceed.
+- Plan mode stops after the plan, for review, before
+  any step runs.
+- Execute mode runs straight through, as before.
+- Proceed resumes the frozen plan or spec exactly,
+  without re-planning and without a new interview.
+- Daemon runs, scheduled jobs, and practice runs
+  execute directly; they never stall on an interview.
+
+Skip the interview any time by attaching a spec
+sheet, or by choosing Execute mode.
+
 ## 🧰 Tool, skill, and plugin system
 
 Aidon builds his own capability tools by climbing, this
@@ -350,10 +371,11 @@ scratch.
   collection.
 
 **Promotion, episodic to LTM:** at the end of a completed run,
-Aidon may ask whether to put that run's episodic memories into
-LTM. If `AIDON_AUTO_PROMOTE_TO_LTM=1`, promotion happens
-automatically, otherwise it asks, and a "no" leaves episodic
-memories project-scoped only.
+and for a chat exchange, that episodic record is copied to
+LTM automatically — no approval. An identical text already
+in LTM is a duplicate and is not recorded twice; a record
+sharing at least half its shape tokens supersedes the old
+copy; anything else is recorded alongside.
 
 **Embedder, production:** EmbeddingGemma 2, `google/embeddinggemma-2`,
 440M: text plus vision, audio omitted, 768-dim, local via

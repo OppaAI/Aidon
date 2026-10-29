@@ -75,6 +75,13 @@ class RouterClient(ModelClient):
         client = self.route(phase)
         if client is None:
             raise ValueError("RouterClient has no default client")
+        # Forward the phase to a counting tier so its usage lands
+        # in that phase's trace bucket; plain tiers keep the old
+        # call shape. Without this, tier calls record under the
+        # CountingClient default ("chat") and per-phase trace
+        # events drain 0.
+        if callable(getattr(client, "take_phase_usage", None)):
+            return client.chat(messages, phase=phase, sampling=sampling)
         try:
             return client.chat(messages, sampling=sampling)
         except TypeError:
@@ -90,6 +97,7 @@ class RouterClient(ModelClient):
             yield from stream(messages, sampling=sampling)
         except TypeError:
             yield from stream(messages)
+        self.last_stream_usage = getattr(client, "last_stream_usage", None)
 
     def stats(self) -> dict:
         return dict(self.calls_by_phase)

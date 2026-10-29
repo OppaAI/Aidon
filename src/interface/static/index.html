@@ -61,6 +61,12 @@
       <a class="nav-btn" href="/reports" title="Reports — run summaries and daily reports">
         <span class="nav-ico">📰</span><span class="nav-label">Report</span>
       </a>
+      <a class="nav-btn" href="/practice" title="Practice — free-time windows that run goals until a pass">
+        <span class="nav-ico">🎯</span><span class="nav-label">Practice</span>
+      </a>
+      <a class="nav-btn" href="/documents" title="Documents — how to use Aidon and what it can do">
+        <span class="nav-ico">📄</span><span class="nav-label">Documents</span>
+      </a>
     </nav>
     <div id="projects-bar">
       <div class="left-head">
@@ -129,7 +135,9 @@
             <button id="attach-btn" class="composer-icon" title="Attach image or document" aria-label="Attach image or document">&#128206;</button>
             <button id="camera-btn" class="composer-icon" title="Take photo" aria-label="Take photo">&#128247;</button>
             <button id="web-btn" class="composer-icon" title="Force web search" aria-label="Force web search"><svg class="globe-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.8 12h16.4M12 3.5c2.2 2.3 3.3 5.1 3.3 8.5s-1.1 6.2-3.3 8.5c-2.2-2.3-3.3-5.1-3.3-8.5S9.8 5.8 12 3.5z"></path></svg></button>
-            <button id="preapprove-btn" class="composer-icon preapprove-control" title="Approve for me" aria-label="Approve for me"><span class="preapprove-icon">✓</span><span>Approve for me</span></button>
+            <button id="think-btn" class="composer-icon" title="Maximum thinking" aria-label="Maximum thinking">&#129504;</button>
+            <label for="mode-chooser">Run Mode: </label><select id="mode-chooser" class="composer-icon" title="Run mode" aria-label="Run mode"><option value="ask">Ask</option><option value="execute">Execute</option><option value="plan">Plan</option></select>
+            <button id="preapprove-btn" class="composer-icon preapprove-control" title="Auto-Approve" aria-label="Auto-Approve"><span class="preapprove-icon">👌</span><span>Auto-Approve</span></button>
           </div>
           <div id="composer-right">
             <canvas id="voice-wave" width="180" height="28" title="Your voice activity"></canvas>

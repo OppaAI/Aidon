@@ -52,12 +52,13 @@ Important runtime settings include the model backend, execution isolation, memor
 - `AIDON_API_KEY` — API key for that endpoint
 - `AIDON_MODEL` — model name at that endpoint
 - `AIDON_HOME` — where Aidon keeps its state (default `~/.aidon`)
-- `AIDON_EXECUTION_BACKEND` — `bubblewrap` by default, or `docker`
+- `AIDON_EXECUTION_BACKEND` — `bubblewrap` by default, or `docker`, `subprocess`, or `vm` (SSH to a VM you already run)
 - `AIDON_DOCKER_IMAGE` — Docker image when Docker execution is selected
 - `AIDON_DOCKER_NETWORK` — keep `0` unless network access is required
 - `AIDON_EMBED_MODEL` / `AIDON_SPARSE_MODEL` — dense and sparse memory models
 - `AIDON_VERIFIER_MODEL` — optional independent local verifier model
 - `AIDON_THINK_PHASES` — local-model phases that may use extended thinking
+- `AIDON_DAG_SIMILARITY` — goal-shape overlap (0-1) for DAG replacement, experience adaptation, and failure matching (default 0.3; lower merges more aggressively)
 - `AIDON_SLACK_SIGNING_SECRET` — Slack webhook signing secret
 
 See `examples/.env.example` for the complete commented configuration.

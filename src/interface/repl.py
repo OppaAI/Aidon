@@ -26,13 +26,15 @@ import sys
 
 class Repl:
     def __init__(self, handler, input_fn=input, output_fn=print,
-                 title="Aidon REPL", on_clear=None, on_remember=None):
+                 title="Aidon REPL", on_clear=None, on_remember=None,
+                 on_think=None):
         self.handler = handler
         self.input_fn = input_fn
         self.output_fn = output_fn
         self.title = title
         self.on_clear = on_clear
         self.on_remember = on_remember
+        self.on_think = on_think
         self.history: list[str] = []
         self.staged: list[str] = []
         if getattr(sys.stdout, "isatty", lambda: False)():
@@ -97,10 +99,23 @@ class Repl:
             if line == "/quit":
                 break
             if line == "/help":
-                self.output_fn("/help, /history, /clear, /remember <fact>, "
-                               "/attach <path>, /staged, /clear-staged, /quit, "
-                               "or a goal to run.")
+                from .surfaces import CLI_HELP_TEXT
+                self.output_fn(CLI_HELP_TEXT)
                 continue
+            if line == "/think" or line.startswith("/think "):
+                # Bare /think toggles the session flag (the caller
+                # owns the state via on_think); "/think <goal>" falls
+                # through to the handler, which strips the prefix and
+                # runs that one goal with max thinking.
+                if line.strip() == "/think":
+                    if self.on_think is None:
+                        self.output_fn("Think toggle is unavailable in this session.")
+                    else:
+                        try:
+                            self.output_fn(str(self.on_think()))
+                        except Exception as exc:
+                            self.output_fn(f"Error toggling think: {exc}")
+                    continue
             if line == "/remember" or line.startswith("/remember "):
                 text = line[len("/remember"):].strip()
                 if not text:
