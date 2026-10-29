@@ -253,3 +253,41 @@ def test_proceed_ask_runs_with_frozen_spec(tmp_path, monkeypatch):
         "make notes", spec=Spec(goal="make notes", deliverables=["a.md"]))
     assert report.status == "done"
     assert (tmp_path / "work" / "a.md").read_text() == "x\n"
+
+
+# --- WebUI /proceed dispatch ---
+
+def test_webui_proceed_dispatches_resume(tmp_path):
+    import time
+
+    from src.interface.triggers import TriggerDispatcher
+    from src.interface.webui import WebUIServer
+
+    home = tmp_path / "home"
+    home.mkdir()
+    stop_id = save_mode_stop(
+        home, "plan", "make notes",
+        plan={"steps": [{"tool": "write", "args": {"file": "a.md", "text": "x\n"},
+                         "deliverable": "a.md"}],
+              "deliverables": ["a.md"], "criteria": []},
+        conversation_key="c1")
+    events = []
+    dispatcher = TriggerDispatcher()
+    dispatcher.register("webui", events.append)
+    server = WebUIServer(home, dispatcher=dispatcher, memory=None)
+    result = server.start_goal({"goal": f"/proceed {stop_id}",
+                                "conversation_id": "c1"})
+    assert "run_id" in result
+    deadline = time.time() + 5
+    while not events and time.time() < deadline:
+        time.sleep(0.05)
+    assert len(events) == 1
+    event = events[0]
+    assert event.goal == "make notes"
+    assert event.payload["mode"] == "execute"
+    assert event.payload["resume_stop_id"] == stop_id
+    assert event.payload["resume_plan"]["deliverables"] == ["a.md"]
+    # Bare proceed with no stop is a text reply, not a dispatched run.
+    server.start_goal({"goal": "/proceed", "conversation_id": "other"})
+    time.sleep(0.2)
+    assert len(events) == 1
