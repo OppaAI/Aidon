@@ -69,6 +69,12 @@ class CountingClient(ModelClient):
         # events, but the finished-run total still needs every
         # thinking token the run spent.
         self.thinking_tokens_total: int = 0
+        # Cumulative estimate split: the chars//4 estimate is one
+        # number per call, but the footer breaks it into in/out.
+        # Split proportionally to prompt/reply text so in + out
+        # always equals tokens_estimated exactly.
+        self.in_tokens_estimated: int = 0
+        self.out_tokens_estimated: int = 0
         self._thinking_text: dict[str, str] = {}
         # Parallel LLM steps count through here concurrently;
         # without a lock, increments from two threads can
@@ -147,11 +153,17 @@ class CountingClient(ModelClient):
         else:
             usage = getattr(response, "usage", None) or {}
             thinking_text = getattr(response, "thinking", "") or ""
-        tokens = max(1, (len(_text_of(messages)) + len(reply)) // 4)
+        prompt_text = _text_of(messages)
+        total_len = len(prompt_text) + len(reply)
+        tokens = max(1, total_len // 4)
+        in_tokens = tokens * len(prompt_text) // total_len if total_len else 0
+        out_tokens = tokens - in_tokens
         with self._lock:
             self._record_usage(phase, messages, reply, usage, thinking_text)
             self.calls += 1
             self.tokens_estimated += tokens
+            self.in_tokens_estimated += in_tokens
+            self.out_tokens_estimated += out_tokens
             self.calls_by_phase[phase] = self.calls_by_phase.get(phase, 0) + 1
             self.tokens_by_phase[phase] = self.tokens_by_phase.get(phase, 0) + tokens
         return reply
@@ -170,10 +182,16 @@ class CountingClient(ModelClient):
             chunks.append(text)
             yield text
         reply = "".join(chunks)
-        tokens = max(1, (len(_text_of(messages)) + len(reply)) // 4)
+        prompt_text = _text_of(messages)
+        total_len = len(prompt_text) + len(reply)
+        tokens = max(1, total_len // 4)
+        in_tokens = tokens * len(prompt_text) // total_len if total_len else 0
+        out_tokens = tokens - in_tokens
         with self._lock:
             self.calls += 1
             self.tokens_estimated += tokens
+            self.in_tokens_estimated += in_tokens
+            self.out_tokens_estimated += out_tokens
             self.calls_by_phase["stream"] = self.calls_by_phase.get("stream", 0) + 1
             self.tokens_by_phase["stream"] = self.tokens_by_phase.get("stream", 0) + tokens
         # Streamed deltas carry text only, so this delta is always

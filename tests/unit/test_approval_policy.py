@@ -68,6 +68,35 @@ def test_relative_name_strips_workspace_folder(tmp_path):
     assert _relative_name(workdir, "workdir/report.pdf") == "report.pdf"
 
 
+# --- criterion hedges: trailing parentheticals strip, core still checks ---
+
+def test_criterion_trailing_parenthetical_stripped(tmp_path):
+    workdir = tmp_path / "w"
+    workdir.mkdir()
+    (workdir / "my_creator_3.pdf").write_bytes(b"%PDF-")
+    ok, _ = check_criterion(
+        workdir,
+        "PDF file my_creator_3.pdf exists in workspace folder "
+        "(or numbered rename like my_creator_3.pdf if file exists)")
+    assert ok
+
+
+def test_criterion_unverifiable_still_fails(tmp_path):
+    workdir = tmp_path / "w"
+    workdir.mkdir()
+    ok, msg = check_criterion(workdir, "do a good job (or try harder)")
+    assert not ok and msg.startswith("unverified criterion")
+
+
+def test_criterion_trailing_note_keeps_core(tmp_path):
+    workdir = tmp_path / "w"
+    workdir.mkdir()
+    (workdir / "notes.txt").write_text("hello world")
+    ok, _ = check_criterion(
+        workdir, "notes.txt contains hello (case sensitive)")
+    assert ok
+
+
 # --- policy table ---
 
 def test_help_text_carries_categories():

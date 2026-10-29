@@ -184,6 +184,9 @@ class RunReport:
     backend: str = "bubblewrap"
     model_calls: int = 0
     model_tokens_estimated: int = 0
+    model_tokens_in_estimated: int = 0
+    model_tokens_out_estimated: int = 0
+    model_thinking_tokens: int = 0
     adapted: bool = False
     adapted_from: str = ""
     replan_note: str = ""
@@ -240,10 +243,20 @@ def format_run_stats(report: RunReport) -> str:
     elapsed = max(0.0, float(getattr(report, "elapsed_seconds", 0.0) or 0.0))
     elapsed_text = format_duration(elapsed)
     tokens = int(getattr(report, "model_tokens_estimated", 0) or 0)
+    in_tok = int(getattr(report, "model_tokens_in_estimated", 0) or 0)
+    out_tok = int(getattr(report, "model_tokens_out_estimated", 0) or 0)
+    think_tok = int(getattr(report, "model_thinking_tokens", 0) or 0)
     waited = float(getattr(report, "approval_wait_seconds", 0.0) or 0.0)
     waiting = (f" (plus {format_duration(waited)} waiting for you)"
                if waited >= 1 else "")
-    return f"⏱️ {elapsed_text}{waiting} · {tokens:,} total workflow tokens (estimated)"
+    if in_tok or out_tok or think_tok:
+        usage = (f"IN: {in_tok:,} OUT: {out_tok:,} "
+                 f"(Think: {think_tok:,}) TOT: {tokens:,} tokens (estimated)")
+    else:
+        # No breakdown recorded (a non-counting client): keep the
+        # old single-number line rather than three zeros.
+        usage = f"{tokens:,} total workflow tokens (estimated)"
+    return f"⏱️ {elapsed_text}{waiting} · {usage}"
 
 
 def run_react(client, messages: list, tools, *, max_rounds: int | None = None,
@@ -1072,6 +1085,12 @@ class GoalRunner:
                    "folder', resolve it to the workdir, and write criteria "
                    "in checkable forms such as 'NAME exists in the "
                    "workspace folder'.")
+        system += (" Criteria must be checkable, one assertion each, no "
+                   "parenthetical hedges. Forms that verify: 'NAME exists', "
+                   "'NAME exists in the workspace folder', 'NAME is "
+                   "non-empty', 'NAME contains TEXT', 'ledger NAME total is "
+                   "CENTS'. Anything else fails verification even when the "
+                   "files exist.")
         if self.plugins is not None and not self.kernel_mode:
             plugin_tools = self.plugins.tool_names()
             if plugin_tools:
@@ -1761,29 +1780,34 @@ class GoalRunner:
             return None
         return plan, [exp.goal for exp in candidates]
 
-    def _usage_totals(self) -> tuple[int, int]:
-        """Finished-run (calls, tokens) across every counting tier.
+    def _usage_totals(self) -> dict:
+        """Finished-run usage across every counting tier.
 
         Sums the unwrapped counting clients, deduped, so fast-tier
         calls count even when the run's client is a plain client
-        and only the router holds counting tiers. Thinking tokens
-        are added on top: the chars//4 estimate basis (prompt +
-        reply text) never contains thinking text, so adding the
-        real reasoning count cannot double-count it, and leaving
-        it out would understate the run's cost.
+        and only the router holds counting tiers. in + out is the
+        chars//4 estimate split; think is the real reasoning
+        count, added on top because the estimate basis (prompt +
+        reply text) never contains thinking text, so adding it
+        cannot double-count it; total is in + out + think.
         """
-        clients = self._counting_clients()
-        if clients:
-            calls = sum(int(getattr(c, "calls", 0) or 0) for c in clients)
-            tokens = sum(int(getattr(c, "tokens_estimated", 0) or 0)
+        if self._counting_clients():
+            clients = self._counting_clients()
+            in_tok = sum(int(getattr(c, "in_tokens_estimated", 0) or 0)
                          for c in clients)
-            tokens += sum(int(getattr(c, "thinking_tokens_total", 0) or 0)
+            out_tok = sum(int(getattr(c, "out_tokens_estimated", 0) or 0)
                           for c in clients)
-            return calls, tokens
+            think = sum(int(getattr(c, "thinking_tokens_total", 0) or 0)
+                        for c in clients)
+            return {"calls": sum(int(getattr(c, "calls", 0) or 0)
+                                 for c in clients),
+                    "in": in_tok, "out": out_tok, "think": think,
+                    "total": in_tok + out_tok + think}
         client = self.client
         if hasattr(client, "calls") and hasattr(client, "tokens_estimated"):
-            return (int(client.calls), int(client.tokens_estimated))
-        return 0, 0
+            return {"calls": int(client.calls), "in": 0, "out": 0,
+                    "think": 0, "total": int(client.tokens_estimated)}
+        return {"calls": 0, "in": 0, "out": 0, "think": 0, "total": 0}
 
     def _finalize(self, report: RunReport) -> RunReport:
         """Fill model-usage and adaptation fields, from the counting client if present."""
@@ -1792,8 +1816,12 @@ class GoalRunner:
             timer.stop()
             report.elapsed_seconds = round(timer.elapsed_active(), 1)
             report.approval_wait_seconds = round(timer.approval_wait_seconds(), 1)
-        report.model_calls, report.model_tokens_estimated = \
-            self._usage_totals()
+        totals = self._usage_totals()
+        report.model_calls = totals["calls"]
+        report.model_tokens_estimated = totals["total"]
+        report.model_tokens_in_estimated = totals["in"]
+        report.model_tokens_out_estimated = totals["out"]
+        report.model_thinking_tokens = totals["think"]
         report.blocked = list(getattr(self, "_blocked", []))
         report.network = self.network_available
         report.adapted = bool(self._adapted)

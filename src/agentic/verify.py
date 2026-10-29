@@ -69,6 +69,18 @@ def _ledger_total(workdir: Path, name: str) -> int | None:
 
 def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
     text = str(criterion).strip()
+    # Models hedge with trailing parentheticals ("... (or ... if ...)").
+    # The aside is not part of the assertion, so strip trailing
+    # parenthetical groups and match the checkable core. Only
+    # trailing groups strip: a parenthetical mid-criterion may
+    # carry the filename or the needle. A criterion with no
+    # checkable core still fails, as before — this narrows
+    # nothing, it just stops hedges from voiding real checks.
+    while True:
+        stripped = re.sub(r"\s*\([^()]*\)\s*$", "", text)
+        if stripped == text:
+            break
+        text = stripped
     # Models often describe the evidence instead of naming the generated
     # file. The file-producing tool is the source of truth in this case.
     if re.search(r"(?:pdf|document|file)\s+(?:file\s+)?(?:is\s+)?(?:created|exists)\s+inside\s+(?:the\s+)?(?:workdir|workspace folder)(?:\b|$)",
