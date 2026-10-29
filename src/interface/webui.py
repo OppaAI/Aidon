@@ -1276,9 +1276,11 @@ class WebUIServer:
         mirror_response = self._mirror_command(conversation_id, goal, project_id)
         if mirror_response is not None:
             return mirror_response
-        from .surfaces import (HELP_TEXT, parse_research_command,
+        from .mode_stops import latest_mode_stop, load_mode_stop
+        from .surfaces import (HELP_TEXT, mode_enabled, parse_mode_command,
+                               parse_proceed_command, parse_research_command,
                                parse_think_command, research_enabled,
-                               think_enabled, toggle_research,
+                               set_mode, think_enabled, toggle_research,
                                toggle_think)
         if goal.strip() == "/help":
             return self._simple_command_response(conversation_id, goal, project_id,
@@ -1305,6 +1307,44 @@ class WebUIServer:
             goal = research_cmd["goal"]
             research_mode = True
         research_mode = research_mode or research_enabled(self.home, conversation_id)
+        # Modes: a typed one-shot wins, then the composer's chooser
+        # (payload "mode"), then the sticky flag for the conversation.
+        # /proceed resumes a stopped run instead of starting a goal.
+        mode = None
+        resume_stop_id = ""
+        resume_spec = None
+        resume_plan = None
+        mode_cmd = parse_mode_command(goal)
+        if mode_cmd is not None:
+            if mode_cmd["action"] == "set":
+                set_mode(self.home, conversation_id, mode_cmd["mode"])
+                if mode_cmd["mode"] == "execute":
+                    _mtext = "Execute mode on for this conversation — goals run directly."
+                else:
+                    _mtext = f"{mode_cmd['mode'].capitalize()} mode on for this conversation."
+                return self._simple_command_response(conversation_id, goal, project_id, _mtext)
+            goal = mode_cmd["goal"]
+            mode = mode_cmd["mode"]
+        proceed_cmd = parse_proceed_command(goal)
+        if proceed_cmd is not None:
+            stop = (load_mode_stop(self.home, proceed_cmd["stop_id"])
+                    if proceed_cmd["stop_id"]
+                    else latest_mode_stop(self.home, conversation_id))
+            if stop is None:
+                if proceed_cmd["stop_id"]:
+                    _ptext = f"No stopped run with id {proceed_cmd['stop_id']}."
+                else:
+                    _ptext = "No stopped run to proceed with."
+                return self._simple_command_response(conversation_id, goal, project_id, _ptext)
+            goal = stop["goal"]
+            mode = "execute"
+            resume_stop_id = stop["stop_id"]
+            resume_spec = stop.get("spec")
+            resume_plan = stop.get("plan")
+        if mode is None and str(body.get("mode", "") or "") in ("ask", "plan", "execute"):
+            mode = str(body.get("mode"))
+        if mode is None:
+            mode = mode_enabled(self.home, conversation_id) or "execute"
         run_id = new_run_id()
         if self.run_control is not None:
             self.run_control.register(run_id, goal, project_id)
@@ -1390,6 +1430,13 @@ class WebUIServer:
                        if str(path).strip()]
         if image_paths:
             payload["image_paths"] = image_paths
+        payload["mode"] = mode
+        if resume_stop_id:
+            payload["resume_stop_id"] = resume_stop_id
+        if isinstance(resume_spec, dict):
+            payload["resume_spec"] = resume_spec
+        if isinstance(resume_plan, dict):
+            payload["resume_plan"] = resume_plan
         event = TriggerEvent(source="webui", kind="goal", goal=goal,
                              project_id=project_id,
                              payload={**payload, "conversation_id": conversation_id},
@@ -1417,7 +1464,7 @@ class WebUIServer:
         out = dict(record or {})
         if control:
             terminal = control.get("status") in {
-                "done", "failed", "rejected", "cancelled"}
+                "done", "failed", "rejected", "cancelled", "stopped"}
             out.update({"status": control.get("status", out.get("status", "running")),
                         "goal": control.get("goal", out.get("goal", "")),
                         "stage": ("done" if terminal else
@@ -1534,15 +1581,25 @@ class WebUIServer:
                                     self.whatsapp_sender(sender, ack)
                                 continue
                         from .surfaces import (HELP_TEXT as _WA_HELP,
+                                                mode_enabled as _wa_mode_enabled,
+                                                parse_mode_command as _wa_mode_cmd,
+                                                parse_proceed_command as _wa_proceed,
                                                 parse_research_command as _wa_research,
                                                 parse_think_command as _wa_think,
                                                 research_enabled as _wa_research_enabled,
+                                                set_mode as _wa_set_mode,
                                                 think_enabled as _wa_enabled,
                                                 toggle_research as _wa_research_toggle,
                                                 toggle_think as _wa_toggle)
+                        from .mode_stops import (latest_mode_stop as _wa_latest_stop,
+                                                 load_mode_stop as _wa_load_stop)
                         wa_key = "whatsapp:" + str(sender)
                         wa_think_max = False
                         wa_research_mode = False
+                        wa_mode = None
+                        wa_resume_stop_id = ""
+                        wa_resume_spec = None
+                        wa_resume_plan = None
                         if decision_reply is None:
                             wa_cmd = _wa_think(text)
                             if wa_cmd is not None:
@@ -1567,6 +1624,36 @@ class WebUIServer:
                                         wa_research_mode = True
                                 elif text.strip() == "/help":
                                     decision_reply = _WA_HELP
+                            if decision_reply is None:
+                                wa_mcmd = _wa_mode_cmd(text)
+                                if wa_mcmd is not None:
+                                    if wa_mcmd["action"] == "set":
+                                        _wa_set_mode(self.home, wa_key, wa_mcmd["mode"])
+                                        if wa_mcmd["mode"] == "execute":
+                                            decision_reply = "Execute mode on for this chat — goals run directly."
+                                        else:
+                                            decision_reply = (f"{wa_mcmd['mode'].capitalize()} mode on "
+                                                              "for this chat.")
+                                    else:
+                                        text = wa_mcmd["goal"]
+                                        wa_mode = wa_mcmd["mode"]
+                                else:
+                                    wa_pcmd = _wa_proceed(text)
+                                    if wa_pcmd is not None:
+                                        _stop = (_wa_load_stop(self.home, wa_pcmd["stop_id"])
+                                                 if wa_pcmd["stop_id"]
+                                                 else _wa_latest_stop(self.home, wa_key))
+                                        if _stop is None:
+                                            if wa_pcmd["stop_id"]:
+                                                decision_reply = f"No stopped run with id {wa_pcmd['stop_id']}."
+                                            else:
+                                                decision_reply = "No stopped run to proceed with."
+                                        else:
+                                            text = _stop["goal"]
+                                            wa_mode = "execute"
+                                            wa_resume_stop_id = _stop["stop_id"]
+                                            wa_resume_spec = _stop.get("spec")
+                                            wa_resume_plan = _stop.get("plan")
                         if decision_reply is None:
                             text, force_web = self._force_web_prefix(text)
                             if not text:
@@ -1579,11 +1666,19 @@ class WebUIServer:
                                 self.whatsapp_sender(sender, decision_reply)
                             continue
                         local_replies: list[str] = []
+                        _wa_payload = {"from": sender,
+                                       "force_web": force_web,
+                                       "think_max": wa_think_max or _wa_enabled(self.home, wa_key),
+                                       "research_mode": wa_research_mode or _wa_research_enabled(self.home, wa_key),
+                                       "mode": wa_mode or _wa_mode_enabled(self.home, wa_key) or "execute"}
+                        if wa_resume_stop_id:
+                            _wa_payload["resume_stop_id"] = wa_resume_stop_id
+                        if isinstance(wa_resume_spec, dict):
+                            _wa_payload["resume_spec"] = wa_resume_spec
+                        if isinstance(wa_resume_plan, dict):
+                            _wa_payload["resume_plan"] = wa_resume_plan
                         event = TriggerEvent(source="whatsapp", kind="message",
-                                             goal=text, payload={"from": sender,
-                                                                 "force_web": force_web,
-                                                                 "think_max": wa_think_max or _wa_enabled(self.home, wa_key),
-                                                                 "research_mode": wa_research_mode or _wa_research_enabled(self.home, wa_key)},
+                                             goal=text, payload=_wa_payload,
                                              reply=local_replies.append)
                         self.dispatcher.dispatch(event)
                         for reply in local_replies:
@@ -1695,15 +1790,25 @@ class WebUIServer:
                 self._record_surface_exchange("slack:" + channel, "assistant", mirror_reply)
                 return 200, {"replies": [mirror_reply]}
             from .surfaces import (HELP_TEXT as _SL_HELP,
+                                    mode_enabled as _sl_mode_enabled,
+                                    parse_mode_command as _sl_mode_cmd,
+                                    parse_proceed_command as _sl_proceed,
                                     parse_research_command as _sl_research,
                                     parse_think_command as _sl_think,
                                     research_enabled as _sl_research_enabled,
+                                    set_mode as _sl_set_mode,
                                     think_enabled as _sl_enabled,
                                     toggle_research as _sl_research_toggle,
                                     toggle_think as _sl_toggle)
+            from .mode_stops import (latest_mode_stop as _sl_latest_stop,
+                                     load_mode_stop as _sl_load_stop)
             sl_key = "slack:" + channel
             sl_think_max = False
             sl_research_mode = False
+            sl_mode = None
+            sl_resume_stop_id = ""
+            sl_resume_spec = None
+            sl_resume_plan = None
             if decision_reply is None:
                 sl_cmd = _sl_think(text)
                 if sl_cmd is not None:
@@ -1726,6 +1831,36 @@ class WebUIServer:
                             sl_research_mode = True
                     elif text.strip() == "/help":
                         decision_reply = _SL_HELP
+                if decision_reply is None:
+                    sl_mcmd = _sl_mode_cmd(text)
+                    if sl_mcmd is not None:
+                        if sl_mcmd["action"] == "set":
+                            _sl_set_mode(self.home, sl_key, sl_mcmd["mode"])
+                            if sl_mcmd["mode"] == "execute":
+                                decision_reply = "Execute mode on for this channel — goals run directly."
+                            else:
+                                decision_reply = (f"{sl_mcmd['mode'].capitalize()} mode on "
+                                                  "for this channel.")
+                        else:
+                            text = sl_mcmd["goal"]
+                            sl_mode = sl_mcmd["mode"]
+                    else:
+                        sl_pcmd = _sl_proceed(text)
+                        if sl_pcmd is not None:
+                            _stop = (_sl_load_stop(self.home, sl_pcmd["stop_id"])
+                                     if sl_pcmd["stop_id"]
+                                     else _sl_latest_stop(self.home, sl_key))
+                            if _stop is None:
+                                if sl_pcmd["stop_id"]:
+                                    decision_reply = f"No stopped run with id {sl_pcmd['stop_id']}."
+                                else:
+                                    decision_reply = "No stopped run to proceed with."
+                            else:
+                                text = _stop["goal"]
+                                sl_mode = "execute"
+                                sl_resume_stop_id = _stop["stop_id"]
+                                sl_resume_spec = _stop.get("spec")
+                                sl_resume_plan = _stop.get("plan")
             force_web = False
             if decision_reply is None:
                 text, force_web = self._force_web_prefix(text)
@@ -1833,6 +1968,13 @@ class WebUIServer:
             payload["force_web"] = force_web
             payload["think_max"] = sl_think_max or _sl_enabled(self.home, sl_key)
             payload["research_mode"] = sl_research_mode or _sl_research_enabled(self.home, sl_key)
+            payload["mode"] = sl_mode or _sl_mode_enabled(self.home, sl_key) or "execute"
+            if sl_resume_stop_id:
+                payload["resume_stop_id"] = sl_resume_stop_id
+            if isinstance(sl_resume_spec, dict):
+                payload["resume_spec"] = sl_resume_spec
+            if isinstance(sl_resume_plan, dict):
+                payload["resume_plan"] = sl_resume_plan
             payload["channel"] = channel
             payload["thread_ts"] = thread_ts
             event = TriggerEvent(source="slack", kind="message", goal=text,
@@ -2133,6 +2275,7 @@ class WebUIServer:
             {"key": "AIDON_REACT_MAX_WORKERS", "label": "ReAct parallel workers", "type": "int", "default": "3", "desc": "Parallel tool workers within one ReAct round; 1 = sequential.", "secret": False},
             {"key": "AIDON_CRITIC_ENABLED", "label": "Plan critic on/off", "type": "int", "default": "1", "desc": "Reflection pass on each valid plan before execution; 0 skips it.", "secret": False},
             {"key": "AIDON_CRITIC_MAX_ROUNDS", "label": "Critic repair rounds", "type": "int", "default": "1", "desc": "Critic-issue repair rounds; 0 runs the critic without repairing.", "secret": False},
+            {"key": "AIDON_CRITIC_MAX_ISSUES", "label": "Critic issues per round", "type": "int", "default": "5", "desc": "Most issues the critic returns per review round; repairs address them in order.", "secret": False},
             {"key": "AIDON_DAG_SIMILARITY", "label": "DAG similarity threshold", "type": "string", "default": "0.3", "desc": "Goal-shape overlap (0-1) for DAG replacement, experience adaptation, and failure matching; lower merges more aggressively.", "secret": False},
         ]},
     ]
@@ -2216,6 +2359,7 @@ class WebUIServer:
             "AIDON_REACT_MAX_WORKERS": (1, 32, 1),
             "AIDON_CRITIC_ENABLED": (0, 1, 1),
             "AIDON_CRITIC_MAX_ROUNDS": (0, 5, 1),
+            "AIDON_CRITIC_MAX_ISSUES": (1, 20, 5),
             "AIDON_SLACK_POLL_SECONDS": (3, 3600, 1),
             "AIDON_SLACK_ACK_AFTER_SECONDS": (0, 3600, 1),
             "AIDON_APPROVAL_NUDGE_MIN": (0, 1440, 1),
@@ -3883,6 +4027,16 @@ loadSettings();
                         self._send_json(500, {"error": str(exc)})
                 elif parsed.path == "/api/goals":
                     result = server.start_goal(body)
+                    self._send_json(200 if "run_id" in result else 400, result)
+                elif parsed.path == "/api/proceed":
+                    # The Proceed button on a stopped run: reuse the
+                    # typed /proceed path, so the button and the
+                    # command dispatch the same resume run.
+                    stop_id = str(body.get("stop_id", "") or "")
+                    result = server.start_goal({
+                        "goal": f"/proceed {stop_id}".strip(),
+                        "conversation_id": str(body.get("conversation_id", "") or ""),
+                    })
                     self._send_json(200 if "run_id" in result else 400, result)
                 elif parsed.path.startswith("/api/runs/") and parsed.path.endswith("/approval"):
                     run_id = parsed.path[len("/api/runs/"):-len("/approval")].strip("/")

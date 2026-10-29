@@ -228,12 +228,20 @@ _THINK_FILE = "think_flags.json"
 
 _THINK_RE = re.compile(r"^/think(?:\s+(.*?))?\s*$", re.IGNORECASE)
 _RESEARCH_RE = re.compile(r"^/research(?:\s+(.*?))?\s*$", re.IGNORECASE)
+_MODE_RE = re.compile(r"^/(ask|plan|execute)(?:\s+(.*?))?\s*$", re.IGNORECASE)
+_PROCEED_RE = re.compile(r"^/?proceed(?:\s+(\S+))?\s*$", re.IGNORECASE)
 
 HELP_TEXT = (
     "/think — toggle maximum thinking for this conversation (🧠 button does the same).\n"
     "/think <goal> — run one goal with maximum thinking.\n"
     "/research — toggle deep-research mode for this conversation.\n"
     "/research <goal> — run one goal with deep research first, at maximum thinking.\n"
+    "/ask — ask questions first, then stop with a spec and a Proceed button.\n"
+    "/ask <goal> — interview one goal, then stop.\n"
+    "/plan — plan only, then stop with the plan and a Proceed button.\n"
+    "/plan <goal> — plan one goal, then stop.\n"
+    "/execute — run goals directly (the default).\n"
+    "/proceed [id] — continue a stopped Ask or Plan run.\n"
     "/web <question> — force a web answer for one question (🌐 button does the same).\n"
     "/mirror slack #channel — link this conversation to a Slack channel.\n"
     "/mirror slack off — remove the Slack link.\n"
@@ -249,6 +257,12 @@ CLI_HELP_TEXT = (
     "/think <goal> — run one goal with maximum thinking.\n"
     "/research — toggle deep-research mode for this REPL session.\n"
     "/research <goal> — run one goal with deep research first, at maximum thinking.\n"
+    "/ask — ask questions first, then stop with a spec and a Proceed button.\n"
+    "/ask <goal> — interview one goal, then stop.\n"
+    "/plan — plan only, then stop with the plan and a Proceed button.\n"
+    "/plan <goal> — plan one goal, then stop.\n"
+    "/execute — run goals directly (the default).\n"
+    "/proceed [id] — continue a stopped Ask or Plan run.\n"
     "/help — this list.\n"
     "/history — past goals this session.\n"
     "/clear — clear history.\n"
@@ -327,6 +341,91 @@ def parse_think_command(text: str) -> dict | None:
     if not rest:
         return {"action": "toggle"}
     return {"action": "once", "goal": rest}
+
+
+def parse_mode_command(text: str) -> dict | None:
+    """Parse an /ask, /plan, or /execute command; None when not one.
+
+    Bare ``/ask`` sets the sticky mode for the conversation;
+    ``/ask <goal>`` runs one goal in Ask mode without changing it.
+    Same shape for /plan and /execute (bare /execute clears the
+    sticky mode back to direct execution).
+    """
+    match = _MODE_RE.match(str(text or "").strip())
+    if not match:
+        return None
+    mode = match.group(1).lower()
+    rest = (match.group(2) or "").strip()
+    if not rest:
+        return {"action": "set", "mode": mode}
+    return {"action": "once", "mode": mode, "goal": rest}
+
+
+def parse_proceed_command(text: str) -> dict | None:
+    """Parse a proceed command; None when the text is not one.
+
+    ``proceed`` resumes the latest stopped run for the conversation;
+    ``proceed <id>`` resumes that stop. A leading slash is accepted,
+    so /proceed and proceed mean the same thing. Anything longer
+    (for example "proceed with the plan") is not a command.
+    """
+    match = _PROCEED_RE.match(str(text or "").strip())
+    if not match:
+        return None
+    return {"stop_id": match.group(1) or None}
+
+
+def load_mode_flags(home: Path) -> dict:
+    """Return the sticky mode flags, {} when absent or broken.
+
+    Modes share think_flags.json with the think and research flags
+    (a third section in the same file), so one flags file holds all
+    per-conversation run toggles.
+    """
+    try:
+        data = json.loads(_think_path(home).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    modes = data.get("modes", {})
+    return modes if isinstance(modes, dict) else {}
+
+
+def mode_enabled(home: Path, key: str) -> str:
+    """Sticky mode for a conversation key: ask, plan, or "" (execute)."""
+    mode = load_mode_flags(home).get(str(key or ""), "")
+    return mode if mode in ("ask", "plan") else ""
+
+
+def set_mode(home: Path, key: str, mode: str) -> str:
+    """Set the sticky mode for a conversation key; returns it.
+
+    "execute" clears the sticky mode, so goals run directly again.
+    Read-merges like the think/research setters: the other sections
+    in the file are never wiped.
+    """
+    key = str(key or "")
+    try:
+        data = json.loads(_think_path(home).read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    modes = data.get("modes", {})
+    if not isinstance(modes, dict):
+        modes = {}
+    if mode in ("ask", "plan"):
+        modes[key] = mode
+    else:
+        modes.pop(key, None)
+    data["modes"] = modes
+    path = _think_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tmp.replace(path)
+    return mode if mode in ("ask", "plan") else ""
 
 
 def load_research_flags(home: Path) -> dict:

@@ -21,14 +21,39 @@ the latest plan proceeds with the issues traced. A critic
 that could veto a plan forever would be worse than no
 critic. Without a model client the critic returns no
 issues — the deterministic validator is still the floor.
+Each round returns at most AIDON_CRITIC_MAX_ISSUES issues
+(default 5): the cap bounds how much repair one round can
+ask for, so a long complaint list cannot stall the run.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 
 from ..system.model_client import Message
+
+_DEFAULT_MAX_ISSUES = 5
+
+
+def max_issues() -> int:
+    """Critic issues per round, from AIDON_CRITIC_MAX_ISSUES.
+
+    Read at call time, never import time. Default 5; garbage
+    falls back to 5; below 1 clamps to 1 (a critic returning
+    nothing still costs a call, so 0 is not a useful setting);
+    above 20 clamps to 20, the settings page's bound.
+    """
+    try:
+        value = int(str(os.environ.get("AIDON_CRITIC_MAX_ISSUES", "")).strip())
+    except (TypeError, ValueError):
+        return _DEFAULT_MAX_ISSUES
+    if value < 1:
+        return 1
+    if value > 20:
+        return 20
+    return value
 
 _CRITIC_SYSTEM = (
     "Review this plan against its goal. Return JSON only, "
@@ -96,4 +121,4 @@ def review_plan(plan, goal: str, available_tools=None,
     if not isinstance(issues, list):
         return []
     return [str(issue).strip() for issue in issues
-            if str(issue).strip()][:5]
+            if str(issue).strip()][:max_issues()]

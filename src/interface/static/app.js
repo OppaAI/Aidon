@@ -76,6 +76,7 @@
   let lastRoute = null;
   let runTraceHistory = [];
   let cardShownFor = null;
+  let proceedShownFor = null;
   const streamMessages = {};
 
   function esc(s) {
@@ -1008,6 +1009,57 @@
       decide(run.run_id, "rejected", ""));
   }
 
+  // A stopped Ask/Plan run renders one Proceed button, not an
+  // approval card: proceeding resumes the run, it does not approve
+  // an action. The button posts to /api/proceed and follows the
+  // resume run it returns, like any other new run.
+  function showProceedCard(run, stop) {
+    if (proceedShownFor === run.run_id) return;
+    proceedShownFor = run.run_id;
+    approvalSlot.innerHTML = "";
+    const card = document.createElement("div");
+    card.className = "card approval-card";
+    card.innerHTML =
+      '<div class="kind">stopped — ' + esc(stop.mode) + " ready</div>" +
+      "<h3>" + (stop.mode === "ask" ? "Spec ready" : "Plan ready") + "</h3>" +
+      '<div class="row">' +
+      '<button class="approve" data-d="proceed">Proceed</button>' +
+      "</div>";
+    approvalSlot.appendChild(card);
+    card.querySelector('[data-d="proceed"]').addEventListener("click", async () => {
+      const btn = card.querySelector('[data-d="proceed"]');
+      btn.disabled = true;
+      try {
+        const convCtx = window.aidonConversation ? window.aidonConversation() : {};
+        const r = await fetch("/api/proceed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stop_id: stop.stop_id,
+            conversation_id: convCtx.conversation_id || "",
+          }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.run_id) throw new Error((data && data.detail) || "no run");
+        approvalSlot.innerHTML = "";
+        proceedShownFor = null;
+        cardShownFor = null;
+        currentRun = data.run_id;
+        lastEventCount = 0;
+        lastTraceCount = 0;
+        setStatus("busy", "working");
+        renderStages("interpret");
+        steerRow.hidden = false;
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        pollTimer = setInterval(poll, 2000);
+        poll();
+      } catch (e) {
+        btn.disabled = false;
+        showMiddleStatus("Could not proceed: " + e.message, "error");
+      }
+    });
+  }
+
   async function decide(runId, decision, editedText) {
     try {
       const r = await fetch("/api/runs/" + runId + "/approval", {
@@ -1149,6 +1201,9 @@
         if (!sawDecision) {
           showMiddleStatus("Approval timed out, treated as rejected — card removed", "warning");
         }
+      }
+      if (run.mode_stop) {
+        showProceedCard(run, run.mode_stop);
       }
       if (run.status === "running") {
         // Chat-first questions: while the run waits for a question
@@ -1456,6 +1511,7 @@
     const previousRun = currentRun;
     const guidance = guidanceInput.value.trim();
     const forceWeb = document.getElementById("web-btn")?.classList.contains("active") || false;
+    const runMode = document.getElementById("mode-chooser")?.value || "execute";
     const imgs = pendingImages.slice();
     const fls = pendingFiles.slice();
     const files = imgs.concat(fls);
@@ -1482,6 +1538,7 @@
         const fd = new FormData();
         fd.append("goal", goal);
         fd.append("guidance", guidance);
+        fd.append("mode", runMode);
         if (forceWeb) fd.append("force_web", "true");
         if (convCtx.conversation_id)
           fd.append("conversation_id", convCtx.conversation_id);
@@ -1498,7 +1555,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            goal, guidance, force_web: forceWeb,
+            goal, guidance, force_web: forceWeb, mode: runMode,
             conversation_id: convCtx.conversation_id || "",
             project_id: convCtx.project_id || "",
           }),
@@ -1563,6 +1620,7 @@
     document.getElementById("thinking-list").innerHTML = "";
     document.getElementById("thinking-count").textContent = "";
     cardShownFor = null;
+    proceedShownFor = null;
     approvalSlot.innerHTML = "";
     currentRun = data.run_id;
     setStatus("busy", "working");

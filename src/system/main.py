@@ -1069,6 +1069,31 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     tools["schedule_job"] = schedule_job
     tools["web_search"] = web_search
     tools["fetch_url"] = fetch_url
+
+    def fetch_feed(url, state_file=""):
+        # Native feed reading with new-item dedupe. The state file
+        # defaults to .rss_seen.json in the run workdir; a given
+        # name must stay inside the workdir, like other file tools.
+        # Scheduled runs share the serve workdir, so their state
+        # persists across ticks; interactive runs get a fresh state
+        # per run (every current item reads as new) unless a shared
+        # state file is named.
+        try:
+            from ..capabilities.rss import fetch_feed as _fetch_feed
+            from pathlib import Path as _FeedPath
+            root = _FeedPath(workdir).resolve()
+            if state_file:
+                candidate = (root / str(state_file)).resolve()
+                if not candidate.is_relative_to(root):
+                    return "feed failed: state file outside workdir"
+                state_path = candidate
+            else:
+                state_path = root / ".rss_seen.json"
+            return _fetch_feed(str(url), state_path)
+        except Exception as exc:
+            return f"feed failed: {type(exc).__name__}: {exc}"
+
+    tools["fetch_feed"] = fetch_feed
     tools["read_document"] = read_document
 
     def deep_research_tool(query):
@@ -2235,6 +2260,7 @@ def main(argv: list[str] | None = None) -> int:
         from ..interface.repl import Repl
         _cli_think_state = {"on": False}
         _cli_research_state = {"on": False}
+        _cli_mode_state = {"mode": "execute"}
 
         def _repl_handler(goal: str) -> str:
             from ..agentic.budgets import Budget as _B2
@@ -2263,10 +2289,67 @@ def main(argv: list[str] | None = None) -> int:
                             "for this REPL session.")
                 goal = _cli_rcmd["goal"]
                 _cli_research_once = True
-            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), think_max=_cli_once or _cli_think_state["on"], research_mode=_cli_research_once or _cli_research_state["on"], deep_researcher=make_deep_researcher(config))
-            report = runner.run(goal)
+            from ..interface.surfaces import parse_mode_command as _cli_mode
+            from ..interface.surfaces import parse_proceed_command as _cli_proceed
+            _cli_mode_once = None
+            _cli_mcmd = _cli_mode(goal)
+            if _cli_mcmd is not None:
+                if _cli_mcmd["action"] == "set":
+                    _cli_mode_state["mode"] = _cli_mcmd["mode"]
+                    if _cli_mcmd["mode"] == "execute":
+                        return "Execute mode on for this REPL session — goals run directly."
+                    return f"{_cli_mcmd['mode'].capitalize()} mode on for this REPL session."
+                goal = _cli_mcmd["goal"]
+                _cli_mode_once = _cli_mcmd["mode"]
+            _cli_resume_plan = None
+            _cli_resume_spec = None
+            _cli_resume_stop_id = ""
+            _cli_pcmd = _cli_proceed(goal)
+            if _cli_pcmd is not None:
+                from ..interface.mode_stops import load_mode_stop as _cli_load_stop
+                from ..interface.mode_stops import latest_mode_stop as _cli_latest_stop
+                _stop = (_cli_load_stop(config.home, _cli_pcmd["stop_id"])
+                         if _cli_pcmd["stop_id"]
+                         else _cli_latest_stop(config.home, "cli"))
+                if _stop is None:
+                    if _cli_pcmd["stop_id"]:
+                        return f"No stopped run with id {_cli_pcmd['stop_id']}."
+                    return "No stopped run to proceed with."
+                goal = _stop["goal"]
+                _cli_mode_once = "execute"
+                _cli_resume_stop_id = _stop["stop_id"]
+                if _stop["mode"] == "plan" and isinstance(_stop.get("plan"), dict) and _stop["plan"].get("steps"):
+                    from ..agentic.loop import Plan as _CliPlan
+                    _rp = _stop["plan"]
+                    _cli_resume_plan = _CliPlan(
+                        steps=_rp.get("steps", []),
+                        deliverables=[str(d) for d in _rp.get("deliverables", [])],
+                        criteria=[str(c) for c in _rp.get("criteria", [])])
+                elif _stop["mode"] == "ask" and isinstance(_stop.get("spec"), dict):
+                    from ..agentic.interview import Spec as _CliSpec
+                    _cli_resume_spec = _CliSpec.from_dict(_stop["spec"])
+            try:
+                from ..agentic.semantic_router import SemanticRouter as _CliRouter
+                _cli_router = _CliRouter(memory.embedder, cache_path=config.home / "semantic_router_vectors.json")
+            except Exception:
+                _cli_router = None
+            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), think_max=_cli_once or _cli_think_state["on"], research_mode=_cli_research_once or _cli_research_state["on"], deep_researcher=make_deep_researcher(config), mode=_cli_mode_once or (_cli_mode_state["mode"] if _cli_mode_state["mode"] != "execute" else None), question_ask=lambda q: input(f"\nAidon: {q}\nYou: "), conversation_key="cli", resume_plan=_cli_resume_plan, semantic_router=_cli_router)
+            if _cli_resume_spec is not None:
+                report = runner.run(goal, spec=_cli_resume_spec)
+            else:
+                report = runner.run(goal)
+            if _cli_resume_stop_id and report.status == "done":
+                try:
+                    from ..interface.mode_stops import delete_mode_stop as _cli_del_stop
+                    _cli_del_stop(config.home, _cli_resume_stop_id)
+                except Exception:
+                    pass
             if report.status == "chat":
                 return report.chat_reply or "Received."
+            if report.status == "stopped":
+                _sid = (report.mode_stop or {}).get("stop_id", "")
+                _smode = (report.mode_stop or {}).get("mode", "") or "run"
+                return f"[stopped] {_smode} ready — run /proceed {_sid} to continue."
             return f"[{report.status}] {', '.join(report.files)} {report.error}".strip()
         def _remember(text: str) -> str:
             point = memory.remember(text, source="cli-command")
@@ -2502,6 +2585,28 @@ def main(argv: list[str] | None = None) -> int:
             if _whatsapp_to:
                 _gate_context["whatsapp_to"] = _whatsapp_to
 
+            # Mode resume + conversation key for the stop record.
+            _conversation_key = ""
+            if event.source == "webui":
+                _conversation_key = str(event.payload.get("conversation_id", "") or "")
+            elif event.source == "slack":
+                _conversation_key = "slack:" + str(event.payload.get("channel", "") or "")
+            elif event.source == "whatsapp":
+                _conversation_key = "whatsapp:" + str(event.payload.get("from", "") or "")
+            _resume_stop_id = str(event.payload.get("resume_stop_id", "") or "")
+            _resume_plan = None
+            _resume_spec = None
+            if isinstance(event.payload.get("resume_plan"), dict):
+                _rp = event.payload["resume_plan"]
+                if _rp.get("steps"):
+                    from ..agentic.loop import Plan as _ResumePlan
+                    _resume_plan = _ResumePlan(
+                        steps=_rp.get("steps", []),
+                        deliverables=[str(d) for d in _rp.get("deliverables", [])],
+                        criteria=[str(c) for c in _rp.get("criteria", [])])
+            if isinstance(event.payload.get("resume_spec"), dict):
+                from ..agentic.interview import Spec as _ResumeSpec
+                _resume_spec = _ResumeSpec.from_dict(event.payload["resume_spec"])
             runner = GoalRunner(client, run_sandbox, _gate,
                                 config.home, memory=memory,
                                 project_id=event.project_id, plugins=plugins,
@@ -2511,7 +2616,7 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages)), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context)
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages)), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan)
             def _deliver_files(files, target):
                 """Upload run deliverables as bytes to a Slack/WhatsApp target.
 
@@ -2620,12 +2725,48 @@ def main(argv: list[str] | None = None) -> int:
             # WebUI goals run once. Swarm remains an explicit CLI option;
             # automatically splitting ordinary chat made conversational
             # questions appear multiple times and multiplied model calls.
-            report = runner.run(event.goal)
+            if _resume_spec is not None:
+                report = runner.run(event.goal, spec=_resume_spec)
+            else:
+                report = runner.run(event.goal)
             route_callback = event.payload.get("_route_callback")
             if callable(route_callback):
                 route_callback(runner.last_route)
             run_control.set_status(run_id, report.status)
-            if report.status == "chat":
+            # A stopped run hands the frontend its Proceed button
+            # through the run record (the poll returns the record),
+            # and a finished proceed consumes the stop record so a
+            # failed proceed can still be retried.
+            if report.status == "stopped" and report.mode_stop:
+                try:
+                    if run_id in server._web_runs:
+                        server._web_runs[run_id]["mode_stop"] = dict(report.mode_stop)
+                except Exception:
+                    pass
+            if _resume_stop_id and report.status == "done":
+                try:
+                    from ..interface.mode_stops import delete_mode_stop
+                    delete_mode_stop(config.home, _resume_stop_id)
+                except Exception:
+                    pass
+            if report.status == "stopped":
+                _stopped = report.mode_stop or {}
+                _sid = str(_stopped.get("stop_id", "") or "")
+                if _stopped.get("mode") == "ask":
+                    _shead = "Spec ready — the interview is done."
+                else:
+                    _delivs = _stopped.get("deliverables") or []
+                    _shead = ("Plan ready" + (f" ({len(_delivs)} deliverable(s): "
+                                              + ", ".join(str(d) for d in _delivs[:5])
+                                              + ")" if _delivs else "") + ".")
+                if event.source == "webui":
+                    _saction = "Tap Proceed below to continue."
+                elif event.source in ("slack", "whatsapp"):
+                    _saction = f"Reply proceed {_sid} to continue."
+                else:
+                    _saction = f"Run /proceed {_sid} to continue."
+                _surface_reply(f"{_shead}\n{_saction}\n" + format_run_stats(report))
+            elif report.status == "chat":
                 _surface_reply((report.chat_reply or "Received.") + "\n" + format_run_stats(report))
             else:
                 from ..interface.phrasing import (

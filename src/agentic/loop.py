@@ -198,6 +198,10 @@ class RunReport:
     # approval cards), False means network off, None means
     # unknown (nothing announced, nothing shown).
     network: bool | None = None
+    # Stopped Ask/Plan run: {"stop_id", "mode", "goal", ...} when
+    # this report is a stop, else {}. The surface turns it into
+    # the Proceed button (WebUI) or the proceed <id> reply text.
+    mode_stop: dict = field(default_factory=dict)
     elapsed_seconds: float = 0.0
     approval_wait_seconds: float = 0.0
 
@@ -345,7 +349,9 @@ class GoalRunner:
                  route_callback=None, trace_callback=None,
                  allowed_side_effect_tools=None, gate_context=None,
                  think_max: bool = False, research_mode: bool = False,
-                 deep_researcher=None, deadline_seconds: float | None = None):
+                 deep_researcher=None, deadline_seconds: float | None = None,
+                 mode: str | None = None, question_ask=None,
+                 conversation_key: str = "", resume_plan=None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -417,6 +423,19 @@ class GoalRunner:
         self.research_mode = bool(research_mode)
         self.deep_researcher = deep_researcher
         self._deep_research_context = ""
+        # Ask/Plan/Execute mode. None means undecided: the interpret
+        # pass may detect Ask/Plan from the goal, else Execute.
+        # A chosen mode ("ask", "plan", "execute") always wins over
+        # detection. question_ask is the chat callback the Ask
+        # interview asks through (no clock, no card); None means
+        # Ask mode cannot interview and fails the run instead.
+        # conversation_key routes a bare proceed to this run's stop.
+        # resume_plan skips planning: the proceed of a Plan stop
+        # executes the saved plan directly.
+        self.mode = mode if mode in ("ask", "plan", "execute") else None
+        self.question_ask = question_ask
+        self.conversation_key = str(conversation_key or "")
+        self.resume_plan = resume_plan
         # Wall-clock time box for the run, seconds from run()
         # start; None means unlimited. Enforced between execution
         # steps (see _deadline_exceeded), never mid-step.
@@ -1265,6 +1284,10 @@ class GoalRunner:
         self._current_spec = spec
         self._research_report = research_report
         self._live_actions = live_actions or []
+        # Proceed of a Plan stop: the saved plan executes directly,
+        # no routing, no fresh planning, no mode re-detection.
+        if getattr(self, "resume_plan", None) is not None:
+            return self._finalize(self._execute_plan(goal, self.resume_plan))
         if self.semantic_router is not None:
             try:
                 self.last_route = self.semantic_router.classify(goal)
@@ -1273,6 +1296,54 @@ class GoalRunner:
                     self.route_callback(self.last_route)
             except Exception:
                 self.last_route = None
+        # Mode detection rides the interpret pass: only when no mode
+        # was chosen (command, chooser, sticky flag) and no spec was
+        # frozen. A chosen mode always wins; detection never
+        # overrides it, and a frozen spec always executes.
+        if (getattr(self, "mode", None) is None and spec is None
+                and self.semantic_router is not None):
+            try:
+                detected = self.semantic_router.mode_for(goal)
+            except Exception:
+                detected = None
+            if detected in ("ask", "plan"):
+                self.mode = detected
+                self._trace("interpret", "done", f"mode detected: {detected}")
+        # Ask mode: interview, then stop. The interview asks through
+        # the chat callback (no clock, no card); the spec decision is
+        # the Proceed button, not an approval card, so no gate is
+        # passed and no spec approval is asked here.
+        if getattr(self, "mode", None) == "ask" and spec is None:
+            if getattr(self, "question_ask", None) is None:
+                return self._finalize(RunReport(
+                    "failed", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                    False, False,
+                    error="ask mode needs a question channel; use /ask in chat, WebUI, or the CLI",
+                    backend=self._backend_name()))
+            try:
+                from .interview import InterviewRunner
+                interviewer = InterviewRunner(
+                    self.client, self.home, memory=self.memory, gate=None,
+                    project_id=self.project_id)
+                result = interviewer.start_from_message(
+                    goal, ask=self.question_ask, approve=None)
+            except Exception as exc:
+                return self._finalize(RunReport(
+                    "failed", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                    False, False, error=f"interview failed: {exc}"[:500],
+                    backend=self._backend_name()))
+            from ..interface.mode_stops import save_mode_stop
+            spec_dict = (result.spec.to_dict()
+                         if hasattr(result.spec, "to_dict") else {"goal": goal})
+            stop_id = save_mode_stop(
+                self.home, mode="ask", goal=goal, spec=spec_dict,
+                conversation_key=getattr(self, "conversation_key", ""),
+                project_id=self.project_id)
+            return self._finalize(RunReport(
+                "stopped", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                False, False,
+                mode_stop={"stop_id": stop_id, "mode": "ask", "goal": goal},
+                backend=self._backend_name()))
         # Write-intent guard, from Aidon: the router is a hint, not a
         # safety boundary. A goal that asks for a write, a save, or a file
         # is never answered by a path with no write tools, even if the
@@ -2063,6 +2134,22 @@ class GoalRunner:
         if not plan.deliverables:
             return RunReport("failed", goal, plan, False, False,
                              error="plan has no deliverables")
+        # Plan mode stops here: the plan passed validation, the
+        # critic pass, the document fallback, and the cycle guard,
+        # so the plan shown is the plan that would execute. No step
+        # runs; the Proceed button resumes it via resume_plan.
+        if getattr(self, "mode", None) == "plan":
+            from .checkpoint import plan_to_dict
+            from ..interface.mode_stops import save_mode_stop
+            stop_id = save_mode_stop(
+                self.home, mode="plan", goal=goal, plan=plan_to_dict(plan),
+                conversation_key=getattr(self, "conversation_key", ""),
+                project_id=self.project_id)
+            return RunReport("stopped", goal, plan, False, False,
+                             mode_stop={"stop_id": stop_id, "mode": "plan",
+                                        "goal": goal,
+                                        "deliverables": list(plan.deliverables)},
+                             backend=self._backend_name())
         passed: set[str] = set()
         verified: list[str] = []
         resume = self._load_checkpoint(self.sandbox.workdir, goal=goal,

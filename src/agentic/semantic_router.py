@@ -139,6 +139,28 @@ AGENTIC_EXAMPLES = [
     "deploy the app to the staging server",
 ]
 
+# Mode examples: the same interpret pass also detects Ask/Plan.
+# Execute needs no examples: it is the default when neither matches.
+ASK_MODE_EXAMPLES = [
+    "ask me questions first",
+    "ask me before you start",
+    "interview me about this first",
+    "ask me what I want before doing anything",
+    "don't start yet, ask me questions",
+    "I want to answer questions first",
+    "let's talk through this before you build it",
+]
+
+PLAN_MODE_EXAMPLES = [
+    "just plan it, don't execute",
+    "make a plan only",
+    "plan only, don't run it",
+    "show me the plan first",
+    "don't execute yet, just plan",
+    "draft the plan and stop",
+    "plan it out but don't do it",
+]
+
 
 def _cosine(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
@@ -195,6 +217,7 @@ class SemanticRouter:
             # not treat their generic webchat examples as the separate,
             # topic-free web-intent signal.
             self._web_intent_vecs = example_vectors.get("web_intent", [])
+            self._mode_vecs = example_vectors.get("modes", {})
             return
         cached = self._load_cache(cache_path) if cache_path else None
         if cached is not None:
@@ -203,12 +226,15 @@ class SemanticRouter:
             self._agentic_vecs = cached["agentic"]
             self._artifact_vecs = cached["artifact"]
             self._web_intent_vecs = cached.get("web_intent", self._webchat_vecs)
+            self._mode_vecs = cached.get("modes", {})
             return
         self._chat_vecs = self._embed(CHAT_EXAMPLES)
         self._webchat_vecs = self._embed(WEBCHAT_EXAMPLES)
         self._agentic_vecs = self._embed(AGENTIC_EXAMPLES)
         self._artifact_vecs = self._embed(ARTIFACT_EXAMPLES)
         self._web_intent_vecs = self._embed(WEB_INTENT_EXAMPLES)
+        self._mode_vecs = {"ask": self._embed(ASK_MODE_EXAMPLES),
+                           "plan": self._embed(PLAN_MODE_EXAMPLES)}
         if cache_path:
             self._save_cache(cache_path)
 
@@ -221,7 +247,9 @@ class SemanticRouter:
                 return None
             if data.get("examples") != {"chat": CHAT_EXAMPLES, "webchat": WEBCHAT_EXAMPLES,
                                         "web_intent": WEB_INTENT_EXAMPLES,
-                                        "agentic": AGENTIC_EXAMPLES, "artifact": ARTIFACT_EXAMPLES}:
+                                        "agentic": AGENTIC_EXAMPLES, "artifact": ARTIFACT_EXAMPLES,
+                                        "modes": {"ask": ASK_MODE_EXAMPLES,
+                                                  "plan": PLAN_MODE_EXAMPLES}}:
                 return None
             vecs = data["vectors"]
             if (len(vecs["chat"]) != len(CHAT_EXAMPLES)
@@ -241,10 +269,13 @@ class SemanticRouter:
             data = {"embedder": self._embedder_name,
                     "examples": {"chat": CHAT_EXAMPLES, "webchat": WEBCHAT_EXAMPLES,
                                  "web_intent": WEB_INTENT_EXAMPLES,
-                                 "agentic": AGENTIC_EXAMPLES, "artifact": ARTIFACT_EXAMPLES},
+                                 "agentic": AGENTIC_EXAMPLES, "artifact": ARTIFACT_EXAMPLES,
+                                 "modes": {"ask": ASK_MODE_EXAMPLES,
+                                           "plan": PLAN_MODE_EXAMPLES}},
                     "vectors": {"chat": self._chat_vecs, "webchat": self._webchat_vecs,
                                 "web_intent": self._web_intent_vecs,
-                                "agentic": self._agentic_vecs, "artifact": self._artifact_vecs}}
+                                "agentic": self._agentic_vecs, "artifact": self._artifact_vecs,
+                                "modes": self._mode_vecs}}
             path.write_text(_json.dumps(data))
         except Exception:
             pass
@@ -288,3 +319,31 @@ class SemanticRouter:
         if confidence < 0.15:
             return "agentic", confidence
         return best_cat, confidence
+
+    def mode_for(self, text: str) -> str | None:
+        """Detect Ask/Plan mode from the goal, or None for Execute.
+
+        Same interpret pass as classify (one embedding, no LLM call):
+        the goal's best cosine against the Ask and Plan example sets
+        must clear 0.50, the web-intent gate's bar, and beat the other
+        mode by a margin, or the goal stays in Execute. An ambiguous
+        goal defaults to Execute rather than guessing a stop.
+        """
+        try:
+            vecs = getattr(self, "_mode_vecs", None) or {}
+            ask_vecs = vecs.get("ask", [])
+            plan_vecs = vecs.get("plan", [])
+            if not ask_vecs or not plan_vecs:
+                return None
+            vec = self._embed([text])[0]
+            ask_score = max((_cosine(vec, v) for v in ask_vecs), default=0.0)
+            plan_score = max((_cosine(vec, v) for v in plan_vecs), default=0.0)
+        except Exception:
+            return None
+        if ask_score >= plan_score:
+            best, second, mode = ask_score, plan_score, "ask"
+        else:
+            best, second, mode = plan_score, ask_score, "plan"
+        if best >= 0.50 and best - second >= 0.05:
+            return mode
+        return None
