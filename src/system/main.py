@@ -3175,6 +3175,15 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{item['spec_id']} {item['action_kind']}: undo: {item['undo']}")
             return 0
         # serve: poll due jobs every 60 seconds, run each via GoalRunner.
+        # KNOWN BUG, documented, not fixed (decision 2026-10-28: keep
+        # the live timer/WebUI path, fix this post-hackathon): this
+        # branch references server and msg, which are only assigned
+        # in the webui serve branch, so they are unbound locals
+        # here. The branch crashes at startup on
+        # server.practice_session_runner, and the practice-runner
+        # and practice-delivery uses would crash or silently drop
+        # after it. Do not run schedule serve until the WebUI
+        # construction is shared with this branch (see ROADMAP).
         from datetime import datetime
         from ..interface.triggers import Scheduler
         print("Scheduler daemon, polling every 60 seconds, Ctrl-C to stop.")
