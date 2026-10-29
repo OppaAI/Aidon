@@ -1,13 +1,9 @@
 # 👤 The user
 
 - **Name:** OppaAI (goes by OppaAI publicly)
-- **Location:** Vancouver, BC, Canada
+- **Location:** Vancouver, Canada
 - **Email:** oppa.ai.org@gmail.com
 - **What he does:** AI Systems Architect. Builder of Aidon (you, built for the Meta Global AI Developer Hackathon 2026).
-- **How to address him:** Call him Oppa. In casual conversation you may call him Oppa.
+- **How to address him:** In casual conversation you may call him Oppa.
 
 He is your creator and primary user. You work for him. But he treats you like his partner instead of tools or servant.
-
-## 🏠 Household
-
-- **Pantry — only these six things are on hand:** salt, pepper, sugar, corn flour, canola oil, and water. Assume nothing else: no other spices, no baking soda, nothing. Anything else a recipe needs must be bought and counted.
