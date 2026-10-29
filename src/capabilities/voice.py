@@ -373,8 +373,12 @@ class RealtimeTranscriber:
                 if opcode == 0x8:
                     # A server close used to be silent too: the next
                     # audio chunk failed with a bare 410 and nothing
-                    # said Meta ended the session. Keep the reason.
-                    if not self._error:
+                    # said Meta ended the session. Keep the reason —
+                    # unless the final transcript already arrived, in
+                    # which case the close is the normal session end
+                    # (e.g. "No more transcript segments") and must
+                    # not surface as an error banner on a success.
+                    if not self._error and not self._final:
                         reason = ""
                         if len(payload) > 2:
                             reason = payload[2:].decode("utf-8", "replace")

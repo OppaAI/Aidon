@@ -249,6 +249,68 @@ def test_realtime_server_close_records_reason():
         server_sock.close()
 
 
+def _closing_after_final_meta_server(server_sock, seen):
+    """Handshake + ack, final transcript, then close: normal end."""
+    try:
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = server_sock.recv(1)
+            if not chunk:
+                return
+            data += chunk
+        key = ""
+        for line in data.decode("utf-8", "replace").split("\r\n"):
+            if line.lower().startswith("sec-websocket-key:"):
+                key = line.split(":", 1)[1].strip()
+        server_sock.sendall(
+            f"HTTP/1.1 101 Switching Protocols\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Accept: {_ws_accept(key)}\r\n\r\n".encode())
+        while True:
+            opcode, payload = _read_frame(server_sock)
+            if opcode == 0x8:
+                return
+            if opcode == 0x1:
+                msg = json.loads(payload.decode("utf-8"))
+                if "authorization" in msg:
+                    server_sock.sendall(_server_frame(
+                        0x1, json.dumps({"sessionId": "test-session"}).encode()))
+                    server_sock.sendall(_server_frame(
+                        0x1, json.dumps({"type": "transcript",
+                                         "transcript": "Hello world.",
+                                         "final": True}).encode()))
+                    server_sock.sendall(_server_frame(
+                        0x8, b"\x03\xe8No more transcript segments"))
+                    return
+    except Exception:
+        return
+
+
+def test_realtime_close_after_final_is_not_an_error():
+    """A close after the final transcript is a normal end, not an error.
+
+    Otherwise every successful transcription ends with a fake error
+    banner ("server closed the session: No more transcript segments").
+    """
+    client_sock, server_sock = socket.socketpair()
+    thread = threading.Thread(target=_closing_after_final_meta_server,
+                              args=(server_sock, {}), daemon=True)
+    thread.start()
+    rt = RealtimeTranscriber("test-key", session_id="test-session",
+                             socket_factory=lambda h, p: client_sock)
+    try:
+        assert rt.connect(timeout=5) == "test-session"
+        assert _wait_until(lambda: rt.send_audio(b"\x00\x01") is False)
+        assert rt.final is True
+        assert rt.transcript == "Hello world."
+        assert rt.error == ""
+    finally:
+        rt.close()
+        client_sock.close()
+        server_sock.close()
+
+
 def test_realtime_survives_idle_gap():
     """A silent mic must not kill the session (410 regression).
 
