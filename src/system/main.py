@@ -224,7 +224,7 @@ def make_deep_researcher(config):
     return deep_researcher
 
 
-def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False) -> dict:
+def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     The loop approval-gates any extra tool whose name contains
@@ -575,6 +575,41 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         except Exception as exc:
             return False, f"approval failed: {exc}"
 
+    def _computer_secrets() -> dict:
+        """Secrets the owner authorized for computer use.
+
+        AIDON_COMPUTER_SECRETS lists env names (kept in .env, which
+        Config already loads into os.environ); only listed names
+        resolve. The model names a handle, never a value, and an
+        unlisted handle is refused inside run_computer_use.
+        """
+        names = os.environ.get("AIDON_COMPUTER_SECRETS", "")
+        secrets = {}
+        for name in names.split(","):
+            name = name.strip()
+            if name and name in os.environ:
+                secrets[name] = os.environ[name]
+        return secrets
+
+    def _guided_computer_task(driver, approve_fn):
+        """computer_use_task closure over one driver + approval path.
+
+        Only wired when a model chat is available: the guided
+        loop needs vision, and without it the tool would act
+        blind. Scheduled runs never pass model_chat, so they
+        never get this tool.
+        """
+        def computer_use_task(description, max_actions=10,
+                              screenshot_dir="computer-screenshots"):
+            from ..capabilities.computer_use import run_guided_task
+            target = _confined(screenshot_dir)
+            result = run_guided_task(
+                description, model_chat, approve=approve_fn,
+                driver=driver, screenshot_dir=target,
+                max_actions=max_actions, secrets=_computer_secrets())
+            return json.dumps(result, ensure_ascii=False)
+        return computer_use_task
+
     # The WebUI goal runner receives this dictionary as its extra toolset.
     # Keep desktop control here as well as in the CLI tool builder; otherwise
     # the status panel can say x11 while the planner cannot select
@@ -592,21 +627,25 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                 raise RuntimeError("no discoverable X11 driver")
             desktop_driver = X11Driver()
 
+            def _desktop_approve(kind, detail):
+                ok, _ = _approval(
+                    "live_execute", "Approve desktop action",
+                    f"Run X11 computer action {kind}: {detail}",
+                    force_ask=True,
+                )
+                return ok
+
             def computer_use(actions, screenshot_dir="computer-screenshots"):
-                def approve(kind, detail):
-                    ok, _ = _approval(
-                        "live_execute", "Approve desktop action",
-                        f"Run X11 computer action {kind}: {detail}",
-                        force_ask=True,
-                    )
-                    return ok
                 target = _confined(screenshot_dir)
                 result = run_computer_use(
-                    actions, approve=approve, driver=desktop_driver,
-                    screenshot_dir=target)
+                    actions, approve=_desktop_approve, driver=desktop_driver,
+                    screenshot_dir=target, secrets=_computer_secrets())
                 return json.dumps(result, ensure_ascii=False)
 
             tools["computer_use"] = computer_use
+            if model_chat is not None:
+                tools["computer_use_task"] = _guided_computer_task(
+                    desktop_driver, _desktop_approve)
         except Exception:
             # A missing xdotool or DISPLAY must not make other tools vanish.
             pass
@@ -726,23 +765,26 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
 
             _desktop_driver = X11Driver()
 
-            def computer_use(actions, screenshot_dir="computer-screenshots"):
-                def approve(kind, detail):
-                    ok, why = _approval(
-                        "live_execute", "Approve desktop action",
-                        f"Run X11 computer action {kind}: {detail}",
-                        force_ask=True,
-                    )
-                    return ok
+            def _desktop_approve2(kind, detail):
+                ok, why = _approval(
+                    "live_execute", "Approve desktop action",
+                    f"Run X11 computer action {kind}: {detail}",
+                    force_ask=True,
+                )
+                return ok
 
+            def computer_use(actions, screenshot_dir="computer-screenshots"):
                 target = _confined(screenshot_dir)
                 result = run_computer_use(
-                    actions, approve=approve, driver=_desktop_driver,
-                    screenshot_dir=target,
+                    actions, approve=_desktop_approve2, driver=_desktop_driver,
+                    screenshot_dir=target, secrets=_computer_secrets(),
                 )
                 return json.dumps(result, ensure_ascii=False)
 
             tools["computer_use"] = computer_use
+            if model_chat is not None:
+                tools["computer_use_task"] = _guided_computer_task(
+                    _desktop_driver, _desktop_approve2)
         except Exception:
             # A missing display or driver leaves the capability unavailable.
             pass
@@ -2474,7 +2516,7 @@ def main(argv: list[str] | None = None) -> int:
                                 semantic_router=semantic_router,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context)
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages)), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context)
             def _deliver_files(files, target):
                 """Upload run deliverables as bytes to a Slack/WhatsApp target.
 
@@ -3568,7 +3610,7 @@ def main(argv: list[str] | None = None) -> int:
                         budget=budget, trace=trace, model_verifier=model_verifier,
                         kernel_mode=config.kernel_mode, semantic_router=_cli_router,
                         use_semantic_router_skip=True, researcher=_researcher,
-                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds, args.project), researcher=_researcher),
+                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds, args.project), researcher=_researcher, model_chat=lambda messages: client.chat(messages)),
                         router=model_router, versioned_writes=True,
                         run_id=_goal_run_id, run_control=_goal_control,
                         network_available=_network_available(execution_backend, sandbox),

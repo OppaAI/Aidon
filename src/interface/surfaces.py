@@ -18,8 +18,10 @@ request), or ``/mirror whatsapp on`` for a conversation,
 which routes that conversation's questions and results to
 WhatsApp too. Approvals can already be given from any
 surface (``approve <id>`` resolves a run started anywhere);
-approval cards themselves are not pushed to WhatsApp,
-because the gate carries no run context to filter them by.
+approval cards are also pushed to WhatsApp when the run
+carries gate context naming that destination (the WebUI
+gate sends the full card there on WhatsApp-originated or
+mirrored runs).
 
 A link is one row: a WebUI conversation id, an optional
 Slack channel, and a WhatsApp mirror flag. A channel links
