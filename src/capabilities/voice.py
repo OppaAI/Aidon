@@ -319,6 +319,16 @@ class RealtimeTranscriber:
             "partialMode": "CUMULATIVE",
             "emitAudioProgress": False,
         }))
+        # The connect timeout must not survive into the session: the
+        # recv loop's job is to wait for server frames, and any idle
+        # gap longer than the timeout (a pause before speaking, a
+        # silent mic) would otherwise end the loop, after which
+        # every audio chunk fails with 410. Clear it BEFORE the recv
+        # thread starts: a recv already waiting under the old
+        # timeout still fires even after another thread clears it.
+        # close() unblocks the blocking recv via shutdown, so
+        # nothing hangs on teardown.
+        self._sock.settimeout(None)
         self._recv_thread = threading.Thread(target=self._recv_loop,
                                              daemon=True)
         self._recv_thread.start()
@@ -400,8 +410,12 @@ class RealtimeTranscriber:
                         self._final = True
                 elif msg.get("type") == "error":
                     self._error = str(msg.get("message", "transcribe error"))
-        except Exception:
-            pass
+        except Exception as exc:
+            # A dead recv loop used to be silent: the next audio
+            # chunk failed with 410 and nothing said why. Keep the
+            # reason so the failure is diagnosable.
+            if not self._error:
+                self._error = str(exc)
         finally:
             self._done.set()
 
