@@ -338,6 +338,16 @@ class Scheduler:
                 failures = ["chain goal must be a JSON object or array"]
             if failures:
                 raise ValueError("invalid chain: " + "; ".join(failures))
+        # A schedule that never fires is a silent dead job: the
+        # daemon only understands next_due forms (at:/daily/
+        # weekly/monthly/cron). "every …" and bare ISO datetimes
+        # parse elsewhere but never fire, so reject them here,
+        # where the creator sees the failure and can retry with
+        # a firing form. A one-shot in the past never fires either.
+        if job.next_due(datetime.now()) is None:
+            raise ValueError(
+                f"schedule {job.schedule!r} never fires; use at:<ISO datetime>, "
+                "daily HH:MM, weekly DAY HH:MM, monthly ..., or a 5-field cron")
         self.jobs = [j for j in self.jobs if j.name != job.name]
         self.jobs.append(job)
         self.save()

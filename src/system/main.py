@@ -80,6 +80,51 @@ def _cli_gate(home, timeout_seconds: int = 900,
         return gate
 
 
+def _scheduled_gate() -> ApprovalGate:
+    """Non-blocking gate for unattended scheduled runs.
+
+    A daemon tick loop must never block on stdin: _cli_gate's
+    input() either hangs the loop or dies on EOF in a headless
+    daemon. This gate decides immediately, with no policy
+    auto-approval and no prompt: email tools are approved (the
+    email tool itself enforces owner-only delivery for scheduled
+    runs, so the gate cannot leak mail to other recipients),
+    and everything else is rejected fail-closed and fast. A
+    scheduled goal that needs shell, install, publish, or live
+    approval therefore fails with a clear rejection instead of
+    hanging the tick loop — it never worked unattended before
+    either, it just failed slowly.
+    """
+    def decide(kind: str, title: str, body: str) -> Decision:
+        if kind == "live" and title in ("Extra tool email_send",
+                                        "Extra tool email_make_draft"):
+            return Decision("approved")
+        return Decision("rejected")
+
+    return ApprovalGate(decide, policy=None)
+
+
+def _make_web_researcher(config, conversation_context: str = ""):
+    """Snippet researcher from config, shared by interactive and
+    scheduled runs. Returns title/snippet strings (no URLs — the
+    deep researcher is the citation-carrying path)."""
+    def _researcher(goal_text):
+        try:
+            from ..agentic.research_allow import DomainGrants, load_allowlist
+            from ..capabilities.search import search as _s
+            search_text = goal_text
+            if conversation_context:
+                search_text = (f"Conversation topic:\n{conversation_context}\n\n"
+                               f"Current request:\n{goal_text}")
+            _r = _s(search_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url,
+                    allowlist=load_allowlist(config.home, config.research_allowlist),
+                    grants=DomainGrants(config.home))
+            return [f"{x.get('title', '')}: {x.get('snippet', '')}" for x in _r.get("results", [])]
+        except Exception:
+            return []
+    return _researcher
+
+
 def _network_available(execution_backend, sandbox) -> bool:
     """True when shell steps can reach the network, for the loop's
     network-on announcement and the sandbox offline hint. A Docker
@@ -173,7 +218,7 @@ def make_deep_researcher(config):
     return deep_researcher
 
 
-def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None) -> dict:
+def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     The loop approval-gates any extra tool whose name contains
@@ -369,9 +414,38 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             return make_draft(config.home, to, subject, body)
 
         def email_send(draft, owner_email=""):
+            # The tool used to pass sender=None, so it could only
+            # keep the draft and always reported "no sender". With
+            # Gmail keys present it now sends for real. Safety is
+            # layered, not repeated: interactive runs already pass
+            # the loop's send-gate (a human card) before dispatch,
+            # so their approve callback stays permissive; scheduled
+            # runs pass the ScheduledGate (email tools only) and
+            # then this callback refuses every non-owner recipient
+            # — send_draft skips the callback entirely for owner
+            # sends, so owner mail is the only mail a scheduled
+            # run can ever deliver.
+            sender = None
+            if (os.environ.get("GMAIL_CLIENT_ID", "")
+                    and os.environ.get("GMAIL_CLIENT_SECRET", "")
+                    and os.environ.get("GMAIL_REFRESH_TOKEN", "")):
+                from ..capabilities.gmail import gmail_sender as _gs
+                _real = _gs(os.environ["GMAIL_CLIENT_ID"],
+                            os.environ["GMAIL_CLIENT_SECRET"],
+                            os.environ["GMAIL_REFRESH_TOKEN"])
+
+                def sender(to, subject, body):
+                    result = _real(to, subject, body)
+                    if isinstance(result, dict) and result.get("id") \
+                            and "ok" not in result:
+                        result = dict(result)
+                        result["ok"] = True
+                    return result
+            approve = (lambda kind, body: False) if scheduled \
+                else (lambda kind, body: True)
             return send_draft(config.home, draft,
                               owner_email or getattr(config, "owner_email", ""),
-                              approve=lambda kind, body: True, sender=None)
+                              approve=approve, sender=sender)
 
         tools["email_make_draft"] = email_make_draft
         tools["email_send"] = email_send
@@ -2272,20 +2346,7 @@ def main(argv: list[str] | None = None) -> int:
                 _gate = PreapprovalGate(server.webui_gate.gate, PreapprovalStore(config.home), event.project_id)
             except Exception:
                 _gate = server.webui_gate.gate
-            def _web_researcher(goal_text):
-                try:
-                    from ..agentic.research_allow import DomainGrants, load_allowlist
-                    from ..capabilities.search import search as _s
-                    search_text = goal_text
-                    if conversation_context:
-                        search_text = (f"Conversation topic:\n{conversation_context}\n\n"
-                                       f"Current request:\n{goal_text}")
-                    _r = _s(search_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url,
-                            allowlist=load_allowlist(config.home, config.research_allowlist),
-                            grants=DomainGrants(config.home))
-                    return [f"{x.get('title', '')}: {x.get('snippet', '')}" for x in _r.get("results", [])]
-                except Exception:
-                    return []
+            _web_researcher = _make_web_researcher(config, conversation_context)
             # Slack/WhatsApp runs have no WebUI waiter callback in the
             # payload, so build one: send the question straight to the
             # surface (not via the reply list, which is only flushed
@@ -3161,12 +3222,29 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"Job {job.name}: brief delivery {_sent}")
                     _handled = True
                 if not _handled:
-                    runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home,
+                    # Scheduled runs get the same extra tools as
+                    # interactive runs (fetch, email, web search),
+                    # but behind the scheduled gate: email to the
+                    # owner goes through, everything else fails
+                    # fast instead of blocking the tick on stdin.
+                    # Questions have no channel here, so ask_user
+                    # tells the model to proceed with its best
+                    # judgment and note the assumption. The runner
+                    # itself keeps researcher=None on purpose: a
+                    # researcher would newly let scheduled goals
+                    # route to webchat replies instead of the
+                    # agentic pipeline; the web_search plan tool
+                    # carries its own researcher.
+                    _job_researcher = _make_web_researcher(config)
+                    _job_gate = _scheduled_gate()
+                    _job_tools = _goal_extra_tools(config, sandbox.workdir, gate=_job_gate, researcher=_job_researcher, question_answer=None, scheduled=True)
+                    runner = GoalRunner(client, sandbox, _job_gate, config.home,
                                         memory=memory, project_id=job.project_id, plugins=_plugins,
                                         execution_backend=_backend, budget=_Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
                                         trace=_Trace(config.home, project_id=job.project_id), model_verifier=_MV(client),
                                         kernel_mode=config.kernel_mode, semantic_router=_router2,
-                                        use_semantic_router_skip=True, network_available=_network_available(_backend, sandbox), run_id=_serve_run_id, run_control=_serve_control)
+                                        use_semantic_router_skip=True, network_available=_network_available(_backend, sandbox), run_id=_serve_run_id, run_control=_serve_control,
+                                        extra_tools=_job_tools)
                     report = runner.run(job.goal)
                     print(f"Job {job.name}: {report.status}, files: {', '.join(report.files)}")
             # Tick drain: once per tick, due notifications only,
