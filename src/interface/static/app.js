@@ -895,8 +895,13 @@
       item.className = "think-item " + (e.kind || "note") +
         (failed ? " think-failed" : "");
       const hasTokenFields = ("tokens_in" in e) || ("tokens_out" in e);
+      // Thinking is internal and encrypted on Meta, but its token
+      // count arrives in usage, so show the cost beside in→out
+      // instead of hiding it until the row is expanded.
+      const thinkSuffix = ((e.thinking_tokens || 0) > 0)
+        ? (" · " + e.thinking_tokens + " think") : "";
       const meta = hasTokenFields
-        ? ((e.seconds || 0) + "s · " + (e.tokens_in || 0) + "→" + (e.tokens_out || 0) + " tok")
+        ? ((e.seconds || 0) + "s · " + (e.tokens_in || 0) + "→" + (e.tokens_out || 0) + " tok" + thinkSuffix)
         : ((e.tokens_in || e.tokens_out)
           ? ((e.tokens_in || 0) + " in · " + (e.tokens_out || 0) + " out")
           : (e.status || ((e.seconds || 0) + "s")));

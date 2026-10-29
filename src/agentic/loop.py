@@ -1734,6 +1734,30 @@ class GoalRunner:
             return None
         return plan, [exp.goal for exp in candidates]
 
+    def _usage_totals(self) -> tuple[int, int]:
+        """Finished-run (calls, tokens) across every counting tier.
+
+        Sums the unwrapped counting clients, deduped, so fast-tier
+        calls count even when the run's client is a plain client
+        and only the router holds counting tiers. Thinking tokens
+        are added on top: the chars//4 estimate basis (prompt +
+        reply text) never contains thinking text, so adding the
+        real reasoning count cannot double-count it, and leaving
+        it out would understate the run's cost.
+        """
+        clients = self._counting_clients()
+        if clients:
+            calls = sum(int(getattr(c, "calls", 0) or 0) for c in clients)
+            tokens = sum(int(getattr(c, "tokens_estimated", 0) or 0)
+                         for c in clients)
+            tokens += sum(int(getattr(c, "thinking_tokens_total", 0) or 0)
+                          for c in clients)
+            return calls, tokens
+        client = self.client
+        if hasattr(client, "calls") and hasattr(client, "tokens_estimated"):
+            return (int(client.calls), int(client.tokens_estimated))
+        return 0, 0
+
     def _finalize(self, report: RunReport) -> RunReport:
         """Fill model-usage and adaptation fields, from the counting client if present."""
         timer = getattr(self, "_elapsed_timer", None)
@@ -1741,10 +1765,8 @@ class GoalRunner:
             timer.stop()
             report.elapsed_seconds = round(timer.elapsed_active(), 1)
             report.approval_wait_seconds = round(timer.approval_wait_seconds(), 1)
-        client = self.client
-        if hasattr(client, "calls") and hasattr(client, "tokens_estimated"):
-            report.model_calls = int(client.calls)
-            report.model_tokens_estimated = int(client.tokens_estimated)
+        report.model_calls, report.model_tokens_estimated = \
+            self._usage_totals()
         report.network = self.network_available
         report.adapted = bool(self._adapted)
         report.adapted_from = str(self._adapted_from)

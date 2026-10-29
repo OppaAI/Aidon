@@ -64,6 +64,11 @@ class CountingClient(ModelClient):
         self._usage_in: dict[str, int] = {}
         self._usage_out: dict[str, int] = {}
         self._usage_thinking: dict[str, int] = {}
+        # Cumulative thinking tokens, never drained: the per-phase
+        # deltas above are popped by take_phase_usage for trace
+        # events, but the finished-run total still needs every
+        # thinking token the run spent.
+        self.thinking_tokens_total: int = 0
         self._thinking_text: dict[str, str] = {}
         # Parallel LLM steps count through here concurrently;
         # without a lock, increments from two threads can
@@ -92,6 +97,7 @@ class CountingClient(ModelClient):
         self._usage_out[phase] = self._usage_out.get(phase, 0) + tokens_out
         self._usage_thinking[phase] = \
             self._usage_thinking.get(phase, 0) + thinking
+        self.thinking_tokens_total += thinking
         if thinking_text:
             self._thinking_text[phase] = thinking_text
 
