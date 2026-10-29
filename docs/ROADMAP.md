@@ -254,6 +254,18 @@ will be available inside a future VM once that backend exists.
   definite, checkable kind (outcome verification,
   guardrail classification), not a general moral sense.
 
+- Scheduler serve as one process: the standalone schedule
+  serve daemon is broken since the practice-windows change —
+  it references server and msg that only the webui serve
+  branch constructs, so it crashes at startup and its
+  practice delivery would silently drop. The fix extracts
+  the WebUI construction into a shared helper, calls it in
+  the serve branch, runs the server in a thread, and wires
+  practice_session_runner and the two senders, with a
+  sandbox smoke test of the daemon. Until then the live
+  scheduler path stays the timer plus the WebUI process.
+  Post-hackathon.
+
 - Aidon fly-brain biological layer: the MaleCNS, the
   male Drosophila central nervous system connectome,
   as a biological layer, with sentient emergence and
