@@ -110,6 +110,10 @@ class Config:
     execution_backend: str = "bubblewrap"
     docker_image: str = "python:3.12-slim"
     docker_network: bool = False
+    vm_host: str = ""
+    vm_user: str = ""
+    vm_sudo_password: str = ""
+    vm_use_sudo: bool = False
     ingest_dir: Path | None = None
     budget_tokens: int = 200000
     budget_seconds: int = 3600
@@ -213,6 +217,11 @@ class Config:
                                         "python:3.12-slim"),
             docker_network=os.environ.get("AIDON_DOCKER_NETWORK",
                                           "0") == "1",
+            vm_host=os.environ.get("AIDON_VM_HOST", ""),
+            vm_user=os.environ.get("AIDON_VM_USER", ""),
+            vm_sudo_password=os.environ.get("AIDON_VM_SUDO_PASSWORD", ""),
+            vm_use_sudo=os.environ.get("AIDON_VM_USE_SUDO",
+                                       "0") == "1",
             ingest_dir=(Path(os.environ["AIDON_INGEST_DIR"]).expanduser()
                         if os.environ.get("AIDON_INGEST_DIR") else None),
             budget_tokens=_env_int(

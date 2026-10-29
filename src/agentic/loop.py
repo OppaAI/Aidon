@@ -1091,6 +1091,13 @@ class GoalRunner:
                    "non-empty', 'NAME contains TEXT', 'ledger NAME total is "
                    "CENTS'. Anything else fails verification even when the "
                    "files exist.")
+        system += (" Attempt outputs are numbered from the first attempt: "
+                   "if a deliverable may be produced more than once, name "
+                   "attempt outputs NAME_1, NAME_2, ... starting at 1, never "
+                   "reusing the exact requested name mid-run. Add a final "
+                   "step that renames the best attempt output to the exact "
+                   "requested name inside the workdir (shell mv), so "
+                   "verification and delivery see the exact name.")
         if self.plugins is not None and not self.kernel_mode:
             plugin_tools = self.plugins.tool_names()
             if plugin_tools:
@@ -2168,6 +2175,57 @@ class GoalRunner:
         deadline = getattr(self, "_deadline_at", None)
         return deadline is not None and time.monotonic() >= deadline
 
+    def _repair_criteria(self, goal: str, criteria: list[str],
+                         failures: list[str]) -> list[str] | None:
+        """Rewrite unverifiable criteria into checkable forms.
+
+        Returns the full replacement criteria list, or None when
+        the repair cannot be trusted (model error, unparsable
+        reply, empty list). The caller re-verifies the SAME
+        workdir against the new list without re-executing
+        anything: files are untouched, only the assertions
+        change. One call per run, guarded by the caller.
+        """
+        failed = [f[len("unverified criterion: "):] for f in failures]
+        try:
+            files = sorted(p.name for p in self.sandbox.workdir.iterdir()
+                           if p.is_file())
+        except Exception:
+            files = []
+        prompt = (
+            f"Goal: {goal}\n"
+            f"Files in the workdir: {', '.join(files) or '(none)'}\n"
+            "These criteria failed verification because they are not "
+            "in a checkable form:\n"
+            + "\n".join(f"- {c}" for c in failed)
+            + "\nAll criteria (keep the ones that already verify, "
+            "rewrite the failed ones):\n"
+            + "\n".join(f"- {c}" for c in criteria)
+            + "\nRewrite the failed criteria into checkable forms only: "
+            "'NAME exists', 'NAME exists in the workspace folder', "
+            "'NAME is non-empty', 'NAME contains TEXT', 'ledger NAME "
+            "total is CENTS'. One assertion each, no parenthetical "
+            "hedges. Return JSON only: {\"criteria\": [...]}")
+        try:
+            reply = self._chat("plan", [Message("user", prompt)])
+        except Exception:
+            return None
+        try:
+            data = json.loads(reply)
+        except Exception:
+            match = re.search(r"\{.*\}", reply, re.DOTALL)
+            if match is None:
+                return None
+            try:
+                data = json.loads(match.group(0))
+            except Exception:
+                return None
+        items = data.get("criteria") if isinstance(data, dict) else None
+        if not isinstance(items, list) or not items:
+            return None
+        cleaned = [str(c).strip() for c in items if str(c).strip()]
+        return cleaned or None
+
     def _execute_plan(self, goal: str, plan: Plan) -> RunReport:
         if self.budget is not None:
             self.budget.start()
@@ -2342,6 +2400,11 @@ class GoalRunner:
                              backend=self._backend_name())
         passed: set[str] = set()
         verified: list[str] = []
+        # One criterion repair per run: when verification fails only
+        # because criteria are unverifiable, rewriting the criteria
+        # and re-verifying the untouched files beats re-executing
+        # the plan and minting another attempt's files.
+        self._criterion_repaired = False
         resume = self._load_checkpoint(self.sandbox.workdir, goal=goal,
                                        plan=plan)
         if resume is not None and resume.phase in ("sandbox", "verified", "approved"):
@@ -2437,6 +2500,40 @@ class GoalRunner:
                     passed.add(name)
             if model_failed:
                 passed.clear()
+            if (not ok and not model_failed
+                    and not self._criterion_repaired and failures
+                    and all(f.startswith("unverified criterion: ")
+                            for f in failures)):
+                # Unverifiable-only failure: no step failed, no file
+                # is missing, the assertions themselves are the
+                # problem. Rewrite them and re-verify the same
+                # files; re-execution would only mint duplicates.
+                self._criterion_repaired = True
+                new_criteria = self._repair_criteria(
+                    goal, criteria, failures)
+                if new_criteria is not None:
+                    self._trace("verify", "criterion-repair",
+                                f"repaired {len(new_criteria)} criteria")
+                    ok2, failures2, verified2 = verify_plan(
+                        self.sandbox.workdir, current_plan.deliverables,
+                        new_criteria)
+                    if ok2:
+                        current_plan.criteria = new_criteria
+                        # The repaired set is the whole verification
+                        # set now; stale step criteria must not be
+                        # re-added on a later verification pass.
+                        for step in current_plan.normalized_steps():
+                            step.criteria = ""
+                        ok, verify_failures, verified = True, [], verified2
+                        failures = []
+                        # The passed computation above already ran
+                        # against the failed verification; credit
+                        # the repaired verification here.
+                        for name in verified2:
+                            passed.add(name)
+                    else:
+                        self._trace("verify", "criterion-repair-failed",
+                                    "; ".join(failures2)[:200])
             if ok and not model_failed:
                 self._save_checkpoint(
                     "verified", goal, current_plan, passed,

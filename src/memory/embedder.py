@@ -50,6 +50,11 @@ import threading
 DIM = 768
 HASH_DIM = 128
 EMBEDDINGGEMMA2_MODEL = "google/embeddinggemma-2"
+# Pinned revision (the Oct 28 snapshot): upstream README edits
+# otherwise create a new snapshot directory on every HEAD move,
+# which looks like the weights downloading again. Override with
+# AIDON_EMBEDDING_REVISION to use a different snapshot.
+EMBEDDINGGEMMA2_REVISION = "f9972ac22e696a105c482202646979e33e4b5a1e"
 DEFAULT_SPARSE_MODEL = "prithivida/Splade_PP_en_v1"
 _WORD = re.compile(r"[a-z0-9]+")
 
@@ -139,7 +144,7 @@ class EmbeddingGemma2Embedder(Embedder):
     dim = DIM
 
     def __init__(self, model_name: str = EMBEDDINGGEMMA2_MODEL,
-                 model=None):
+                 model=None, revision: str | None = None):
         self.model_name = model_name
         if model is not None:
             self._model = model
@@ -152,10 +157,17 @@ class EmbeddingGemma2Embedder(Embedder):
                 "for the real embedder (pip install -U "
                 "'sentence-transformers[image]>=6.1' transformers "
                 "Pillow), or use HashEmbedder for tests") from exc
+        # Pinned revision by default, so upstream repo edits do
+        # not mint new snapshot directories; AIDON_EMBEDDING_REVISION
+        # overrides, an explicit revision argument wins over both.
+        self.revision = (revision
+                         or os.environ.get("AIDON_EMBEDDING_REVISION")
+                         or EMBEDDINGGEMMA2_REVISION)
         # 440M: text + vision, audio omitted. Text-only would
         # also set vision_config=None, full would set neither.
         self._model = SentenceTransformer(
-            model_name, config_kwargs={"audio_config": None})
+            model_name, config_kwargs={"audio_config": None},
+            revision=self.revision)
 
     def _encode(self, inputs, prompt_name: str | None = None):
         try:

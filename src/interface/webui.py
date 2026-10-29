@@ -2191,9 +2191,12 @@ class WebUIServer:
             {"key": "AIDON_APPROVAL_TIMEOUT_S", "label": "Approval timeout seconds", "type": "int", "default": "900", "desc": "Seconds an approval card waits before failing closed.", "secret": False},
         ]},
         {"group": "Sandbox", "settings": [
-            {"key": "AIDON_EXECUTION_BACKEND", "label": "Execution backend", "type": "enum", "default": "bubblewrap", "desc": "Sandbox backend for shell steps.", "secret": False, "options": ["bubblewrap", "docker", "subprocess"]},
+            {"key": "AIDON_EXECUTION_BACKEND", "label": "Execution backend", "type": "enum", "default": "bubblewrap", "desc": "Sandbox backend for shell steps.", "secret": False, "options": ["bubblewrap", "docker", "subprocess", "vm"]},
             {"key": "AIDON_DOCKER_IMAGE", "label": "Docker image", "type": "string", "default": "python:3.12-slim", "desc": "Pinned image for the Docker backend.", "secret": False},
             {"key": "AIDON_DOCKER_NETWORK", "label": "Docker network", "type": "bool", "default": "0", "desc": "Allow network for the Docker backend.", "secret": False},
+            {"key": "AIDON_VM_HOST", "label": "VM host", "type": "string", "default": "", "desc": "SSH host for the VM backend; empty = VM backend unavailable.", "secret": False},
+            {"key": "AIDON_VM_USER", "label": "VM user", "type": "string", "default": "", "desc": "SSH user for the VM backend; empty = current login.", "secret": False},
+            {"key": "AIDON_VM_USE_SUDO", "label": "VM sudo", "type": "bool", "default": "0", "desc": "Run VM commands under sudo; needs AIDON_VM_SUDO_PASSWORD in .env.", "secret": False},
             {"key": "AIDON_MAX_SANDBOX_SECONDS", "label": "Sandbox timeout seconds", "type": "int", "default": "120", "desc": "Timeout for one sandbox command.", "secret": False},
             {"key": "AIDON_SANDBOX_MEM_MB", "label": "Sandbox memory MB", "type": "int", "default": "1024", "desc": "Maximum address space for a sandbox child; 0 disables this limit.", "secret": False},
             {"key": "AIDON_SANDBOX_NPROC", "label": "Sandbox process limit", "type": "int", "default": "256", "desc": "Maximum processes for a sandbox child; 0 disables this limit.", "secret": False},
