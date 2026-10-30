@@ -327,7 +327,9 @@ def make_backend(name: str, sandbox: Sandbox, image: str = "python:3.12-slim",
                  vm_sudo_password: str | None = None,
                  vm_use_sudo: bool = False,
                  modal_app: str | None = None,
-                 modal_image=None) -> ExecutionBackend:
+                 modal_image=None,
+                 modal_cpu: float = 1.0,
+                 modal_memory_mb: int = 1024) -> ExecutionBackend:
     """Owner-chosen backend, never model-chosen."""
     if name == "docker":
         return DockerBackend(image=image, allow_network=allow_network)
@@ -341,7 +343,8 @@ def make_backend(name: str, sandbox: Sandbox, image: str = "python:3.12-slim",
     if name == "modal":
         return ModalBackend(app_name=modal_app or "aidon-sandbox",
                             allow_network=allow_network,
-                            image=modal_image)
+                            image=modal_image,
+                            cpu=modal_cpu, memory_mb=modal_memory_mb)
     if name in ("bubblewrap", "sandbox", ""):
         return BubblewrapBackend(sandbox)
     raise ValueError(f"unknown execution backend: {name}")
@@ -359,10 +362,14 @@ class ModalBackend(ExecutionBackend):
                  allow_network: bool = False,
                  timeout_seconds: int = 600,
                  sandbox_factory=None,
-                 image=None):
+                 image=None,
+                 cpu: float = 1.0,
+                 memory_mb: int = 1024):
         self.app_name = app_name
         self.allow_network = allow_network
         self.timeout_seconds = timeout_seconds
+        self.cpu = cpu
+        self.memory_mb = memory_mb
         self._sandbox_factory = sandbox_factory
         # An image object from the capability image builder;
         # None means the default base image. Set by the
@@ -405,7 +412,8 @@ class ModalBackend(ExecutionBackend):
             self._sb = modal.Sandbox.create(
                 app=app, image=self._image_obj or self._image(),
                 timeout=self.timeout_seconds,
-                block_network=not self.allow_network)
+                block_network=not self.allow_network,
+                cpu=self.cpu, memory=self.memory_mb)
         except Exception as exc:
             raise RuntimeError(
                 f"Modal sandbox create failed: {exc}") from exc

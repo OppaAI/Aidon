@@ -376,7 +376,14 @@ class SkillLibrary:
         return skill
 
     def trust(self, name: str, approved: bool = False) -> Skill:
-        """Mark a skill trusted. Owner approval is mandatory."""
+        """Mark a skill trusted. Owner approval is mandatory.
+
+        Trust also requires pinned string dependencies
+        (name==version): an unpinned build is not
+        reproducible, so it cannot be trusted. Dict
+        dependencies are verified-install records, not
+        requirements, and are exempt.
+        """
         if not approved:
             raise PermissionError(f"trusting skill {name!r} needs owner approval")
         skill = self.get(name)
@@ -384,6 +391,12 @@ class SkillLibrary:
             raise KeyError(f"no skill named {name!r}")
         if skill.state == "retired":
             raise ValueError(f"skill {name!r} is retired")
+        unpinned = [dep for dep in (skill.dependencies or [])
+                    if isinstance(dep, str) and "==" not in dep]
+        if unpinned:
+            raise ValueError(
+                f"trusting skill {name!r} needs pinned dependencies: "
+                f"{', '.join(sorted(set(unpinned)))} (use name==version)")
         skill.state = "trusted"
         self._update(skill)
         self._sync_discovery(skill)

@@ -30,6 +30,14 @@ What it counts (kinds):
               capability image builds).
   repair:     a capability repair cycle (a repair
               attempt after a failure).
+  Time accounting, reconciled with the image builder:
+  max_acquisition_seconds (default 600) is the per-run
+  budget across ALL acquisitions; the builder's
+  setup_timeout (default 1200) is the wall clock of a
+  SINGLE image build. A run can therefore hold at most
+  one full-length build inside its acquisition budget;
+  the two numbers measure different things and do not
+  conflict.
 
 What it does NOT do, deliberately:
 - Reuse-before-creation is the loop's recall and

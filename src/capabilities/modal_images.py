@@ -158,6 +158,7 @@ class CapabilityImageBuilder:
         """
         pip_packages = sorted(set(pip_packages))
         apt_packages = sorted(set(apt_packages))
+        resolved_pip: dict[str, str] = {}
         if not SAFE_NAME.match(name):
             raise ValueError(f"Invalid capability image name: {name!r}")
         if not pip_packages and not apt_packages:
@@ -202,6 +203,13 @@ class CapabilityImageBuilder:
                     self.setup_timeout)
                 if rc != 0:
                     raise RuntimeError(f"pip install failed: {err}")
+                _frc, _freeze, _ferr = self._exec(
+                    setup, ["python", "-m", "pip", "freeze"], 300)
+                if _frc == 0:
+                    for _line in _freeze.splitlines():
+                        if "==" in _line:
+                            _pname, _pver = _line.split("==", 1)
+                            resolved_pip[_pname.strip().lower()] = _pver.strip()
             snapshot = setup.snapshot_filesystem()
         finally:
             try:
@@ -228,6 +236,7 @@ class CapabilityImageBuilder:
             "name": name,
             "pip": pip_packages,
             "apt": apt_packages,
+            "resolved_pip": resolved_pip,
             "base": "ubuntu:24.04+py3.12",
             "built_at": datetime.now(timezone.utc).isoformat(),
             "test_command": script,

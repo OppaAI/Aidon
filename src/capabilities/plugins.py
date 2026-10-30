@@ -30,11 +30,14 @@ Adoption, in order, no step skipped:
    itself, and never an invented CVE id.
 2. Blocking findings reject adoption, even if the user
    would approve: eval, exec, subprocess or os.system,
-   socket or network calls, and a secret assignment
-   (a key, token, or password set to a string value).
+   socket or network calls, a secret assignment
+   (a key, token, or password set to a string value),
+   a dynamic import (which hides the imported module
+   from this scan), and a dependency that is *, latest,
+   or unpinned (an unpinned build is not reproducible,
+   so it cannot be trusted).
 3. Non-blocking warnings are shown on the adoption card:
-   a file write in plugin code, and a dependency that
-   is *, latest, or unpinned. Warnings do not block,
+   a file write in plugin code. Warnings do not block,
    they are disclosed, and adoption still needs approval.
 4. The owner approves on a decision card, with the scan
    report as the card body. No approval, no adoption.
@@ -67,7 +70,8 @@ import hashlib
 # the owner as something to approve.
 MAX_PLUGIN_BYTES = 10 * 1024 * 1024
 
-BLOCKING_TYPES = ("eval_exec", "subprocess", "network", "secret")
+BLOCKING_TYPES = ("eval_exec", "subprocess", "network", "secret",
+                    "dynamic_import", "unpinned_dependency")
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 SECRET_RE = re.compile(r"(api[_-]?key|password|token|secret)", re.IGNORECASE)
 
@@ -122,6 +126,15 @@ def scan_plugin(directory: Path) -> list[ScanFinding]:
         except (SyntaxError, UnicodeDecodeError):
             findings.append(ScanFinding(rel, 0, "unparsable", "Python file does not parse"))
             continue
+        subprocess_names: set[str] = set()
+        for _node in ast.walk(tree):
+            if isinstance(_node, ast.ImportFrom) and _node.module == "subprocess":
+                for _alias in _node.names:
+                    subprocess_names.add(_alias.asname or _alias.name)
+            elif isinstance(_node, ast.Import):
+                for _alias in _node.names:
+                    if _alias.name == "subprocess":
+                        subprocess_names.add(_alias.asname or "subprocess")
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 func = node.func
@@ -130,12 +143,21 @@ def scan_plugin(directory: Path) -> list[ScanFinding]:
                     name = func.id
                 elif isinstance(func, ast.Attribute):
                     name = func.attr
-                if name in ("eval", "exec"):
+                if name == "__import__" or name == "import_module":
+                    findings.append(ScanFinding(rel, node.lineno, "dynamic_import",
+                                                "Dynamic import hides the imported module"))
+                elif name in ("eval", "exec"):
                     findings.append(ScanFinding(rel, node.lineno, "eval_exec",
                                                 "eval or exec call"))
                 elif name in ("system", "popen") or (isinstance(func, ast.Attribute) and name in ("Popen", "run") and isinstance(func.value, ast.Name) and func.value.id == "subprocess"):
                     findings.append(ScanFinding(rel, node.lineno, "subprocess",
                                                 "Subprocess or shell call"))
+                elif isinstance(func, ast.Name) and func.id in subprocess_names:
+                    findings.append(ScanFinding(rel, node.lineno, "subprocess",
+                                                "Subprocess call via imported name"))
+                elif isinstance(func, ast.Attribute) and func.attr in ("execv", "execl", "execle", "execlp", "execvp", "execvpe", "spawnl", "spawnlp", "spawnv", "spawnvp", "spawnve", "spawnlpe"):
+                    findings.append(ScanFinding(rel, node.lineno, "subprocess",
+                                                "Process spawn/exec call"))
                 elif name == "urlopen":
                     findings.append(ScanFinding(rel, node.lineno, "network",
                                                 "Network call"))
@@ -149,9 +171,16 @@ def scan_plugin(directory: Path) -> list[ScanFinding]:
                     if alias.name in ("socket", "subprocess"):
                         findings.append(ScanFinding(rel, node.lineno, "network" if alias.name == "socket" else "subprocess",
                                                     f"Import of {alias.name}"))
-            if isinstance(node, ast.ImportFrom) and node.module in ("socket", "subprocess", "urllib.request"):
-                findings.append(ScanFinding(rel, node.lineno, "network" if node.module != "subprocess" else "subprocess",
-                                            f"Import from {node.module}"))
+                    elif alias.name == "importlib" or alias.name.startswith("importlib."):
+                        findings.append(ScanFinding(rel, node.lineno, "dynamic_import",
+                                                    "Dynamic import hides the imported module"))
+            if isinstance(node, ast.ImportFrom) and (node.module in ("socket", "subprocess", "urllib.request") or (node.module or "").startswith("importlib")):
+                if (node.module or "").startswith("importlib"):
+                    findings.append(ScanFinding(rel, node.lineno, "dynamic_import",
+                                                "Dynamic import hides the imported module"))
+                else:
+                    findings.append(ScanFinding(rel, node.lineno, "network" if node.module != "subprocess" else "subprocess",
+                                                f"Import from {node.module}"))
             if isinstance(node, (ast.Assign, ast.AnnAssign)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 value = node.value
@@ -355,7 +384,9 @@ class PluginRegistry:
         findings = scan_plugin(source_dir)
         blocking = [f for f in findings if f.type in BLOCKING_TYPES]
         if blocking:
-            return False, findings, "Adoption rejected: blocking scan findings"
+            return False, findings, (
+                "Adoption rejected: blocking scan findings ("
+                + ", ".join(sorted({f.type for f in blocking})) + ")")
         # Size cap, before any approval card: an oversized source is
         # not something the owner should be asked to approve.
         total_size = plugin_tree_size(source_dir)
