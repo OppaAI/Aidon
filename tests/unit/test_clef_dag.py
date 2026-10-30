@@ -58,15 +58,31 @@ def test_uncertain_none_keeps_recalled_order():
     assert ranked == exps
 
 
-def test_error_and_no_client_and_single_candidate_unchanged():
+def test_error_and_no_client_unchanged():
     exps = [_exp("a"), _exp("b")]
     assert rank_dags("goal", exps, _StubClef("dag_2", 0.9,
                                              error=RuntimeError("down"))) == exps
     assert rank_dags("goal", exps, None) == exps
+
+
+def test_single_candidate_veto():
     single = [_exp("only")]
-    stub = _StubClef("dag_1", 0.9)
-    assert rank_dags("goal", single, stub) == single
-    assert stub.calls == [], "no call when nothing to rank"
+    assert rank_dags("goal", single, _StubClef("none", 0.9)) == []
+    assert rank_dags("goal", single, _StubClef("none", 0.7)) == single
+    assert rank_dags("goal", single, _StubClef("use_it", 0.9)) == single
+
+
+def test_over_limit_withholds_veto_and_keeps_tail():
+    exps = [_exp(f"g{i}") for i in range(8)]
+    stub = _StubClef("dag_5", 0.9)
+    ranked = rank_dags("goal", exps, stub)
+    assert ranked[0].goal == "g4"
+    assert [e.goal for e in ranked[1:]] == [
+        "g0", "g1", "g2", "g3", "g5", "g6", "g7"]
+    criteria = stub.calls[0][2]
+    assert "none" not in criteria, \
+        "a veto must not be offered over unjudged candidates"
+    assert len(criteria) == 5
 
 
 def test_candidate_list_capped_at_five():
@@ -74,4 +90,4 @@ def test_candidate_list_capped_at_five():
     stub = _StubClef("dag_5", 0.9)
     ranked = rank_dags("goal", exps, stub)
     assert ranked[0].goal == "g4"
-    assert len(stub.calls[0][2]) == 6, "five candidates plus none"
+    assert len(stub.calls[0][2]) == 5, "five candidates, no veto over the tail"

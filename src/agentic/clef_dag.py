@@ -16,19 +16,27 @@ kept short so the state stays small. One call, zero output
 tokens, a winner plus confidence.
 
 Confidence is the safety valve, mirroring triage:
-- below 0.6: keep the Jaccard order (uncertain ranking never
+- below 0.6: keep the recalled order (uncertain ranking never
   overrides recall).
 - a winner at 0.6 or above: move it to the front. The rest
   keep their recalled order.
 - "none" at 0.8 or above: return an empty list, so the run
   plans fresh instead of adapting a workflow that fits
-  nothing. Below 0.8, "none" keeps the Jaccard order: a
+  nothing. Below 0.8, "none" keeps the recalled order: a
   doubtful veto must not throw away a usable workflow.
-- any error, or fewer than two candidates: return the input
-  unchanged. With one candidate there is nothing to rank;
-  the veto for a single candidate is a follow-up, not this
-  step, and a bad single adaptation is still caught by
-  verification downstream.
+- any error, or no client: return the input unchanged.
+
+Two soundness rules for the veto, fixed after review:
+- A veto is only offered when every recalled candidate was
+  judged. When recall returns more than the judged limit,
+  the "none" option is withheld: vetoing the judged five
+  must not discard unjudged candidates the model never saw.
+  The winner still moves to the front and the unjudged tail
+  keeps its order behind the judged set.
+- A single candidate gets its own veto question (use it or
+  none), so a lone bad match can be rejected instead of
+  adapted. Below the veto bar it is kept: a doubtful veto
+  must not throw away the only workflow either.
 
 The Jaccard threshold (AIDON_DAG_SIMILARITY) still decides
 which candidates reach this step at all; Clef only reorders
@@ -59,14 +67,35 @@ def _candidate_text(exp) -> str:
 
 def rank_dags(goal: str, experiences: list, client, limit: int = MAX_CANDIDATES) -> list:
     """Reorder recalled experiences by Clef fit; input unchanged
-    on any failure, low confidence, or fewer than two candidates."""
-    if client is None or len(experiences) < 2:
+    on any failure or low confidence. A veto is only offered
+    when every recalled candidate was judged (single candidate
+    or no more than the limit); with a longer recall the
+    unjudged tail is never discarded."""
+    if client is None or not experiences:
+        return experiences
+    if len(experiences) == 1:
+        # Single-candidate veto: one choice, same veto bar.
+        try:
+            choice, confidence, _probs = client.decide_choice(
+                {"goal": goal, "candidate": _candidate_text(experiences[0])},
+                "single_fit",
+                "Does this workflow fit the goal? Judge by what it "
+                "actually does, not by shared words with the goal.",
+                {"use_it": "This workflow fits the goal; adapt it.",
+                 "none": "No fit; plan fresh instead of adapting."})
+        except Exception:
+            return experiences
+        if choice == "none" and confidence >= VETO_CONFIDENCE:
+            return []
         return experiences
     candidates = list(experiences[:limit])
     criteria = {f"dag_{i + 1}": _candidate_text(exp)
                 for i, exp in enumerate(candidates)}
-    criteria["none"] = ("No candidate workflow fits this goal; "
-                        "plan fresh instead of adapting.")
+    if len(experiences) <= limit:
+        # Full judgment: every recalled candidate is in front of
+        # the model, so a veto soundly empties the recall.
+        criteria["none"] = ("No candidate workflow fits this goal; "
+                            "plan fresh instead of adapting.")
     try:
         choice, confidence, _probs = client.decide_choice(
             {"goal": goal},

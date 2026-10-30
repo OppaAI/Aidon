@@ -2162,7 +2162,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "sandbox":
         from ..capabilities.execution import make_backend
         try:
-            backend = make_backend(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network, vm_host=config.vm_host, vm_user=config.vm_user or None, vm_sudo_password=config.vm_sudo_password or None, vm_use_sudo=config.vm_use_sudo)
+            backend = make_backend(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network, vm_host=config.vm_host, vm_user=config.vm_user or None, vm_sudo_password=config.vm_sudo_password or None, vm_use_sudo=config.vm_use_sudo, modal_app=config.modal_app)
             print(f"Sandbox backend: {config.execution_backend}, workdir: {sandbox.workdir}, backend: {backend}")
             return 0
         except Exception as exc:
@@ -2563,7 +2563,8 @@ def main(argv: list[str] | None = None) -> int:
                     image=config.docker_image, allow_network=config.docker_network,
                     vm_host=config.vm_host, vm_user=config.vm_user or None,
                     vm_sudo_password=config.vm_sudo_password or None,
-                    vm_use_sudo=config.vm_use_sudo)
+                    vm_use_sudo=config.vm_use_sudo,
+                    modal_app=config.modal_app)
             except Exception:
                 execution_backend = None
             try:
@@ -3734,7 +3735,8 @@ def main(argv: list[str] | None = None) -> int:
             image=config.docker_image, allow_network=config.docker_network,
             vm_host=config.vm_host, vm_user=config.vm_user or None,
             vm_sudo_password=config.vm_sudo_password or None,
-            vm_use_sudo=config.vm_use_sudo)
+            vm_use_sudo=config.vm_use_sudo,
+            modal_app=config.modal_app)
     except Exception as exc:
         print(f"execution backend error: {exc}")
         return 2

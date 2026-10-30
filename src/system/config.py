@@ -114,6 +114,7 @@ class Config:
     vm_user: str = ""
     vm_sudo_password: str = ""
     vm_use_sudo: bool = False
+    modal_app: str = "aidon-sandbox"
     ingest_dir: Path | None = None
     budget_tokens: int = 200000
     budget_seconds: int = 3600
@@ -231,6 +232,7 @@ class Config:
             vm_sudo_password=os.environ.get("AIDON_VM_SUDO_PASSWORD", ""),
             vm_use_sudo=os.environ.get("AIDON_VM_USE_SUDO",
                                        "0") == "1",
+            modal_app=os.environ.get("AIDON_MODAL_APP", "aidon-sandbox"),
             ingest_dir=(Path(os.environ["AIDON_INGEST_DIR"]).expanduser()
                         if os.environ.get("AIDON_INGEST_DIR") else None),
             budget_tokens=_env_int(

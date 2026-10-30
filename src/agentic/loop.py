@@ -1861,7 +1861,7 @@ class GoalRunner:
                 # stays the pre-filter; Clef only reorders within
                 # the recalled set, and any failure or low
                 # confidence keeps the recalled order.
-                if getattr(self, "clef_client", None) is not None and len(experiences) > 1:
+                if getattr(self, "clef_client", None) is not None and experiences:
                     try:
                         from .clef_dag import rank_dags
                         _ranked = rank_dags(goal, experiences, getattr(self, "clef_client", None))
