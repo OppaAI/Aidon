@@ -136,3 +136,121 @@ def test_model_no_naming_data_file_keeps_a_file(tmp_path, monkeypatch):
     # though "data.txt" contains "a.txt" as a substring.
     assert (work / "a.txt").read_text(encoding="utf-8") == "v1"
     assert (work / "data.txt").read_text(encoding="utf-8") == "CHANGED"
+
+
+def test_model_no_naming_no_file_repairs_everything(tmp_path, monkeypatch):
+    # Generic rejection: the NO names no deliverable, so no file is
+    # known-good. The old code credited both code-verified files to
+    # passed, the repair skipped both steps, and the next attempt
+    # re-verified identical files until attempts ran out. Now both
+    # files are rewritten.
+    monkeypatch.setenv("AIDON_MODEL_VERIFIER", "always")
+    work = tmp_path / "work"
+    work.mkdir(parents=True)
+    runner = _runner(work, tmp_path)
+    calls = {"n": 0}
+
+    def _verify(goal, deliverables, workdir, criteria):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"verdict": "no",
+                    "reason": "NO: The deliverables are incomplete."}
+        return {"verdict": "yes", "reason": "YES fine"}
+
+    runner.model_verifier = SimpleNamespace(verify=_verify, effort_escalated=False)
+    runner._chat = lambda phase, messages: _repair_plan_json()
+    plan = Plan(
+        steps=[
+            Step(tool="write", args={"file": "a.txt", "text": "v1"},
+                 deliverable="a.txt"),
+            Step(tool="write", args={"file": "b.txt", "text": "v1"},
+                 deliverable="b.txt"),
+        ],
+        deliverables=["a.txt", "b.txt"],
+        criteria=["a.txt exists", "b.txt exists"])
+    report = runner._execute_plan("Write two files", plan)
+    assert report.status == "done"
+    assert report.attempts == 2
+    assert (work / "a.txt").read_text(encoding="utf-8") == "v2"
+    assert (work / "b.txt").read_text(encoding="utf-8") == "CHANGED"
+
+
+def test_model_no_naming_two_files_repairs_both(tmp_path, monkeypatch):
+    # A NO naming two of three files narrows repair to those two;
+    # the unnamed third file keeps its first-attempt content.
+    monkeypatch.setenv("AIDON_MODEL_VERIFIER", "always")
+    work = tmp_path / "work"
+    work.mkdir(parents=True)
+    runner = _runner(work, tmp_path)
+    calls = {"n": 0}
+
+    def _verify(goal, deliverables, workdir, criteria):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"verdict": "no", "reason": "NO: a.txt and b.txt are thin"}
+        return {"verdict": "yes", "reason": "YES fine"}
+
+    runner.model_verifier = SimpleNamespace(verify=_verify, effort_escalated=False)
+    runner._chat = lambda phase, messages: json.dumps({
+        "steps": [
+            {"tool": "write", "args": {"file": "a.txt", "text": "v2"},
+             "deliverable": "a.txt"},
+            {"tool": "write", "args": {"file": "b.txt", "text": "CHANGED"},
+             "deliverable": "b.txt"},
+            {"tool": "write", "args": {"file": "c.txt", "text": "v2"},
+             "deliverable": "c.txt"},
+        ],
+        "deliverables": ["a.txt", "b.txt", "c.txt"],
+        "criteria": ["a.txt exists", "b.txt exists", "c.txt exists"],
+    })
+    plan = Plan(
+        steps=[
+            Step(tool="write", args={"file": "a.txt", "text": "v1"},
+                 deliverable="a.txt"),
+            Step(tool="write", args={"file": "b.txt", "text": "v1"},
+                 deliverable="b.txt"),
+            Step(tool="write", args={"file": "c.txt", "text": "v1"},
+                 deliverable="c.txt"),
+        ],
+        deliverables=["a.txt", "b.txt", "c.txt"],
+        criteria=["a.txt exists", "b.txt exists", "c.txt exists"])
+    report = runner._execute_plan("Write three files", plan)
+    assert report.status == "done"
+    assert report.attempts == 2
+    assert (work / "a.txt").read_text(encoding="utf-8") == "v2"
+    assert (work / "b.txt").read_text(encoding="utf-8") == "CHANGED"
+    assert (work / "c.txt").read_text(encoding="utf-8") == "v1"
+
+
+def test_model_no_naming_nonexistent_file_repairs_everything(tmp_path, monkeypatch):
+    # A NO naming a file that is not a deliverable names no
+    # deliverable, so it is a generic rejection: everything is
+    # repairable, not everything passed.
+    monkeypatch.setenv("AIDON_MODEL_VERIFIER", "always")
+    work = tmp_path / "work"
+    work.mkdir(parents=True)
+    runner = _runner(work, tmp_path)
+    calls = {"n": 0}
+
+    def _verify(goal, deliverables, workdir, criteria):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"verdict": "no", "reason": "NO: report.pdf is thin"}
+        return {"verdict": "yes", "reason": "YES fine"}
+
+    runner.model_verifier = SimpleNamespace(verify=_verify, effort_escalated=False)
+    runner._chat = lambda phase, messages: _repair_plan_json()
+    plan = Plan(
+        steps=[
+            Step(tool="write", args={"file": "a.txt", "text": "v1"},
+                 deliverable="a.txt"),
+            Step(tool="write", args={"file": "b.txt", "text": "v1"},
+                 deliverable="b.txt"),
+        ],
+        deliverables=["a.txt", "b.txt"],
+        criteria=["a.txt exists", "b.txt exists"])
+    report = runner._execute_plan("Write two files", plan)
+    assert report.status == "done"
+    assert report.attempts == 2
+    assert (work / "a.txt").read_text(encoding="utf-8") == "v2"
+    assert (work / "b.txt").read_text(encoding="utf-8") == "CHANGED"

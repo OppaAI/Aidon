@@ -20,6 +20,8 @@ model for a repaired plan, with the failure list and the
 list of passed deliverables. Passed deliverables are
 untouched: repair steps may only fix failed steps and
 failed criteria, they may not rewrite a passed file.
+Exception: a model-verifier NO that names no file keeps
+every deliverable repairable, since no file is known-good.
 At most 3 attempts in total (1 initial + 2 repairs),
 then the run fails, it does not ask for approval, and
 it does not go live.
@@ -1216,9 +1218,26 @@ class GoalRunner:
         system += (" Criteria must be checkable, one assertion each, no "
                    "parenthetical hedges. Forms that verify: 'NAME exists', "
                    "'NAME exists in the workspace folder', 'NAME is "
-                   "non-empty', 'NAME contains TEXT', 'ledger NAME total is "
+                   "non-empty', 'NAME contains TEXT', 'NAME does not "
+                   "contain TEXT', 'ledger NAME total is "
                    "CENTS'. Anything else fails verification even when the "
                    "files exist.")
+        system += (" Allergy and dietary restrictions: when the goal or "
+                   "spec names an allergy, intolerance, or dietary "
+                   "restriction, criteria must check the deliverable text "
+                   "for the allergen AND its hidden names (milk: whey, "
+                   "casein, lactose, milk solids; egg: albumin, egg white, "
+                   "yolk; gluten: wheat, barley, rye, and oats, which risk "
+                   "wheat cross-contact), for label-claim wording quoted "
+                   "from the source (a certified gluten-free logo or "
+                   "statement counts only when the source says so, never "
+                   "assumed), and for cross-contamination warnings in the "
+                   "ingredient or product text ('may contain', 'made in a "
+                   "facility that also processes', 'shared equipment'). A "
+                   "claim that can only be confirmed from a physical "
+                   "package label must NOT be asserted as met: include a "
+                   "criterion requiring the final output to list it as a "
+                   "label check for the user to confirm on the package.")
         system += (" Attempt outputs are numbered from the first attempt: "
                    "if a deliverable may be produced more than once, name "
                    "attempt outputs NAME_1, NAME_2, ... starting at 1, never "
@@ -2404,7 +2423,8 @@ class GoalRunner:
             + "\n".join(f"- {c}" for c in criteria)
             + "\nRewrite the failed criteria into checkable forms only: "
             "'NAME exists', 'NAME exists in the workspace folder', "
-            "'NAME is non-empty', 'NAME contains TEXT', 'ledger NAME "
+            "'NAME is non-empty', 'NAME contains TEXT', 'NAME does not "
+            "contain TEXT', 'ledger NAME "
             "total is CENTS'. One assertion each, no parenthetical "
             "hedges. Return JSON only: {\"criteria\": [...]}")
         try:
@@ -2712,13 +2732,27 @@ class GoalRunner:
             # take it back out, or the repair attempt would skip
             # the very step it has to fix. A mention is an exact
             # filename match, not a substring, so a data.txt
-            # failure never takes a.txt out.
-            for name in list(passed):
-                if any(_mentions_file(msg, name) for msg in failures):
-                    passed.discard(name)
-            for name in verified:
-                if not any(_mentions_file(msg, name) for msg in failures):
-                    passed.add(name)
+            # failure never takes a.txt out. Exception: a model
+            # NO that names no deliverable at all. Crediting the
+            # code-verified files to passed there would tell the
+            # repair planner not to rewrite the very files the
+            # model rejected, and the next attempt would skip
+            # their steps entirely — a deadlock that re-verifies
+            # identical files until attempts run out. A generic
+            # rejection therefore keeps every deliverable
+            # repairable; only a NO naming a file narrows repair
+            # to that file.
+            if model_failed and not any(
+                    _mentions_file(msg, d) for msg in failures
+                    for d in current_plan.deliverables):
+                passed.difference_update(current_plan.deliverables)
+            else:
+                for name in list(passed):
+                    if any(_mentions_file(msg, name) for msg in failures):
+                        passed.discard(name)
+                for name in verified:
+                    if not any(_mentions_file(msg, name) for msg in failures):
+                        passed.add(name)
             if (not ok and not model_failed
                     and not self._criterion_repaired and failures
                     and all(f.startswith("unverified criterion: ")
@@ -2758,6 +2792,22 @@ class GoalRunner:
                     "verified", goal, current_plan, passed,
                     verified=verified, attempt=attempt)
                 break
+            if self._criterion_repaired and failures and all(
+                    f.startswith("unverified criterion: ") for f in failures):
+                # Criterion repair is spent (one per run) and the
+                # failure is still only uncheckable criteria: the
+                # assertions themselves are the problem, and no
+                # further repair exists for them. Re-executing
+                # would fail identically, so fail fast with the
+                # exact criteria named instead of burning the
+                # remaining attempts. The user (or a new run with
+                # checkable criteria) fixes the assertions; the
+                # loop does not re-execute to prove it again.
+                return RunReport("failed", goal, current_plan, False, False,
+                                 files=sorted(passed),
+                                 error=("criteria not checkable: "
+                                        + "; ".join(failures))[:500],
+                                 attempts=attempt)
             if attempt == max_attempts:
                 return RunReport("failed", goal, current_plan, False, False,
                                  files=sorted(passed),
