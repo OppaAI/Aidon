@@ -1106,6 +1106,11 @@ class WebUIServer:
         import os
         candidates = []
         configured = os.environ.get("AIDON_VRM_PATH", "").strip()
+        if not configured and "AIDON_VRM_PATH" in os.environ:
+            # Explicitly blank = the avatar is off. An unset variable
+            # still falls through to the drop-in locations below, so a
+            # fresh install keeps working without any config edit.
+            return None
         if configured:
             candidates.append(Path(configured).expanduser())
         candidates.extend((self.home / "avatar.vrm",
