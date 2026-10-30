@@ -2288,6 +2288,31 @@ class GoalRunner:
                         break
             except Exception:
                 pass
+        # Diagnostics: a failed run records its error with
+        # its run id, redacted, for `aidon diagnostics`.
+        # Best effort, never fails the finished run.
+        if report.status == "failed":
+            try:
+                from ..system.diagnostics import log_run_error
+                log_run_error(self.home, str(getattr(self, "run_id", "") or ""),
+                              "finalize", report.error or report.status)
+            except Exception:
+                pass
+        # Mission skill harvest: ordinary runs test and
+        # promote candidate skills, bounded by the run's
+        # skill budget. Trust still needs owner approval,
+        # and validated skills never enter plan prompts
+        # until trusted. Best effort, never fails the run.
+        if report.status == "done":
+            try:
+                from ..capabilities.skill_library import SkillLibrary
+                _promoted = SkillLibrary(self.home).harvest_candidates(
+                    getattr(self, "sandbox", None),
+                    governor=getattr(self, "acquisition_governor", None))
+                if _promoted:
+                    report.promoted_skills = _promoted
+            except Exception:
+                pass
         try:
             from .autonomy_metrics import AutonomyMetrics
             AutonomyMetrics(self.home).record(

@@ -24,11 +24,11 @@ chat's one goal), never a whole chat.
 What it counts (kinds):
   tool:       a tool/plugin build adopted in-run
               (adopt_tool_plugin).
-  skill:      a skill promoted from experience in-run.
-              Reserved: no run path promotes skills today
-              (promotion runs through the learn cycle,
-              which has its own daily cap), so this
-              counter is for the wiring when one lands.
+  skill:      a skill promoted from a candidate in-run.
+              The mission harvest at finalize tests each
+              candidate and promotes on a passing report,
+              bounded by max_skills; the learn cycle keeps
+              its own daily cap.
   mcp:        a new MCP server connection (mcp_connect).
   dependency: a dependency set installed in-run
               (package installs, apt installs, and

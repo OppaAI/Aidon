@@ -168,9 +168,19 @@ def _sandbox_run(sandbox, cmd: str) -> tuple[bool, str]:
     Accepts run(cmd) returning a dict with ok/output, an
     object with ok/stdout/stderr, or a run_command(cmd)
     returning a result with returncode/stdout/stderr.
+
+    Skill test commands are shell strings, but the real
+    Sandbox.run takes an argv list, never a shell string:
+    passing the string straight through would run its
+    characters as argv. A real Sandbox therefore gets
+    ["sh", "-c", cmd]; doubles keep the old call.
     """
     if hasattr(sandbox, "run"):
-        out = sandbox.run(cmd)
+        from .sandbox import Sandbox as _RealSandbox
+        if isinstance(sandbox, _RealSandbox):
+            out = sandbox.run(["sh", "-c", cmd])
+        else:
+            out = sandbox.run(cmd)
         if isinstance(out, dict):
             return bool(out.get("ok")), str(out.get("output", ""))
         if hasattr(out, "ok"):
@@ -374,6 +384,40 @@ class SkillLibrary:
             skill.state = "validated"
             self._update(skill)
         return skill
+
+    def harvest_candidates(self, sandbox, governor=None) -> list[str]:
+        """Test and promote candidate skills, bounded by the
+        run governor's skill budget.
+
+        The mission loop calls this on successful runs: each
+        candidate's own test commands run in the sandbox, and
+        a passing report promotes it to validated. A failed
+        test leaves the skill a candidate; an exhausted skill
+        budget stops the harvest. Nothing here trusts: trust
+        still needs owner approval, and validated skills
+        never enter plan prompts until trusted. Never raises
+        for a single skill's failure; a governor error stops
+        the harvest instead of failing the run.
+        """
+        promoted = []
+        for skill in self.list(states=("candidate",)):
+            if governor is not None:
+                try:
+                    governor.acquire("skill")
+                except Exception:
+                    break
+            try:
+                report = self.run_tests(skill.name, sandbox)
+            except Exception:
+                continue
+            if not report.get("passed"):
+                continue
+            try:
+                self.promote(skill.name, report)
+                promoted.append(skill.name)
+            except Exception:
+                continue
+        return promoted
 
     def trust(self, name: str, approved: bool = False) -> Skill:
         """Mark a skill trusted. Owner approval is mandatory.

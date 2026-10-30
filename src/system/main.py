@@ -1560,6 +1560,8 @@ def main(argv: list[str] | None = None) -> int:
     tools_parser = sub.add_parser("tools", help="Inspect the tool registry")
     tools_parser.add_argument("action", choices=["list", "check"], help="list = list plugin tools, check = check a tool exists")
     tools_parser.add_argument("name", nargs="?", default="", help="Tool name for check")
+    diagnostics_parser = sub.add_parser("diagnostics", help="Diagnostic report for a run: trace, errors, log tail")
+    diagnostics_parser.add_argument("run_id", help="Run id to diagnose")
     capabilities_parser = sub.add_parser("capabilities", help="Inspect registered capabilities (images, MCP servers)")
     capabilities_parser.add_argument("action", choices=["list", "stale"], help="list = list entries, stale = entries idle too long, retirement candidates")
     capabilities_parser.add_argument("--days", type=int, default=90, help="Idle days for stale (default 90)")
@@ -1695,6 +1697,11 @@ def main(argv: list[str] | None = None) -> int:
 
     config = Config.load()
     config.ensure_home()
+    try:
+        from .diagnostics import setup_logging
+        setup_logging(config.home)
+    except Exception:
+        pass
     from .model_client import client_for_config
     from ..agentic.counting import CountingClient
     try:
@@ -2044,6 +2051,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{args.name} rolled back to candidate")
             return 0
         return 2
+    if args.command == "diagnostics":
+        from .diagnostics import build_diagnostic_report, write_diagnostic_report
+        report = build_diagnostic_report(config.home, args.run_id)
+        path = write_diagnostic_report(config.home, args.run_id)
+        print(report)
+        print(f"\nSaved to {path}")
+        return 0
     if args.command == "tools":
         from ..capabilities.plugins import PluginRegistry
         from ..capabilities.tool_catalog import all_tool_names

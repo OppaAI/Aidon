@@ -167,7 +167,12 @@ approval consumes nothing on every path: plugin adoption
 runs preflight, then approval, then the count at commit
 (the commit re-hashes first and aborts on changed bytes);
 a failed attempt does consume. Skill promotion in goal
-runs is reserved, not counted; the learn cycle enforces
+runs counts: the finalize harvest tests each candidate
+skill and promotes it on a passing report, bounded by
+the run's skill budget (an exhausted budget stops the
+harvest, never the run); trust still needs owner
+approval, and validated skills never enter plan prompts
+until trusted. The learn cycle enforces
 its own daily per-skill cap and fails closed without a
 lifecycle check. A mission's budget survives its stops:
 the run site assigns a mission key, carried through stop
@@ -186,6 +191,23 @@ Stale capabilities surface, they are not auto-retired:
 `aidon capabilities list` shows use counts, and
 `aidon capabilities stale` lists validated or trusted
 capabilities idle 90 days (or `--days N`).
+
+## Diagnostics
+
+Centralized logging lives under the Aidon home: a rotating
+application log (`logs/aidon.log`, 1 MB x 5), one JSON error
+record per line (`logs/errors.jsonl`), and the existing
+run traces (`trace/<run_id>.jsonl`). A failed run records
+its error with its run id at finalize; `aidon diagnostics
+<run_id>` prints a report — trace events, recorded errors
+with sanitized tracebacks, log tail, environment, and
+reproduction steps — and writes it to
+`reports/errors/<run_id>.md`. Logs and reports never carry
+secret values, tokens, file contents, or conversations:
+structured secrets are scrubbed by regex, everything else
+is kept out by policy at the call site. Diagnostics
+records; it never feeds the planner and never decides a
+repair.
 
 ## Optional tools
 

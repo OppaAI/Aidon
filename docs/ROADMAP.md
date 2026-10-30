@@ -296,6 +296,66 @@ VM and will be available inside a future VM once that backend exists.
   registry); unify them into one or document the split, so checkpoint
   and mission state stop living in two handles. Post-hackathon.
 
+- Deferred at the freeze (2026-10-30), NOT built, NOT demoed:
+
+- MCP reputation and catalog discovery, post-hackathon:
+  search a curated directory of reputable MCP servers,
+  rank by independent ratings and reviews, verify
+  publisher identity and repository provenance, and test
+  a server in isolation before proposing adoption.
+  Research-and-propose exists now; the catalog does not.
+- Game-controller and robot hardware interfaces,
+  post-hackathon: controller input, ROS 2 / MQTT /
+  serial robot links, and motor commands through a
+  dedicated safety controller that validates every
+  command independently of the LLM, with emergency stop,
+  movement limits, and a watchdog. The agent proposes;
+  the controller decides what is safe to execute.
+- Stronger DAG evolution benchmarks, post-hackathon:
+  beyond the canned Snake-to-Worm comparison, a suite
+  measuring reuse, adaptation quality, and token savings
+  across varied task families.
+- Diagnostics extensions, post-hackathon (basic logging
+  and `aidon diagnostics` are built now): automated
+  root-cause analysis, dashboards, remote telemetry,
+  advanced metrics, automatic issue submission, and a
+  self-diagnosis loop feeding log-derived repairs into
+  planning. Deliberately not wired into the loop before
+  the freeze.
+- Declared-capability plugins (Option A), pending owner
+  decision: plugins that declare the host capabilities
+  they need (camera, audio, devices) instead of reaching
+  for subprocess, which is the real fix for pattern-scan
+  residuals and the only climbable path to host hardware
+  like the camera.
+- MCP server building, post-hackathon: Aidon authors MCP
+  servers, not just connects to them.
+- Worker-pool to level runner, post-hackathon: the pool
+  runs DAG levels, pending a sibling-visibility decision.
+- Triage v2, post-hackathon: richer capability ranking
+  beyond the current heuristics.
+- DAG quality scoring, post-hackathon: score DAGs by
+  outcome quality, not just reuse.
+- Incremental Modal sync, post-hackathon: sync only
+  changed files instead of a full tar per command.
+- Webcam audio pairing and subtitles, post-hackathon:
+  audio alongside the clip, plus subtitle tracks.
+- File splits for large uploads, post-hackathon: split
+  and resume for files too large for one upload.
+- Swarm parent-cancel propagation, post-hackathon:
+  cancelling a parent cancels its swarm sub-runs.
+- Semantic duplicate detection, post-hackathon: catch
+  near-duplicate capabilities by meaning, not just name.
+- Retirement actions for stale capabilities,
+  post-hackathon: surfacing exists (`aidon capabilities
+  stale`); acting on it stays human for now.
+- Recovery-router acquire-build-rerun loop wiring,
+  post-hackathon: the router's acquire step builds and
+  reruns instead of noting only.
+- Registry and hub trusted use beyond triage,
+  post-hackathon: trusted capabilities informing more
+  than the triage note.
+
 - Aidon fly-brain biological layer: the MaleCNS, the
   male Drosophila central nervous system connectome,
   as a biological layer, with sentient emergence and
