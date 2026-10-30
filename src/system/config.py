@@ -165,6 +165,16 @@ class Config:
     sam_api_key: str = ""
     learn_max_skills_per_day: int = 5
     skill_max_failures: int = 3
+    # Per-run acquisition governor caps (AIDON_ACQ_MAX_*):
+    # how much one run may grow the toolbox. Defaults are
+    # the starting policy; a mission with explicit owner
+    # authorization runs with larger caps.
+    acq_max_tools: int = 2
+    acq_max_skills: int = 2
+    acq_max_mcp: int = 1
+    acq_max_dependency_sets: int = 2
+    acq_max_repair_cycles: int = 3
+    acq_max_seconds: float = 600.0
     # Backend selection: AIDON_BACKEND decides between the native chat
     # protocol, the Meta Model API, a plain OpenAI-compatible endpoint,
     # and the offline fake client.
@@ -289,6 +299,12 @@ class Config:
             learn_max_skills_per_day=_env_int(
                 "AIDON_LEARN_MAX_SKILLS_PER_DAY", 5),
             skill_max_failures=_env_int("AIDON_SKILL_MAX_FAILURES", 3),
+            acq_max_tools=_env_int("AIDON_ACQ_MAX_TOOLS", 2),
+            acq_max_skills=_env_int("AIDON_ACQ_MAX_SKILLS", 2),
+            acq_max_mcp=_env_int("AIDON_ACQ_MAX_MCP", 1),
+            acq_max_dependency_sets=_env_int("AIDON_ACQ_MAX_DEPS", 2),
+            acq_max_repair_cycles=_env_int("AIDON_ACQ_MAX_REPAIRS", 3),
+            acq_max_seconds=_env_float("AIDON_ACQ_MAX_SECONDS", 600.0),
             backend=os.environ.get("AIDON_BACKEND", "").strip().lower(),
             model_think=os.environ.get("AIDON_MODEL_THINK", "0") not in
             ("0", "false", "no", ""),

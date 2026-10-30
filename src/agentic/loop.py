@@ -491,7 +491,7 @@ class GoalRunner:
                  deep_researcher=None, deadline_seconds: float | None = None,
                  mode: str | None = None, question_ask=None,
                  conversation_key: str = "", resume_plan=None,
-                 clef_client=None):
+                 clef_client=None, acquisition_governor=None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -541,6 +541,7 @@ class GoalRunner:
         # capability triage in run(). Routing via Clef arrives as
         # the semantic_router argument instead (ClefRouter).
         self.clef_client = clef_client
+        self.acquisition_governor = acquisition_governor
         self.kernel_mode = kernel_mode
         self.semantic_router = semantic_router
         self.use_semantic_router_skip = use_semantic_router_skip
@@ -2740,6 +2741,21 @@ class GoalRunner:
         max_attempts = _resolve_count("AIDON_MAX_ATTEMPTS", MAX_ATTEMPTS, 1)
         for attempt in range(1, max_attempts + 1):
             failures: list[str] = []
+            if attempt > 1:
+                # A repair cycle under the acquisition governor:
+                # the attempts cap stays authoritative, but the
+                # governor bounds repairs even if attempts are
+                # raised above it. Exhaustion fails the run with
+                # the governor's message, not another repair.
+                _gov = getattr(self, "acquisition_governor", None)
+                if _gov is not None:
+                    try:
+                        _gov.acquire("repair")
+                    except Exception as exc:
+                        return RunReport("failed", goal, current_plan,
+                                         False, False, error=str(exc)[:500],
+                                         attempts=attempt,
+                                         backend=self._backend_name())
             # Cancellation, checked before every attempt, and steer,
             # applied to the next repair attempt, not to passed work.
             if self.run_control is not None and self.run_control.is_cancelled(self.run_id):

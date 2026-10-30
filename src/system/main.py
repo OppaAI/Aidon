@@ -220,7 +220,23 @@ def make_deep_researcher(config):
     return deep_researcher
 
 
-def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None) -> dict:
+def _make_governor(config):
+    """One acquisition governor per run, from config caps.
+
+    getattr defaults keep old configs working: a config
+    without the acq_* fields still gets the starting policy.
+    """
+    from ..capabilities.acquisition_governor import AcquisitionGovernor
+    return AcquisitionGovernor(
+        max_tools=getattr(config, "acq_max_tools", 2),
+        max_skills=getattr(config, "acq_max_skills", 2),
+        max_mcp=getattr(config, "acq_max_mcp", 1),
+        max_dependency_sets=getattr(config, "acq_max_dependency_sets", 2),
+        max_repair_cycles=getattr(config, "acq_max_repair_cycles", 3),
+        max_acquisition_seconds=getattr(config, "acq_max_seconds", 600.0))
+
+
+def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None, governor=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     The loop approval-gates any extra tool whose name contains
@@ -571,6 +587,17 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         except Exception as exc:
             return False, f"approval failed: {exc}"
 
+    def _acq(kind):
+        """Governor context for one acquisition, or a no-op.
+
+        None governor means ungoverned (tests, legacy paths):
+        production call sites always pass one.
+        """
+        if governor is None:
+            from contextlib import nullcontext
+            return nullcontext()
+        return governor.timed(kind)
+
     def _computer_secrets() -> dict:
         """Secrets the owner authorized for computer use.
 
@@ -697,7 +724,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                             )
             if not ok:
                 return f"install rejected: {why}"
-            success, output = _install_python_package(names, target)
+            with _acq("dependency"):
+                success, output = _install_python_package(names, target)
             return f"INSTALLED {' '.join(names)} -> {target}" if success else f"INSTALL_FAILED: {output}"
 
         def apt_install(packages):
@@ -712,7 +740,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                             )
             if not ok:
                 return f"install rejected: {why}"
-            success, output = _apt_install(names)
+            with _acq("dependency"):
+                success, output = _apt_install(names)
             return f"APT_INSTALLED {' '.join(names)}" if success else f"APT_FAILED: {output}"
 
         tools.update(uv_venv=uv_venv, install_python_package=install_python_package,
@@ -905,39 +934,40 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                         )
         if not ok:
             return f"MCP_REFUSED: {why}"
-        try:
-            if transport == "stdio":
-                from ..interface.mcp_client import McpClient
-                client = McpClient(command_parts, env=dict(env or {}))
-                client.start()
-            else:
-                from ..interface.mcp_http import McpHttpClient
-                client = McpHttpClient(str(url), token=str(token or "") or None)
-                client.initialize()
-            offered = client.list_tools()
-            if not offered:
-                client.close()
-                return f"MCP_REFUSED: {server_name!r} offered no tools"
-            mcp_connections[server_name] = client
-            registered = []
-            for info in offered:
-                remote_name = str(info.get("name", "")).strip()
-                if not remote_name or not remote_name.replace("_", "").isalnum():
-                    continue
-                local_name = f"mcp_{server_name}_{remote_name}"
-
-                def call_remote(_args=None, _client=client, _remote=remote_name):
-                    return json.dumps(_client.call_tool(_remote, _args or {}), ensure_ascii=False)
-
-                tools[local_name] = call_remote
-                registered.append(local_name)
-            return f"MCP_CONNECTED {server_name!r}: {', '.join(registered) or 'no safe tools'}"
-        except Exception as exc:
+        with _acq("mcp"):
             try:
-                client.close()
-            except Exception:
-                pass
-            return f"MCP_REFUSED: {type(exc).__name__}: {exc}"
+                if transport == "stdio":
+                    from ..interface.mcp_client import McpClient
+                    client = McpClient(command_parts, env=dict(env or {}))
+                    client.start()
+                else:
+                    from ..interface.mcp_http import McpHttpClient
+                    client = McpHttpClient(str(url), token=str(token or "") or None)
+                    client.initialize()
+                offered = client.list_tools()
+                if not offered:
+                    client.close()
+                    return f"MCP_REFUSED: {server_name!r} offered no tools"
+                mcp_connections[server_name] = client
+                registered = []
+                for info in offered:
+                    remote_name = str(info.get("name", "")).strip()
+                    if not remote_name or not remote_name.replace("_", "").isalnum():
+                        continue
+                    local_name = f"mcp_{server_name}_{remote_name}"
+
+                    def call_remote(_args=None, _client=client, _remote=remote_name):
+                        return json.dumps(_client.call_tool(_remote, _args or {}), ensure_ascii=False)
+
+                    tools[local_name] = call_remote
+                    registered.append(local_name)
+                return f"MCP_CONNECTED {server_name!r}: {', '.join(registered) or 'no safe tools'}"
+            except Exception as exc:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+                return f"MCP_REFUSED: {type(exc).__name__}: {exc}"
 
     def mcp_disconnect(name):
         server_name = str(name).strip()
@@ -962,7 +992,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             if not source.is_dir():
                 return f"adoption refused: plugin directory not found: {path}"
             registry = PluginRegistry(config.home)
-            approved, _findings, message = registry.adopt(source, gate=gate)
+            with _acq("tool"):
+                approved, _findings, message = registry.adopt(source, gate=gate)
             return message if approved else f"adoption refused: {message}"
 
         tools["adopt_tool_plugin"] = adopt_tool_plugin
@@ -2731,6 +2762,7 @@ def main(argv: list[str] | None = None) -> int:
             if isinstance(event.payload.get("resume_spec"), dict):
                 from ..agentic.interview import Spec as _ResumeSpec
                 _resume_spec = _ResumeSpec.from_dict(event.payload["resume_spec"])
+            _governor = _make_governor(config)
             runner = GoalRunner(client, run_sandbox, _gate,
                                 config.home, memory=memory,
                                 conversation_id=event.conversation_id, plugins=plugins,
@@ -2741,7 +2773,7 @@ def main(argv: list[str] | None = None) -> int:
                                 clef_client=_clef_client,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages)), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan)
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor)
             def _deliver_files(files, target):
                 """Upload run deliverables as bytes to a Slack/WhatsApp target.
 
@@ -3578,7 +3610,8 @@ def main(argv: list[str] | None = None) -> int:
                     _job_sandboxed = _backend is not None or bool(
                         getattr(sandbox, "bwrap", False))
                     _job_gate = _scheduled_gate(sandboxed=_job_sandboxed)
-                    _job_tools = _goal_extra_tools(config, sandbox.workdir, gate=_job_gate, researcher=_job_researcher, question_answer=None, scheduled=True)
+                    _job_governor = _make_governor(config)
+                    _job_tools = _goal_extra_tools(config, sandbox.workdir, gate=_job_gate, researcher=_job_researcher, question_answer=None, scheduled=True, governor=_job_governor)
                     try:
                         _job_deadline = float(job.time_limit or 0) or None
                     except (TypeError, ValueError):
@@ -3590,6 +3623,7 @@ def main(argv: list[str] | None = None) -> int:
                                         kernel_mode=config.kernel_mode, semantic_router=_router2,
                                         use_semantic_router_skip=True, network_available=_network_available(_backend, sandbox), run_id=_serve_run_id, run_control=_serve_control,
                                         extra_tools=_job_tools,
+                                        acquisition_governor=_job_governor,
                                         deadline_seconds=_job_deadline)
                     report = runner.run(job.goal)
                     print(f"Job {job.name}: {report.status}, files: {', '.join(report.files)}")
@@ -3834,15 +3868,16 @@ def main(argv: list[str] | None = None) -> int:
         _i_control = _IRunControl(config.home)
         _i_control.register(_i_run_id, args.text, args.conversation)
         print(f"interview run id: {_i_run_id}")
+        _i_governor = _make_governor(config)
         goal_runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home,
                                  memory=memory,
-                                 conversation_id=args.conversation, plugins=plugins, execution_backend=execution_backend, researcher=_interview_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds), researcher=_interview_researcher), router=model_router, versioned_writes=True,
+                                 conversation_id=args.conversation, plugins=plugins, execution_backend=execution_backend, researcher=_interview_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds), researcher=_interview_researcher, governor=_i_governor), router=model_router, versioned_writes=True,
                                  budget=_IBudget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
                                  trace=_ITrace(config.home, conversation_id=args.conversation),
                                  model_verifier=_IModelVerifier(client),
                                  semantic_router=_i_router,
                                  use_semantic_router_skip=True,
-                                 run_control=_i_control, run_id=_i_run_id, network_available=_network_available(execution_backend, sandbox))
+                                 run_control=_i_control, run_id=_i_run_id, network_available=_network_available(execution_backend, sandbox), acquisition_governor=_i_governor)
         report = goal_runner.run(args.text, spec=result.spec)
         print(f"status: {report.status}")
         print(f"verified: {report.verified}")
@@ -3885,17 +3920,18 @@ def main(argv: list[str] | None = None) -> int:
     _goal_control = _GoalControl(config.home)
     _goal_control.register(_goal_run_id, args.text, args.conversation)
     print(f"run id: {_goal_run_id}")
+    _governor = _make_governor(config)
     runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds, args.conversation), config.home,
                         memory=memory,
                         conversation_id=args.conversation, plugins=plugins, execution_backend=execution_backend,
                         budget=budget, trace=trace, model_verifier=model_verifier,
                         kernel_mode=config.kernel_mode, semantic_router=_cli_router,
                         use_semantic_router_skip=True, researcher=_researcher,
-                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds, args.conversation), researcher=_researcher, model_chat=lambda messages: client.chat(messages)),
+                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds, args.conversation), researcher=_researcher, model_chat=lambda messages: client.chat(messages), governor=_governor),
                         router=model_router, versioned_writes=True,
                         run_id=_goal_run_id, run_control=_goal_control,
                         network_available=_network_available(execution_backend, sandbox),
-                        guidance=getattr(args, "guidance", ""))
+                        guidance=getattr(args, "guidance", ""), acquisition_governor=_governor)
     spec = None
     if getattr(args, "spec", None):
         from pathlib import Path
@@ -3926,9 +3962,9 @@ def main(argv: list[str] | None = None) -> int:
                                         semantic_router=_cli_router,
                                         use_semantic_router_skip=True,
                                         researcher=_researcher,
-                                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=runner.gate, researcher=_researcher),
+                                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=runner.gate, researcher=_researcher, governor=getattr(runner, "acquisition_governor", None)),
                                         router=model_router, versioned_writes=True,
-                                        run_id=_sub_id, run_control=_goal_control, network_available=_network_available(execution_backend, sandbox))
+                                        run_id=_sub_id, run_control=_goal_control, network_available=_network_available(execution_backend, sandbox), acquisition_governor=getattr(runner, "acquisition_governor", None))
                 sub_report = sub_runner.run(subgoal, spec=spec)
                 return f"[{sub_report.status}] {', '.join(sub_report.files)} {sub_report.error}".strip()
             swarm_result = run_swarm(args.text, client, _swarm_runner)

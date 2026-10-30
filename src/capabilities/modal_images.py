@@ -72,13 +72,15 @@ class CapabilityImageBuilder:
 
     def __init__(self, home, app_name: str = "aidon-sandbox",
                  sandbox_factory=None, approve=None,
-                 setup_timeout: int = 1200, test_timeout: int = 300):
+                 setup_timeout: int = 1200, test_timeout: int = 300,
+                 governor=None):
         self.home = Path(home)
         self.app_name = app_name
         self._sandbox_factory = sandbox_factory
         self._approve = approve
         self.setup_timeout = setup_timeout
         self.test_timeout = test_timeout
+        self._governor = governor
 
     def _base_image(self):
         import modal
@@ -137,6 +139,17 @@ class CapabilityImageBuilder:
 
     def build(self, name: str, pip_packages=(), apt_packages=(),
               test_command: str | None = None) -> dict:
+        """Governed wrapper: one dependency-set count plus
+        elapsed build time against the run's governor."""
+        if self._governor is None:
+            return self._build_inner(name, pip_packages, apt_packages,
+                                     test_command)
+        with self._governor.timed("dependency"):
+            return self._build_inner(name, pip_packages, apt_packages,
+                                     test_command)
+
+    def _build_inner(self, name: str, pip_packages=(), apt_packages=(),
+                     test_command: str | None = None) -> dict:
         """Build, test, and register one capability image.
 
         Returns {"record": manifest record, "image": snapshot
