@@ -299,7 +299,9 @@ def test_webui_tts_501_without_key_and_goals_with_images(tmp_path):
                                 {"goal": "make a poster",
                                  "images": [{"name": "poster.png", "data_b64": image_b64}]})
         assert status == 200
-        assert data["goal"] == "make a poster"
+        assert data["goal"].startswith("make a poster")
+        assert "Attached image paths" in data["goal"]
+        assert data["goal"].endswith("-poster.png")
         assert len(data["images"]) == 1 and data["images"][0].endswith("-poster.png")
         assert data["run_id"]
         assert list((tmp_path / "home" / "library" / "uploads").glob("*-poster.png"))
