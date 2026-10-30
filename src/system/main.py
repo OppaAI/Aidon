@@ -554,10 +554,11 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         def record_webcam(seconds, output="clip.mp4", device=""):
             # Kind "record", force_ask: camera activation is
             # never pre-approved and never silent. The card
-            # names the duration and the output file first.
+            # names the device, duration, and output file.
             ok, why = _approval(
                 "record", "Record webcam video",
-                f"Activate the camera and record {int(seconds)} "
+                f"Activate the camera ({device or '/dev/video0'}) "
+                f"and record {int(seconds)} "
                 f"seconds of video to {output}?",
                 force_ask=True)
             if not ok:

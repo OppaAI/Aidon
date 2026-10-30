@@ -34,9 +34,11 @@ What it counts (kinds):
   max_acquisition_seconds (default 600) is the per-run
   budget across ALL acquisitions; the builder's
   setup_timeout (default 1200) is the wall clock of a
-  SINGLE image build. A run can therefore hold at most
-  one full-length build inside its acquisition budget;
-  the two numbers measure different things and do not
+  SINGLE image build. The time check runs between
+  acquisitions, so a single build can run past the
+  600s budget; the budget stops the NEXT acquisition,
+  it does not interrupt the build in flight. The two
+  numbers measure different things and do not
   conflict.
 
 What it does NOT do, deliberately:
@@ -56,6 +58,10 @@ What it does NOT do, deliberately:
   The budget is about attempts: without that, a
   failing capability could be retried until the run
   budget, not the acquisition budget, stops it.
+  An owner rejection is not a failed attempt: paths
+  that approve first (MCP, installs) count only after
+  approval passes; plugin adoption still counts first,
+  a known ordering gap.
 
 Exhaustion fails the run, like the run budget: the
 raised AcquisitionBudgetExceeded names the exhausted

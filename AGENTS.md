@@ -157,10 +157,17 @@ a rung:
 
 Capability acquisition is budgeted per run: at most 2 tools,
 1 MCP server, 2 dependency sets, 3 repair cycles, and 600
-seconds of acquisition time. A rejected approval consumes
-nothing; a failed attempt does. Learning runs under the
-same budget and fails closed without one — no default
-allow. Image builds record the pip versions actually
+seconds of acquisition time. The time budget is cumulative
+and checked between acquisitions — it does not interrupt
+an operation in flight, so one long build can run past
+600s. On the MCP and install paths, a rejected approval
+consumes nothing (counting starts after approval passes);
+a failed attempt does consume. Plugin adoption still
+counts before its internal approval — a known ordering
+gap, fix pending. Skill promotion in goal runs is
+reserved, not counted; the learn cycle enforces its own
+daily per-skill cap and fails closed without a lifecycle
+check. Image builds record the pip versions actually
 resolved, and Modal sandboxes default to 1 CPU / 1024 MB
 (`AIDON_MODAL_CPU`, `AIDON_MODAL_MEMORY_MB`).
 

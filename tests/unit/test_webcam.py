@@ -177,7 +177,7 @@ def test_closure_approval_and_rejection(tmp_path, monkeypatch):
     assert calls == [(30, str(tmp_path / "clip.mp4"), "/dev/video0")]
     kind, title, body, force_ask = gate.seen[-1]
     assert kind == "record" and title == "Record webcam video"
-    assert "30" in body and force_ask is True
+    assert "30" in body and "/dev/video0" in body and force_ask is True
     gate2 = _Gate(verdict="rejected")
     tools2 = _goal_extra_tools(SimpleNamespace(home=tmp_path), tmp_path,
                                gate=gate2)
