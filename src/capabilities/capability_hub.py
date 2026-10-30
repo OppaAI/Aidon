@@ -111,8 +111,16 @@ whether it executes locally or on Modal. Availability
 records where a capability runs; the hub itself runs
 wherever Aidon's home directory is.
 
-NOT wired yet, deliberately: triage still assembles
-its own inventory, planner skill recall still ranks
+A caller that already holds a loaded PluginRegistry
+(a run's runner always does) should pass it in: loading
+plugins executes their top-level code, and rebuilding
+the registry inside the hub would execute it a second
+time. A pre-loaded registry is reused as-is; without
+one, the hub loads the registry itself, exactly as any
+other standalone reader does.
+
+NOT fully wired yet, deliberately: triage now reads the
+hub (build_inventory), but planner skill recall still ranks
 trusted first then validated then candidate, and no
 writer syncs hub entries yet, because the hub owns
 no store of record and index() rebuilds from the
@@ -195,8 +203,9 @@ def _image_description(record) -> str:
 class CapabilityHub:
     """Local capability index over the existing stores."""
 
-    def __init__(self, home):
+    def __init__(self, home, plugins=None):
         self.home = Path(home)
+        self.plugins_registry = plugins
 
     def _health_path(self) -> Path:
         return self.home / HEALTH_FILENAME
@@ -323,13 +332,33 @@ class CapabilityHub:
                        "passed", "installed", "builtin", [name],
                        "Arena tool"))
 
-    def _add_plugins(self, put) -> None:
+    def _load_plugins(self):
+        """Plugin objects without re-executing plugin code.
+
+        A pre-loaded registry is reused as-is. Otherwise the
+        registry is loaded fresh, exactly as any standalone
+        reader loads it. A stub without load_all yields nothing.
+        """
+        reg = self.plugins_registry
+        if reg is not None:
+            loaded = getattr(reg, "plugins", None)
+            if isinstance(loaded, dict) and loaded:
+                return list(loaded.values())
+            loader = getattr(reg, "load_all", None)
+            if callable(loader):
+                try:
+                    return loader()
+                except Exception:
+                    return []
+            return []
         try:
             from .plugins import PluginRegistry
-            registry = PluginRegistry(self.home)
-            plugins = registry.load_all()
+            return PluginRegistry(self.home).load_all()
         except Exception:
-            return
+            return []
+
+    def _add_plugins(self, put) -> None:
+        plugins = self._load_plugins()
         for plugin in plugins:
             tools = [str(t.get("name", "")) for t in plugin.tools]
             put(_entry(f"plugin:{plugin.name}", plugin.name, "plugin",

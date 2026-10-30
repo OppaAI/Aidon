@@ -65,6 +65,30 @@ def _by_id(hub):
     return {e["id"]: e for e in hub.index()}
 
 
+def test_preloaded_registry_is_reused_without_reimport(tmp_path):
+    plug = tmp_path / "plugins" / "demo"
+    plug.mkdir(parents=True)
+    (plug / "plugin.json").write_text(json.dumps({
+        "name": "demo", "version": "1", "description": "Demo plugin",
+        "tools": [{"name": "demo_tool", "module": "demo_mod.py",
+                   "function": "demo_fn"}],
+        "skills": []}))
+    (plug / "demo_mod.py").write_text(
+        "import os\n"
+        "open(os.path.join(os.path.dirname(__file__), "
+        "'imports.txt'), 'a').write('x')\n"
+        "def demo_fn(args):\n    return 'ok'\n")
+    from src.capabilities.plugins import PluginRegistry
+    registry = PluginRegistry(tmp_path)
+    registry.load_all()
+    marker = plug / "imports.txt"
+    assert marker.read_text() == "x"
+    hub = CapabilityHub(tmp_path, plugins=registry)
+    assert hub.get("plugin:demo") is not None
+    assert marker.read_text() == "x", \
+        "the hub must reuse the loaded registry, not import again"
+
+
 def test_builtin_tools_present(home):
     entry = _by_id(CapabilityHub(home)).get("tool:write")
     assert entry["lifecycle"] == "builtin"

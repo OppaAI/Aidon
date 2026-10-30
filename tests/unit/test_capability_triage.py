@@ -28,16 +28,47 @@ def _inventory():
 def test_inventory_reads_tools_skills_and_mcp_file(tmp_path):
     (tmp_path / "mcp_servers.json").write_text(
         json.dumps({"notion": {}, "todoist": {}}))
+    plug = tmp_path / "plugins" / "demo"
+    plug.mkdir(parents=True)
+    (plug / "plugin.json").write_text(json.dumps({
+        "name": "demo", "version": "1", "description": "Demo plugin",
+        "tools": [{"name": "edit_image", "module": "demo_mod.py",
+                   "function": "demo_fn"}],
+        "skills": ["pdf.md"]}))
+    (plug / "demo_mod.py").write_text(
+        "def demo_fn(args):\n    return 'ok'\n")
+    (plug / "pdf.md").write_text("# PDF skill\nmake pdfs with text\n")
+    from src.capabilities.plugins import PluginRegistry
+    registry = PluginRegistry(tmp_path)
+    registry.load_all()
     tools = SimpleNamespace(names=lambda: ["write", "read"])
-    plugins = SimpleNamespace(
-        tool_names=lambda: ["edit_image"],
-        skill_texts=lambda: {"pdf": "make pdfs with text"})
-    inv = build_inventory(tmp_path, tools, plugins, {"tts_speak": None})
+    inv = build_inventory(tmp_path, tools, registry, {"tts_speak": None})
     assert inv["tools"] == ["edit_image", "read", "tts_speak", "write"]
-    assert inv["skills"] == [{"name": "pdf", "description": "make pdfs with text"}]
+    assert inv["skills"] == [{"name": "demo/pdf.md",
+                              "description": "Skill bundled with plugin demo"}]
     assert inv["mcp_servers"] == ["notion", "todoist"]
     text = inventory_text(inv)
     assert "edit_image" in text and "notion" in text
+
+
+def test_inventory_sees_registry_mcp_and_filters_dead_entries(tmp_path):
+    from src.capabilities.capability_hub import CapabilityHub
+    from src.capabilities.capability_registry import CapabilityRegistry
+    (tmp_path / "mcp_servers.json").write_text(json.dumps({
+        "down-server": {"transport": "stdio", "command": "down-mcp"}}))
+    reg = CapabilityRegistry(tmp_path)
+    evidence = [{"passed": True, "test": "connect and list tools"}]
+    reg.register("reg-server", "mcp",
+                 {"transport": "http", "url": "https://example.invalid/mcp",
+                  "tools": ["fetch_page"]}, evidence)
+    reg.register("old-server", "mcp",
+                 {"transport": "stdio", "command": "old-mcp",
+                  "tools": ["old_tool"]}, evidence)
+    reg.retire("old-server", "replaced by reg-server")
+    CapabilityHub(tmp_path).record_health("mcp:down-server", "unavailable")
+    tools = SimpleNamespace(names=lambda: ["write"])
+    inv = build_inventory(tmp_path, tools, None, None)
+    assert inv["mcp_servers"] == ["reg-server"]
 
 
 def test_inventory_tolerates_missing_sources(tmp_path):

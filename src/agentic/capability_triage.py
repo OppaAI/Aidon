@@ -9,8 +9,21 @@ failing after three attempts, and a fillable gap reaches the
 planner as context instead of an invented tool name.
 
 Division of labour, deliberately:
-- Inventory is code: tool names, skill names, and approved MCP
-  server names, read from the live sources (never invented).
+- Inventory is the hub: tool names, skill names, and
+  MCP server names, read from the one capability index
+  (never invented). The run's own tool registries still
+  contribute their executable tool names, because a tool
+  registered at runtime but absent from the static
+  catalog must still count; the hub contributes skills,
+  MCP servers, and plugin tools.
+- Triage reads the hub filtered: retired capabilities
+  never count as coverage, and a capability whose health
+  is positively unavailable does not count either.
+  Unknown health still counts: no check has reported
+  anything, and an unchecked capability must not vanish
+  from triage before the first health check runs.
+  Retired registry servers and unavailable servers are
+  the two cases the old assembly could not see.
 - Gap classification is Clef: one choice question over
   covered / need_skill / need_mcp / need_plugin / blocked.
   Clef cannot NAME the missing capability (it returns only
@@ -26,9 +39,6 @@ Division of labour, deliberately:
 """
 
 from __future__ import annotations
-
-import json
-from pathlib import Path
 
 MIN_CONFIDENCE = 0.6
 BLOCK_CONFIDENCE = 0.8
@@ -70,45 +80,54 @@ _NOTES = {
 }
 
 
-def _read_mcp_servers(home) -> list[str]:
-    try:
-        data = json.loads((Path(home) / "mcp_servers.json").read_text())
-    except Exception:
-        return []
-    if isinstance(data, dict):
-        return [str(k) for k in data]
-    if isinstance(data, list):
-        return [str(item.get("name", item)) if isinstance(item, dict)
-                else str(item) for item in data]
-    return []
-
-
 def build_inventory(home, tools, plugins, extra_tools) -> dict:
-    """Live inventory rows. Every source is guarded: a missing
-    source gives an empty section, never a placeholder."""
-    names: list[str] = []
+    """Inventory from the capability hub, plus the run's own
+    executable tool names. The shape is unchanged
+    ({tools, skills, mcp_servers}), so callers and the
+    Clef prompt keep working; the source changed.
+
+    Tools are the union of the runtime registries and the
+    hub's plugin tools: the runtime is ground truth for
+    what this run can execute. Skills and MCP servers come
+    from the hub alone, filtered to live, usable entries:
+    retired capabilities and positively-unavailable ones
+    never count as coverage. Registry MCP servers, which
+    the old file-only read could not see at all, now
+    appear. A hub failure propagates: the loop's
+    triage-skipped handler proceeds as covered, which is
+    safer than triaging over a silently empty inventory
+    that could wrongly block the run."""
+    names: set[str] = set()
     try:
-        names.extend(str(n) for n in tools.names())
+        names.update(str(n) for n in tools.names())
     except Exception:
         pass
     try:
-        names.extend(str(n) for n in plugins.tool_names())
+        names.update(str(n) for n in plugins.tool_names())
     except Exception:
         pass
     try:
-        names.extend(str(n) for n in (extra_tools or {}))
+        names.update(str(n) for n in (extra_tools or {}))
     except Exception:
         pass
+    from ..capabilities.capability_hub import CapabilityHub
     skills: list[dict] = []
-    try:
-        for name, text in (plugins.skill_texts() or {}).items():
-            skills.append({"name": str(name),
-                           "description": str(text or "")[:160]})
-    except Exception:
-        pass
-    return {"tools": sorted(set(names)),
+    mcp: set[str] = set()
+    for entry in CapabilityHub(home, plugins=plugins).index():
+        if entry["lifecycle"] == "retired":
+            continue
+        if entry["health"] == "unavailable":
+            continue
+        if entry["kind"] == "skill":
+            skills.append({"name": entry["name"],
+                           "description": entry["description"][:160]})
+        elif entry["kind"] == "mcp":
+            mcp.add(entry["name"])
+        elif entry["kind"] == "plugin":
+            names.update(entry["tools"])
+    return {"tools": sorted(names),
             "skills": skills,
-            "mcp_servers": _read_mcp_servers(home)}
+            "mcp_servers": sorted(mcp)}
 
 
 def inventory_text(inventory: dict) -> str:
