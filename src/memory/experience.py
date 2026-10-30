@@ -295,15 +295,19 @@ def render_experience_skill(experience: Experience) -> str:
 
 def promote_experience_to_skill(home, experience: Experience,
                                 name: str | None = None):
-    """Write an experience out as a discoverable skill file.
+    """Write an experience out as a skill draft file.
 
-    The file lands in <home>/skills/<name>.md, where the
-    planner's skill discovery already reads it, so the next
-    run can reuse the workflow. An existing file is never
-    overwritten silently: the owner edits or deletes a
-    hand-tuned skill by hand, and a promotion must not
-    clobber it. Promotion is an explicit owner action (the
-    skill-library CLI), not something a run does to itself.
+    The file lands in <home>/skills/<name>.md as a draft.
+    It does not enter run context on its own: the plan
+    prompt carries trusted skills only, so the draft
+    becomes usable once it is added to the skill library
+    and trusted with owner approval, which publishes it
+    through the library's discovery sync. An existing
+    file is never overwritten silently: the owner edits
+    or deletes a hand-tuned skill by hand, and a
+    promotion must not clobber it. Promotion is an
+    explicit owner action (the skill-library CLI), not
+    something a run does to itself.
     """
     from pathlib import Path as _Path
     skills_dir = _Path(home) / "skills"

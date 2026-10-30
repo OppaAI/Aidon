@@ -19,6 +19,14 @@ Division of labour, deliberately:
 - Triage reads the hub filtered: retired capabilities
   never count as coverage, and a capability whose health
   is positively unavailable does not count either.
+  Skills go further: only trusted skills count, because
+  triage coverage must not exceed what the planner can
+  actually see — the plan prompt carries trusted skills
+  only, so a goal "covered" by a candidate or validated
+  skill would be a gap the planner cannot fill. MCP
+  servers keep the looser rule: a validated server can
+  still be connected with per-use approval, so it may
+  count as coverage where a skill may not.
   Unknown health still counts: no check has reported
   anything, and an unchecked capability must not vanish
   from triage before the first health check runs.
@@ -119,6 +127,8 @@ def build_inventory(home, tools, plugins, extra_tools) -> dict:
         if entry["health"] == "unavailable":
             continue
         if entry["kind"] == "skill":
+            if entry["lifecycle"] != "trusted":
+                continue
             skills.append({"name": entry["name"],
                            "description": entry["description"][:160]})
         elif entry["kind"] == "mcp":

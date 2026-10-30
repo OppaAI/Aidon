@@ -291,6 +291,21 @@ class PluginRegistry:
         return sorted(names)
 
     def skill_texts(self) -> dict[str, str]:
+        """Skill texts for run context: plugin skills plus
+        standalone skills the library trusts.
+
+        Plugin skills are trusted by adoption (owner
+        approval at adopt time). A standalone
+        skills/*.md file enters run context only when a
+        library skill with the same sanitized name is
+        trusted: trust() publishes the Markdown, retire
+        removes it, and hand-placed files without a
+        trusted library record are unvetted drafts. They
+        stay on disk and in the library list for
+        development and approval, but never in a plan
+        prompt, a skill expansion, or a recovery note.
+        A library read failure fails closed: standalone
+        files drop out, plugin skills are unaffected."""
         texts: dict[str, str] = {}
         for plugin in self.plugins.values():
             for skill in plugin.skills:
@@ -298,9 +313,23 @@ class PluginRegistry:
                 texts[f"{plugin.name}/{skill}"] = path.read_text(encoding="utf-8")
         # Standalone skills in <home>/skills/, Markdown only.
         if self.skills_dir.exists():
+            trusted = self._trusted_skill_stems()
             for path in sorted(self.skills_dir.glob("*.md")):
-                texts[path.name] = path.read_text(encoding="utf-8")
+                if path.stem in trusted:
+                    texts[path.name] = path.read_text(encoding="utf-8")
         return texts
+
+    def _trusted_skill_stems(self) -> set[str]:
+        """Sanitized stems of trusted library skills, matching
+        the filename rule trust() publishes with."""
+        try:
+            import re as _re
+            from .skill_library import SkillLibrary
+            return {_re.sub(r"[^A-Za-z0-9_.-]+", "-", skill.name)
+                    for skill in SkillLibrary(self.home).list(
+                        states=("trusted",))}
+        except Exception:
+            return set()
 
     def call(self, name: str, args: dict) -> str:
         for plugin in self.plugins.values():

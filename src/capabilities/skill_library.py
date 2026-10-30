@@ -488,14 +488,21 @@ class SkillLibrary:
         return missing
 
 
-    def relevant(self, goal: str, limit: int = 5) -> list[Skill]:
+    def relevant(self, goal: str, limit: int = 5,
+                 states: tuple = ("trusted",)) -> list[Skill]:
         """Skills for a goal: trusted first, then validated, then
         candidate; retired never returned. Within a state, more
         keyword overlap with the goal ranks higher.
+
+        Ordinary recall returns trusted skills only: a
+        validated skill is staged for approval, a candidate
+        is unvetted. Pass states explicitly for development
+        and approval views, where untrusted skills must
+        stay visible.
         """
         goal_words = set(re.findall(r"[a-z0-9]+", (goal or "").lower()))
         scored: list[tuple[int, int, Skill]] = []
-        for skill in self.list():
+        for skill in self.list(states=states):
             haystack = " ".join([skill.name, skill.description] + skill.capabilities).lower()
             words = set(re.findall(r"[a-z0-9]+", haystack))
             overlap = len(goal_words & words)

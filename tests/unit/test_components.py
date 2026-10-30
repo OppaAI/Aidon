@@ -157,14 +157,17 @@ def test_run_tests_reports_missing_dependencies(tmp_path):
     assert library.run_tests("hints", FakeSandbox())["passed"] is True
 
 
-def test_relevant_trusted_first_then_validated(tmp_path):
+def test_relevant_trusted_only_by_default(tmp_path):
     library = SkillLibrary(tmp_path)
     library.add(_skill("cand", description="write a csv report"))
     library.add(_skill("val", description="write a csv report"))
     library.promote("val", {"passed": True})
     library.add(_skill("trust", description="write a csv report"))
     library.trust("trust", approved=True)
-    names = [skill.name for skill in library.relevant("csv report", limit=3)]
+    assert [skill.name for skill in library.relevant("csv report", limit=3)] == ["trust"]
+    names = [skill.name for skill in library.relevant(
+        "csv report", limit=3,
+        states=("trusted", "validated", "candidate"))]
     assert names == ["trust", "val", "cand"]
 
 

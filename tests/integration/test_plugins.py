@@ -53,6 +53,31 @@ def test_scan_blocks_eval_and_secret(tmp_path):
         f"{f.path} {f.type} {f.message}" for f in findings)
 
 
+def test_skill_texts_only_trusted_standalone_skills(tmp_path):
+    home = tmp_path / "home"
+    registry = PluginRegistry(home)
+    directory = _plugin_dir(tmp_path, skills=["skill.md"])
+    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: True)
+    assert ok is True
+    from src.capabilities.skill_library import Skill, SkillLibrary
+    lib = SkillLibrary(home)
+    lib.add(Skill(name="trusted-one", description="Trusted."))
+    lib.trust("trusted-one", approved=True)
+    lib.add(Skill(name="validated-one", description="Staged."))
+    lib.promote("validated-one", {"passed": True})
+    (home / "skills" / "validated-one.md").write_text(
+        "# Staged draft\n", encoding="utf-8")
+    (home / "skills" / "hand.md").write_text(
+        "# Hand placed\n", encoding="utf-8")
+    registry2 = PluginRegistry(home)
+    registry2.load_all()
+    texts = registry2.skill_texts()
+    assert "upper/skill.md" in texts, "plugin skills are trusted by adoption"
+    assert "trusted-one.md" in texts
+    assert "validated-one.md" not in texts
+    assert "hand.md" not in texts
+
+
 def test_adopt_rejects_blocking_even_if_approved(tmp_path):
     home = tmp_path / "home"
     registry = PluginRegistry(home)

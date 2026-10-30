@@ -51,6 +51,20 @@ def test_inventory_reads_tools_skills_and_mcp_file(tmp_path):
     assert "edit_image" in text and "notion" in text
 
 
+def test_inventory_skills_are_trusted_only(tmp_path):
+    from src.capabilities.skill_library import Skill, SkillLibrary
+    lib = SkillLibrary(tmp_path)
+    lib.add(Skill(name="trusted-skill", description="Trusted."))
+    lib.trust("trusted-skill", approved=True)
+    lib.add(Skill(name="validated-skill", description="Staged."))
+    lib.promote("validated-skill", {"passed": True})
+    lib.add(Skill(name="candidate-skill", description="Draft."))
+    (tmp_path / "skills" / "hand.md").write_text("# Hand\n")
+    tools = SimpleNamespace(names=lambda: ["write"])
+    inv = build_inventory(tmp_path, tools, None, None)
+    assert [s["name"] for s in inv["skills"]] == ["trusted-skill"]
+
+
 def test_inventory_sees_registry_mcp_and_filters_dead_entries(tmp_path):
     from src.capabilities.capability_hub import CapabilityHub
     from src.capabilities.capability_registry import CapabilityRegistry

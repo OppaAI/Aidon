@@ -240,13 +240,17 @@ def test_merge_still_works_for_compatible_workflows(tmp_path):
 
 
 def test_experience_promotes_to_discoverable_skill(tmp_path):
-    """A promoted workflow lands where the planner discovers skills.
+    """A promoted workflow lands as a skill draft file.
 
-    The planner reads <home>/skills/*.md files, so promotion
-    writes that file — goal, steps, and lesson included — and
-    the plugin registry's skill texts pick it up.
+    The file exists with the workflow text, but it does
+    not enter run context on its own: the plan prompt
+    carries trusted skills only. Adding it to the library
+    and trusting it publishes it into discovery, and
+    only then do the plugin registry's skill texts pick
+    it up.
     """
     from src.capabilities.plugins import PluginRegistry
+    from src.capabilities.skill_library import Skill, SkillLibrary
     from src.memory.experience import (
         promote_experience_to_skill, render_experience_skill)
     memory = _memory(tmp_path)
@@ -258,7 +262,12 @@ def test_experience_promotes_to_discoverable_skill(tmp_path):
     assert path.exists()
     assert path.read_text(encoding="utf-8") == text
     texts = PluginRegistry(tmp_path / "home").skill_texts()
-    assert any("Write a snake game" in value for value in texts.values())
+    assert not any("Write a snake game" in value for value in texts.values())
+    lib = SkillLibrary(tmp_path / "home")
+    lib.add(Skill(name=path.stem, description="Snake game workflow"))
+    lib.trust(path.stem, approved=True)
+    texts = PluginRegistry(tmp_path / "home").skill_texts()
+    assert path.name in texts
     try:
         promote_experience_to_skill(tmp_path / "home", exp)
     except FileExistsError:
