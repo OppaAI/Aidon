@@ -1559,7 +1559,8 @@ def main(argv: list[str] | None = None) -> int:
     repl_parser = sub.add_parser("repl", help="Full REPL, Aidon repl, /help, /history, /quit, or a goal")
     learn_parser = sub.add_parser("learn", help="Idle learn cycle: re-test candidate skills, promote passers, consolidate validated duplicates")
     skill_lib_parser = sub.add_parser("skill-library", help="Full skill library: list, show, promote, trust, retire, rollback, versions, from-experience")
-    skill_lib_parser.add_argument("action", choices=["list", "show", "promote", "trust", "retire", "rollback", "versions", "from-experience"], help="list = list skills, show = show one, promote/trust/retire = lifecycle, rollback = restore a version, versions = version history, from-experience = promote a successful run's workflow to a discoverable skill file")
+    skill_lib_parser.add_argument("action", choices=["list", "show", "promote", "trust", "retire", "rollback", "versions", "from-experience", "import"], help="list = list skills, show = show one, promote/trust/retire = lifecycle, rollback = restore a version, versions = version history, from-experience = promote a successful run's workflow to a discoverable skill file, import = add a Markdown skill file as a candidate")
+    skill_lib_parser.add_argument("--file", default="", help="Skill file for import")
     skill_lib_parser.add_argument("name", nargs="?", default="", help="Skill name")
     skill_lib_parser.add_argument("--version", type=int, default=0, help="Version for rollback")
     conversations_parser = sub.add_parser("conversations", help="SQLite conversation store: list, history, record, delete")
@@ -1758,7 +1759,17 @@ def main(argv: list[str] | None = None) -> int:
         print(result)
         return 0 if result.get("ok") else 2
     if args.command == "skill-library":
-        from ..capabilities.skill_library import SkillLibrary
+        from ..capabilities.skill_library import SkillLibrary, import_skill_file
+        if args.action == "import":
+            if not args.file:
+                print("skill-library import needs --file"); return 2
+            try:
+                skill = import_skill_file(config.home, args.file,
+                                          args.name or None)
+            except (ValueError, PermissionError) as exc:
+                print(f"import failed: {exc}"); return 1
+            print(f"Imported skill {skill.name} as candidate "
+                  f"from {args.file}"); return 0
         lib = SkillLibrary(config.home)
         if args.action == "list":
             for skill in lib.list():

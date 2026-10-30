@@ -96,6 +96,58 @@ def check_code_sources(sources: list[dict]) -> None:
             raise PermissionError(f"code source {name!r} blocked: {reason}")
 
 
+def import_skill_file(home, source_path, name: str | None = None) -> Skill:
+    """Import a Markdown skill file as a library candidate.
+
+    The file is copied to <home>/skills/<sanitized-name>.md,
+    so its stem always matches the trusted-name gate the
+    planner reads (skill_texts only admits files whose stem
+    is a trusted library name). The description is the
+    first non-heading, non-empty line. A skill with no
+    borrowed code carries empty code_sources, which passes
+    the license gate.
+
+    Re-importing an existing non-retired name is refused:
+    retire it first, so trusted content is never silently
+    replaced by a new file. On an add failure the copied
+    file is removed again, so a failed import leaves no
+    orphan discovery file behind.
+    """
+    import re as _re
+    source = Path(source_path)
+    if not source.is_file():
+        raise ValueError(f"skill file not found: {source_path}")
+    text = source.read_text(encoding="utf-8")
+    raw_name = (name or source.stem).strip()
+    if not raw_name:
+        raise ValueError("skill name is required")
+    clean = _re.sub(r"[^A-Za-z0-9_.-]+", "-", raw_name)
+    lib = SkillLibrary(home)
+    existing = lib.get(clean)
+    if existing is not None and existing.state != "retired":
+        raise ValueError(
+            f"skill {clean!r} already exists ({existing.state}); "
+            "retire it first to re-import")
+    description = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            description = stripped[:200]
+            break
+    skills_dir = Path(home) / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    target = skills_dir / f"{clean}.md"
+    target.write_text(text, encoding="utf-8")
+    try:
+        return lib.add(Skill(name=clean, description=description))
+    except Exception:
+        try:
+            target.unlink()
+        except OSError:
+            pass
+        raise
+
+
 def is_trivial_test(cmd: str) -> bool:
     """True when a test command cannot fail for a broken skill.
 
@@ -347,6 +399,11 @@ class SkillLibrary:
         discovery directory; retiring one removes it again.
         Only trusted skills are published — candidates and
         validated skills stay unvetted and undiscovered.
+
+        A hand-written procedure file is never overwritten:
+        trust publishes the metadata stub only when no file
+        exists yet. Overwriting would destroy the procedure
+        the trust was meant to approve.
         """
         import re as _re
         skills_dir = self.home / "skills"
@@ -354,7 +411,8 @@ class SkillLibrary:
         path = skills_dir / filename
         if skill.state == "trusted":
             skills_dir.mkdir(parents=True, exist_ok=True)
-            path.write_text(skill.to_markdown(), encoding="utf-8")
+            if not path.exists():
+                path.write_text(skill.to_markdown(), encoding="utf-8")
         elif skill.state == "retired":
             try:
                 path.unlink()
