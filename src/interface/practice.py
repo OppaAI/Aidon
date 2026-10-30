@@ -541,7 +541,7 @@ def window_end(schedule: dict, day: datetime) -> datetime:
 
 
 def load_spec(home: Path, name: str) -> dict | None:
-    """A frozen interview spec by project name, None when absent."""
+    """A frozen interview spec by chat name, None when absent."""
     if not name:
         return None
     path = Path(home) / "specs" / (name if name.endswith(".json") else name + ".json")

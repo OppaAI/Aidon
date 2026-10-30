@@ -2,7 +2,7 @@
 
 WebUI, built now, after triggers, after v1 and MCP:
 - Chat thread, in the browser, at /, with a left
-  sidebar for projects, history, and library, and a
+  sidebar for history and library, and a
   chat box that sends a message to /api/chat.
 - Approval cards, in the UI, not only in the CLI.
   When the loop asks for approval, a WebUIGate creates
@@ -51,8 +51,7 @@ Messaging, WhatsApp and Slack, both two-way, no Telegram:
 
 Server, stdlib only, localhost only:
 The server binds 127.0.0.1, never 0.0.0.0, and serves
-only the routes above, plus /api/library and
-/api/projects. It does not serve the Aidon home,
+only the routes above, plus /api/library. It does not serve the Aidon home,
 it does not serve .env, it does not serve keys.
 A real key is never in a response, only a hash prefix.
 """
@@ -233,7 +232,6 @@ CHAT_HTML = """<!doctype html>
 <p id="mic-status"></p>
 </div>
 <div id="sidebar">
-<h2>Projects</h2><div id="projects"></div>
 <h2>Library</h2><a href="/library">Library tab</a>
 <h2>Settings</h2><a href="/settings">Settings and keys</a>
 <h2>Workflows</h2><a href="/dag">DAG editor</a> <a href="/factory">Factory</a> <a href="/replay">Replay</a> <a href="/avatar-vrm">Open VRM avatar</a> <a href="/capabilities">Capabilities</a> <a href="/memory">Memory</a> <a href="/knowledge">Knowledge</a> <a href="/reports">Reports</a>
@@ -993,16 +991,16 @@ class WebUIServer:
         return {"grants": grants, "kinds": KINDS, "help": HELP_TEXT}
 
     def handle_preapproval_grant(self, body: dict) -> tuple[int, dict]:
-        """Grant from the WebUI form: project, kind (name or number), hours."""
+        """Grant from the WebUI form: conversation, kind (name or number), hours."""
         import time as _time
 
         from .preapproval import (DEFAULT_HOURS, IRREVERSIBLE, KIND_NAMES,
                                   MAX_HOURS, grantable_kind, kind_from_token)
-        spec_id = str(body.get("spec_id") or body.get("project")
-                      or "default").strip()
+        spec_id = str(body.get("spec_id") or body.get("conversation_id")
+                      or "").strip()
         kind = kind_from_token(str(body.get("kind", "")))
         if not spec_id:
-            return 400, {"ok": False, "error": "project id is required"}
+            return 400, {"ok": False, "error": "conversation id is required"}
         if kind is None:
             return 400, {"ok": False, "error": "choose a kind, by number or name"}
         if kind in IRREVERSIBLE:
@@ -1032,7 +1030,7 @@ class WebUIServer:
         from .preapproval import kind_from_token
         spec_id = str(spec_id or "").strip()
         if not spec_id:
-            return 400, {"ok": False, "error": "project id is required"}
+            return 400, {"ok": False, "error": "conversation id is required"}
         resolved = kind_from_token(kind) if kind else None
         if kind and resolved is None:
             return 400, {"ok": False, "error": f"unknown kind {kind!r}"}
@@ -1050,57 +1048,6 @@ class WebUIServer:
                 out.append({"name": path.name, "path": str(path.relative_to(library_dir)),
                             "size": path.stat().st_size})
         return out
-
-    def _projects(self) -> list[str]:
-        if self.memory is None:
-            return []
-        try:
-            return self.memory.list_projects()
-        except Exception:
-            return []
-
-    def _project_records(self) -> list[dict]:
-        """Return durable projects, including empty newly-created ones."""
-        records = []
-        seen = set()
-        try:
-            for item in self._conversations_db().list_projects():
-                record = {"id": str(item["id"]),
-                          "name": str(item.get("name") or item["id"]),
-                          "conversation_count": 0}
-                records.append(record)
-                seen.add(record["id"])
-        except Exception:
-            pass
-        try:
-            memory_projects = self._projects()
-        except Exception:
-            memory_projects = []
-        for project_id in memory_projects:
-            project_id = str(project_id)
-            if project_id and project_id not in seen:
-                records.append({"id": project_id, "name": project_id,
-                                "conversation_count": 0})
-                seen.add(project_id)
-        try:
-            db = self._conversations_db()
-            for item in records:
-                item["conversation_count"] = len(
-                    db.list_conversations(item["id"]))
-        except Exception:
-            pass
-        return records
-
-    def handle_project_create(self, body: dict) -> dict:
-        name = " ".join(str(body.get("name", "")).split()).strip()
-        if not name:
-            return {"ok": False, "error": "project name is required"}
-        if len(name) > 120:
-            return {"ok": False, "error": "project name is too long"}
-        try:
-            return self._conversations_db().create_project(name)
-        except Exception as exc:
-            return {"ok": False, "error": f"could not create project: {exc}"}
 
     def _avatar_path(self) -> Path | None:
         import os
@@ -1132,12 +1079,12 @@ class WebUIServer:
         if not message:
             return {"reply": "Usage: /web <question>"}
         message, delivery = extract_result_delivery(message)
-        # A plain chat is global/unassigned unless the user explicitly
-        # selected a project. Do not silently put it in "default".
-        project_id = str(body.get("project_id", "") or "")
+        # A plain chat is global/unassigned unless a conversation id
+        # is supplied with it.
+        conversation_id = str(body.get("conversation_id", "") or "")
         replies: list[str] = []
         event = TriggerEvent(source="webui", kind="chat", goal=message,
-                             project_id=project_id,
+                             conversation_id=conversation_id,
                              payload={**({"result_delivery": delivery.__dict__}
                                          if delivery else {}),
                                       "force_web": force_web},
@@ -1203,8 +1150,7 @@ class WebUIServer:
             waiter = self._question_waiters.get(run_id)
             return waiter["question"] if waiter else None
 
-    def _mirror_command(self, conversation_id: str, goal: str,
-                        project_id: str) -> dict | None:
+    def _mirror_command(self, conversation_id: str, goal: str) -> dict | None:
         """Handle a /mirror command in WebUI chat; None when not one."""
         from .surfaces import (link_slack, unlink_slack, set_whatsapp_mirror,
                                mirror_status_text, parse_mirror_command)
@@ -1235,14 +1181,14 @@ class WebUIServer:
             pass
         if self.memory is not None:
             try:
-                self.memory.record_stm("assistant", text, project_id=project_id,
+                self.memory.record_stm("assistant", text,
                                        conversation_id=conversation_id)
             except Exception:
                 pass
         from .run_control import new_run_id
         run_id = new_run_id()
         self._web_runs[run_id] = {"run_id": run_id, "goal": goal,
-                                  "project_id": project_id, "status": "done",
+                                  "conversation_id": conversation_id, "status": "done",
                                   "events": [{"kind": "aidon-final", "text": text,
                                               "stream_id": ""}], "trace": []}
         return {"run_id": run_id, "conversation_id": conversation_id, "goal": goal}
@@ -1258,15 +1204,12 @@ class WebUIServer:
             return {"error": "a web question is required"}
         force_web = force_web or bool(body.get("force_web", False))
         goal, delivery = extract_result_delivery(goal)
-        # Keep ordinary chats outside projects. A project id is supplied
-        # only when the user selected one in the WebUI.
-        project_id = str(body.get("project_id", "") or "")
         conversation_id = str(body.get("conversation_id", "") or "")
         conversation_db = None
         try:
             conversation_db = self._conversations_db()
             if not conversation_id:
-                conversation_id = conversation_db.create_conversation(project_id)["id"]
+                conversation_id = conversation_db.create_conversation()["id"]
             conversation_db.record_exchange(conversation_id, "user", goal)
         except Exception:
             # A run must still work if the optional conversation store is
@@ -1277,7 +1220,6 @@ class WebUIServer:
                 self.memory.record_stm(
                     "user", goal,
                     attachments=body.get("image_paths") or [],
-                    project_id=project_id,
                     conversation_id=conversation_id,
                 )
             except Exception:
@@ -1291,7 +1233,7 @@ class WebUIServer:
         if answered_run is not None:
             return {"run_id": answered_run, "conversation_id": conversation_id,
                     "goal": goal}
-        mirror_response = self._mirror_command(conversation_id, goal, project_id)
+        mirror_response = self._mirror_command(conversation_id, goal)
         if mirror_response is not None:
             return mirror_response
         from .mode_stops import latest_mode_stop, load_mode_stop
@@ -1301,7 +1243,7 @@ class WebUIServer:
                                set_mode, think_enabled, toggle_research,
                                toggle_think)
         if goal.strip() == "/help":
-            return self._simple_command_response(conversation_id, goal, project_id,
+            return self._simple_command_response(conversation_id, goal,
                                                  HELP_TEXT)
         think_max = False
         think_cmd = parse_think_command(goal)
@@ -1309,7 +1251,7 @@ class WebUIServer:
             if think_cmd["action"] == "toggle":
                 state = toggle_think(self.home, conversation_id)
                 return self._simple_command_response(
-                    conversation_id, goal, project_id,
+                    conversation_id, goal,
                     f"Maximum thinking {'on' if state else 'off'} for this conversation.")
             goal = think_cmd["goal"]
             think_max = True
@@ -1320,7 +1262,7 @@ class WebUIServer:
             if research_cmd["action"] == "toggle":
                 state = toggle_research(self.home, conversation_id)
                 return self._simple_command_response(
-                    conversation_id, goal, project_id,
+                    conversation_id, goal,
                     f"Deep-research mode {'on' if state else 'off'} for this conversation.")
             goal = research_cmd["goal"]
             research_mode = True
@@ -1340,7 +1282,7 @@ class WebUIServer:
                     _mtext = "Execute mode on for this conversation — goals run directly."
                 else:
                     _mtext = f"{mode_cmd['mode'].capitalize()} mode on for this conversation."
-                return self._simple_command_response(conversation_id, goal, project_id, _mtext)
+                return self._simple_command_response(conversation_id, goal, _mtext)
             goal = mode_cmd["goal"]
             mode = mode_cmd["mode"]
         proceed_cmd = parse_proceed_command(goal)
@@ -1353,7 +1295,7 @@ class WebUIServer:
                     _ptext = f"No stopped run with id {proceed_cmd['stop_id']}."
                 else:
                     _ptext = "No stopped run to proceed with."
-                return self._simple_command_response(conversation_id, goal, project_id, _ptext)
+                return self._simple_command_response(conversation_id, goal, _ptext)
             goal = stop["goal"]
             mode = "execute"
             resume_stop_id = stop["stop_id"]
@@ -1365,8 +1307,8 @@ class WebUIServer:
             mode = mode_enabled(self.home, conversation_id) or "ask"
         run_id = new_run_id()
         if self.run_control is not None:
-            self.run_control.register(run_id, goal, project_id)
-        record = {"run_id": run_id, "goal": goal, "project_id": project_id,
+            self.run_control.register(run_id, goal, conversation_id)
+        record = {"run_id": run_id, "goal": goal, "conversation_id": conversation_id,
                   "status": "running", "events": [], "trace": []}
         self._web_runs[run_id] = record
         stream_state = {"text": "", "active": False}
@@ -1429,7 +1371,7 @@ class WebUIServer:
             if self.memory is not None:
                 try:
                     self.memory.record_stm(
-                        "assistant", str(text), project_id=project_id,
+                        "assistant", str(text),
                         conversation_id=conversation_id)
                 except Exception:
                     pass
@@ -1456,7 +1398,7 @@ class WebUIServer:
         if isinstance(resume_plan, dict):
             payload["resume_plan"] = resume_plan
         event = TriggerEvent(source="webui", kind="goal", goal=goal,
-                             project_id=project_id,
+                             conversation_id=conversation_id,
                              payload={**payload, "conversation_id": conversation_id},
                              reply=reply)
 
@@ -1715,7 +1657,7 @@ class WebUIServer:
             pass
 
     def _simple_command_response(self, conversation_id: str, goal: str,
-                               project_id: str, text: str) -> dict:
+                               text: str) -> dict:
         """Reply to a chat command without running a goal.
 
         Same shape as a mirror-command reply: the assistant text is
@@ -1728,14 +1670,14 @@ class WebUIServer:
             pass
         if self.memory is not None:
             try:
-                self.memory.record_stm("assistant", text, project_id=project_id,
+                self.memory.record_stm("assistant", text,
                                        conversation_id=conversation_id)
             except Exception:
                 pass
         from .run_control import new_run_id
         run_id = new_run_id()
         self._web_runs[run_id] = {"run_id": run_id, "goal": goal,
-                                  "project_id": project_id, "status": "done",
+                                  "conversation_id": conversation_id, "status": "done",
                                   "events": [{"kind": "aidon-final", "text": text,
                                               "stream_id": ""}], "trace": []}
         return {"run_id": run_id, "conversation_id": conversation_id, "goal": goal}
@@ -2073,13 +2015,6 @@ class WebUIServer:
             except json.JSONDecodeError:
                 continue
         return events
-
-    def projects_history(self) -> list[dict]:
-        trace_dir = self.home / "trace"
-        trace_count = len(list(trace_dir.glob("*.jsonl"))) \
-            if trace_dir.exists() else 0
-        return [{"project": project, "trace_files": trace_count}
-                for project in self._projects()]
 
     def settings_get(self) -> dict:
         path = self.home / "settings.json"
@@ -2510,103 +2445,6 @@ class WebUIServer:
             pass
         return {"ok": True, "key": env_key}
 
-    def handle_project_delete(self, project_id: str) -> dict:
-        """Delete a project: memory points, conversations, brief.
-
-        Returns ok True only when the project existed somewhere
-        (memory projects, the SQLite conversation store, legacy
-        JSON conversations, or a saved brief). An unknown project
-        returns ok False. With no memory attached, memory deletion
-        is skipped but conversations/briefs still delete, and ok
-        reflects whether anything was found.
-        """
-        project_id = str(project_id or "").strip()
-        if not project_id:
-            return {"ok": False, "error": "project_id is required"}
-        found = False
-        removed_memory = 0
-        if self.memory is not None:
-            try:
-                projects = self.memory.list_projects()
-            except Exception:
-                projects = []
-            if project_id in projects:
-                found = True
-            # Memory's project-deletion API is forget_project;
-            # store-level objects expose delete_by_project per
-            # collection instead. Use whichever is present.
-            try:
-                if hasattr(self.memory, "forget_project"):
-                    deleted = self.memory.forget_project(project_id) or {}
-                    removed_memory += int(sum(int(v) for v in deleted.values()))
-                elif hasattr(self.memory, "delete_by_project"):
-                    for collection in ("working", "episodic", "semantic", "experience", "knowledge"):
-                        removed_memory += int(self.memory.delete_by_project(collection, project_id) or 0)
-                elif hasattr(getattr(self.memory, "store", None), "delete_by_project"):
-                    for collection in ("working", "episodic", "semantic", "experience", "knowledge"):
-                        removed_memory += int(self.memory.store.delete_by_project(collection, project_id) or 0)
-            except Exception:
-                pass
-            if removed_memory:
-                found = True
-        removed_conversations = 0
-        db_path = self.home / "conversations.db"
-        if db_path.is_file():
-            try:
-                project_db = self._conversations_db()
-                if project_db.delete_project(project_id):
-                    found = True
-                import sqlite3
-                conn = sqlite3.connect(str(db_path), timeout=10.0)
-                try:
-                    rows = conn.execute(
-                        "SELECT id FROM conversations WHERE project_id = ?",
-                        (project_id,)).fetchall()
-                    ids = [row[0] for row in rows]
-                    if ids:
-                        found = True
-                        removed_conversations = len(ids)
-                        placeholders = ",".join("?" for _ in ids)
-                        conn.execute(
-                            f"DELETE FROM exchanges WHERE conversation_id IN ({placeholders})", ids)
-                        conn.execute(
-                            f"DELETE FROM attachments WHERE conversation_id IN ({placeholders})", ids)
-                        try:
-                            conn.execute(
-                                f"DELETE FROM summaries WHERE conversation_id IN ({placeholders})", ids)
-                        except Exception:
-                            pass
-                        conn.execute(
-                            "DELETE FROM conversations WHERE project_id = ?", (project_id,))
-                        conn.commit()
-                finally:
-                    conn.close()
-            except Exception:
-                pass
-        for path in sorted((self.home / "conversations").glob("*.json")) if (self.home / "conversations").is_dir() else []:
-            try:
-                data = self._read_json_file(path)
-            except Exception:
-                data = None
-            if data is not None and str(data.get("project_id", "")) == project_id:
-                found = True
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
-        brief_path = self.home / "project_briefs" / f"{self._safe_name(project_id)}.json"
-        if brief_path.is_file():
-            found = True
-            try:
-                brief_path.unlink()
-            except OSError:
-                pass
-        if not found:
-            return {"ok": False, "error": f"unknown project: {project_id}"}
-        return {"ok": True, "project_id": project_id,
-                "removed_memory_points": removed_memory,
-                "removed_conversations": removed_conversations}
-
     def handle_memory_edit(self, collection: str, point_id: str, text: str) -> dict:
         """Edit a memory point's text, or record the edit if the
         point is not in the live store. Never silently dropped:
@@ -2864,7 +2702,7 @@ class WebUIServer:
     def handle_conversation_create(self, body: dict) -> dict:
         try:
             db = self._conversations_db()
-            record = db.create_conversation(str(body.get("project_id", "default")))
+            record = db.create_conversation()
             for turn in body.get("turns", []):
                 if isinstance(turn, dict):
                     db.record_exchange(record["id"], str(turn.get("role", "user")),
@@ -2877,7 +2715,6 @@ class WebUIServer:
             import uuid
             conversation_id = str(body.get("id", "")) or uuid.uuid4().hex[:12]
             record = {"id": conversation_id,
-                      "project_id": str(body.get("project_id", "default")),
                       "turns": list(body.get("turns", []))}
             self._write_json_file(
                 self._json_dir("conversations") / f"{self._safe_name(conversation_id)}.json",
@@ -2900,6 +2737,12 @@ class WebUIServer:
         try:
             db = self._conversations_db()
             if db.delete_conversation(conversation_id):
+                try:
+                    brief = self.home / "chat_briefs" / f"{self._safe_name(conversation_id)}.json"
+                    if brief.is_file():
+                        brief.unlink()
+                except Exception:
+                    pass
                 return {"ok": True}
         except Exception:
             pass
@@ -2907,6 +2750,12 @@ class WebUIServer:
         if not path.is_file():
             return {"ok": False}
         path.unlink()
+        try:
+            brief = self.home / "chat_briefs" / f"{self._safe_name(conversation_id)}.json"
+            if brief.is_file():
+                brief.unlink()
+        except Exception:
+            pass
         return {"ok": True}
 
     def handle_practice_list(self) -> dict:
@@ -2958,14 +2807,14 @@ class WebUIServer:
         return {"started": True, "name": schedule.get("name"),
                 "window_minutes": 60}
 
-    def handle_brief_get(self, project_id: str):
+    def handle_brief_get(self, conversation_id: str):
         return self._read_json_file(
-            self.home / "project_briefs" / f"{self._safe_name(project_id)}.json")
+            self.home / "chat_briefs" / f"{self._safe_name(conversation_id)}.json")
 
-    def handle_brief_save(self, project_id: str, body: dict) -> dict:
-        record = {"project_id": project_id, "brief": body.get("brief", body)}
+    def handle_brief_save(self, conversation_id: str, body: dict) -> dict:
+        record = {"conversation_id": conversation_id, "brief": body.get("brief", body)}
         self._write_json_file(
-            self._json_dir("project_briefs") / f"{self._safe_name(project_id)}.json",
+            self._json_dir("chat_briefs") / f"{self._safe_name(conversation_id)}.json",
             record)
         return record
 
@@ -3327,17 +3176,17 @@ class WebUIServer:
                 "content": path.read_text(encoding="utf-8")}
 
     def handle_missions_list(self) -> dict:
-        """Mission records stored under <home>/missions/<project>/
+        """Mission records stored under <home>/missions/<conversation>/
         mission.json. No missions is an empty list, never an error;
         a directory without a mission.json is skipped.
         """
         records = []
         missions_dir = self.home / "missions"
         if missions_dir.is_dir():
-            for project_dir in sorted(missions_dir.iterdir()):
-                if not project_dir.is_dir():
+            for mission_dir in sorted(missions_dir.iterdir()):
+                if not mission_dir.is_dir():
                     continue
-                data = self._read_json_file(project_dir / "mission.json")
+                data = self._read_json_file(mission_dir / "mission.json")
                 if data is not None:
                     records.append(data)
         return {"missions": records}
@@ -3676,15 +3525,12 @@ loadSettings();
                 elif parsed.path == "/api/library":
                     from ..memory.library import Library
                     query = parse_qs(parsed.query)
-                    project_id = query.get("project_id", [""])[0]
-                    items = Library(server.home).list_items(project_id)
+                    items = Library(server.home).list_items()
                     # Keep the legacy file listing visible for homes created
                     # before the library manifest was introduced.
                     if not items:
                         items = server._library_files()
                     self._send_json(200, {"files": items})
-                elif parsed.path == "/api/projects":
-                    self._send_json(200, {"projects": server._project_records()})
                 elif parsed.path == "/api/approvals":
                     # Auth already checked at the top of do_GET,
                     # the same is_authorized check every /api/
@@ -3757,8 +3603,6 @@ loadSettings();
                         self._send_json(200, {"run": run, "events": server.replay_events(run)})
                     else:
                         self._send_json(200, {"runs": server.replay_runs()})
-                elif parsed.path == "/api/projects/history":
-                    self._send_json(200, {"projects": server.projects_history()})
                 elif parsed.path == "/api/settings/catalog":
                     self._send_json(200, server.settings_catalog())
                 elif parsed.path == "/api/keys":
@@ -3832,13 +3676,13 @@ loadSettings();
                     self._send_json(200, server.handle_practice_list())
                 elif parsed.path == "/api/conversations":
                     self._send_json(200, server.handle_conversations_list())
+                elif parsed.path.startswith("/api/conversations/") and parsed.path.endswith("/brief"):
+                    conversation_id = parsed.path[len("/api/conversations/"):-len("/brief")].strip("/")
+                    data = server.handle_brief_get(conversation_id)
+                    self._send_json(200 if data is not None else 404, data or {"error": "not found"})
                 elif parsed.path.startswith("/api/conversations/"):
                     conv_id = parsed.path[len("/api/conversations/"):]
                     data = server.handle_conversation_get(conv_id)
-                    self._send_json(200 if data is not None else 404, data or {"error": "not found"})
-                elif parsed.path.startswith("/api/projects/") and parsed.path.endswith("/brief"):
-                    project_id = parsed.path[len("/api/projects/"):-len("/brief")].strip("/")
-                    data = server.handle_brief_get(project_id)
                     self._send_json(200 if data is not None else 404, data or {"error": "not found"})
                 elif parsed.path == "/api/ideas":
                     self._send_json(200, server.handle_ideas_list())
@@ -4005,9 +3849,6 @@ loadSettings();
                         else:
                             result = server.settings_set_env(key, body.get("value", ""))
                             self._send_json(200 if result.get("ok") else 400, result)
-                elif parsed.path == "/api/projects":
-                    result = server.handle_project_create(body)
-                    self._send_json(200 if result.get("id") else 400, result)
                 elif parsed.path == "/api/settings/env":
                     result = server.settings_set_env(str(body.get("key", "")), body.get("value", ""))
                     self._send_json(200 if result.get("ok") else 400, result)
@@ -4352,13 +4193,6 @@ loadSettings();
                     mission_id = parsed.path[len("/api/missions/"):].strip("/")
                     result = server.handle_mission_delete(mission_id)
                     self._send_json(200 if result["ok"] else 404, result)
-                elif parsed.path.startswith("/api/projects/"):
-                    project_id = parsed.path[len("/api/projects/"):].strip("/")
-                    if project_id and "/" not in project_id:
-                        result = server.handle_project_delete(project_id)
-                        self._send_json(200 if result["ok"] else 404, result)
-                    else:
-                        self._send_json(404, {"error": "not found"})
                 else:
                     self._send_json(404, {"error": "not found"})
 
@@ -4378,9 +4212,9 @@ loadSettings();
                     body = json.loads(raw) if raw else {}
                 except json.JSONDecodeError:
                     body = {}
-                if parsed.path.startswith("/api/projects/") and parsed.path.endswith("/brief"):
-                    project_id = parsed.path[len("/api/projects/"):-len("/brief")].strip("/")
-                    self._send_json(200, server.handle_brief_save(project_id, body))
+                if parsed.path.startswith("/api/conversations/") and parsed.path.endswith("/brief"):
+                    conversation_id = parsed.path[len("/api/conversations/"):-len("/brief")].strip("/")
+                    self._send_json(200, server.handle_brief_save(conversation_id, body))
                 else:
                     self._send_json(404, {"error": "not found"})
 

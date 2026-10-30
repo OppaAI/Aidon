@@ -86,7 +86,7 @@ def test_scheduler_loop_daily_report_nudges_autonomy(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     (home / "learned").mkdir()
-    (home / "learned" / "last_run.json").write_text('{"status": "done", "project_id": "dinner"}')
+    (home / "learned" / "last_run.json").write_text('{"status": "done", "conversation_id": "dinner"}')
     report = daily_report(home)
     assert "done" in report and "dinner" in report
 

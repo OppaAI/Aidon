@@ -1,9 +1,14 @@
 """Durable conversations in SQLite, separate from the JSON store.
 
 The JSON store in conversations.py is a plain transcript file. This
-module is the durable side: projects, conversations, numbered
+module is the durable side: conversations, numbered
 exchanges, attachments, ideas, and a rolling summary per
 conversation, all in one SQLite file under the Aidon home.
+
+The projects table and project_id columns below are legacy storage
+from the removed projects concept. They are kept so existing homes
+keep opening without a migration; no code reads or writes them
+for scoping anymore (new rows store an empty string).
 
 Exchange numbering is the part that needs care. Two writers (the
 WebUI and a messaging worker, for example) must never be handed
@@ -103,78 +108,30 @@ class ConversationStoreDB:
             )
             self._conn.commit()
 
-    # -- projects ------------------------------------------------------
-
-    def ensure_default_project(self) -> dict:
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT id, name, created_at FROM projects WHERE id = 'default'"
-            ).fetchone()
-            if row:
-                return dict(row)
-            self._conn.execute(
-                "INSERT OR IGNORE INTO projects (id, name, created_at)"
-                " VALUES ('default', 'default', ?)", (_now(),))
-            self._conn.commit()
-            return dict(self._conn.execute(
-                "SELECT id, name, created_at FROM projects WHERE id = 'default'"
-            ).fetchone())
-
-    def create_project(self, name: str) -> dict:
-        project_id = _new_id()
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)",
-                (project_id, name, _now()))
-            self._conn.commit()
-        return {"id": project_id, "name": name}
-
-    def list_projects(self) -> list[dict]:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT id, name, created_at FROM projects ORDER BY created_at"
-            ).fetchall()
-        return [dict(row) for row in rows]
-
-    def delete_project(self, project_id: str) -> bool:
-        with self._lock:
-            cur = self._conn.execute(
-                "DELETE FROM projects WHERE id = ?", (str(project_id),))
-            self._conn.commit()
-        return cur.rowcount > 0
-
     # -- conversations -------------------------------------------------
 
-    def create_conversation(self, project_id: str) -> dict:
+    def create_conversation(self) -> dict:
         conversation_id = _new_id()
         with self._lock:
             self._conn.execute(
                 "INSERT INTO conversations (id, project_id, created_at)"
-                " VALUES (?, ?, ?)", (conversation_id, project_id, _now()))
+                " VALUES (?, ?, ?)", (conversation_id, "", _now()))
             self._conn.commit()
-        return {"id": conversation_id, "project_id": project_id}
-
-    def list_conversations(self, project_id: str) -> list[dict]:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT id, project_id, created_at FROM conversations"
-                " WHERE project_id = ? ORDER BY created_at",
-                (project_id,)).fetchall()
-        return [dict(row) for row in rows]
+        return {"id": conversation_id}
 
     def list_all_conversations(self) -> list[dict]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, project_id, created_at FROM conversations"
+                "SELECT id, created_at FROM conversations"
                 " ORDER BY created_at").fetchall()
         return [dict(row) for row in rows]
 
-    def import_conversation(self, conversation_id: str, project_id: str,
+    def import_conversation(self, conversation_id: str,
                             turns: list | None = None) -> dict:
         with self._lock:
             self._conn.execute(
                 "INSERT OR IGNORE INTO conversations (id, project_id, created_at)"
-                " VALUES (?, ?, ?)", (conversation_id, project_id, _now()))
+                " VALUES (?, ?, ?)", (conversation_id, "", _now()))
             self._conn.commit()
         for turn in turns or []:
             if isinstance(turn, dict):
@@ -183,7 +140,7 @@ class ConversationStoreDB:
                                      str(turn.get("text", "")))
             else:
                 self.record_exchange(conversation_id, "user", str(turn))
-        return {"id": conversation_id, "project_id": project_id}
+        return {"id": conversation_id}
 
     def delete_conversation(self, conversation_id: str) -> bool:
         with self._lock:
@@ -286,14 +243,14 @@ class ConversationStoreDB:
         return {"id": attachment_id, "conversation_id": conversation_id,
                 "path": path, "kind": kind}
 
-    def add_idea(self, project_id: str, text: str) -> dict:
+    def add_idea(self, text: str) -> dict:
         idea_id = _new_id()
         with self._lock:
             self._conn.execute(
                 "INSERT INTO ideas (id, project_id, text, created_at)"
-                " VALUES (?, ?, ?, ?)", (idea_id, project_id, text, _now()))
+                " VALUES (?, ?, ?, ?)", (idea_id, "", text, _now()))
             self._conn.commit()
-        return {"id": idea_id, "project_id": project_id, "text": text}
+        return {"id": idea_id, "text": text}
 
 
     def close(self) -> None:

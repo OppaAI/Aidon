@@ -175,16 +175,16 @@ def test_loop_repair_keeps_passed_files(tmp_path):
     assert json.loads((tmp_path / "home" / "work" / "ledger.json").read_text())["lines"][0]["amount_cents"] == 999
 
 
-def test_loop_with_memory_records_project_and_experience(tmp_path):
+def test_loop_with_memory_records_chat_and_experience(tmp_path):
     memory = Memory(tmp_path / "home", embedder=HashEmbedder(), store=InMemoryStore())
     plan = {"steps": [{"tool": "write", "args": {"file": "out.md", "text": "hi"}, "deliverable": "out.md"}],
             "deliverables": ["out.md"], "criteria": []}
     runner = _runner(tmp_path, FakeClient(json.dumps(plan)), memory=memory)
-    runner.project_id = "dinner"
+    runner.conversation_id = "dinner"
     report = runner.run("Write out")
     assert report.status == "done"
     episodic = memory.list_points("episodic")
-    assert episodic and episodic[0].payload["project_id"] == "dinner"
+    assert episodic and episodic[0].payload["conversation_id"] == "dinner"
     assert memory.list_points("experience")
 
 

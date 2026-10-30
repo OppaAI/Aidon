@@ -11,13 +11,13 @@ Taxonomy, as defined for Aidon:
   in memory for context (last 20 by default) and recorded to
   the ``working`` collection for session recall. STM is never
   promoted to long-term memory on its own.
-- Episodic memory: project-specific memory. Interview
+- Episodic memory: chat-specific memory. Interview
   questions and answers, and specific information and data
-  within project tasks, scoped by project_id, in the
-  ``episodic`` collection. This is what a project remembers
+  within chat sessions, scoped by conversation_id, in the
+  ``episodic`` collection. This is what a chat remembers
   about itself, not what Aidon knows in general.
 - Semantic memory (LTM, global): facts, in the ``semantic``
-  collection. Not project-scoped, reusable across projects.
+  collection. Not chat-scoped, reusable across chats.
 - Procedural memory (LTM, global): skills, tools, and
   workflows, in the ``experience`` collection. See
   experience.py: an Experience is a successful run's workflow
@@ -62,17 +62,17 @@ to put that run's episodic memories into LTM. If the
 environment flag AIDON_AUTO_PROMOTE_TO_LTM is "1", promotion
 happens automatically, without asking. Otherwise the default
 is to ask, via a caller-supplied ask callback, and a "no"
-leaves episodic memories project-scoped only. Promotion
+leaves episodic memories chat-scoped only. Promotion
 copies a point to the semantic collection (for a fact) or
 to the experience collection (for a workflow), and marks
 the episodic point as promoted, it does not delete the
 episodic original, and it copies the payload, so a library
 link survives promotion.
 
-Projects and conversations, without a second store:
-Project and conversation ids are payload fields on working
-and episodic points. ``conversation_history`` and
-``list_projects`` read them back from Qdrant by filtered
+Chats, without a second store:
+Conversation ids are payload fields on working
+and episodic points. ``conversation_history``
+reads them back from Qdrant by filtered
 scroll, in created order, so a conversation survives a
 restart without SQLite. ``conversation_context`` returns
 the last exchanges for a conversation, plus a stored
@@ -258,8 +258,6 @@ class InMemoryStore:
         if point is not None:
             point.payload.update(payload)
 
-    def delete_by_project(self, collection: str, project_id: str) -> int:
-        return self.delete_where(collection, {"project_id": project_id})
 
     def delete_where(self, collection: str, filters: dict) -> int:
         doomed = [pid for pid, p in self._data[collection].items()
@@ -398,8 +396,6 @@ class SQLiteStore(InMemoryStore):
             self.delete(collection, point_id)
         return len(doomed)
 
-    def delete_by_project(self, collection: str, project_id: str) -> int:
-        return self.delete_where(collection, {"project_id": project_id})
 
     def list_points(self, collection: str, limit: int = 50) -> list[Point]:
         return self._rows(collection, limit)
@@ -623,8 +619,6 @@ class QdrantStore:
             limit=limit, with_vectors=True)
         return [self._to_point(p) for p in points]
 
-    def delete_by_project(self, collection: str, project_id: str) -> int:
-        return self.delete_where(collection, {"project_id": project_id})
 
     def delete_where(self, collection: str, filters: dict) -> int:
         """Delete every point matching all filters, not just the first page."""
@@ -652,7 +646,7 @@ class QdrantStore:
         """Every point, paged with scroll, for prune and export.
 
         ``list_points`` is capped by its limit, so using it for prune
-        or project discovery silently skipped everything past the cap.
+        or conversation discovery silently skipped everything past the cap.
         """
         offset = None
         while True:
@@ -802,23 +796,21 @@ class Memory:
 
     def record_stm(self, role: str, text: str,
                    attachments: list | None = None,
-                   project_id: str = "", conversation_id: str = "") -> None:
+                   conversation_id: str = "") -> None:
         """Working memory: chat history, last 20 exchanges."""
         self.stm.append({"role": role, "text": text,
                          "attachments": list(attachments or [])})
         payload = {"role": role, "kind": "stm"}
         if attachments:
             payload["attachments"] = list(attachments)
-        if project_id:
-            payload["project_id"] = project_id
         if conversation_id:
             payload["conversation_id"] = conversation_id
         self.record("working", text, payload)
 
-    def record_episodic(self, project_id: str, text: str,
+    def record_episodic(self, conversation_id: str, text: str,
                         payload: dict | None = None,
                         attachments: list | None = None) -> Point:
-        data = {"project_id": project_id, "kind": "episodic",
+        data = {"conversation_id": conversation_id, "kind": "episodic",
                 "promoted": False}
         data.update(payload or {})
         if attachments:
@@ -835,16 +827,13 @@ class Memory:
             pass
         return point
 
-    def remember(self, text: str, *, source: str = "explicit",
-                 project_id: str = "") -> Point:
+    def remember(self, text: str, *, source: str = "explicit") -> Point:
         """Pin a user-requested fact directly into global semantic LTM."""
         text = str(text or "").strip()
         if not text:
             raise ValueError("memory text is required")
         payload = {"kind": "semantic", "pinned": True,
                    "memory_source": source, "memory_score": 1.0}
-        if project_id:
-            payload["project_id"] = project_id
         return self.record("semantic", text, payload)
 
     def record_access(self, collection: str, point_id) -> None:
@@ -936,9 +925,6 @@ class Memory:
     def forget(self, collection: str, point_id: str) -> bool:
         return self.store.delete(collection, point_id)
 
-    def forget_project(self, project_id: str) -> dict[str, int]:
-        return {name: self.store.delete_by_project(name, project_id)
-                for name in COLLECTIONS}
 
     def prune(self, collection: str, *, half_life_days: float = 21.0,
               threshold: float = 0.02, grace_days: int = 35) -> list[str]:
@@ -1037,20 +1023,9 @@ class Memory:
             "summary_point_id": summary[-1].id if summary else "",
         }
 
-    def record_summary(self, conversation_id: str, summary_text: str,
-                       project_id: str = "") -> Point:
+    def record_summary(self, conversation_id: str, summary_text: str) -> Point:
         """Store a conversation summary point, model-written by the caller."""
         payload = {"kind": "summary", "conversation_id": conversation_id}
-        if project_id:
-            payload["project_id"] = project_id
         return self.record("working", summary_text, payload)
 
-    def list_projects(self) -> list[str]:
-        """Distinct project_ids across working, episodic, and library scope."""
-        ids = set()
-        for collection in ("working", "episodic"):
-            for point in self.store.iter_points(collection):
-                pid = point.payload.get("project_id")
-                if pid:
-                    ids.add(pid)
-        return sorted(ids)
+

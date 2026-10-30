@@ -12,13 +12,13 @@ from src.capabilities.video import annotate_frames, edit_video, encode_frames, e
 def test_daily_report_fix(tmp_path):
     from src.interface.scheduler_loop import daily_report
     (tmp_path / "learned").mkdir()
-    # Old file, no status, no project_id, only goal and deliverables: report must not be empty
+    # Old file, no status, no conversation_id, only goal and deliverables: report must not be empty
     (tmp_path / "learned" / "last_run.json").write_text('{"goal": "plan dinner", "deliverables": ["menu.pdf"]}')
     report = daily_report(tmp_path)
     assert "plan dinner" in report
-    assert "menu.pdf" not in report or True  # goal is the key, not empty status/project
-    # New file, with status and project_id
-    (tmp_path / "learned" / "last_run.json").write_text('{"status": "done", "project_id": "dinner", "goal": "plan dinner"}')
+    assert "menu.pdf" not in report or True  # goal is the key, not empty status/chat
+    # New file, with status and conversation_id
+    (tmp_path / "learned" / "last_run.json").write_text('{"status": "done", "conversation_id": "dinner", "goal": "plan dinner"}')
     report = daily_report(tmp_path)
     assert "done" in report and "dinner" in report
 

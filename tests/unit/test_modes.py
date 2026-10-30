@@ -155,7 +155,7 @@ def _ask_runner(tmp_path):
     runner.sandbox = Sandbox(tmp_path / "work", 120)
     runner.home = tmp_path
     runner.run_id = "test-run"
-    runner.project_id = "default"
+    runner.conversation_id = "test"
     runner.execution_backend = None
     runner.gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
     runner.allowed_side_effect_tools = frozenset()

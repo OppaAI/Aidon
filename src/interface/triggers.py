@@ -36,7 +36,7 @@ watcher itself.
 
 Scheduler, minimal and testable:
 A job is a name, a schedule string, a goal, and a
-project id. Schedule strings supported:
+conversation id. Schedule strings supported:
 - "daily HH:MM"
 - "weekly Mon HH:MM" (Mon, Tue, Wed, Thu, Fri, Sat, Sun)
 - "monthly first Wed HH:MM" (first weekday of the month)
@@ -83,7 +83,7 @@ class TriggerEvent:
     source: str
     kind: str = ""
     goal: str = ""
-    project_id: str = "default"
+    conversation_id: str = ""
     payload: dict = field(default_factory=dict)
     received_at: str = ""
     reply: object = None
@@ -117,11 +117,11 @@ class TriggerDispatcher:
         return handler(event)
 
 
-def handle_webhook(name: str, payload: dict, project_id: str = "default") -> TriggerEvent:
+def handle_webhook(name: str, payload: dict, conversation_id: str = "") -> TriggerEvent:
     """n8n-style webhook trigger, as a TriggerEvent."""
     goal = str(payload.get("goal", "")) if isinstance(payload, dict) else ""
     return TriggerEvent(source="webhook", kind=name, goal=goal,
-                        project_id=project_id, payload=dict(payload or {}))
+                        conversation_id=conversation_id, payload=dict(payload or {}))
 
 
 def _cron_field(text: str, low: int, high: int,
@@ -224,7 +224,7 @@ class SchedulerJob:
     name: str
     schedule: str
     goal: str
-    project_id: str = "default"
+    conversation_id: str = ""
     last_run: str = ""
     # Kept for compatibility with the old registry scheduler.  A missing
     # field in an existing scheduler.json is a normal goal job.  This is
@@ -349,7 +349,10 @@ class Scheduler:
             return
         try:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
-            self.jobs = [SchedulerJob(**job) for job in data.get("jobs", [])]
+            self.jobs = [SchedulerJob(**{
+                ("conversation_id" if k == "project_id" else k): v
+                for k, v in job.items()
+            }) for job in data.get("jobs", [])]
         except (json.JSONDecodeError, TypeError):
             self.jobs = []
 
@@ -472,10 +475,10 @@ class IngestWatcher:
             self.save()
         return new
 
-    def events(self, project_id: str = "default") -> list[TriggerEvent]:
+    def events(self, conversation_id: str = "") -> list[TriggerEvent]:
         return [TriggerEvent(source="ingest", kind="file",
                              goal=f"Ingest {path.name}",
-                             project_id=project_id,
+                             conversation_id=conversation_id,
                              payload={"file": path.name, "path": str(path)})
                 for path in self.scan()]
 

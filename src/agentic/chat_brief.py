@@ -1,7 +1,7 @@
-"""Project brief, Aidon project_brief concept, rebuilt.
+"""Chat brief, Aidon chat_brief concept, rebuilt.
 
-A brief is the one-page record of a project before planning: goal, audience, constraints,
-deliverables, and criteria, saved as JSON and Markdown under <home>/briefs/<project>.json/.md.
+A brief is the one-page record of a chat before planning: goal, audience, constraints,
+deliverables, and criteria, saved as JSON and Markdown under <home>/briefs/<conversation>.json/.md.
 Building a brief is code only, no model call: the caller supplies the fields, this module
 validates that goal, deliverables, and criteria are non-empty, and writes both files, so the
 brief can be reviewed, frozen by MissionStore, or fed to the interview spec step.
@@ -27,7 +27,7 @@ def validate_brief(brief: dict) -> list[str]:
 
 
 def brief_to_markdown(brief: dict) -> str:
-    lines = [f"# Brief: {brief.get('project_id', 'project')}", "", f"Goal: {brief.get('goal', '')}", ""]
+    lines = [f"# Brief: {brief.get('conversation_id', 'chat')}", "", f"Goal: {brief.get('goal', '')}", ""]
     lines.append("## Audience")
     lines.append(brief.get("audience", ""))
     lines.append("")
@@ -45,20 +45,20 @@ def brief_to_markdown(brief: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def save_brief(home, project_id: str, brief: dict) -> dict:
+def save_brief(home, conversation_id: str, brief: dict) -> dict:
     failures = validate_brief(brief)
     if failures:
         return {"ok": False, "failures": failures}
-    data = {**brief, "project_id": project_id}
+    data = {**brief, "conversation_id": conversation_id}
     directory = Path(home) / "briefs"
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / f"{project_id}.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
-    (directory / f"{project_id}.md").write_text(brief_to_markdown(data), encoding="utf-8")
-    return {"ok": True, "json": str(directory / f"{project_id}.json"), "md": str(directory / f"{project_id}.md")}
+    (directory / f"{conversation_id}.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+    (directory / f"{conversation_id}.md").write_text(brief_to_markdown(data), encoding="utf-8")
+    return {"ok": True, "json": str(directory / f"{conversation_id}.json"), "md": str(directory / f"{conversation_id}.md")}
 
 
-def load_brief(home, project_id: str) -> dict | None:
-    path = Path(home) / "briefs" / f"{project_id}.json"
+def load_brief(home, conversation_id: str) -> dict | None:
+    path = Path(home) / "briefs" / f"{conversation_id}.json"
     if not path.is_file():
         return None
     try:

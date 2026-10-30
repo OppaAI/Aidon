@@ -25,7 +25,7 @@ and the result are identical everywhere, and a grant made in
 one place is visible in the other two immediately, because
 they read and write the same <home>/preapprovals.json.
 
-Plain words, not jargon: a grant is a project id, a kind,
+Plain words, not jargon: a grant is a conversation id, a kind,
 and a number of hours. The kind can be typed by name or
 picked by number from the menu, which is what "choose or
 enter" means on a phone.
@@ -60,7 +60,7 @@ KINDS: list[dict] = [
              "still asks."},
     {"name": "spec",
      "label": "Approve the spec sheet",
-     "desc": "The interview result is accepted for this project without a card."},
+     "desc": "The interview result is accepted for this chat without a card."},
     {"name": "semantic",
      "label": "Promote facts to long-term memory",
      "desc": "A finished run may store its facts without asking each time."},
@@ -71,13 +71,13 @@ KINDS: list[dict] = [
 KIND_NAMES: tuple[str, ...] = tuple(kind["name"] for kind in KINDS)
 
 HELP_TEXT = (
-    "Pre-approval lets Aidon run reversible steps for one project without "
+    "Pre-approval lets Aidon run reversible steps for one chat without "
     "asking you every time. Irreversible steps always ask.\n"
     "\n"
     "Reply with:\n"
-    "  preapprove <project> <kind> [hours]   grant (default 8 hours)\n"
+    "  preapprove <chat> <kind> [hours]   grant (default 8 hours)\n"
     "  preapprovals                          list what is granted\n"
-    "  unpreapprove <project> <kind|all>     revoke\n"
+    "  unpreapprove <chat> <kind|all>     revoke\n"
     "\n"
     "Kinds, by number or name:\n"
     + "\n".join(f"  {i}. {kind['name']} — {kind['label']}"
@@ -237,12 +237,12 @@ def handle_command(store: PreapprovalStore, text: str,
                     + HELP_TEXT)
         lines = ["Active pre-approvals:"]
         lines.extend("  " + _describe(row, now) for row in rows)
-        lines.append("\nReply unpreapprove <project> <kind> to revoke one.")
+        lines.append("\nReply unpreapprove <chat> <kind> to revoke one.")
         return "\n".join(lines)
 
     if verb == "unpreapprove":
         if not parts:
-            return ("Which project? Reply: unpreapprove <project> <kind|all>\n"
+            return ("Which chat? Reply: unpreapprove <chat> <kind|all>\n"
                     "Run preapprovals to see what is active.")
         spec = parts[0]
         token = parts[1].lower() if len(parts) > 1 else "all"
@@ -263,12 +263,12 @@ def handle_command(store: PreapprovalStore, text: str,
         return HELP_TEXT
     if len(parts) == 1:
         # A bare kind ("preapprove live") is the phone case: the
-        # project is the one the chat is already about.
+        # chat is the one the conversation is already about.
         token = parts[0]
         kind = kind_from_token(token)
         if kind is None or (kind not in KIND_NAMES and kind not in IRREVERSIBLE):
             return HELP_TEXT
-        return (f"Which project? Reply: preapprove <project> {kind} [hours]\n"
+        return (f"Which chat? Reply: preapprove <chat> {kind} [hours]\n"
                 f"Example: preapprove dinner {kind} 8")
 
     spec = parts[0]

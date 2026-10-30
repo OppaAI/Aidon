@@ -49,7 +49,7 @@ def test_all_nine_tools_present(tmp_path):
 def test_schedule_list_and_cancel_round_trip(tmp_path):
     scheduler = Scheduler(tmp_path)
     scheduler.add_job(SchedulerJob(name="morning", schedule="0 9 * * *",
-                                   goal="check mail", project_id="default"))
+                                   goal="check mail"))
     tools = _tools(tmp_path)
     listing = tools["list_schedule"]()
     assert "morning" in listing and "check mail" in listing

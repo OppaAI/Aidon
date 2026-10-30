@@ -71,7 +71,7 @@ def _shared_files(event: dict) -> tuple[list[dict], list[dict]]:
     return list(seen_images.values()), list(seen_files.values())
 
 
-def parse_slack_event(payload: dict, project_id: str = "default") -> TriggerEvent | None:
+def parse_slack_event(payload: dict) -> TriggerEvent | None:
     event = payload.get("event", {}) if isinstance(payload, dict) else {}
     if event.get("type") != "message" or event.get("bot_id"):
         return None
@@ -89,4 +89,4 @@ def parse_slack_event(payload: dict, project_id: str = "default") -> TriggerEven
     for shared in files:
         text = (text + f" [file slack_file_id={shared['id']} "
                 f"mimetype={shared['mimetype']} name={shared['name']}]").strip()
-    return TriggerEvent(source="slack", project_id=project_id, goal=text, payload={"channel": event.get("channel", ""), "user": event.get("user", ""), "images": images, "files": files}, reply=lambda reply: None)
+    return TriggerEvent(source="slack", conversation_id="slack:" + str(event.get("channel", "")), goal=text, payload={"channel": event.get("channel", ""), "user": event.get("user", ""), "images": images, "files": files}, reply=lambda reply: None)

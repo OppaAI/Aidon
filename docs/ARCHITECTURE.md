@@ -126,7 +126,7 @@ flowchart TB
 
 ## 💾 Storage, in the Aidon home, never in the repo
 
-- specs: spec JSON and Markdown sheet, per project.
+- specs: spec JSON and Markdown sheet, per chat.
 - plugins: adopted plugin directories, per name.
 - skills: standalone Markdown skills, per name.
 - library: library files, per item id.

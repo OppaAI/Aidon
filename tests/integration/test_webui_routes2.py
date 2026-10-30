@@ -189,7 +189,7 @@ def test_missions_list_empty_then_populated(tmp_path):
         "dinner", {"title": "Dinner", "deliverables": ["menu.pdf"]})
     missions = server.handle_missions_list()["missions"]
     assert len(missions) == 1
-    assert missions[0]["project_id"] == "dinner"
+    assert missions[0]["conversation_id"] == "dinner"
     assert missions[0]["status"] == "draft"
 
 

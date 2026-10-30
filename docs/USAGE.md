@@ -6,7 +6,7 @@
   `http://127.0.0.1:8765/` by default (`AIDON_WEBUI_PORT`
   overrides it; `webui serve` on its own defaults to
   port 8765), localhost only, with a chat
-  thread, a left sidebar for projects and library, a
+  thread, a left sidebar for history and library, a
   Library tab, a settings and keys page showing hash
   prefixes only, never real keys, and approval cards
   in the UI, fail-closed on timeout. With arguments,
@@ -45,7 +45,7 @@
 ## ✅ Pre-approvals, the same on every surface
 
 A pre-approval lets Aidon run **reversible** steps for one
-project without asking every time. It is not a blanket
+chat without asking every time. It is not a blanket
 auto-approve: anything that sends to a third party,
 publishes, spends, deletes, installs, or adopts a plugin
 always gets a card, even if it was somehow ticked.
@@ -54,12 +54,12 @@ Grant, list, and revoke from any of the four surfaces — the
 WebUI chat box, the WebUI Settings page (Pre-approvals
 panel), WhatsApp, or Slack — with the same words:
 
-- `preapprove <project> <kind> [hours]` — grant, 8 hours by
+- `preapprove <chat> <kind> [hours]` — grant, 8 hours by
   default. The kind can be a name or the number the menu
   shows, so a phone reply can be `preapprove dinner 1 8`.
 - `preapprovals` — list what is active, with hours left.
-- `unpreapprove <project> <kind|all>` — revoke one kind or
-  everything for that project.
+- `unpreapprove <chat> <kind|all>` — revoke one kind or
+  everything for that chat.
 
 Kinds: `live` (reversible runs only, the final card is
 skipped when the plan touches nothing but files), `spec`
@@ -148,7 +148,7 @@ interview.
   JSON dump. Budget is written in dollars and cents, or
   as cents. Empty sections read `None`, not `-`.
 - Attached sheets are parsed, verified by code, and saved
-  as `specs/<project>.json` and `specs/<project>.md`.
+  as `specs/<conversation>.json` and `specs/<conversation>.md`.
   An unverified sheet is not approved, and the run does
   not proceed. A verified sheet is confirmed with a spec
   sheet card, then it binds the planner, same as an
@@ -338,7 +338,7 @@ verification arena they will run in.
 7. **Execute** — only what was approved, and only after it.
 8. **Learn** — what worked is recorded, so the next goal can
    reuse it. Memory starts blank, by design: new collections,
-   no import from previous projects.
+   no import from previous chats.
 
 **KB parsers, future auto-install:** when Aidon detects a
 file it cannot read, for example CAD or LaTeX, it records
@@ -354,14 +354,14 @@ formats are not preinstalled.
 One database, Qdrant, no second database. One instance, local
 mode under the Aidon home by default, or a server URL if
 `AIDON_QDRANT_URL` is set, with separate collections.
-Memory starts blank: no import from previous projects,
+Memory starts blank: no import from previous chats,
 collections start empty, the first runs build memory from
 scratch.
 
 - **Working memory (STM):** chat history, last 20 exchanges,
   `working` collection. Never promoted on its own.
-- **Episodic memory:** project-specific, from interview
-  questions and task data, scoped by project, `episodic`
+- **Episodic memory:** chat-specific, from interview
+  questions and task data, scoped by chat, `episodic`
   collection.
 - **Semantic memory (LTM, global):** facts, `semantic`
   collection.
@@ -397,7 +397,7 @@ access count, last accessed, and distinct access days are
 updated, and a deterministic forgetting curve, 21-day
 half-life, 35-day grace, 0.02 prune threshold, finds
 cleanup candidates. Prune is explicit only, never automatic.
-**Projects and conversations:** project and conversation ids
+**Chats:** conversation ids
 are payload fields on working and episodic points, read back
 from Qdrant by filtered scroll, oldest first, so a
 conversation survives a restart without a second database.

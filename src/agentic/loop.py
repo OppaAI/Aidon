@@ -25,10 +25,10 @@ then the run fails, it does not ask for approval, and
 it does not go live.
 
 Memory, blank by design: a new home starts with empty
-collections, no import from previous projects. When a
+collections, no import from previous chats. When a
 memory is present, the loop recalls Experiences before
 planning fresh, records episodic memory scoped by
-project_id, and builds an Experience after a successful
+conversation_id, and builds an Experience after a successful
 run only. Promotion to long-term memory is automatic:
 a done run's episodic record and a chat exchange are
 copied to LTM, deduplicated when identical and
@@ -472,7 +472,7 @@ def _normalize_shell_args(args: dict) -> dict:
 class GoalRunner:
     def __init__(self, client: ModelClient, sandbox: Sandbox,
                  gate: ApprovalGate, home: Path, memory=None,
-                 project_id: str = "default",
+                 conversation_id: str = "",
                  plugins=None, execution_backend=None,
                  budget=None, trace=None, model_verifier=None,
                  kernel_mode: bool = False, semantic_router=None,
@@ -499,7 +499,7 @@ class GoalRunner:
         self.gate = gate
         self.home = Path(home)
         self.memory = memory
-        self.project_id = project_id
+        self.conversation_id = conversation_id
         self.network_available = network_available
         # Optional human guidance, binding on the planner: carried
         # into the plan prompt as a guidance block (the same block
@@ -763,7 +763,7 @@ class GoalRunner:
             from .lifecycle import NotificationOutbox
             NotificationOutbox(self._mission_registry).enqueue(
                 "review_ready", "Mission ready for review",
-                f"{goal}: sandbox verification passed", self.project_id)
+                f"{goal}: sandbox verification passed", self.conversation_id)
         except Exception as exc:
             self._trace("mission", "failed", f"review snapshot failed: {exc}")
 
@@ -1607,7 +1607,7 @@ class GoalRunner:
                 from .interview import InterviewRunner
                 interviewer = InterviewRunner(
                     self.client, self.home, memory=self.memory, gate=None,
-                    project_id=self.project_id)
+                    conversation_id=self.conversation_id)
                 result = interviewer.start_from_message(
                     goal, ask=self.question_ask, approve=None)
             except Exception as exc:
@@ -1621,7 +1621,7 @@ class GoalRunner:
             stop_id = save_mode_stop(
                 self.home, mode="ask", goal=goal, spec=spec_dict,
                 conversation_key=getattr(self, "conversation_key", ""),
-                project_id=self.project_id)
+                conversation_id=self.conversation_id)
             return self._finalize(RunReport(
                 "stopped", goal, Plan(steps=[], deliverables=[], criteria=[]),
                 False, False,
@@ -2014,7 +2014,7 @@ class GoalRunner:
         if report.status == "chat" and self.memory is not None:
             try:
                 episodic = self.memory.record_episodic(
-                    self.project_id, report.goal,
+                    self.conversation_id, report.goal,
                     {"kind": "chat", "outcome": report.chat_reply or "",
                      "status": "done"})
                 self.memory.promote_to_ltm(episodic, kind="semantic")
@@ -2027,7 +2027,7 @@ class GoalRunner:
         if report.status == "chat":
             try:
                 from ..memory.extraction import spawn_extraction
-                spawn_extraction(self.memory, self.project_id,
+                spawn_extraction(self.memory, self.conversation_id,
                                  f"User: {report.goal}\nAssistant: {report.chat_reply or ''}",
                                  self.client)
             except Exception:
@@ -2054,7 +2054,7 @@ class GoalRunner:
                 from ..memory.extraction import spawn_extraction
                 deliverables = ", ".join(report.plan.deliverables or [])
                 files = ", ".join(report.files or [])
-                spawn_extraction(self.memory, self.project_id,
+                spawn_extraction(self.memory, self.conversation_id,
                                  f"Goal: {report.goal}\nDeliverables: {deliverables}\nFiles: {files}",
                                  self.client)
             except Exception:
@@ -2573,7 +2573,7 @@ class GoalRunner:
             stop_id = save_mode_stop(
                 self.home, mode="plan", goal=goal, plan=plan_to_dict(plan),
                 conversation_key=getattr(self, "conversation_key", ""),
-                project_id=self.project_id)
+                conversation_id=self.conversation_id)
             return RunReport("stopped", goal, plan, False, False,
                              mode_stop={"stop_id": stop_id, "mode": "plan",
                                         "goal": goal,
@@ -2803,7 +2803,7 @@ class GoalRunner:
                                  backend=self._backend_name())
         learn_dir = self.home / "learned"
         learn_dir.mkdir(parents=True, exist_ok=True)
-        record = {"status": "done", "project_id": self.project_id,
+        record = {"status": "done", "conversation_id": self.conversation_id,
                   "goal": goal, "deliverables": files,
                   "criteria": current_plan.criteria,
                   "backend": self._backend_name(),
@@ -2816,7 +2816,7 @@ class GoalRunner:
             json.dumps(record, indent=2), encoding="utf-8")
         if self.memory is not None:
             episodic = self.memory.record_episodic(
-                self.project_id, goal, {"deliverables": files})
+                self.conversation_id, goal, {"deliverables": files})
             try:
                 from ..memory.experience import build_experience, store_experience
                 nodes = []
@@ -2860,7 +2860,7 @@ class GoalRunner:
                 store_experience(self.memory, experience)
                 try:
                     from ..memory.memory_extras import rolling_summary as _rolling_summary
-                    _rolling_summary(self.home, self.project_id, goal, files, "done")
+                    _rolling_summary(self.home, self.conversation_id, goal, files, "done")
                 except Exception:
                     pass
             except Exception:

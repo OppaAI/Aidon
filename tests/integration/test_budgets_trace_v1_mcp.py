@@ -36,7 +36,7 @@ def test_trace_events_in_order(tmp_path):
     plan = {"steps": [{"tool": "write", "args": {"file": "note.md", "text": "done"}, "deliverable": "note.md"}],
             "deliverables": ["note.md"], "criteria": []}
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
-    trace = TraceRecorder(home, project_id="test")
+    trace = TraceRecorder(home, conversation_id="test")
     runner = GoalRunner(FakeClient(json.dumps(plan)), Sandbox(home / "work"),
                         gate, home, memory=None, trace=trace)
     report = runner.run("Write a note")

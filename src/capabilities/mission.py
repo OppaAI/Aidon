@@ -1,6 +1,6 @@
 """Mission lifecycle with frozen snapshots, stdlib only.
 
-A mission starts as a draft: a project id plus a spec dict.
+A mission starts as a draft: a conversation id plus a spec dict.
 When it is ready for review, freeze() copies the spec and
 its deliverables into a snapshot file, stamps it with a
 timestamp and a sha256 hash, and moves the mission to
@@ -16,8 +16,8 @@ for example when review asks for changes, without
 deleting the snapshot that was reviewed.
 
 Storage, all under the Aidon home, never outside it:
-  <home>/missions/<project_id>/mission.json
-  <home>/missions/<project_id>/snapshot.json
+  <home>/missions/<conversation_id>/mission.json
+  <home>/missions/<conversation_id>/snapshot.json
 No secrets are stored here; specs are the caller's data.
 """
 
@@ -68,19 +68,19 @@ def grade_criteria(criteria: list[dict]) -> list[dict]:
     return graded
 
 
-def _mission_dir(home: Path, project_id: str) -> Path:
-    return Path(home) / "missions" / project_id
+def _mission_dir(home: Path, conversation_id: str) -> Path:
+    return Path(home) / "missions" / conversation_id
 
 
-def _load_mission(home: Path, project_id: str) -> dict:
-    path = _mission_dir(home, project_id) / "mission.json"
+def _load_mission(home: Path, conversation_id: str) -> dict:
+    path = _mission_dir(home, conversation_id) / "mission.json"
     if not path.is_file():
-        raise FileNotFoundError(f"no mission for project {project_id}")
+        raise FileNotFoundError(f"no mission for chat {conversation_id}")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _save_mission(home: Path, mission: dict) -> None:
-    directory = _mission_dir(home, mission["project_id"])
+    directory = _mission_dir(home, mission["conversation_id"])
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "mission.json").write_text(
         json.dumps(mission, indent=2, sort_keys=True), encoding="utf-8")
@@ -100,15 +100,15 @@ class MissionStore:
         self.home = Path(home)
         self.home.mkdir(parents=True, exist_ok=True)
 
-    def create(self, project_id: str, spec: dict) -> dict:
-        if not project_id:
-            raise ValueError("project_id is required")
+    def create(self, conversation_id: str, spec: dict) -> dict:
+        if not conversation_id:
+            raise ValueError("conversation_id is required")
         if not isinstance(spec, dict):
             raise ValueError("spec must be a dict")
         spec_copy = copy.deepcopy(spec)
         deliverables = copy.deepcopy(spec_copy.get("deliverables", []))
         mission = {
-            "project_id": project_id,
+            "conversation_id": conversation_id,
             "spec": spec_copy,
             "deliverables": deliverables,
             "status": "draft",
@@ -116,34 +116,34 @@ class MissionStore:
         _save_mission(self.home, mission)
         return copy.deepcopy(mission)
 
-    def get(self, project_id: str) -> dict:
-        return _load_mission(self.home, project_id)
+    def get(self, conversation_id: str) -> dict:
+        return _load_mission(self.home, conversation_id)
 
-    def status(self, project_id: str) -> str:
-        return _load_mission(self.home, project_id)["status"]
+    def status(self, conversation_id: str) -> str:
+        return _load_mission(self.home, conversation_id)["status"]
 
-    def set_status(self, project_id: str, status: str) -> dict:
+    def set_status(self, conversation_id: str, status: str) -> dict:
         if status not in STATUSES:
             raise ValueError(
                 f"status must be one of {', '.join(STATUSES)}, not {status}")
-        mission = _load_mission(self.home, project_id)
+        mission = _load_mission(self.home, conversation_id)
         mission["status"] = status
         _save_mission(self.home, mission)
         return copy.deepcopy(mission)
 
-    def freeze(self, project_id: str, force: bool = False,
+    def freeze(self, conversation_id: str, force: bool = False,
                test_results: dict | None = None,
                artifacts: list[str] | None = None,
                criteria: list[dict] | None = None) -> dict:
-        mission = _load_mission(self.home, project_id)
-        directory = _mission_dir(self.home, project_id)
+        mission = _load_mission(self.home, conversation_id)
+        directory = _mission_dir(self.home, conversation_id)
         snapshot_path = directory / "snapshot.json"
         if snapshot_path.is_file() and not force:
             return json.loads(snapshot_path.read_text(encoding="utf-8"))
         spec = copy.deepcopy(mission["spec"])
         deliverables = copy.deepcopy(mission.get("deliverables", []))
         snapshot = {
-            "project_id": project_id,
+            "conversation_id": conversation_id,
             "spec": spec,
             "deliverables": deliverables,
             "status": "ready_for_review",
@@ -160,8 +160,8 @@ class MissionStore:
         _save_mission(self.home, mission)
         return copy.deepcopy(snapshot)
 
-    def unfreeze(self, project_id: str) -> dict:
-        mission = _load_mission(self.home, project_id)
+    def unfreeze(self, conversation_id: str) -> dict:
+        mission = _load_mission(self.home, conversation_id)
         mission["status"] = "in_progress"
         _save_mission(self.home, mission)
         return copy.deepcopy(mission)

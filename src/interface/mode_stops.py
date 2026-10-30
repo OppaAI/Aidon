@@ -42,7 +42,7 @@ def _save(home: Path, stops: dict) -> None:
 
 def save_mode_stop(home: Path, mode: str, goal: str, spec=None, plan=None,
                    conversation_key: str = "",
-                   project_id: str = "default") -> str:
+                   conversation_id: str = "") -> str:
     """Save a stopped run; returns its stop id."""
     if mode not in _MODES:
         raise ValueError(f"unknown stop mode: {mode}")
@@ -55,7 +55,7 @@ def save_mode_stop(home: Path, mode: str, goal: str, spec=None, plan=None,
         "spec": spec if isinstance(spec, dict) else None,
         "plan": plan if isinstance(plan, dict) else None,
         "conversation_key": str(conversation_key or ""),
-        "project_id": str(project_id or "default"),
+        "conversation_id": str(conversation_id or ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     _save(home, stops)

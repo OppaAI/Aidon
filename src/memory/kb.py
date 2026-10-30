@@ -50,7 +50,7 @@ CHUNK_OVERLAP = 100
 # adopt it with the owner's approval, like any capability
 # tool. CAD, LaTeX, and 3D formats are examples, not a
 # closed list. Blank memory, see README: no import from
-# previous projects, collections start empty.
+# previous chats, collections start empty.
 PARSER_NEEDED = {
     ".dwg": "cad-parser", ".dxf": "cad-parser", ".step": "cad-parser",
     ".stp": "cad-parser", ".stl": "3d-parser", ".obj": "3d-parser",

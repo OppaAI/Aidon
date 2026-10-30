@@ -53,7 +53,7 @@ def test_interview_chat_then_spec_approval(tmp_path):
     memory = _memory(tmp_path)
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
     runner = InterviewRunner(_InterviewClient(), tmp_path / "home",
-                             memory=memory, gate=gate, project_id="dinner")
+                             memory=memory, gate=gate, conversation_id="dinner")
     answers = iter(["roast beef"])
     result = runner.start_from_message(
         "Plan a dinner", ask=lambda q: next(answers))
@@ -75,7 +75,7 @@ def test_interview_unverified_spec_is_not_approved(tmp_path):
                                         "deliverables": []}})
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
     runner = InterviewRunner(BadClient(), tmp_path / "home",
-                             memory=None, gate=gate, project_id="dinner")
+                             memory=None, gate=gate, conversation_id="dinner")
     result = runner.start_from_message("Plan a dinner", ask=lambda q: "x")
     assert result.verified is False
     assert result.approved is False
@@ -117,7 +117,7 @@ def test_attach_skips_interview_and_saves_markdown(tmp_path):
     gate = ApprovalGate(decide)
     runner = InterviewRunner(FakeClient("should not be called"),
                              tmp_path / "home", memory=memory, gate=gate,
-                             project_id="dinner")
+                             conversation_id="dinner")
     sheet = spec_sheet_md(Spec(goal="Plan a dinner",
                                deliverables=["menu.pdf"],
                                constraints=["no milk"]))
@@ -147,13 +147,13 @@ def test_interview_prefills_from_previous_spec(tmp_path):
                                         "deliverables": []}})
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
     runner = InterviewRunner(EmptySpecClient(), tmp_path / "home",
-                             memory=memory, gate=gate, project_id="dinner")
+                             memory=memory, gate=gate, conversation_id="dinner")
     result = runner.start_from_message("Plan a dinner", ask=lambda q: "x")
     assert result.spec.deliverables == ["menu.pdf"]
     assert result.spec.constraints == ["no milk"]
 
 
-def test_interview_does_not_prefill_from_other_project_spec(tmp_path):
+def test_interview_does_not_prefill_from_other_chat_spec(tmp_path):
     memory = _memory(tmp_path)
     memory.record_episodic("tart", "Interview spec: Make tarts",
                            {"spec": {"goal": "Make tarts",
@@ -167,7 +167,7 @@ def test_interview_does_not_prefill_from_other_project_spec(tmp_path):
                                         "deliverables": ["reply"]}})
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
     runner = InterviewRunner(EmptySpecClient(), tmp_path / "home",
-                             memory=memory, gate=gate, project_id="greeting")
+                             memory=memory, gate=gate, conversation_id="greeting")
     result = runner.start_from_message("Hi Aidon", ask=lambda q: "x")
     assert result.spec.deliverables == ["reply"]
     assert result.spec.constraints == []

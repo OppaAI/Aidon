@@ -82,13 +82,13 @@ def generate_daily_report(home, day: date | None = None,
     last_run = _read_last_run(home)
     if last_run:
         status = str(last_run.get("status", "") or "recorded")
-        project = str(last_run.get("project_id", "") or "")
+        chat = str(last_run.get("conversation_id", "") or "")
         goal = str(last_run.get("goal", "") or "")
         line = f"Last recorded run: {status}"
         if goal:
             line += f" — {goal}"
-        if project:
-            line += f" (project {project})"
+        if chat:
+            line += f" (chat {chat})"
         lines.extend(["", line])
         deliverables = last_run.get("deliverables") or []
         if isinstance(deliverables, list) and deliverables:
@@ -171,7 +171,7 @@ def autonomy_report(home) -> dict:
             pass
     return {
         "last_run_status": last_run.get("status", "none"),
-        "last_run_project": last_run.get("project_id", ""),
+        "last_run_conversation": last_run.get("conversation_id", ""),
         "run_count": run_count,
         "trace_count": trace_count,
         "autonomy": "supervised, approval gate on live actions" if last_run else "no runs recorded",

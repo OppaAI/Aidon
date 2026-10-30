@@ -2,7 +2,7 @@
 
 Usage:
   python -m src.main goal "Plan a dinner for two"
-  python -m src.main goal --project dinner "Plan a dinner for two"
+  python -m src.main goal --conversation dinner "Plan a dinner for two"
 
 Configuration comes from the environment, or from a .env
 file in the current directory or in the Aidon home, loaded
@@ -15,7 +15,7 @@ without overriding real environment variables:
   AIDON_EMBEDDER=hash  forces the test embedder
 
 Memory starts blank, by design: new collections, no import
-from previous projects. If the real embedder is not
+from previous chats. If the real embedder is not
 installed, the CLI falls back to HashEmbedder with a
 warning on stderr, so a run still works offline, with
 non-semantic recall. The demo and submission run on the
@@ -57,7 +57,7 @@ def _startup_style(kind: str, text: str) -> None:
 
 
 def _cli_gate(home, timeout_seconds: int = 900,
-              project_id: str = "default") -> ApprovalGate:
+              conversation_id: str = "") -> ApprovalGate:
     from ..interface.autonomy import policy_for
 
     def decide(kind: str, title: str, body: str) -> Decision:
@@ -72,11 +72,11 @@ def _cli_gate(home, timeout_seconds: int = 900,
     )
     # Pre-approval applies to CLI and scheduled runs too, not only to
     # the WebUI: the store is the same file the WebUI, WhatsApp, and
-    # Slack surfaces write, keyed by the run's project id.
+    # Slack surfaces write, keyed by the run's conversation id.
     try:
         from ..interface.preapproval import PreapprovalStore
         from ..interface.preapproval_gate import PreapprovalGate
-        return PreapprovalGate(gate, PreapprovalStore(home), project_id)
+        return PreapprovalGate(gate, PreapprovalStore(home), conversation_id)
     except Exception:
         return gate
 
@@ -999,7 +999,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         try:
             scheduler.add_job(SchedulerJob(name=name, schedule=schedule,
                                            goal=goal, kind=kind or "goal",
-                                           project_id="default",
+                                           conversation_id="",
                                            until=until, tz=tz,
                                            time_limit=time_limit))
         except ValueError as exc:
@@ -1135,7 +1135,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             if not jobs:
                 return "(no scheduled jobs)"
             return "\n".join(
-                f"{job.name}: {job.goal} schedule={job.schedule} project={job.project_id}"
+                f"{job.name}: {job.goal} schedule={job.schedule} chat={job.conversation_id}"
                 for job in jobs)
         except Exception as exc:
             return f"schedule list failed: {type(exc).__name__}: {exc}"
@@ -1289,8 +1289,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=False)
     goal_parser = sub.add_parser("goal", aliases=["run"], help="Run a goal")
     goal_parser.add_argument("text", help="Goal in plain language")
-    goal_parser.add_argument("--project", default="default",
-                             help="Project id for episodic memory")
+    goal_parser.add_argument("--conversation", default="cli",
+                             help="Chat id for episodic memory")
     goal_parser.add_argument("--guidance", default="",
                              help="Binding instructions or hints for the run")
     goal_parser.add_argument("--swarm", action="store_true", help="Attempt swarm split, Aidon decides, fallback to single run")
@@ -1298,8 +1298,8 @@ def main(argv: list[str] | None = None) -> int:
                              help="Attached spec sheet file, skips interview")
     interview_parser = sub.add_parser("interview", help="Interview to a spec")
     interview_parser.add_argument("text", help="Goal in plain language, chat message")
-    interview_parser.add_argument("--project", default="default",
-                                  help="Project id for episodic memory")
+    interview_parser.add_argument("--conversation", default="cli",
+                                  help="Chat id for episodic memory")
     interview_parser.add_argument("--run", action="store_true",
                                   help="Run the goal after the spec is approved")
     interview_parser.add_argument("--attach", default=None,
@@ -1309,8 +1309,8 @@ def main(argv: list[str] | None = None) -> int:
                                help="List adopted plugins, scan a plugin dir, or adopt it")
     plugin_parser.add_argument("path", nargs="?", default=None,
                                help="Plugin directory, for scan and adopt")
-    plugin_parser.add_argument("--project", default="default",
-                               help="Project id for episodic memory")
+    plugin_parser.add_argument("--conversation", default="cli",
+                               help="Chat id for episodic memory")
     trigger_parser = sub.add_parser("trigger", help="Trigger a DAG run")
     trigger_parser.add_argument("action", choices=["list", "ingest", "schedule", "webhook"],
                                 help="List sources, scan ingest folder, check due jobs, or fire a webhook trigger")
@@ -1318,8 +1318,8 @@ def main(argv: list[str] | None = None) -> int:
                                 help="Webhook trigger name, for webhook action")
     trigger_parser.add_argument("--goal", default="",
                                 help="Goal for a webhook trigger")
-    trigger_parser.add_argument("--project", default="default",
-                                help="Project id for episodic memory")
+    trigger_parser.add_argument("--conversation", default="",
+                                help="Chat id for episodic memory")
     v1_parser = sub.add_parser("v1", help="v1 API, token auth, MCP")
     v1_parser.add_argument("action", choices=["serve", "keygen", "mcp", "mcp-http", "revoke"],
                            help="Serve the v1 HTTP API, generate a key once, or run the MCP stdio server")
@@ -1383,11 +1383,10 @@ def main(argv: list[str] | None = None) -> int:
     email_parser.add_argument("--body", default="", help="Body for send")
 
     memory_parser = sub.add_parser("memory", help="Inspect and prune Aidon memory, Aidon memory commands")
-    memory_parser.add_argument("action", choices=["forget", "ingest", "check", "prune", "list"], help="forget = delete matching memories, ingest = ingest a folder, check = list points, prune = delete decayed memories, list = list projects")
+    memory_parser.add_argument("action", choices=["forget", "ingest", "check", "prune", "list"], help="forget = delete matching memories, ingest = ingest a folder, check = list points, prune = delete decayed memories, list = list chats")
     memory_parser.add_argument("query", nargs="?", default="", help="Query for forget, folder for ingest")
     memory_parser.add_argument("--id", default=None, help="Exact point id for forget")
     memory_parser.add_argument("--collection", default="episodic", help="Collection for forget, check, prune")
-    memory_parser.add_argument("--project", default="default", help="Project id")
     memory_parser.add_argument("--dry-run", action="store_true", help="Prune dry run only, do not delete")
     skills_parser = sub.add_parser("skills", help="Inspect the skill library, Aidon skills commands")
     skills_parser.add_argument("action", choices=["list", "show", "check", "rollback"], help="list = list skills, show = show one skill state, check = governor check, rollback = reset a skill to candidate")
@@ -1402,7 +1401,7 @@ def main(argv: list[str] | None = None) -> int:
     dag_parser.add_argument("--parallel", action="store_true", help="Run independent DAG nodes concurrently instead of one at a time")
     mission_parser = sub.add_parser("mission", help="Mission lifecycle records")
     mission_parser.add_argument("action", choices=["list", "show", "discard", "create"], help="list = list missions, show = show one, discard = discard a rejected mission, create = create a draft mission")
-    mission_parser.add_argument("id", nargs="?", default="", help="Project id")
+    mission_parser.add_argument("id", nargs="?", default="", help="Mission id")
     mission_parser.add_argument("--spec", default="{}", help="Spec JSON for create")
     outbox_parser = sub.add_parser("outbox", help="Durable notification outbox")
     outbox_parser.add_argument("action", choices=["list", "drain", "queue"], help="list = list queued, drain = deliver queued with a printed sender, queue = queue a notification")
@@ -1421,7 +1420,7 @@ def main(argv: list[str] | None = None) -> int:
                                  choices=["goal", "chain", "learn", "report", "brief"],
                                  help="Job kind; chain uses JSON in --goal")
     schedule_parser.add_argument("--schedule", default="0 9 * * *", help="Cron schedule for add, default daily 9am")
-    schedule_parser.add_argument("--project", default="default", help="Project id for add")
+    schedule_parser.add_argument("--conversation", default="", help="Chat id for add")
     practice_parser = sub.add_parser("practice", help="Free-time practice windows, same store as the Practice page")
     practice_parser.add_argument("action", choices=["add", "list", "remove", "run"], help="add = add a schedule, list = list schedules, remove = remove one, run = run one now (60 min)")
     practice_parser.add_argument("--name", default="", help="Schedule name")
@@ -1725,7 +1724,6 @@ def main(argv: list[str] | None = None) -> int:
                 except Exception:
                     continue
                 store.import_conversation(str(data.get("id", path.stem)),
-                                          str(data.get("project_id", "default")),
                                           list(data.get("turns", [])))
                 count += 1
             print(f"Imported {count} legacy conversations"); return 0
@@ -1840,7 +1838,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Prune {args.collection}: {result}")
             return 0
         if args.action == "list":
-            print(f"Projects: {', '.join(memory.list_projects())}")
+            from ..memory.conversations_db import ConversationStoreDB
+            ids = [r["id"] for r in ConversationStoreDB(config.home).list_all_conversations()]
+            print(f"Chats: {', '.join(ids)}")
             return 0
         return 2
     if args.command == "skills":
@@ -1945,7 +1945,7 @@ def main(argv: list[str] | None = None) -> int:
             for path in sorted(missions_dir.glob("*/mission.json")) if missions_dir.exists() else []:
                 try:
                     data = _json.loads(path.read_text())
-                    print(f"{data.get('project_id')}: {data.get('status')}")
+                    print(f"{data.get('conversation_id')}: {data.get('status')}")
                 except Exception:
                     continue
             return 0
@@ -2010,7 +2010,7 @@ def main(argv: list[str] | None = None) -> int:
         scheduler = Scheduler(config.home)
         if args.action == "list":
             for job in scheduler.jobs:
-                print(f"{job.name}: {job.goal} schedule={job.schedule} project={job.project_id}")
+                print(f"{job.name}: {job.goal} schedule={job.schedule} chat={job.conversation_id}")
             return 0
         if args.action == "show":
             for job in scheduler.jobs:
@@ -2024,7 +2024,7 @@ def main(argv: list[str] | None = None) -> int:
                 scheduler.add_job(SchedulerJob(name=args.name, goal=args.goal,
                                                schedule=args.schedule,
                                                kind=args.kind,
-                                               project_id=args.project))
+                                               conversation_id=args.conversation))
             except ValueError as exc:
                 print(f"schedule add failed: {exc}"); return 2
             print(f"Added job {args.name}")
@@ -2109,7 +2109,7 @@ def main(argv: list[str] | None = None) -> int:
                 _pgate = _cli_gate(config.home, config.approval_timeout_seconds)
             from ..interface.messaging import MessagingConfig as _PMC
             _pmcfg = _PMC.from_env()
-            _prunner = GoalRunner(client, _psandbox, _pgate, config.home, memory=memory, project_id="default", plugins=_pplugins, execution_backend=_pbackend, budget=_PB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_PT(config.home, project_id="default"), model_verifier=_PMV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_pbackend, _psandbox),
+            _prunner = GoalRunner(client, _psandbox, _pgate, config.home, memory=memory, conversation_id="practice:" + schedule["name"], plugins=_pplugins, execution_backend=_pbackend, budget=_PB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_PT(config.home, conversation_id="practice:" + schedule["name"]), model_verifier=_PMV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_pbackend, _psandbox),
                                   extra_tools=practice_tools(
                                       _pdir, _pmcfg, owner_email=config.owner_email,
                                       gmail_client_id=_pos.environ.get("GMAIL_CLIENT_ID", ""),
@@ -2292,7 +2292,7 @@ def main(argv: list[str] | None = None) -> int:
                             _sbackend = _smb(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
                         except Exception:
                             _sbackend = None
-                        _srunner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_splugins, execution_backend=_sbackend, budget=_SB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_ST(config.home, project_id="default"), model_verifier=_SMV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_sbackend, sandbox))
+                        _srunner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, conversation_id="slack:" + channel, plugins=_splugins, execution_backend=_sbackend, budget=_SB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_ST(config.home, conversation_id="slack:" + channel), model_verifier=_SMV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_sbackend, sandbox))
                         _sreport = _srunner.run(message.get("text", ""))
                         print(f"Slack run: {_sreport.status}, files: {', '.join(_sreport.files)}")
                 if not args.seconds or _time.time() >= end:
@@ -2339,9 +2339,10 @@ def main(argv: list[str] | None = None) -> int:
             import uuid as _tick_uuid
             _tick_run_id = _tick_uuid.uuid4().hex[:12]
             _tick_control = _TickControl(config.home)
-            _tick_control.register(_tick_run_id, job.goal, job.project_id)
+            _tick_session = getattr(job, "conversation_id", "") or getattr(job, "project_id", "") or "scheduled"
+            _tick_control.register(_tick_run_id, job.goal, _tick_session)
             print(f"Tick job {job.name}: run id {_tick_run_id}")
-            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds, job.project_id), config.home, memory=memory, project_id=job.project_id, plugins=_plugins, execution_backend=_backend, budget=_B(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T(config.home, project_id=job.project_id), model_verifier=_MV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), run_id=_tick_run_id, run_control=_tick_control)
+            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds, _tick_session), config.home, memory=memory, conversation_id=_tick_session, plugins=_plugins, execution_backend=_backend, budget=_B(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T(config.home, conversation_id=_tick_session), model_verifier=_MV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), run_id=_tick_run_id, run_control=_tick_control)
             report = runner.run(job.goal)
             print(f"Tick job {job.name}: {report.status}, files: {', '.join(report.files)}")
         return 0
@@ -2422,7 +2423,7 @@ def main(argv: list[str] | None = None) -> int:
                 _cli_router = _CliRouter(memory.embedder, cache_path=config.home / "semantic_router_vectors.json")
             except Exception:
                 _cli_router = None
-            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), think_max=_cli_once or _cli_think_state["on"], research_mode=_cli_research_once or _cli_research_state["on"], deep_researcher=make_deep_researcher(config), mode=_cli_mode_once or _cli_mode_state["mode"], question_ask=lambda q: input(f"\nAidon: {q}\nYou: "), conversation_key="cli", resume_plan=_cli_resume_plan, semantic_router=_cli_router)
+            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, conversation_id="cli", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, conversation_id="cli"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), think_max=_cli_once or _cli_think_state["on"], research_mode=_cli_research_once or _cli_research_state["on"], deep_researcher=make_deep_researcher(config), mode=_cli_mode_once or _cli_mode_state["mode"], question_ask=lambda q: input(f"\nAidon: {q}\nYou: "), conversation_key="cli", resume_plan=_cli_resume_plan, semantic_router=_cli_router)
             if _cli_resume_spec is not None:
                 report = runner.run(goal, spec=_cli_resume_spec)
             else:
@@ -2514,7 +2515,7 @@ def main(argv: list[str] | None = None) -> int:
             from ..agentic.semantic_router import SemanticRouter
             from ..interface.scheduler_loop import NudgeTracker
             run_id = str(event.payload.get("run_id", "")) or new_run_id()
-            run_control.register(run_id, event.goal, event.project_id)
+            run_control.register(run_id, event.goal, event.conversation_id)
             # Each goal gets its own timestamped workspace directory. This
             # prevents unrelated runs from colliding on filenames and keeps
             # the user-visible artifact path contextual instead of exposing
@@ -2541,7 +2542,7 @@ def main(argv: list[str] | None = None) -> int:
             plugins.load_all()
             budget = Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps,
                             max_seconds=config.budget_seconds)
-            trace = TraceRecorder(config.home, project_id=event.project_id)
+            trace = TraceRecorder(config.home, conversation_id=event.conversation_id)
             try:
                 from ..capabilities.execution import make_backend
                 execution_backend = make_backend(
@@ -2570,7 +2571,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 from ..interface.preapproval import PreapprovalStore
                 from ..interface.preapproval_gate import PreapprovalGate
-                _gate = PreapprovalGate(server.webui_gate.gate, PreapprovalStore(config.home), event.project_id)
+                _gate = PreapprovalGate(server.webui_gate.gate, PreapprovalStore(config.home), event.conversation_id)
             except Exception:
                 _gate = server.webui_gate.gate
             _web_researcher = _make_web_researcher(config, conversation_context)
@@ -2701,7 +2702,7 @@ def main(argv: list[str] | None = None) -> int:
                 _resume_spec = _ResumeSpec.from_dict(event.payload["resume_spec"])
             runner = GoalRunner(client, run_sandbox, _gate,
                                 config.home, memory=memory,
-                                project_id=event.project_id, plugins=plugins,
+                                conversation_id=event.conversation_id, plugins=plugins,
                                 execution_backend=execution_backend, budget=budget,
                                 trace=trace, model_verifier=ModelVerifier(client),
                                 kernel_mode=config.kernel_mode,
@@ -2935,7 +2936,7 @@ def main(argv: list[str] | None = None) -> int:
                                     else:
                                         _event = TriggerEvent(
                                             source="slack", kind="message",
-                                            goal=_text, project_id="default",
+                                            goal=_text, conversation_id="slack:" + _channel,
                                             payload={"channel": _channel},
                                             reply=_replies.append)
                                         _run_thread = threading.Thread(
@@ -3010,9 +3011,9 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 _backend = None
             _runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home,
-                                 memory=memory, project_id=goal_record.project_id, plugins=_plugins,
+                                 memory=memory, conversation_id=goal_record.conversation_id, plugins=_plugins,
                                  execution_backend=_backend, budget=_VB(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
-                                 trace=_VT(config.home, project_id=goal_record.project_id), model_verifier=_VM(client),
+                                 trace=_VT(config.home, conversation_id=goal_record.conversation_id), model_verifier=_VM(client),
                                  kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox))
             _report = _runner.run(goal_record.goal)
             return {"status": _report.status, "files": _report.files, "error": _report.error}
@@ -3111,7 +3112,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.action == "ingest":
             watcher = IngestWatcher(config.ingest_path, config.home)
-            for event in watcher.events(project_id=args.project):
+            for event in watcher.events(conversation_id=args.conversation):
                 print(f"ingest trigger: {event.payload['path']}")
             return 0
         if args.action == "schedule":
@@ -3124,7 +3125,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("trigger webhook needs a name")
                 return 2
             event = handle_webhook(args.name, {"goal": args.goal},
-                                   project_id=args.project)
+                                   conversation_id=args.conversation)
             dispatcher = TriggerDispatcher()
             dispatcher.register("webhook", lambda e: print(f"webhook trigger: {e.kind}: {e.goal}"))
             dispatcher.dispatch(event)
@@ -3286,7 +3287,7 @@ def main(argv: list[str] | None = None) -> int:
         from ..interface.triggers import Scheduler
         print("Scheduler daemon, polling every 60 seconds, Ctrl-C to stop.")
         print("Scheduler daemon also watches ingest and polls Slack, when configured, same loop.")
-        def _full_scheduler_runner():
+        def _full_scheduler_runner(session: str = ""):
             from ..agentic.budgets import Budget as _B2
             from ..agentic.trace import TraceRecorder as _T2
             from ..agentic.verifier_model import ModelVerifier as _M2
@@ -3297,7 +3298,7 @@ def main(argv: list[str] | None = None) -> int:
                 _be = _mb2(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _be = None
-            return GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, project_id="default", plugins=_pl, execution_backend=_be, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, project_id="default"), model_verifier=_M2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_be, sandbox))
+            return GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, conversation_id=session, plugins=_pl, execution_backend=_be, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, conversation_id=session), model_verifier=_M2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_be, sandbox))
 
         import os as _os
         _slack_last_ts = ""
@@ -3340,9 +3341,9 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 _gate = server.webui_gate.gate
             return GoalRunner(client, _psandbox, _gate, config.home, memory=memory,
-                              project_id="default", plugins=_pl, execution_backend=_be,
+                              conversation_id="practice:" + schedule["name"], plugins=_pl, execution_backend=_be,
                               budget=_B3(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
-                              trace=_T3(config.home, project_id="default"), model_verifier=_M3(client),
+                              trace=_T3(config.home, conversation_id="practice:" + schedule["name"]), model_verifier=_M3(client),
                               kernel_mode=config.kernel_mode,
                               network_available=_network_available(_be, _psandbox),
                               extra_tools=practice_tools(
@@ -3451,7 +3452,8 @@ def main(argv: list[str] | None = None) -> int:
                 import uuid as _serve_uuid
                 _serve_run_id = _serve_uuid.uuid4().hex[:12]
                 _serve_control = _ServeControl(config.home)
-                _serve_control.register(_serve_run_id, job.goal, job.project_id)
+                _serve_session = getattr(job, "conversation_id", "") or getattr(job, "project_id", "") or "scheduled"
+                _serve_control.register(_serve_run_id, job.goal, _serve_session)
                 print(f"Job {job.name}: run id {_serve_run_id}")
 
                 # Scheduled non-goal jobs retain the Aidon scheduler
@@ -3490,7 +3492,7 @@ def main(argv: list[str] | None = None) -> int:
                         continue
                     _chain_decision = _cli_gate(
                         config.home, config.approval_timeout_seconds,
-                        job.project_id).ask(
+                        _serve_session).ask(
                             "live", f"Approve scheduled chain {job.name}?",
                             json.dumps(_chain, sort_keys=True), force_ask=True)
                     if _chain_decision.verdict not in ("approved", "auto_approved"):
@@ -3550,9 +3552,9 @@ def main(argv: list[str] | None = None) -> int:
                     except (TypeError, ValueError):
                         _job_deadline = None
                     runner = GoalRunner(client, sandbox, _job_gate, config.home,
-                                        memory=memory, project_id=job.project_id, plugins=_plugins,
+                                        memory=memory, conversation_id=_serve_session, plugins=_plugins,
                                         execution_backend=_backend, budget=_Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
-                                        trace=_Trace(config.home, project_id=job.project_id), model_verifier=_MV(client),
+                                        trace=_Trace(config.home, conversation_id=_serve_session), model_verifier=_MV(client),
                                         kernel_mode=config.kernel_mode, semantic_router=_router2,
                                         use_semantic_router_skip=True, network_available=_network_available(_backend, sandbox), run_id=_serve_run_id, run_control=_serve_control,
                                         extra_tools=_job_tools,
@@ -3588,7 +3590,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 from ..interface.triggers import IngestWatcher
                 watcher = IngestWatcher(config.ingest_path, config.home)
-                for ingest_event in watcher.events(project_id="default"):
+                for ingest_event in watcher.events(conversation_id=""):
                     print(f"Ingest trigger: {ingest_event.payload.get('path', '')}")
                     ingest_runner = _full_scheduler_runner()
                     ingest_report = ingest_runner.run(ingest_event.goal)
@@ -3605,7 +3607,7 @@ def main(argv: list[str] | None = None) -> int:
                     _slack_ts_path.write_text(_slack_last_ts)
                     for _message in _messages:
                         print(f"Slack poll message: {_message['text'][:100]}")
-                        _poll_runner = _full_scheduler_runner()
+                        _poll_runner = _full_scheduler_runner("slack:" + _channel)
                         _poll_report = _poll_runner.run(_message["text"])
                         print(f"Slack poll job: {_poll_report.status}")
             except Exception as exc:
@@ -3725,7 +3727,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         ok, findings, message = registry.adopt(
             Path(args.path), gate=_cli_gate(config.home, config.approval_timeout_seconds), memory=memory,
-            project_id=args.project)
+            conversation_id=args.conversation)
         print(message)
         for finding in findings:
             print(f"{finding.path}:{finding.line} {finding.type}")
@@ -3745,7 +3747,7 @@ def main(argv: list[str] | None = None) -> int:
             pass
         from ..agentic.interview import InterviewRunner
         runner = InterviewRunner(client, config.home, memory=memory,
-                                 gate=_cli_gate(config.home, config.approval_timeout_seconds), project_id=args.project)
+                                 gate=_cli_gate(config.home, config.approval_timeout_seconds), conversation_id=args.conversation)
         print(f"Spec template: {runner.ensure_template()}  "
               f"(copy it, fill it in, attach it to skip the interview; "
               f"docs: README, Spec sheet section)")
@@ -3762,8 +3764,8 @@ def main(argv: list[str] | None = None) -> int:
         if result.failures:
             print(f"Spec failures: {'; '.join(result.failures)}")
         print(f"Spec approved: {result.approved}")
-        print(f"Spec file: {config.home}/specs/{args.project}.json")
-        print(f"Spec sheet: {config.home}/specs/{args.project}.md")
+        print(f"Spec file: {config.home}/specs/{args.conversation}.json")
+        print(f"Spec sheet: {config.home}/specs/{args.conversation}.md")
         if not result.approved:
             return 2
         if not args.run:
@@ -3797,13 +3799,13 @@ def main(argv: list[str] | None = None) -> int:
         import uuid as _i_uuid
         _i_run_id = _i_uuid.uuid4().hex[:12]
         _i_control = _IRunControl(config.home)
-        _i_control.register(_i_run_id, args.text, args.project)
+        _i_control.register(_i_run_id, args.text, args.conversation)
         print(f"interview run id: {_i_run_id}")
         goal_runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home,
                                  memory=memory,
-                                 project_id=args.project, plugins=plugins, execution_backend=execution_backend, researcher=_interview_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds), researcher=_interview_researcher), router=model_router, versioned_writes=True,
+                                 conversation_id=args.conversation, plugins=plugins, execution_backend=execution_backend, researcher=_interview_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds), researcher=_interview_researcher), router=model_router, versioned_writes=True,
                                  budget=_IBudget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
-                                 trace=_ITrace(config.home, project_id=args.project),
+                                 trace=_ITrace(config.home, conversation_id=args.conversation),
                                  model_verifier=_IModelVerifier(client),
                                  semantic_router=_i_router,
                                  use_semantic_router_skip=True,
@@ -3826,7 +3828,7 @@ def main(argv: list[str] | None = None) -> int:
     from ..agentic.trace import TraceRecorder
     budget = Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps,
                     max_seconds=config.budget_seconds)
-    trace = TraceRecorder(config.home, project_id=args.project)
+    trace = TraceRecorder(config.home, conversation_id=args.conversation)
     from ..agentic.verifier_model import ModelVerifier
     model_verifier = ModelVerifier(client)
     try:
@@ -3848,15 +3850,15 @@ def main(argv: list[str] | None = None) -> int:
     _goal_run_id = _uuid.uuid4().hex[:12]
     from ..interface.run_control import RunControl as _GoalControl
     _goal_control = _GoalControl(config.home)
-    _goal_control.register(_goal_run_id, args.text, args.project)
+    _goal_control.register(_goal_run_id, args.text, args.conversation)
     print(f"run id: {_goal_run_id}")
-    runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds, args.project), config.home,
+    runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds, args.conversation), config.home,
                         memory=memory,
-                        project_id=args.project, plugins=plugins, execution_backend=execution_backend,
+                        conversation_id=args.conversation, plugins=plugins, execution_backend=execution_backend,
                         budget=budget, trace=trace, model_verifier=model_verifier,
                         kernel_mode=config.kernel_mode, semantic_router=_cli_router,
                         use_semantic_router_skip=True, researcher=_researcher,
-                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds, args.project), researcher=_researcher, model_chat=lambda messages: client.chat(messages)),
+                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds, args.conversation), researcher=_researcher, model_chat=lambda messages: client.chat(messages)),
                         router=model_router, versioned_writes=True,
                         run_id=_goal_run_id, run_control=_goal_control,
                         network_available=_network_available(execution_backend, sandbox),
@@ -3880,10 +3882,10 @@ def main(argv: list[str] | None = None) -> int:
                 # register under their own ids, so control list shows
                 # them and cancel/steer can target a sub-run directly.
                 _sub_id = f"{runner.run_id}-{_uuid.uuid4().hex[:8]}"
-                _goal_control.register(_sub_id, subgoal, args.project)
+                _goal_control.register(_sub_id, subgoal, args.conversation)
                 sub_runner = GoalRunner(client, sandbox, runner.gate,
                                         config.home, memory=memory,
-                                        project_id=args.project, plugins=plugins,
+                                        conversation_id=args.conversation, plugins=plugins,
                                         execution_backend=execution_backend,
                                         budget=budget, trace=trace,
                                         model_verifier=model_verifier,

@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.memory.conversations import ConversationStore
-from src.agentic.project_brief import save_brief, load_brief, validate_brief
+from src.agentic.chat_brief import save_brief, load_brief, validate_brief
 from src.capabilities.docgen import generate_document, DocStore, build_ebook
 from src.capabilities.mail_rules import apply_rules
 from src.agentic.patterns import match_pattern
@@ -86,7 +86,7 @@ def test_security_tools_uploads_apikeys(tmp_path):
 
 def test_intake_lifecycle_planner_eval_governor():
     intake = intake_from_message("#dinner make a menu\nno milk")
-    assert intake["project_id"] == "dinner" and validate_intake(intake) == []
+    assert intake["conversation_id"] == "dinner" and validate_intake(intake) == []
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         life = LifecycleStore(Path(tmp))

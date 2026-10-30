@@ -83,17 +83,6 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
 #history-list, #search-results, #ideas-list, #goals-list, #library-list {
   flex: 1; overflow-y: auto; padding: 0 8px 12px; display: flex;
   flex-direction: column; gap: 4px; }
-#projects-bar { border-top: 1px solid var(--border); padding-top: 6px; }
-#project-list { display: flex; flex-direction: column; gap: 2px;
-  padding: 0 8px 10px; max-height: 168px; overflow-y: auto; }
-.project-item { padding: 7px 10px; border-radius: 9px; cursor: pointer;
-  border: 1px solid transparent; font-size: 13px; display: flex;
-  align-items: center; gap: 8px; transition: all .12s; }
-.project-item:hover { background: var(--surface2); border-color: var(--border); }
-.project-item.active { background: var(--surface2); border-color: var(--accent);
-  color: var(--accent); font-weight: 600; }
-.project-item .proj-count { margin-left: auto; font-size: 10.5px;
-  color: var(--muted); font-family: var(--font-mono); }
 .left-sub { font-size: 10px; text-transform: none; letter-spacing: 0;
   font-weight: 400; text-align: right; }
 .lib-item { display: flex; gap: 9px; align-items: center; padding: 8px 10px;
@@ -118,13 +107,13 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
   -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .hist-meta { font-size: 10.5px; color: var(--muted); margin-top: 3px;
   font-family: var(--font-mono); }
-.hist-item, .goal-item, .project-item, .lib-item { position: relative; }
+.hist-item, .goal-item, .lib-item { position: relative; }
 .hist-del { position: absolute; top: 5px; right: 5px; border: none;
   background: transparent; color: var(--muted); cursor: pointer;
   font-size: 11px; line-height: 1; padding: 3px 5px; border-radius: 6px;
   opacity: 0; transition: opacity .12s, color .12s, background .12s; }
 .hist-item:hover .hist-del, .goal-item:hover .hist-del,
-.project-item:hover .hist-del, .lib-item:hover .hist-del { opacity: 1; }
+.lib-item:hover .hist-del { opacity: 1; }
 .hist-del:hover { color: var(--red); background: var(--surface); }
 .hist-status { display: inline-block; padding: 1px 7px; border-radius: 8px;
   font-size: 10px; margin-right: 5px; }
@@ -802,7 +791,7 @@ body:has(.settings-app) { overflow: auto; }
   box-shadow: 0 0 10px var(--accent-glow);
 }
 
-/* Project brief editor (same overlay family as the webcam modal) */
+/* Chat brief editor (same overlay family as the webcam modal) */
 #brief-overlay {
   position: fixed; inset: 0; z-index: 90;
   display: flex; align-items: center; justify-content: center;

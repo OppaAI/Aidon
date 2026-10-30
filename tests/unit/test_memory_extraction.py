@@ -90,7 +90,7 @@ def test_record_extraction_by_scope(tmp_path):
                                           "User plans a proposal dinner"]
     episodic = memory.list_points("episodic")[0]
     assert episodic.payload["kind"] == "fact"
-    assert episodic.payload["project_id"] == "proj"
+    assert episodic.payload["conversation_id"] == "proj"
     assert episodic.payload["importance"] == 0.8
     assert record_extraction(memory, "proj",
                              {"facts": [], "understandings": []}) == 0
@@ -134,7 +134,7 @@ def _finalize_runner(tmp_path, memory):
     runner._adapted_from = ""
     runner._dag_summary = {}
     runner.memory = memory
-    runner.project_id = "default"
+    runner.conversation_id = "test"
     runner.run_id = "test"
     runner.home = tmp_path
     return runner

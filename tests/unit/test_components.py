@@ -588,9 +588,7 @@ from src.agentic.eval import (
 
 def test_conversations_db_numbering_is_serialised(tmp_path):
     store = ConversationStoreDB(tmp_path)
-    project = store.ensure_default_project()
-    assert store.ensure_default_project()["id"] == project["id"]
-    conv = store.create_conversation(project["id"])
+    conv = store.create_conversation()
     errors = []
 
     def record(n):
@@ -615,8 +613,7 @@ def test_conversations_db_numbering_is_serialised(tmp_path):
 
 def test_conversations_db_history_summary_delete(tmp_path):
     store = ConversationStoreDB(tmp_path)
-    project = store.create_project("dinner")
-    conv = store.create_conversation(project["id"])
+    conv = store.create_conversation()
     record_run_exchange(store, conv["id"], "user",
                         "Plan a roast beef dinner for two.")
     record_run_exchange(store, conv["id"], "assistant",
@@ -627,12 +624,12 @@ def test_conversations_db_history_summary_delete(tmp_path):
     summary = store.rolling_summary(conv["id"])
     assert "roast beef" in summary.lower()
     assert "budget" in summary.lower()
-    assert store.list_conversations(project["id"])
+    assert store.list_all_conversations()
     assert store.add_attachment(conv["id"], "menu.pdf", kind="pdf")["path"] == "menu.pdf"
-    assert store.add_idea(project["id"], "try yorkshire pudding")["text"]
+    assert store.add_idea("try yorkshire pudding")["text"]
     assert store.delete_conversation(conv["id"]) is True
     assert store.history(conv["id"]) == []
-    assert store.list_conversations(project["id"]) == []
+    assert store.list_all_conversations() == []
     store.close()
 
 

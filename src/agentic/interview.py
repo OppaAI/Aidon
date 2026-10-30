@@ -33,11 +33,11 @@ with a fail-closed clock, unlike the questions.
 
 Q&A recording:
 Every question and answer is recorded as STM (chat
-history) and as episodic memory, scoped by project_id,
+history) and as episodic memory, scoped by conversation_id,
 so a later run can see what was asked and answered,
 and a correction updates the spec, it does not start
 a new interview. The spec itself is saved as JSON
-under <home>/specs/<project_id>.json, and recorded
+under <home>/specs/<conversation_id>.json, and recorded
 as an episodic point, so recall can find it by text.
 
 Model shape, for tests and for real runs:
@@ -384,13 +384,13 @@ class InterviewRunner:
     """Chat interview, triggered by a chat message."""
 
     def __init__(self, client: ModelClient, home: Path, memory=None,
-                 gate=None, project_id: str = "default",
+                 gate=None, conversation_id: str = "",
                  max_questions: int = 20):
         self.client = client
         self.home = Path(home)
         self.memory = memory
         self.gate = gate
-        self.project_id = project_id
+        self.conversation_id = conversation_id
         self.max_questions = max_questions
 
     def _reply(self, messages) -> str:
@@ -438,7 +438,7 @@ class InterviewRunner:
         # Build from memory and previous runs first, before
         # asking anything new. This is what keeps the
         # interview from re-asking what is already known:
-        # - previous conversation in this project,
+        # - previous conversation in this chat,
         # - previous episodic specs for a similar goal,
         # - previous successful Experiences for a similar goal.
         # A prefilled field is a proposal, not a fact: the
@@ -448,17 +448,17 @@ class InterviewRunner:
         initial_spec = Spec(goal=message.strip())
         if self.memory is not None:
             try:
-                context = self.memory.conversation_context(self.project_id)
+                context = self.memory.conversation_context(self.conversation_id)
                 memory_context["previous_exchanges"] = [
                     {"role": p.payload.get("role", ""), "text": p.text}
                     for p in context["exchanges"][-5:]]
                 if context["summary"]:
                     memory_context["previous_summary"] = context["summary"]
                 # Previous specs: episodic points carrying a spec, from
-                # THIS project only. A spec from another project must
+                # THIS chat only. A spec from another chat must
                 # never seed this interview.
                 for point in self.memory.list_points("episodic", limit=100):
-                    if point.payload.get("project_id") != self.project_id:
+                    if point.payload.get("conversation_id") != self.conversation_id:
                         continue
                     saved = point.payload.get("spec")
                     if isinstance(saved, dict) and saved.get("goal"):
@@ -526,7 +526,7 @@ class InterviewRunner:
         if self.memory is not None:
             try:
                 self.memory.record_episodic(
-                    self.project_id,
+                    self.conversation_id,
                     f"Interview spec: {spec.goal}",
                     {"spec": spec.to_dict(), "deliverables": spec.deliverables,
                      "verified": verified})
@@ -567,8 +567,8 @@ class InterviewRunner:
     def _save_spec(self, spec: Spec) -> tuple[Path, Path]:
         """Save a spec as JSON and as a standard Markdown sheet.
 
-        Both live in <home>/specs/: <project>.json for code,
-        <project>.md for humans. The template is ensured
+        Both live in <home>/specs/: <conversation>.json for code,
+        <conversation>.md for humans. The template is ensured
         alongside them, so a user who finds a sheet knows
         they can write their own. Even an unverified spec
         is saved, so the user can see what is missing and
@@ -577,8 +577,8 @@ class InterviewRunner:
         spec_dir = self.home / "specs"
         spec_dir.mkdir(parents=True, exist_ok=True)
         self.ensure_template()
-        json_path = spec_dir / f"{self.project_id}.json"
-        md_path = spec_dir / f"{self.project_id}.md"
+        json_path = spec_dir / f"{self.conversation_id}.json"
+        md_path = spec_dir / f"{self.conversation_id}.md"
         json_path.write_text(json.dumps(spec.to_dict(), indent=2),
                              encoding="utf-8")
         md_path.write_text(spec_sheet_md(spec), encoding="utf-8")
@@ -602,7 +602,7 @@ class InterviewRunner:
         if self.memory is not None:
             try:
                 self.memory.record_episodic(
-                    self.project_id,
+                    self.conversation_id,
                     f"Attached spec: {spec.goal}",
                     {"spec": spec.to_dict(), "deliverables": spec.deliverables,
                      "verified": verified, "attached": True})
@@ -655,7 +655,6 @@ class InterviewRunner:
         if self.memory is not None:
             try:
                 self.memory.record_stm(
-                    role, text, project_id=self.project_id,
-                    conversation_id=self.project_id)
+                    role, text, conversation_id=self.conversation_id)
             except Exception:
                 pass

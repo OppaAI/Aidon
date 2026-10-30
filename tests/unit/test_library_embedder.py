@@ -114,7 +114,7 @@ def test_library_add_image_links_memory_and_stays_under_home(tmp_path):
     source = _png(tmp_path)
     item, point = library.add_image(
         source, "Roast beef chart", memory=memory,
-        collection="episodic", project_id="proj1")
+        collection="episodic", conversation_id="proj1")
     # File is under home/library/files/<id>/<name>, not the repo.
     assert item["stored_path"].startswith("library/files/")
     assert item["stored_path"].endswith("/chart.png")
@@ -134,10 +134,10 @@ def test_library_add_image_links_memory_and_stays_under_home(tmp_path):
     promoted = memory.promote_to_ltm(point, kind="semantic")
     assert promoted.payload["library_url"] == item["url"]
     # Library listing, get with confinement, and delete.
-    assert library.list_items("proj1")[0]["id"] == item["id"]
+    assert library.list_items()[0]["id"] == item["id"]
     assert library.get_item(item["id"])["name"] == "chart.png"
     assert library.delete_item(item["id"]) is True
-    assert library.list_items("proj1") == []
+    assert library.list_items() == []
 
 
 def test_library_chart_carries_data_file(tmp_path):
@@ -147,7 +147,7 @@ def test_library_chart_carries_data_file(tmp_path):
     data.write_text("item,price\nbeef,20\n")
     item, _ = library.add_image(
         _png(tmp_path), "Price chart, beef 20", memory=memory,
-        collection="episodic", project_id="proj1", data_path=data)
+        collection="episodic", conversation_id="proj1", data_path=data)
     assert item["data_file"] == "data.csv"
     assert (tmp_path / "home" / "library" / "files" / item["id"]
             / "data.csv").exists()

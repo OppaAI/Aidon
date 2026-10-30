@@ -66,7 +66,7 @@ def test_list_and_revoke_from_the_chat(tmp_path):
     assert "dinner · spec" in listing
     assert handle_command(store, "unpreapprove dinner spec").startswith("Revoked")
     assert handle_command(store, "preapprovals").startswith("No pre-approvals")
-    # Revoking everything for a project also works.
+    # Revoking everything for a chat also works.
     handle_command(store, "preapprove dinner spec 2")
     handle_command(store, "preapprove dinner live 2")
     assert "Revoked 2" in handle_command(store, "unpreapprove dinner all")
@@ -164,7 +164,7 @@ def _run(tmp_path, gate):
     home = tmp_path / "home"
     home.mkdir()
     runner = GoalRunner(FakeClient(""), Sandbox(home / "work"), gate, home,
-                        project_id="dinner")
+                        conversation_id="dinner")
     return runner.run("Write a note")
 
 
@@ -345,7 +345,7 @@ def test_loop_asks_when_the_plan_is_not_reversible(tmp_path):
     sent = []
     runner = GoalRunner(
         FakeClient(plan), Sandbox(home / "work"),
-        PreapprovalGate(inner, store, "dinner"), home, project_id="dinner",
+        PreapprovalGate(inner, store, "dinner"), home, conversation_id="dinner",
         extra_tools={"email_send": lambda **kwargs: sent.append(kwargs) or "sent"})
     runner.run("Email the customer")
     assert "live" in inner.kinds, "an irreversible plan must still get its card"

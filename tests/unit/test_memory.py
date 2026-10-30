@@ -1,4 +1,4 @@
-"""Memory component tests: hybrid recall, forgetting, projects,
+"""Memory component tests: hybrid recall, forgetting, chats,
 promotion, KB parsing, Experience merge.
 
 Offline: InMemoryStore + HashEmbedder, plus a stub
@@ -68,18 +68,18 @@ def test_forgetting_curve_and_prune(tmp_path):
     assert after > before
 
 
-def test_conversation_history_and_projects(tmp_path):
+def test_conversation_history_and_chats(tmp_path):
     memory = _memory(tmp_path)
-    memory.record_stm("user", "hello", conversation_id="conv1", project_id="proj1")
-    memory.record_stm("assistant", "hi there", conversation_id="conv1", project_id="proj1")
-    memory.record_stm("user", "other chat", conversation_id="conv2", project_id="proj2")
+    memory.record_stm("user", "hello", conversation_id="conv1")
+    memory.record_stm("assistant", "hi there", conversation_id="conv1")
+    memory.record_stm("user", "other chat", conversation_id="conv2")
     history = memory.conversation_history("conv1")
     assert len(history) == 2
     assert history[0].text == "hello"
     assert history[1].text == "hi there"
     context = memory.conversation_context("conv1")
     assert len(context["exchanges"]) == 2
-    assert memory.list_projects() == ["proj1", "proj2"]
+    assert len(memory.conversation_history("conv2")) == 1
     summary = memory.record_summary("conv1", "User greeted, assistant replied.")
     assert memory.conversation_context("conv1")["summary"] == "User greeted, assistant replied."
 

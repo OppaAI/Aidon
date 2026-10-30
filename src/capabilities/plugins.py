@@ -310,7 +310,7 @@ class PluginRegistry:
         raise ValueError(f"unknown plugin tool: {name}")
 
     def adopt(self, source_dir: Path, gate=None, approve=None, memory=None,
-              project_id: str = "default") -> tuple[bool, list[ScanFinding], str]:
+              conversation_id: str = "") -> tuple[bool, list[ScanFinding], str]:
         """Adopt a plugin: scan, approve, then copy. Returns (ok, findings, message).
 
         The approve callback, when given, receives (plugin, findings,
@@ -432,7 +432,7 @@ class PluginRegistry:
         if memory is not None:
             try:
                 memory.record_episodic(
-                    project_id, f"Adopted plugin {plugin.name}",
+                    conversation_id, f"Adopted plugin {plugin.name}",
                     {"plugin": plugin.name, "version": plugin.version,
                      "tools": plugin.tool_names()})
             except Exception:

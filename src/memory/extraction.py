@@ -32,9 +32,9 @@ import threading
 _PROMPT = """Extract what is durable from this exchange. Return JSON only, no other text:
 {"facts": [{"subject": "...", "predicate": "...", "value": "...", "scope": "episodic|semantic", "importance": 0.0-1.0}],
  "understandings": [{"text": "...", "scope": "episodic|semantic", "importance": 0.0-1.0}]}
-Facts are atomic, verifiable statements: preferences, biographical facts, project constraints, decisions.
+Facts are atomic, verifiable statements: preferences, biographical facts, task constraints, decisions.
 Understandings are interpretive takeaways: what the user is trying to achieve, their goals, attitudes, why they want something.
-Scope episodic = specific to this project or conversation; semantic = generally true about the user.
+Scope episodic = specific to this chat; semantic = generally true about the user.
 A turn may hold facts and understandings at the same time, or neither. Either list may be empty. Return empty lists when nothing durable is present. Do not invent anything not in the exchange.
 Exchange:
 """
@@ -131,7 +131,7 @@ def extract_from_text(exchange_text: str, chat) -> dict:
     return parse_extraction(reply)
 
 
-def record_extraction(memory, project_id: str, result: dict) -> int:
+def record_extraction(memory, conversation_id: str, result: dict) -> int:
     """Record facts + understandings into their scoped collections."""
     count = 0
     for fact in result.get("facts") or []:
@@ -141,7 +141,7 @@ def record_extraction(memory, project_id: str, result: dict) -> int:
                    "scope": fact["scope"], "importance": fact["importance"],
                    "source": "extraction"}
         if fact["scope"] == "episodic":
-            payload["project_id"] = project_id
+            payload["conversation_id"] = conversation_id
         try:
             memory.record(fact["scope"], text, payload)
             count += 1
@@ -151,7 +151,7 @@ def record_extraction(memory, project_id: str, result: dict) -> int:
         payload = {"kind": "understanding", "scope": item["scope"],
                    "importance": item["importance"], "source": "extraction"}
         if item["scope"] == "episodic":
-            payload["project_id"] = project_id
+            payload["conversation_id"] = conversation_id
         try:
             memory.record(item["scope"], item["text"], payload)
             count += 1
@@ -160,7 +160,7 @@ def record_extraction(memory, project_id: str, result: dict) -> int:
     return count
 
 
-def spawn_extraction(memory, project_id: str, exchange_text: str, chat):
+def spawn_extraction(memory, conversation_id: str, exchange_text: str, chat):
     """Start the background extraction thread; None when skipped.
 
     Skipped (no thread, no call) when extraction is disabled, when
@@ -173,7 +173,7 @@ def spawn_extraction(memory, project_id: str, exchange_text: str, chat):
     def _run():
         try:
             result = extract_from_text(exchange_text, chat)
-            record_extraction(memory, project_id, result)
+            record_extraction(memory, conversation_id, result)
         except Exception:
             pass
 
