@@ -1,0 +1,39 @@
+python sandbox_test.py
+--- locked: apt-get update (returncode=0)
+rary failure resolving 'security.ubuntu.com'
+Err:3 http://archive.ubuntu.com/ubuntu noble-updates InRelease
+  Temporary failure resolving 'archive.ubuntu.com'
+Err:4 http://archive.ubuntu.com/ubuntu noble-backports InRelease
+  Temporary failure resolving 'archive.ubuntu.com'
+Reading package lists...
+--- locked: pip install cowsay (returncode=1)
+esolutionError("HTTPSConnection(host='pypi.org', port=443): Failed to resolve 'pypi.org' ([Errno -3] Temporary failure in name resolution)")': /simple/cowsay/
+ERROR: Could not find a version that satisfies the requirement cowsay (from versions: none)
+ERROR: No matching distribution found for cowsay
+--- sudo present? (returncode=0)
+no sudo installed
+--- plain root command (no sudo needed) (returncode=0)
+uid=0(root) gid=0(root) groups=0(root)
+wrote to /etc
+--- open: apt install tree (returncode=0)
+packing libtext-charwidth-perl:amd64 (0.04-11build3) ...
+Selecting previously unselected package cowsay.
+Preparing to unpack .../cowsay_3.03+dfsg2-8_all.deb ...
+Unpacking cowsay (3.03+dfsg2-8) ...
+Setting up libtext-charwidth-perl:amd64 (0.04-11build3) ...
+Setting up cowsay (3.03+dfsg2-8) ...
+--- open: pip install cowsay (returncode=0)
+
+--- open: cowsay works (returncode=0)
+__
+| hi |
+  ==
+  \
+   \
+     ^__^
+     (oo)\_______
+     (__)\       )\/\
+         ||----w |
+         ||     ||
+--- snapshot: scipy in locked sandbox (returncode=0)
+1.18.1
