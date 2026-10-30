@@ -420,16 +420,18 @@ html[data-theme="light"] [data-status="model"] { color: #193353; }
 .think-item.think-failed { border-color: var(--red); }
 .think-item.think-failed .think-meta { color: var(--red); }
 .think-error-detail { padding: 0 9px 9px; color: var(--red); font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.think-head-row { display: flex; gap: 8px; align-items: center; padding: 7px 9px;
+.think-head-row { display: grid; grid-template-columns: 20px 1fr;
+  column-gap: 8px; row-gap: 2px; align-items: start; padding: 7px 9px;
   cursor: pointer; user-select: none; }
 .think-head-row:hover { background: rgba(255,255,255,.02); }
 .think-toggle { width: 20px; height: 20px; flex: 0 0 auto; border-radius: 6px;
+  grid-column: 1; grid-row: 1 / span 2;
   border: 1px solid var(--border); background: var(--surface); color: var(--accent);
   font-size: 12px; line-height: 1; cursor: pointer; padding: 0; }
-.think-title { flex: 1; min-width: 0; font-size: 12.5px; line-height: 1.35;
-  word-break: break-word; }
-.think-meta { font-size: 10px; color: var(--muted); font-family: var(--font-mono);
-  white-space: nowrap; }
+.think-title { grid-column: 2; grid-row: 1; min-width: 0; font-size: 12.5px;
+  line-height: 1.35; word-break: break-word; }
+.think-meta { grid-column: 2; grid-row: 2; font-size: 10px; color: var(--muted);
+  font-family: var(--font-mono); }
 .think-body { display: none; border-top: 1px solid var(--border); padding: 8px 10px;
   font-size: 11.5px; }
 .think-item.open .think-body { display: block; }
