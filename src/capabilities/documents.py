@@ -131,9 +131,9 @@ def _ocr_image(path: Path) -> str | None:
     try:
         from PIL import Image
         import pytesseract  # type: ignore
-        return pytesseract.image_to_string(Image.open(path)).strip()
-    except Exception:
+    except ImportError:
         return None
+    return pytesseract.image_to_string(Image.open(path)).strip()
 
 
 def read_document(path_or_url: str, sandbox=None,

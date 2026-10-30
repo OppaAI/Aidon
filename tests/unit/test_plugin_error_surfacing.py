@@ -37,7 +37,8 @@ def test_plugin_error_surfaces_instead_of_unknown_tool(tmp_path):
     with pytest.raises(ValueError) as excinfo:
         runner._call_tool("boom", {})
     assert "plugin tool boom failed" in str(excinfo.value)
-    assert "boom inside plugin" in str(excinfo.value)
+    assert "RuntimeError" in str(excinfo.value)
+    assert "boom inside plugin" not in str(excinfo.value)
     assert "unknown tool" not in str(excinfo.value)
 
 

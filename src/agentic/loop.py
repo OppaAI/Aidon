@@ -1128,10 +1128,10 @@ class GoalRunner:
                         pass
                     else:
                         raise ValueError(
-                            f"plugin tool {name} failed: {plugin_exc}") from plugin_exc
+                            f"plugin tool {name} failed: {type(plugin_exc).__name__}") from plugin_exc
                 except Exception as plugin_exc:
                     raise ValueError(
-                        f"plugin tool {name} failed: {plugin_exc}") from plugin_exc
+                        f"plugin tool {name} failed: {type(plugin_exc).__name__}") from plugin_exc
             if str(exc).startswith("unknown tool:") and name in self.extra_tools:
                 # Extra tools are outside the confined set, so a
                 # post or send tool is approval-gated here, before

@@ -58,3 +58,32 @@ def test_read_document_marks_ocr_unavailable(tmp_path, monkeypatch):
     png.write_bytes(b"\x89PNG\r\n\x1a\n")
     result = _docs.read_document(str(png))
     assert "OCR unavailable" in result
+
+
+def test_read_document_marks_ocr_decode_failure(tmp_path, monkeypatch):
+    class _FakeMarkItDown:
+        def convert(self, path):
+            return SimpleNamespace(text_content="")
+
+    monkeypatch.setattr(_docs, "_MARKITDOWN_AVAILABLE", True)
+    monkeypatch.setattr(_docs, "MarkItDown", _FakeMarkItDown, raising=False)
+    import shutil
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/tesseract")
+    fake_pil = types.ModuleType("PIL")
+    fake_image_mod = types.ModuleType("PIL.Image")
+
+    def _broken_open(path):
+        raise OSError("damaged image")
+
+    fake_image_mod.open = _broken_open
+    fake_pil.Image = fake_image_mod
+    monkeypatch.setitem(sys.modules, "PIL", fake_pil)
+    monkeypatch.setitem(sys.modules, "PIL.Image", fake_image_mod)
+    fake_tess = types.ModuleType("pytesseract")
+    fake_tess.image_to_string = lambda img: ""
+    monkeypatch.setitem(sys.modules, "pytesseract", fake_tess)
+    png = tmp_path / "shot.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n")
+    result = _docs.read_document(str(png))
+    assert "READ_FAILED" in result
+    assert "OCR unavailable" not in result

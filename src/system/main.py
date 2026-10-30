@@ -2876,7 +2876,7 @@ def main(argv: list[str] | None = None) -> int:
             _startup_style("warn", "WhatsApp signature verification is off: AIDON_WHATSAPP_APP_SECRET is not set.")
         if not msg.slack_bot_token:
             _startup_style("warn", "Slack sending is not configured: SLACK_BOT_TOKEN is not set.")
-        if msg.slack_signing_secret:
+        if not msg.slack_signing_secret:
             _startup_style("warn", "Slack webhook requests are rejected: AIDON_SLACK_SIGNING_SECRET is not set (fail-closed).")
         try:
             import importlib.util

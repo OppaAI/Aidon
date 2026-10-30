@@ -56,6 +56,38 @@ def is_authorized(headers: dict, token: str | None, remote_addr: str = "127.0.0.
     return _authorization(headers) == expected
 
 
+def _host_name(host: str) -> str:
+    """Hostname part of a Host header: lowercased, port stripped."""
+    h = (host or "").strip().lower()
+    if h.startswith("["):
+        return h[1:].split("]", 1)[0]
+    if h.count(":") > 1:  # bare IPv6, no port to strip
+        return h
+    return h.split(":", 1)[0]
+
+
+def is_allowed_host(host: str, allowed_hosts=None) -> bool:
+    """True only if the Host is loopback or explicitly configured.
+
+    An Origin check that compares Origin to Host is meaningless when
+    the Host itself is attacker-controlled: a rebinding domain that
+    resolves to 127.0.0.1 sends a matching Host and Origin pair. So
+    the Host must first be loopback (127.*, ::1, localhost) or listed
+    in AIDON_WEBUI_ALLOWED_HOSTS (comma-separated string or iterable
+    of names). A missing Host is rejected.
+    """
+    name = _host_name(host)
+    if not name:
+        return False
+    if _is_localhost(name):
+        return True
+    if allowed_hosts is None:
+        return False
+    if isinstance(allowed_hosts, str):
+        allowed_hosts = [h.strip() for h in allowed_hosts.split(",")]
+    return any(name == _host_name(a) for a in allowed_hosts if a)
+
+
 def is_allowed_origin(headers: dict, host: str) -> bool:
     """Same-origin check for browser POSTs to the WebUI.
 

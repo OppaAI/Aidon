@@ -889,6 +889,7 @@ class WebUIServer:
         self._question_by_conversation: dict[str, dict] = {}
         self._question_lock = threading.Lock()
         self.webui_token = webui_token
+        self.webui_allowed_hosts = getattr(config, "webui_allowed_hosts", "") or ""
         self.transcribe_key = transcribe_key
         # Live realtime transcription sessions, by id: the browser
         # sends PCM chunks and reads partials over HTTP, while the
@@ -3562,10 +3563,13 @@ class WebUIServer:
             def do_GET(self):
                 parsed = urlparse(self.path)
                 if not parsed.path.startswith(("/webhook/", "/webhooks/")):
-                    from .webui_auth import is_authorized
+                    from .webui_auth import is_allowed_host, is_authorized
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     if not is_authorized(headers, server.webui_token, self.client_address[0]):
                         self._send_json(401, {"error": "unauthorized"})
+                        return
+                    if not is_allowed_host(self.headers.get("Host", ""), server.webui_allowed_hosts):
+                        self._send_json(403, {"error": "foreign host"})
                         return
                 if server.webhook_only and parsed.path not in (
                         "/webhook/whatsapp", "/webhooks/whatsapp"):
@@ -3923,10 +3927,13 @@ loadSettings();
             def do_POST(self):
                 parsed = urlparse(self.path)
                 if not parsed.path.startswith(("/webhook/", "/webhooks/")):
-                    from .webui_auth import is_allowed_origin, is_authorized
+                    from .webui_auth import is_allowed_host, is_allowed_origin, is_authorized
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     if not is_authorized(headers, server.webui_token, self.client_address[0]):
                         self._send_json(401, {"error": "unauthorized"})
+                        return
+                    if not is_allowed_host(self.headers.get("Host", ""), server.webui_allowed_hosts):
+                        self._send_json(403, {"error": "foreign host"})
                         return
                     if not is_allowed_origin(headers, self.headers.get("Host", "")):
                         self._send_json(403, {"error": "foreign origin"})
@@ -4295,10 +4302,13 @@ loadSettings();
             def do_DELETE(self):
                 parsed = urlparse(self.path)
                 if not parsed.path.startswith(("/webhook/", "/webhooks/")):
-                    from .webui_auth import is_authorized
+                    from .webui_auth import is_allowed_host, is_authorized
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     if not is_authorized(headers, server.webui_token, self.client_address[0]):
                         self._send_json(401, {"error": "unauthorized"})
+                        return
+                    if not is_allowed_host(self.headers.get("Host", ""), server.webui_allowed_hosts):
+                        self._send_json(403, {"error": "foreign host"})
                         return
                 if parsed.path.startswith("/api/memory/episodes/") or \
                         parsed.path.startswith("/api/memory/knowledge/"):
@@ -4347,10 +4357,13 @@ loadSettings();
             def do_PUT(self):
                 parsed = urlparse(self.path)
                 if not parsed.path.startswith(("/webhook/", "/webhooks/")):
-                    from .webui_auth import is_authorized
+                    from .webui_auth import is_allowed_host, is_authorized
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     if not is_authorized(headers, server.webui_token, self.client_address[0]):
                         self._send_json(401, {"error": "unauthorized"})
+                        return
+                    if not is_allowed_host(self.headers.get("Host", ""), server.webui_allowed_hosts):
+                        self._send_json(403, {"error": "foreign host"})
                         return
                 raw = self._read_body()
                 try:

@@ -82,8 +82,6 @@ def make_spreadsheet(sheets, output) -> str:
                 ws.append(row)
         wb.save(path)
         return str(path)
-    print("warning: openpyxl is not installed; wrote CSV files plus a manifest instead of XLSX",
-          file=sys.stderr)
     base = path.with_suffix("")
     manifest_lines = []
     for name, headers, rows in cleaned:
@@ -99,6 +97,8 @@ def make_spreadsheet(sheets, output) -> str:
         "Spreadsheet fallback: openpyxl is not installed, so each sheet "
         "was written as a CSV file.\n" + "\n".join(manifest_lines) + "\n",
         encoding="utf-8")
+    print("warning: openpyxl is not installed; wrote CSV files plus a manifest instead of XLSX",
+          file=sys.stderr)
     return str(manifest)
 
 
