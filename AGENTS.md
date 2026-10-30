@@ -32,6 +32,8 @@ approval → live → learn
 - **Live**: execute the approved plan with real credentials.
 - **Learn**: distill reusable skills (candidate → validated → trusted),
   record the episode, persist the DAG.
+  Skills can also be imported from a file with
+  `aidon skill-library import <file>`.
 
 ## Capabilities
 
@@ -63,6 +65,11 @@ approval → live → learn
     PyPI installs. Never into Aidon's own venv.
   - `apt_install` — system packages via sudo (needs sudo configured).
   - `record_system_audio` — capture system audio (course recordings).
+  - `record_webcam` — capture a webcam clip (host-side: the sandbox
+    has no camera device). Always approval-gated, kind `record`.
+  - `youtube_upload` — upload a video file to YouTube, private by
+    default. Always approval-gated, kind `live`, showing file, size,
+    title, description, visibility, and category.
   - `transcribe_audio` — speech to text (local whisper if available,
     else the Meta transcription API when a key is set).
   - `build_ebook` — markdown sources → EPUB.
@@ -113,6 +120,10 @@ discovered at startup. Core `tools.py` is never edited for this.
   ("save everything, commit nothing"). The scan does not prove
   correctness — your sandbox test evidence does, and an untested
   plugin must not be approved blindly.
+  Blocking scan findings refuse adoption outright: eval/exec,
+  subprocess, network, secret assignment, dynamic import, and
+  unpinned dependencies. Skill trust additionally requires
+  pinned string dependencies (name==version).
   You cannot write outside your workdir, so adoption without approval
   is structurally impossible — the move is the privileged step.
 - **Invest where it pays**: if a goal needs a capability you will
@@ -141,6 +152,32 @@ a rung:
    Prefer this over writing a plugin — someone already built and
    maintains it. Approval is bound to the exact command/URL.
 4. **Write a tool plugin** — last resort: draft, sandbox-test, adopt.
+
+## Acquisition budgets
+
+Capability acquisition is budgeted per run: at most 2 tools,
+1 MCP server, 2 dependency sets, 3 repair cycles, and 600
+seconds of acquisition time. A rejected approval consumes
+nothing; a failed attempt does. Learning runs under the
+same budget and fails closed without one — no default
+allow. Image builds record the pip versions actually
+resolved, and Modal sandboxes default to 1 CPU / 1024 MB
+(`AIDON_MODAL_CPU`, `AIDON_MODAL_MEMORY_MB`).
+
+Stale capabilities surface, they are not auto-retired:
+`aidon capabilities list` shows use counts, and
+`aidon capabilities stale` lists validated or trusted
+capabilities idle 90 days (or `--days N`).
+
+## Optional tools
+
+Non-core built-in tools ship behind a flip, off by
+default: `AIDON_OPTIONAL_TOOLS=0` exposes only the core
+ladder — fetch, ask, installs, MCP connect, plugin
+adoption, plus read/write. Flipping it on restores the
+full built-in set (web search, documents, social, media,
+email, webcam, YouTube). The flip never gates adopted
+plugins or trusted skills: earned tools stay usable.
 
 ## Model routing
 
@@ -251,7 +288,7 @@ Wiring (human does this once):
 ## Maintenance
 Capabilities rot: APIs change, instructions go stale. Every so often
 — a weekly scheduled job is the standing recommendation
-(`aidon schedule add maintenance goal "weekly" "Run 'aidon tools check' and 'aidon skills check'; report failures to the human with proposed fixes"`)
+(`aidon schedule add maintenance goal "weekly" "Run 'aidon tools check' and 'aidon skills check', and 'aidon capabilities stale'; report failures to the human with proposed fixes"`)
 — verify everything still works:
 
 - `aidon tools check` imports every plugin, runs `build_tools`, and
