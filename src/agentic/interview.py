@@ -454,8 +454,12 @@ class InterviewRunner:
                     for p in context["exchanges"][-5:]]
                 if context["summary"]:
                     memory_context["previous_summary"] = context["summary"]
-                # Previous specs: episodic points carrying a spec.
+                # Previous specs: episodic points carrying a spec, from
+                # THIS project only. A spec from another project must
+                # never seed this interview.
                 for point in self.memory.list_points("episodic", limit=100):
+                    if point.payload.get("project_id") != self.project_id:
+                        continue
                     saved = point.payload.get("spec")
                     if isinstance(saved, dict) and saved.get("goal"):
                         previous = Spec.from_dict(saved)

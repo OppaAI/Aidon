@@ -153,6 +153,27 @@ def test_interview_prefills_from_previous_spec(tmp_path):
     assert result.spec.constraints == ["no milk"]
 
 
+def test_interview_does_not_prefill_from_other_project_spec(tmp_path):
+    memory = _memory(tmp_path)
+    memory.record_episodic("tart", "Interview spec: Make tarts",
+                           {"spec": {"goal": "Make tarts",
+                                     "deliverables": ["tarts.md"],
+                                     "constraints": ["no milk", "no gluten",
+                                                     "no coconut"]}})
+    class EmptySpecClient(FakeClient):
+        def chat(self, messages):
+            return json.dumps({"question": None, "complete": True,
+                               "spec": {"goal": "Say hi",
+                                        "deliverables": ["reply"]}})
+    gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
+    runner = InterviewRunner(EmptySpecClient(), tmp_path / "home",
+                             memory=memory, gate=gate, project_id="greeting")
+    result = runner.start_from_message("Hi Aidon", ask=lambda q: "x")
+    assert result.spec.deliverables == ["reply"]
+    assert result.spec.constraints == []
+    assert "no milk" not in " ".join(result.spec.constraints)
+
+
 def test_example_spec_sheet_parses_and_reconciles(tmp_path):
     example = (tmp_path / "repo").parent
     # Example file lives in the repo examples/ path, read
