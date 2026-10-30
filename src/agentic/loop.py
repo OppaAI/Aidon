@@ -1856,6 +1856,20 @@ class GoalRunner:
                 # setting as written.
                 experiences = recall_experiences(
                     self.memory, goal, limit=max(recall_limit, 5))
+                # Clef DAG matching: re-rank the recalled workflows
+                # by fit before adaptation picks one. Jaccard recall
+                # stays the pre-filter; Clef only reorders within
+                # the recalled set, and any failure or low
+                # confidence keeps the recalled order.
+                if self.clef_client is not None and len(experiences) > 1:
+                    try:
+                        from .clef_dag import rank_dags
+                        _ranked = rank_dags(goal, experiences, self.clef_client)
+                        self._trace("dag", "ranked",
+                                    f"{len(_ranked)} candidate(s) after Clef ranking")
+                        experiences = _ranked
+                    except Exception as exc:
+                        self._trace("dag", "rank-skipped", str(exc)[:100])
                 failure = matching_failure(self.memory, goal)
                 if failure is None:
                     # DAG composition first: when the goal spans
