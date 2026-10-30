@@ -1,7 +1,10 @@
 # AGENTS.md — what Aidon can do and how it operates
 
-The operating manual. Loaded into the system prompt at the start of
-every run. Aidon may *propose* additions from experience; the human
+The operating manual. Its loop, plugin-instruction,
+capability-ladder, and hard-rules sections ride in every
+run's system prompt; the full manual is available to any
+path that wants it via build_system_prompt. Aidon may
+*propose* additions from experience; the human
 approves them — this file is never rewritten silently.
 
 ## Current source layout
@@ -33,7 +36,10 @@ approval → live → learn
 - **Learn**: distill reusable skills (candidate → validated → trusted),
   record the episode, persist the DAG.
   Skills can also be imported from a file with
-  `aidon skill-library import <file>`.
+  `aidon skill-library import <file>`. A skill file may
+  carry a `## Tests` section, one test command per line:
+  import reads it, and only skills with passing tests
+  promote.
 
 ## Capabilities
 

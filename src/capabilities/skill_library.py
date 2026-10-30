@@ -103,7 +103,10 @@ def import_skill_file(home, source_path, name: str | None = None) -> Skill:
     so its stem always matches the trusted-name gate the
     planner reads (skill_texts only admits files whose stem
     is a trusted library name). The description is the
-    first non-heading, non-empty line. A skill with no
+    first non-heading, non-empty line outside any Tests
+    section. A ## Tests section, one test command per
+    line, becomes the skill's test_commands: without it
+    the skill has no tests and can never promote. A skill with no
     borrowed code carries empty code_sources, which passes
     the license gate.
 
@@ -129,8 +132,14 @@ def import_skill_file(home, source_path, name: str | None = None) -> Skill:
             f"skill {clean!r} already exists ({existing.state}); "
             "retire it first to re-import")
     description = ""
+    in_tests = False
     for line in text.splitlines():
         stripped = line.strip()
+        if stripped.startswith("## "):
+            in_tests = stripped[3:].strip().lower() == "tests"
+            continue
+        if in_tests:
+            continue
         if stripped and not stripped.startswith("#"):
             description = stripped[:200]
             break
@@ -139,13 +148,42 @@ def import_skill_file(home, source_path, name: str | None = None) -> Skill:
     target = skills_dir / f"{clean}.md"
     target.write_text(text, encoding="utf-8")
     try:
-        return lib.add(Skill(name=clean, description=description))
+        return lib.add(Skill(name=clean, description=description,
+                             test_commands=parse_test_commands(text)))
     except Exception:
         try:
             target.unlink()
         except OSError:
             pass
         raise
+
+
+def parse_test_commands(text: str) -> list[str]:
+    """One test command per line from a skill file's ## Tests
+    section, until the next ## heading. Fence lines, blank
+    lines, and comment lines are skipped. No Tests section
+    means no test commands, and a skill with no test
+    commands is never promotable: tests are the evidence
+    promotion stands on, so they live in the file itself,
+    not in a side record."""
+    commands = []
+    in_tests = False
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            if stripped[3:].strip().lower() == "tests":
+                in_tests = True
+                continue
+            if in_tests:
+                break
+            continue
+        if not in_tests:
+            continue
+        if not stripped or stripped.startswith("#") or \
+                stripped.startswith("```"):
+            continue
+        commands.append(stripped)
+    return commands
 
 
 def is_trivial_test(cmd: str) -> bool:
@@ -243,6 +281,8 @@ class Skill:
             for key, value in self.provenance.items():
                 lines.append(f"- {key}: {value}")
             lines.append("")
+        if self.test_commands:
+            lines += ["## Tests", ""] + list(self.test_commands) + [""]
         return "\n".join(lines)
 
     def required_packages(self) -> list[str]:
