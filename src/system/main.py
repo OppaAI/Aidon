@@ -548,6 +548,26 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         tools["record_system_audio"] = record_audio
     except Exception:
         pass
+    try:
+        from ..capabilities.webcam import record_webcam_clip
+
+        def record_webcam(seconds, output="clip.mp4", device=""):
+            # Kind "record", force_ask: camera activation is
+            # never pre-approved and never silent. The card
+            # names the duration and the output file first.
+            ok, why = _approval(
+                "record", "Record webcam video",
+                f"Activate the camera and record {int(seconds)} "
+                f"seconds of video to {output}?",
+                force_ask=True)
+            if not ok:
+                return f"webcam recording rejected: {why}"
+            return record_webcam_clip(int(seconds), str(_confined(output)),
+                                      device or "/dev/video0")
+
+        tools["record_webcam"] = record_webcam
+    except Exception:
+        pass
 
     # Compatibility names from Aidon.
     if "threads_publish" in tools:
