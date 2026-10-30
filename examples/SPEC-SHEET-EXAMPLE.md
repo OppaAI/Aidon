@@ -2,7 +2,7 @@
 
 How to use this sheet: fill it in, save it, and attach it in the chat box.
 Aidon reads it, verifies it, and skips the interview.
-Template: specs/template.md in your Aidon home, and docs/examples/SPEC-SHEET-TEMPLATE.md in the repo.
+Template: specs/template.md in your Aidon home, and examples/SPEC-SHEET-TEMPLATE.md in the repo.
 Docs: README, Spec sheet section.
 
 This is a filled example, not a template. The customers, invoice numbers, and amounts below are fictional, for illustration only. Totals are calculated by code from the invoice amounts, not typed in by hand, and they reconcile as follows: Northside Bakery $755.50, Acme Consulting $2,020.00, Cedar Landscaping $0.00 paid in full, grand total due $2,775.50.
