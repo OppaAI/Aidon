@@ -1596,6 +1596,36 @@ class GoalRunner:
         # the chat callback (no clock, no card); the spec decision is
         # the Proceed button, not an approval card, so no gate is
         # passed and no spec approval is asked here.
+        # Computed early: the pre-interview intent skip below
+        # needs it, and the write-intent guard below reuses it.
+        _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
+        # Intent routing applies in every mode, before any
+        # mode interview: a chat-routed message gets a plain
+        # reply and a webchat-routed message a research-backed
+        # reply, with no interview and no spec. Research mode
+        # and force_web keep their existing paths below, so
+        # they are excluded here.
+        _route = getattr(self, "last_route", None)
+        if (getattr(self, "use_semantic_router_skip", False) and _route
+                and _route[0] == "chat" and spec is None and not _write_intent
+                and not getattr(self, "research_mode", False)
+                and not getattr(self, "force_web", False)):
+            reply = self._chat("respond", [self._attachment_message(goal)])
+            report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                               False, False, chat_reply=reply)
+            return self._finalize(report)
+        if (getattr(self, "use_semantic_router_skip", False) and _route
+                and _route[0] == "webchat" and spec is None and not _write_intent
+                and self.researcher is not None
+                and not getattr(self, "research_mode", False)
+                and not getattr(self, "force_web", False)):
+            from ..capabilities.webchat import webchat_reply
+            reply = webchat_reply(goal, self.researcher, self.client,
+                                  on_token=self.stream_callback,
+                                  context=self.conversation_context)
+            report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                               False, False, chat_reply=reply)
+            return self._finalize(report)
         if getattr(self, "mode", None) == "ask" and spec is None:
             if getattr(self, "question_ask", None) is None:
                 return self._finalize(RunReport(
@@ -1631,7 +1661,6 @@ class GoalRunner:
         # safety boundary. A goal that asks for a write, a save, or a file
         # is never answered by a path with no write tools, even if the
         # router said chat, because that would silently miss the task.
-        _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
         # Classification is advisory.  If the request reaches the
         # executable pipeline (especially because it writes a file), expose
         # the effective route, not the discarded low-confidence chat guess.
@@ -2769,22 +2798,31 @@ class GoalRunner:
             attempt = max_attempts
         files = sorted(passed) if passed else list(current_plan.deliverables)
         self._mission_prepare_review(goal, current_plan, files, sorted(verified))
-        self._trace("approval", "started", "live approval requested")
-        decision: Decision = self._ask_for_approval(
-            "live", "Approve live execution?",
-            self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"),
-            force_ask=True,
-            reversible=plan_is_reversible(
-                current_plan, self.allowed_side_effect_tools),
-        )
-        # edited means "change the proposal" — not approve the original.
-        # Live card has no apply-edit path; require a clean approved.
-        approved = decision.verdict in ("approved", "auto_approved")
-        self._mission_approval(approved)
-        if not approved:
-            return RunReport("rejected", goal, current_plan, True, False,
-                             files=files, attempts=attempt,
-                             backend=self._backend_name())
+        # Live approval is for live actions only. No caller populates
+        # _live_actions today, and a plan of sandbox steps has none:
+        # asking here would repeat the mode-stop approval for an
+        # empty set, and force_ask would bypass even an Auto-Approve
+        # grant. When live actions exist, the gate below still asks.
+        if getattr(self, "_live_actions", None):
+            self._trace("approval", "started", "live approval requested")
+            decision: Decision = self._ask_for_approval(
+                "live", "Approve live execution?",
+                self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"),
+                force_ask=True,
+                reversible=plan_is_reversible(
+                    current_plan, self.allowed_side_effect_tools),
+            )
+            # edited means "change the proposal" — not approve the original.
+            # Live card has no apply-edit path; require a clean approved.
+            approved = decision.verdict in ("approved", "auto_approved")
+            self._mission_approval(approved)
+            if not approved:
+                return RunReport("rejected", goal, current_plan, True, False,
+                                 files=files, attempts=attempt,
+                                 backend=self._backend_name())
+        else:
+            self._trace("approval", "skipped", "no live actions")
+            self._mission_approval(True)
         self._save_checkpoint(
             "approved", goal, current_plan, passed,
             verified=verified, attempt=attempt)

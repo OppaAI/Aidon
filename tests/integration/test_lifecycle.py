@@ -722,7 +722,9 @@ def _run_simple_goal(tmp_path, network_available):
 
 def test_network_on_announces_reports_and_marks_card(tmp_path, capsys):
     runner, bodies = _run_simple_goal(tmp_path, True)
-    report = runner.run("Write e.md")
+    report = runner.run("Write e.md", live_actions=[
+        {"kind": "notify", "recipient": "owner",
+         "subject": "t", "body": "b"}])
     assert report.status == "done"
     assert report.network is True
     assert "Sandbox network: on" in capsys.readouterr().err
@@ -731,7 +733,9 @@ def test_network_on_announces_reports_and_marks_card(tmp_path, capsys):
 
 def test_network_none_says_nothing(tmp_path, capsys):
     runner, bodies = _run_simple_goal(tmp_path, None)
-    report = runner.run("Write e.md")
+    report = runner.run("Write e.md", live_actions=[
+        {"kind": "notify", "recipient": "owner",
+         "subject": "t", "body": "b"}])
     assert report.status == "done"
     assert report.network is None
     assert "Sandbox network: on" not in capsys.readouterr().err
@@ -740,7 +744,9 @@ def test_network_none_says_nothing(tmp_path, capsys):
 
 def test_network_false_says_nothing(tmp_path, capsys):
     runner, bodies = _run_simple_goal(tmp_path, False)
-    report = runner.run("Write e.md")
+    report = runner.run("Write e.md", live_actions=[
+        {"kind": "notify", "recipient": "owner",
+         "subject": "t", "body": "b"}])
     assert report.status == "done"
     assert report.network is False
     assert "Sandbox network: on" not in capsys.readouterr().err

@@ -165,7 +165,9 @@ def _run(tmp_path, gate):
     home.mkdir()
     runner = GoalRunner(FakeClient(""), Sandbox(home / "work"), gate, home,
                         conversation_id="dinner")
-    return runner.run("Write a note")
+    return runner.run("Write a note", live_actions=[
+        {"kind": "notify", "recipient": "owner",
+         "subject": "t", "body": "b"}])
 
 
 def test_loop_skips_the_live_card_only_for_a_reversible_run(tmp_path):
