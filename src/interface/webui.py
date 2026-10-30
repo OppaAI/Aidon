@@ -3157,6 +3157,9 @@ class WebUIServer:
             goal += "\n\nAttached document paths (use the document reader when needed):\n" + "\n".join(document_paths)
         if video_paths:
             goal += "\n\nAttached video paths (use the video workflow when needed):\n" + "\n".join(video_paths)
+        if image_paths:
+            goal += ("\n\nAttached image paths (pass one to edit_image when a "
+                     "style change or edit is requested):\n" + "\n".join(image_paths))
         result = self.start_goal({**body, "goal": goal, "image_paths": image_paths})
         result.update({"images": [Path(path).name for path in image_paths],
                       "documents": [Path(path).name for path in document_paths],

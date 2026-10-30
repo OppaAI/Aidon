@@ -43,6 +43,21 @@ from pathlib import Path
 MODEL = "muse-image-1.0"
 
 
+def _image_bytes(data, label: str = "Muse Image") -> bytes:
+    """Pull the first image out of an API response, or raise."""
+    images = data.get("data", []) if isinstance(data, dict) else []
+    if not images:
+        raise ValueError(f"{label} did not return an image")
+    first = images[0]
+    if isinstance(first, dict) and first.get("b64_json"):
+        return base64.b64decode(first["b64_json"])
+    if isinstance(first, dict) and first.get("url"):
+        req = urllib.request.Request(first["url"])
+        with urllib.request.urlopen(req, timeout=60) as response:
+            return response.read()
+    raise ValueError(f"{label} returned an image entry with no bytes and no URL")
+
+
 def generate_image(prompt: str, api_key: str, endpoint: str,
                    size: str = "1024x1024", post=None, model: str = MODEL) -> bytes:
     """Generate one image, or raise. Approval is the caller's job, before this call."""
@@ -60,17 +75,7 @@ def generate_image(prompt: str, api_key: str, endpoint: str,
                                      method="POST", headers=headers)
         with urllib.request.urlopen(req, timeout=60) as response:
             data = json.loads(response.read().decode())
-    images = data.get("data", []) if isinstance(data, dict) else []
-    if not images:
-        raise ValueError("Muse Image did not return an image")
-    first = images[0]
-    if isinstance(first, dict) and first.get("b64_json"):
-        return base64.b64decode(first["b64_json"])
-    if isinstance(first, dict) and first.get("url"):
-        req = urllib.request.Request(first["url"])
-        with urllib.request.urlopen(req, timeout=60) as response:
-            return response.read()
-    raise ValueError("Muse Image returned an image entry with no bytes and no URL")
+    return _image_bytes(data)
 
 
 def edit_image(prompt: str, api_key: str, endpoint: str,
@@ -121,17 +126,60 @@ def edit_image(prompt: str, api_key: str, endpoint: str,
                                      method="POST", headers=headers)
         with urllib.request.urlopen(req, timeout=60) as response:
             data = json.loads(response.read().decode())
-    images = data.get("data", []) if isinstance(data, dict) else []
-    if not images:
-        raise ValueError("Muse Image edit did not return an image")
-    first = images[0]
-    if isinstance(first, dict) and first.get("b64_json"):
-        return base64.b64decode(first["b64_json"])
-    if isinstance(first, dict) and first.get("url"):
-        req = urllib.request.Request(first["url"])
-        with urllib.request.urlopen(req, timeout=60) as response:
-            return response.read()
-    raise ValueError("Muse Image edit returned an image entry with no bytes and no URL")
+    return _image_bytes(data, "Muse Image edit")
+
+
+def edit_image_files(prompt: str, api_key: str, endpoint: str,
+                     reference_images: list, size: str = "1024x1024",
+                     post=None, model: str = MODEL) -> bytes:
+    """Edit/compose from local image files with multipart/form-data.
+
+    The JSON form above passes paths/URLs through as strings, which the
+    OpenAI-compatible ``/images/edits`` endpoint does not accept for local
+    files. This variant reads the bytes and posts the official multipart
+    form: model, prompt, size, and one ``image[]`` file per reference.
+
+    ``post(url, headers, body_bytes)`` is injectable for tests. Bytes and
+    paths are accepted; URLs are not (download them first).
+    """
+    if not prompt.strip():
+        raise ValueError("image prompt is required")
+    if not api_key:
+        raise ValueError("Muse Image API key is required, generation is credit-gated, never run without a key")
+    if not reference_images or len(reference_images) > 10:
+        raise ValueError("Muse Image edit needs 1 to 10 reference images, not 0, not more than 10")
+    import mimetypes
+    import uuid
+    files = []
+    for reference in reference_images:
+        path = Path(reference)
+        if not path.is_file():
+            raise ValueError(f"reference image not found: {reference}")
+        files.append((path, path.read_bytes(),
+                      mimetypes.guess_type(path.name)[0] or "application/octet-stream"))
+    boundary = "----Aidon" + uuid.uuid4().hex
+    body = bytearray()
+    for name, value in (("model", model), ("prompt", prompt), ("size", size)):
+        body += (f"--{boundary}\r\nContent-Disposition: form-data; "
+                 f'name="{name}"\r\n\r\n{value}\r\n').encode()
+    for path, data, content_type in files:
+        filename = path.name.replace('"', "")
+        body += (f"--{boundary}\r\nContent-Disposition: form-data; "
+                 f'name="image[]"; filename="{filename}"\r\n'
+                 f"Content-Type: {content_type}\r\n\r\n").encode()
+        body += data + b"\r\n"
+    body += f"--{boundary}--\r\n".encode()
+    url = endpoint.rstrip("/") + "/images/edits"
+    headers = {"Authorization": f"Bearer {api_key}",
+               "Content-Type": f"multipart/form-data; boundary={boundary}"}
+    if post is not None:
+        data = post(url, headers, bytes(body))
+    else:
+        req = urllib.request.Request(url, data=bytes(body), method="POST",
+                                     headers=headers)
+        with urllib.request.urlopen(req, timeout=120) as response:
+            data = json.loads(response.read().decode())
+    return _image_bytes(data, "Muse Image edit")
 
 
 def save_image(data: bytes, path: Path) -> Path:

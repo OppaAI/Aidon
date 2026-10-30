@@ -745,6 +745,94 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     except Exception:
         pass
 
+    # Style/photo edits are host-side: the image API needs the key, the
+    # network, and a home-wide output folder, none of which the sandbox
+    # exposes. Credits are spent, so every call is approval-gated.
+    try:
+        from ..capabilities.image_gen import edit_image_files, save_image as _save_image
+
+        def _image_reference(reference) -> Path:
+            raw = str(reference or "").strip()
+            if not raw:
+                raise ValueError("an image path is required")
+            path = Path(raw).expanduser()
+            uploads = config.home / "library" / "uploads"
+            if not path.is_absolute():
+                candidates = [workdir / raw, uploads / raw, config.home / raw]
+                path = next((p for p in candidates if p.is_file()), candidates[0])
+                if not path.is_file() and "/" not in raw.replace("\\", "/"):
+                    hits = sorted(uploads.glob(f"*-{raw}"), key=lambda p: p.stat().st_mtime)
+                    if hits:
+                        path = hits[-1]
+            path = path.resolve()
+            home_root = config.home.resolve()
+            if path != home_root and home_root not in path.parents:
+                raise ValueError(f"image path outside the Aidon home: {raw}")
+            if not path.is_file():
+                raise ValueError(f"image not found: {raw}")
+            return path
+
+        def _image_destination(output) -> Path:
+            images_dir = (config.home / "images").resolve()
+            raw = str(output or "").strip() or (
+                f"aidon-{datetime.now().strftime('%Y%m%d-%H%M%S')}.png")
+            relative = raw.replace("\\", "/")
+            target = Path(raw).expanduser()
+            if not target.is_absolute():
+                target = (config.home / relative) if relative.startswith("images/") \
+                    else (images_dir / relative)
+            target = target.resolve()
+            home_root = config.home.resolve()
+            if target != home_root and home_root not in target.parents:
+                raise ValueError("output path must stay inside the Aidon home")
+            if target.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+                target = target.with_suffix(".png")
+            return target
+
+        def edit_image(prompt, image="", images=None, output="", size="1024x1024"):
+            """Restyle or compose a photo. Saves under <home>/images by default."""
+            refs = []
+            if images is not None:
+                refs.extend([images] if isinstance(images, str) else list(images))
+            if image:
+                refs.insert(0, image)
+            if not str(prompt or "").strip():
+                return "IMAGE_EDIT_FAILED: a prompt is required"
+            if not refs or len(refs) > 10:
+                return "IMAGE_EDIT_FAILED: pass 1 to 10 reference image paths"
+            try:
+                paths = [_image_reference(item) for item in refs]
+                target = _image_destination(output)
+            except Exception as exc:
+                return f"IMAGE_EDIT_FAILED: {exc}"
+            key = str(getattr(config, "api_key", "") or "")
+            endpoint = str(getattr(config, "api_base", "") or "")
+            if not key or not endpoint:
+                return ("IMAGE_EDIT_FAILED: image tools need AIDON_API_KEY and "
+                        "AIDON_API_ENDPOINT in .env")
+            ok, why = _approval(
+                "live", "Edit image with Muse Image",
+                "Send {n} image(s) to {endpoint} and spend image credits.\n"
+                "Prompt: {prompt}\nSave to: {target}".format(
+                    n=len(paths), endpoint=endpoint,
+                    prompt=str(prompt)[:500], target=target),
+                force_ask=True)
+            if not ok:
+                return f"image edit rejected: {why}"
+            try:
+                data = edit_image_files(
+                    str(prompt), key, endpoint, [str(p) for p in paths],
+                    size=str(size or "1024x1024"),
+                    model=getattr(config, "image_model", "muse-image-1.0"))
+                saved = _save_image(data, target)
+                return f"IMAGE_SAVED: {saved}"
+            except Exception as exc:
+                return f"IMAGE_EDIT_FAILED: {type(exc).__name__}: {exc}"
+
+        tools["edit_image"] = edit_image
+    except Exception:
+        pass
+
     def notify(title, body="", recipient="owner"):
         from ..capabilities.outbox import Outbox
         item = Outbox(config.home).queue(str(recipient), str(title), str(body))

@@ -1280,6 +1280,13 @@ class GoalRunner:
                            "isolated mission venv. Never install packages "
                            "through shell, pip, or sudo; installation is "
                            "approval-gated.")
+            if "edit_image" in self.extra_tools:
+                system += (" For an image restyle or edit, call edit_image "
+                           "with prompt, image (the attached image path), and "
+                           "output such as images/result.png. It sends the "
+                           "image to Muse Image, spends credits, and is "
+                           "approval-gated. Never use shell to re-encode or "
+                           "style an image.")
         system += (" Discover before building: the tools listed above are "
                    "what you can call. If a listed tool does the job, use "
                    "it; do not write a replacement script, plugin, or tool "
