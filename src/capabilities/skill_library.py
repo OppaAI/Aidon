@@ -369,6 +369,8 @@ class SkillLibrary:
         skill.retire_reason = reason
         self._update(skill)
         self._sync_discovery(skill)
+        from .capability_hub import invalidate_health
+        invalidate_health(self.home, f"skill:{name}")
         return skill
 
     def record_failure(self, name: str) -> Skill | None:
@@ -382,6 +384,9 @@ class SkillLibrary:
             skill.state = "retired"
             skill.retire_reason = f"failed {skill.failures} times"
         self._update(skill)
+        if skill.state == "retired":
+            from .capability_hub import invalidate_health
+            invalidate_health(self.home, f"skill:{name}")
         return skill
 
     def rollback(self, name: str, version: int) -> Skill:

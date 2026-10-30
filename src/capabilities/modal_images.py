@@ -226,4 +226,8 @@ class CapabilityImageBuilder:
         tmp_path = self._manifest_path().with_suffix(".tmp")
         tmp_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
         os.replace(tmp_path, self._manifest_path())
+        # A rebuild replaces the judged artifact: a health
+        # verdict on the previous image must not survive.
+        from .capability_hub import invalidate_health
+        invalidate_health(self.home, f"image:{name}")
         return {"record": record, "image": snapshot}

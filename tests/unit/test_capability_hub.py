@@ -89,6 +89,106 @@ def test_preloaded_registry_is_reused_without_reimport(tmp_path):
         "the hub must reuse the loaded registry, not import again"
 
 
+def test_invalidate_drops_health(home):
+    hub = CapabilityHub(home)
+    hub.record_health("mcp:web", "degraded")
+    assert hub.invalidate("mcp:web") is True
+    assert hub.get("mcp:web")["health"] == "unknown"
+    assert hub.invalidate("mcp:web") is False
+
+
+def test_skill_retire_prunes_health(tmp_path):
+    from src.capabilities.skill_library import Skill, SkillLibrary
+    lib = SkillLibrary(tmp_path)
+    lib.add(Skill(name="doomed", description="Doomed."))
+    lib.trust("doomed", approved=True)
+    hub = CapabilityHub(tmp_path)
+    hub.record_health("skill:doomed", "degraded")
+    lib.retire("doomed", "no longer needed")
+    assert hub.get("skill:doomed")["health"] == "unknown"
+
+
+def test_registry_retire_and_reregister_reset_health(tmp_path):
+    from src.capabilities.capability_registry import CapabilityRegistry
+    reg = CapabilityRegistry(tmp_path)
+    evidence = [{"passed": True, "test": "connect and list tools"}]
+    config = {"transport": "stdio", "command": "x-mcp",
+              "tools": ["x_tool"]}
+    reg.register("x-server", "mcp", config, evidence)
+    hub = CapabilityHub(tmp_path)
+    hub.record_health("mcp:x-server", "unavailable")
+    reg.retire("x-server", "replaced")
+    assert hub.get("mcp:x-server")["health"] == "unknown"
+    hub.record_health("mcp:x-server", "unavailable")
+    reg.register("x-server", "mcp", config, evidence)
+    assert hub.get("mcp:x-server")["health"] == "unknown", \
+        "a stale verdict must not survive re-registration"
+
+
+def test_builder_rebuild_resets_health(tmp_path):
+    from src.capabilities.modal_images import CapabilityImageBuilder
+
+    class _Stream:
+        def __init__(self, data=""):
+            self._data = data
+
+        def read(self):
+            return self._data
+
+    class _Proc:
+        def __init__(self):
+            self.stdout = _Stream()
+            self.stderr = _Stream()
+            self.returncode = 0
+
+        def wait(self):
+            return 0
+
+    class _Sandbox:
+        def exec(self, *cmd, timeout=None):
+            return _Proc()
+
+        def snapshot_filesystem(self):
+            return "snapshot-image"
+
+        def terminate(self):
+            pass
+
+    builder = CapabilityImageBuilder(
+        tmp_path, sandbox_factory=lambda *a, **k: _Sandbox())
+    builder._base_image = lambda: "base-image"
+    builder.build("numpy-img", pip_packages=["numpy"])
+    hub = CapabilityHub(tmp_path)
+    hub.record_health("image:numpy-img", "unavailable")
+    builder.build("numpy-img", pip_packages=["numpy"])
+    assert hub.get("image:numpy-img")["health"] == "unknown"
+
+
+def test_adopt_replaces_and_resets_health(tmp_path):
+    from src.capabilities.plugins import PluginRegistry
+    home = tmp_path / "home"
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "plugin.json").write_text(json.dumps({
+        "name": "upper", "version": "1", "description": "Up",
+        "tools": [{"name": "upper", "module": "tool.py",
+                   "function": "upper"}],
+        "skills": ["skill.md"]}))
+    (src / "tool.py").write_text(
+        "def upper(args):\n    return 'HI'\n")
+    (src / "skill.md").write_text("# Skill\n")
+    registry = PluginRegistry(home)
+    ok, _, _ = registry.adopt(src, approve=lambda p, f: True)
+    assert ok is True
+    hub = CapabilityHub(home)
+    hub.record_health("plugin:upper", "degraded")
+    hub.record_health("skill:upper/skill.md", "degraded")
+    ok, _, _ = registry.adopt(src, approve=lambda p, f: True)
+    assert ok is True
+    assert hub.get("plugin:upper")["health"] == "unknown"
+    assert hub.get("skill:upper/skill.md")["health"] == "unknown"
+
+
 def test_builtin_tools_present(home):
     entry = _by_id(CapabilityHub(home)).get("tool:write")
     assert entry["lifecycle"] == "builtin"

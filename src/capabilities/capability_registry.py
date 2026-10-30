@@ -180,6 +180,10 @@ class CapabilityRegistry:
         }
         entries[name] = entry
         self._write(entries)
+        # Re-registration replaces the judged artifact: any
+        # health verdict from before retirement is stale.
+        from .capability_hub import invalidate_health
+        invalidate_health(self.home, f"{kind}:{name}")
         return entry
 
     def promote(self, name: str, approve) -> dict:
@@ -236,4 +240,6 @@ class CapabilityRegistry:
         entry["retire_reason"] = reason
         entry["updated_at"] = datetime.now(timezone.utc).isoformat()
         self._write(entries)
+        from .capability_hub import invalidate_health
+        invalidate_health(self.home, f"{entry.get('kind')}:{name}")
         return entry

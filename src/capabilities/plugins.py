@@ -458,6 +458,13 @@ class PluginRegistry:
             shutil.rmtree(target)
         shutil.copytree(source_dir, target)
         self.plugins[plugin.name] = load_plugin(target)
+        # Replacement invalidates cached health: the old verdict
+        # judged the previous bytes, not these.
+        from .capability_hub import invalidate_health
+        invalidate_health(self.home, f"plugin:{plugin.name}")
+        for skill in plugin.skills:
+            invalidate_health(self.home,
+                              f"skill:{plugin.name}/{skill}")
         if memory is not None:
             try:
                 memory.record_episodic(

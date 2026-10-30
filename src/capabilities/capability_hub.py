@@ -119,14 +119,13 @@ time. A pre-loaded registry is reused as-is; without
 one, the hub loads the registry itself, exactly as any
 other standalone reader does.
 
-NOT fully wired yet, deliberately: triage now reads the
-hub (build_inventory), but planner skill recall still ranks
-trusted first then validated then candidate, and no
-writer syncs hub entries yet, because the hub owns
-no store of record and index() rebuilds from the
-live stores. Moving triage to the hub, restricting
-ordinary recall to trusted skills, and connecting
-writers are the integration steps, in that order.
+Wiring state: triage reads the hub, and ordinary skill
+recall is trusted-only. Writers connect in the one place
+a derived index needs them: replacement and retirement
+invalidate cached health (see invalidate_health), so a
+stale verdict never outlives the thing it judged. The
+index itself needs no writer sync, because index()
+rebuilds from the live stores on every read.
 """
 
 from __future__ import annotations
@@ -198,6 +197,20 @@ def _image_description(record) -> str:
     if apt:
         parts.append(f"apt: {apt}")
     return "; ".join(parts) or "Modal capability image"
+
+
+def invalidate_health(home, entry_id) -> None:
+    """Best-effort health invalidation for writers.
+
+    A cache failure must never break a write: adoption,
+    retirement, registration, and rebuilds succeed even
+    if the health cache cannot be touched, and the stale
+    record remains visible until prune_health() clears it.
+    Writers call this after their durable write lands."""
+    try:
+        CapabilityHub(home).invalidate(entry_id)
+    except Exception:
+        pass
 
 
 class CapabilityHub:
@@ -309,6 +322,19 @@ class CapabilityHub:
         cache[entry_id] = record
         self._write_health(cache)
         return record
+
+    def invalidate(self, entry_id: str) -> bool:
+        """Drop a cached health record, returning health to
+        unknown. Writers call this when a capability is
+        replaced or retired: a stale health verdict must
+        not outlive the thing it judged. Returns True when
+        a record was actually removed."""
+        cache = self._read_health()
+        if entry_id not in cache:
+            return False
+        del cache[entry_id]
+        self._write_health(cache)
+        return True
 
     def prune_health(self) -> int:
         """Drop health records for capabilities that no longer
