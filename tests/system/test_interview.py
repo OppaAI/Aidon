@@ -174,6 +174,33 @@ def test_interview_does_not_prefill_from_other_chat_spec(tmp_path):
     assert "no milk" not in " ".join(result.spec.constraints)
 
 
+def test_spec_sheet_done_when_and_section_aliases_parse(tmp_path):
+    text = ("# Spec Sheet\n\n## Goal\n\nDo X\n\n"
+            "## Done when\n\n- X exists\n- Y count is 3\n\n"
+            "## Deliverables\n\n- x.md\n\n"
+            "## Priorities\n\n- accuracy over speed\n\n"
+            "## Out of scope\n\n- Z\n\n"
+            "## If something goes wrong\n\n- ask me\n\n"
+            "## Checkpoints and reporting\n\n- ping me\n\n"
+            "## Inputs and context\n\n- in.csv\n")
+    parsed = parse_spec_sheet(text)
+    assert parsed.criteria == ["X exists", "Y count is 3"]
+    assert "Priority: accuracy over speed" in parsed.constraints
+    assert "Out of scope: Z" in parsed.constraints
+    assert "Recovery: ask me" in parsed.assumptions
+    assert "Checkpoint: ping me" in parsed.notifications
+    assert "in.csv" in parsed.files
+
+
+def test_spec_sheet_budget_ignores_stray_numbers(tmp_path):
+    text = ("# Spec Sheet\n\n## Goal\n\nDo X\n\n"
+            "## Deliverables\n\n- x.md\n\n"
+            "## Budget\n\nTime cap: 60 min\n")
+    assert parse_spec_sheet(text).budget_cents is None
+    assert parse_spec_sheet(text.replace("Time cap: 60 min", "$25.00")).budget_cents == 2500
+    assert parse_spec_sheet(text.replace("Time cap: 60 min", "25 dollars")).budget_cents == 2500
+
+
 def test_example_spec_sheet_parses_and_reconciles(tmp_path):
     example = (tmp_path / "repo").parent
     # Example file lives in the repo examples/ path, read

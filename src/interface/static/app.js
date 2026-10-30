@@ -1063,28 +1063,96 @@
     return lines.join("<br>");
   }
 
-  // A stopped Ask/Plan run renders one Proceed button, not an
-  // approval card: proceeding resumes the run, it does not approve
-  // an action. The button posts to /api/proceed and follows the
-  // resume run it returns, like any other new run.
-  function showProceedCard(run, stop) {
-    if (proceedShownFor === run.run_id) return;
-    proceedShownFor = run.run_id;
-    const detail = stop.spec || stop.plan || null;
-    approvalSlot.innerHTML = "";
+  // A stopped Ask/Plan run renders its card IN the thread, not in
+  // the approval slot: the slot is a modal overlay, and a card there
+  // vanishes with the run. A thread bubble stays in the chat
+  // session's scrollback, the way old Aidon's card did. Dedup is by
+  // stop id in the DOM, so repeated polls and chat re-opens never
+  // stack the same card twice. An Ask card is an editable sheet,
+  // not a raw textbox: edit the fields, Save, then Proceed. Save
+  // writes the edited spec back to the stop, so Proceed resumes
+  // from the edited spec.
+  function specFieldText(s, key) {
+    const v = s[key];
+    if (Array.isArray(v)) return v.join("\n");
+    if (v == null) return "";
+    return String(v);
+  }
+  function specBudgetText(s) {
+    if (s.budget_cents == null) return "";
+    return "$" + (s.budget_cents / 100).toFixed(2);
+  }
+  function renderStopCard(stop) {
+    if (!stop || !stop.stop_id) return null;
+    if (thread.querySelector('[data-stop-id="' + stop.stop_id + '"]')) return null;
     const card = document.createElement("div");
-    card.className = "card approval-card";
-    card.innerHTML =
-      '<div class="kind">stopped — ' + esc(stop.mode) + " ready</div>" +
-      "<h3>" + (stop.mode === "ask" ? "Spec ready" : "Plan ready") + "</h3>" +
-      '<div class="row">' +
-      '<button class="approve" data-d="proceed">Proceed</button>' +
-      (detail
-        ? '<button data-d="spec">View ' + (stop.mode === "ask" ? "spec" : "plan") + "</button>"
-        : "") +
-      "</div>" +
-      '<div class="spec-detail" hidden></div>';
-    approvalSlot.appendChild(card);
+    card.className = "msg aidon";
+    card.dataset.stopId = stop.stop_id;
+    const isAsk = stop.mode === "ask";
+    const s = stop.spec || null;
+    if (isAsk && s) {
+      const listFields = [["criteria", "Done when"],
+        ["deliverables", "Deliverables"], ["constraints", "Constraints"],
+        ["recipients", "Recipients"], ["files", "Files"],
+        ["notifications", "Notifications"], ["assumptions", "Assumptions"],
+        ["open_questions", "Open questions"]];
+      let fields = '<label>Goal</label><textarea data-f="goal" rows="3">' +
+        esc(specFieldText(s, "goal")) + "</textarea>";
+      listFields.forEach(([key, label]) => {
+        fields += "<label>" + label + '</label><textarea data-f="' + key +
+          '" rows="3">' + esc(specFieldText(s, key)) + "</textarea>";
+      });
+      fields += '<label>Budget</label><input type="text" data-f="budget" value="' +
+        esc(specBudgetText(s)) + '"><label>Deadline</label>' +
+        '<input type="text" data-f="deadline" value="' +
+        esc(specFieldText(s, "deadline")) + '">';
+      card.innerHTML =
+        '<div class="card approval-card spec-card"><div class="kind">stopped — spec ready</div>' +
+        "<h3>Spec ready — edit, save, then proceed</h3>" + fields +
+        '<div class="spec-save-status"></div><div class="row">' +
+        '<button data-d="save">Save</button>' +
+        '<button class="approve" data-d="proceed">Proceed</button></div></div>';
+      const saveBtn = card.querySelector('[data-d="save"]');
+      const status = card.querySelector(".spec-save-status");
+      saveBtn.addEventListener("click", async () => {
+        const spec = {};
+        card.querySelectorAll("[data-f]").forEach((el) => {
+          const key = el.dataset.f;
+          if (key === "goal" || key === "budget" || key === "deadline") {
+            spec[key] = el.value;
+          } else {
+            spec[key] = el.value.split("\n").map((x) => x.trim()).filter(Boolean);
+          }
+        });
+        saveBtn.disabled = true;
+        try {
+          const r = await fetch("/api/mode-stops/" +
+            encodeURIComponent(stop.stop_id) + "/spec", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ spec }),
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok || !data.ok) throw new Error((data && data.error) || "save failed");
+          status.textContent = data.verified
+            ? "Saved · spec verified"
+            : "Saved · not verified: " + (data.failures || []).join("; ");
+        } catch (e) {
+          status.textContent = "Could not save: " + e.message;
+        }
+        saveBtn.disabled = false;
+      });
+    } else {
+      // Plan stops, and Ask stops whose spec did not arrive enriched:
+      // read-only detail plus Proceed, never a blank edit form that
+      // could save over the frozen spec.
+      card.innerHTML =
+        '<div class="card approval-card spec-card"><div class="kind">stopped — ' +
+        esc(stop.mode) + " ready</div>" +
+        "<h3>" + (isAsk ? "Spec ready" : "Plan ready") + "</h3>" +
+        (stop.spec || stop.plan
+          ? '<div class="spec-detail">' + renderStopDetail(stop) + "</div>" : "") +
+        '<div class="row"><button class="approve" data-d="proceed">Proceed</button></div></div>';
+    }
     card.querySelector('[data-d="proceed"]').addEventListener("click", async () => {
       const btn = card.querySelector('[data-d="proceed"]');
       btn.disabled = true;
@@ -1100,7 +1168,6 @@
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok || !data.run_id) throw new Error((data && data.detail) || "no run");
-        approvalSlot.innerHTML = "";
         proceedShownFor = null;
         cardShownFor = null;
         currentRun = data.run_id;
@@ -1117,23 +1184,26 @@
         showMiddleStatus("Could not proceed: " + e.message, "error");
       }
     });
-    const specBtn = card.querySelector('[data-d="spec"]');
-    if (specBtn) {
-      specBtn.addEventListener("click", () => {
-        const box = card.querySelector(".spec-detail");
-        if (!box) return;
-        const label = stop.mode === "ask" ? "spec" : "plan";
-        if (!box.hidden) {
-          box.hidden = true;
-          specBtn.textContent = "View " + label;
-          return;
-        }
-        box.innerHTML = renderStopDetail(stop);
-        box.hidden = false;
-        specBtn.textContent = "Hide " + label;
-      });
-    }
+    thread.appendChild(card);
+    if (typeof scrollThreadToLatest === "function") scrollThreadToLatest();
+    return card;
   }
+  function showProceedCard(run, stop) {
+    if (!stop) return;
+    if (proceedShownFor === stop.stop_id) return;
+    const card = renderStopCard(stop);
+    if (card) proceedShownFor = stop.stop_id;
+  }
+  // Chat re-open path: a stop outlives its run record, so the card
+  // is re-rendered from the stored stop when the chat opens.
+  window.aidonRenderStopCardForConversation = async (conversationId) => {
+    try {
+      const r = await fetch("/api/mode-stops/latest?conversation_id=" +
+        encodeURIComponent(conversationId || ""));
+      if (!r.ok) return;
+      renderStopCard(await r.json());
+    } catch (e) { /* no pending stop: nothing to render */ }
+  };
 
   async function decide(runId, decision, editedText) {
     try {
@@ -2433,6 +2503,8 @@
       });
     }
     if (window.aidonScrollThread) window.aidonScrollThread();
+    if (window.aidonRenderStopCardForConversation)
+      window.aidonRenderStopCardForConversation(conv.id);
     if (window.aidonRestoreRunState) window.aidonRestoreRunState(conv.id);
     input.disabled = false;
     input.focus();

@@ -88,6 +88,59 @@ def test_mode_stops_save_load_delete_latest(tmp_path):
     assert delete_mode_stop(tmp_path, first) is False
 
 
+def test_mode_stops_update_spec_and_latest_for_conversation(tmp_path):
+    from src.interface.mode_stops import (
+        latest_mode_stop_for_conversation, update_mode_stop_spec)
+    stop_id = save_mode_stop(tmp_path, "ask", "plan dinner",
+                             spec={"goal": "plan dinner"},
+                             conversation_key="conv-1",
+                             conversation_id="conv-1")
+    assert update_mode_stop_spec(tmp_path, stop_id,
+                                 {"goal": "plan dinner",
+                                  "deliverables": ["menu.pdf"]}) is True
+    assert load_mode_stop(tmp_path, stop_id)["spec"]["deliverables"] == ["menu.pdf"]
+    assert update_mode_stop_spec(tmp_path, "missing", {}) is False
+    # Key and id both match: a WebUI stop is findable either way.
+    assert latest_mode_stop_for_conversation(tmp_path, "conv-1")["stop_id"] == stop_id
+    assert latest_mode_stop_for_conversation(tmp_path, "nobody") is None
+    assert latest_mode_stop_for_conversation(tmp_path, "") is None
+
+
+def test_mode_stop_spec_save_round_trip(tmp_path):
+    from src.interface.webui import WebUIServer
+    from src.interface.mode_stops import load_mode_stop, save_mode_stop
+    server = WebUIServer(tmp_path, memory=None)
+    stop_id = save_mode_stop(tmp_path, "ask", "plan dinner",
+                             spec={"goal": "plan dinner"},
+                             conversation_key="conv-1",
+                             conversation_id="conv-1")
+    result = server.handle_mode_stop_spec_save(stop_id, {"spec": {
+        "goal": "plan dinner", "criteria": ["menu.pdf exists"],
+        "deliverables": ["menu.pdf"], "budget": "$25.00"}})
+    assert result["ok"] is True
+    assert result["verified"] is True
+    assert result["spec"]["criteria"] == ["menu.pdf exists"]
+    assert result["spec"]["budget_cents"] == 2500
+    assert load_mode_stop(tmp_path, stop_id)["spec"]["criteria"] == ["menu.pdf exists"]
+    saved = tmp_path / "specs" / "conv-1.json"
+    assert saved.exists()
+    # Unverified still saves, with failures reported, not hidden.
+    bad = server.handle_mode_stop_spec_save(stop_id, {"spec": {
+        "goal": "plan dinner", "deliverables": ["menu.pdf"],
+        "open_questions": ["which cuisine?"]}})
+    assert bad["ok"] is True
+    assert bad["verified"] is False
+    assert bad["failures"]
+    # Plan stops carry no spec; missing stops 404-style.
+    plan_id = save_mode_stop(tmp_path, "plan", "plan dinner",
+                             plan={"steps": []}, conversation_key="conv-plan")
+    assert server.handle_mode_stop_spec_save(plan_id, {"spec": {}})["ok"] is False
+    assert server.handle_mode_stop_spec_save("missing", {"spec": {}})["ok"] is False
+    latest = server.handle_mode_stop_latest("conv-1")
+    assert latest is not None and latest["spec"]["goal"] == "plan dinner"
+    assert server.handle_mode_stop_latest("nobody") is None
+
+
 def test_mode_stops_reject_unknown_mode(tmp_path):
     with pytest.raises(ValueError):
         save_mode_stop(tmp_path, "execute", "do it")

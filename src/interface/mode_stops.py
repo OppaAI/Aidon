@@ -89,6 +89,43 @@ def enrich_mode_stop(home: Path, mode_stop: dict) -> dict:
     return out
 
 
+def update_mode_stop_spec(home: Path, stop_id: str, spec: dict) -> bool:
+    """Replace an Ask stop's frozen spec; True when one was there.
+
+    The Save button on the editable spec sheet writes through here,
+    so a later Proceed resumes from the edited spec, not the frozen
+    one. Plan stops carry no spec and are refused by the caller.
+    """
+    stops = _load(home)
+    record = stops.get(str(stop_id))
+    if not isinstance(record, dict):
+        return False
+    record["spec"] = spec if isinstance(spec, dict) else None
+    _save(home, stops)
+    return True
+
+
+def latest_mode_stop_for_conversation(home: Path, conversation_id: str) -> dict | None:
+    """Newest stop for a chat, matching key or id.
+
+    WebUI stops carry both: conversation_key is the chat id for
+    WebUI runs, and conversation_id is set alongside it. Matching
+    either keeps the card findable after a refresh, when no run
+    record exists to carry the stop.
+    """
+    key = str(conversation_id or "")
+    if not key:
+        return None
+    candidates = [r for r in _load(home).values()
+                  if isinstance(r, dict)
+                  and (r.get("conversation_key") == key
+                       or r.get("conversation_id") == key)]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda r: str(r.get("created_at", "")))
+    return dict(candidates[-1])
+
+
 def delete_mode_stop(home: Path, stop_id: str) -> bool:
     """Delete a stop record; True when one was there."""
     stops = _load(home)

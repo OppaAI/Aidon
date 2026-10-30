@@ -2818,6 +2818,58 @@ class WebUIServer:
             record)
         return record
 
+    def handle_mode_stop_latest(self, conversation_id: str) -> dict | None:
+        """Newest pending Ask/Plan stop for a chat, spec/plan attached.
+
+        The chat-open path renders the stop card from this, so the
+        spec sheet survives a refresh: the card lives in the thread,
+        not in a run record that dies with the page.
+        """
+        from .mode_stops import (enrich_mode_stop,
+                                 latest_mode_stop_for_conversation)
+        stop = latest_mode_stop_for_conversation(self.home, conversation_id)
+        if stop is None:
+            return None
+        return enrich_mode_stop(self.home, stop)
+
+    def handle_mode_stop_spec_save(self, stop_id: str, body: dict) -> dict:
+        """Save an edited Ask spec sheet back to its stop.
+
+        The sheet's Save button posts the edited fields; the stop
+        record is updated, so a later Proceed resumes from the
+        edited spec, and the specs/ JSON + Markdown copies are
+        rewritten to match. An unverified spec still saves (the
+        interview saves unverified specs too, so the user can see
+        what is missing); the failures are reported, not hidden.
+        """
+        from .mode_stops import load_mode_stop, update_mode_stop_spec
+        from ..agentic.interview import InterviewRunner, Spec, _parse_budget
+        stop = load_mode_stop(self.home, stop_id)
+        if stop is None:
+            return {"ok": False, "error": "stop not found"}
+        if stop.get("mode") != "ask":
+            return {"ok": False, "error": "only Ask stops carry a spec"}
+        data = body.get("spec", body) if isinstance(body, dict) else {}
+        if not isinstance(data, dict):
+            return {"ok": False, "error": "spec must be an object"}
+        budget = data.get("budget_cents", data.get("budget"))
+        if isinstance(budget, str):
+            budget = _parse_budget(budget)
+        elif isinstance(budget, (int, float)):
+            budget = int(budget)
+        else:
+            budget = None
+        spec = Spec.from_dict({**data, "budget_cents": budget})
+        verified, failures = spec.verify()
+        if not update_mode_stop_spec(self.home, stop_id, spec.to_dict()):
+            return {"ok": False, "error": "stop not found"}
+        conversation_id = str(stop.get("conversation_id") or "")
+        if conversation_id:
+            InterviewRunner(None, self.home,
+                            conversation_id=conversation_id)._save_spec(spec)
+        return {"ok": True, "verified": verified, "failures": failures,
+                "spec": spec.to_dict()}
+
     def handle_ideas_list(self) -> dict:
         directory = self._json_dir("ideas")
         records = []
@@ -3684,6 +3736,11 @@ loadSettings();
                     conv_id = parsed.path[len("/api/conversations/"):]
                     data = server.handle_conversation_get(conv_id)
                     self._send_json(200 if data is not None else 404, data or {"error": "not found"})
+                elif parsed.path == "/api/mode-stops/latest":
+                    query = parse_qs(parsed.query)
+                    conv = query.get("conversation_id", [""])[0]
+                    data = server.handle_mode_stop_latest(conv)
+                    self._send_json(200 if data is not None else 404, data or {"error": "not found"})
                 elif parsed.path == "/api/ideas":
                     self._send_json(200, server.handle_ideas_list())
                 elif parsed.path.startswith("/api/files/"):
@@ -3926,6 +3983,10 @@ loadSettings();
                 elif parsed.path == "/api/goals":
                     result = server.start_goal(body)
                     self._send_json(200 if "run_id" in result else 400, result)
+                elif parsed.path.startswith("/api/mode-stops/") and parsed.path.endswith("/spec"):
+                    stop_id = parsed.path[len("/api/mode-stops/"):-len("/spec")].strip("/")
+                    result = server.handle_mode_stop_spec_save(stop_id, body)
+                    self._send_json(200 if result.get("ok") else 400, result)
                 elif parsed.path == "/api/proceed":
                     # The Proceed button on a stopped run: reuse the
                     # typed /proceed path, so the button and the
