@@ -175,6 +175,15 @@ class Config:
     acq_max_dependency_sets: int = 2
     acq_max_repair_cycles: int = 3
     acq_max_seconds: float = 600.0
+    # YouTube upload (Data API v3): OAuth client + refresh
+    # token from a one-time consent requesting the
+    # youtube.upload scope. Privacy defaults to private:
+    # a demo must never publish by accident.
+    youtube_client_id: str = ""
+    youtube_client_secret: str = ""
+    youtube_refresh_token: str = ""
+    youtube_privacy_status: str = "private"
+    youtube_category_id: str = "22"
     # Backend selection: AIDON_BACKEND decides between the native chat
     # protocol, the Meta Model API, a plain OpenAI-compatible endpoint,
     # and the offline fake client.
@@ -305,6 +314,11 @@ class Config:
             acq_max_dependency_sets=_env_int("AIDON_ACQ_MAX_DEPS", 2),
             acq_max_repair_cycles=_env_int("AIDON_ACQ_MAX_REPAIRS", 3),
             acq_max_seconds=_env_float("AIDON_ACQ_MAX_SECONDS", 600.0),
+            youtube_client_id=os.environ.get("YOUTUBE_CLIENT_ID", ""),
+            youtube_client_secret=os.environ.get("YOUTUBE_CLIENT_SECRET", ""),
+            youtube_refresh_token=os.environ.get("YOUTUBE_REFRESH_TOKEN", ""),
+            youtube_privacy_status=os.environ.get("YOUTUBE_PRIVACY_STATUS", "private"),
+            youtube_category_id=os.environ.get("YOUTUBE_CATEGORY_ID", "22"),
             backend=os.environ.get("AIDON_BACKEND", "").strip().lower(),
             model_think=os.environ.get("AIDON_MODEL_THINK", "0") not in
             ("0", "false", "no", ""),

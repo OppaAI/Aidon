@@ -403,6 +403,52 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     except Exception:
         pass
     try:
+        from ..social.youtube_upload import (
+            build_metadata, refresh_access_token, upload_video)
+
+        def youtube_upload(video, title, description="",
+                           privacy="", category=""):
+            # Named youtube_upload, not youtube_publish, on
+            # purpose: the loop auto-gates post/send/publish
+            # names with a generic card, and this tool carries
+            # its own richer approval below (title, description,
+            # visibility, file, size). One approval, full details.
+            source = _confined(video)
+            if not source.is_file():
+                return f"upload refused: video file not found: {video}"
+            meta = build_metadata(
+                title, description,
+                privacy or getattr(config, "youtube_privacy_status", "private") or "private",
+                category or getattr(config, "youtube_category_id", "22") or "22")
+            ok, why = _approval(
+                "live", "Publish to YouTube",
+                f"Upload {source.name} ({source.stat().st_size} bytes) "
+                f"to YouTube?\n"
+                f"Title: {meta['snippet']['title']}\n"
+                f"Description: {meta['snippet']['description']}\n"
+                f"Visibility: {meta['status']['privacyStatus']}\n"
+                f"Category: {meta['snippet']['categoryId']}",
+                force_ask=True)
+            if not ok:
+                return f"upload rejected: {why}"
+            try:
+                token = refresh_access_token(
+                    getattr(config, "youtube_client_id", ""),
+                    getattr(config, "youtube_client_secret", ""),
+                    getattr(config, "youtube_refresh_token", ""))
+                result = upload_video(source, meta, token)
+            except Exception as exc:
+                return f"upload failed: {type(exc).__name__}: {exc}"
+            video_id = result.get("id", "") if isinstance(result, dict) else ""
+            if not video_id:
+                return "upload failed: no video id in response"
+            return (f"YOUTUBE_UPLOADED {video_id} "
+                    f"https://www.youtube.com/watch?v={video_id}")
+
+        tools["youtube_upload"] = youtube_upload
+    except Exception:
+        pass
+    try:
         from ..capabilities.voice import transcribe, tts
 
         def tts_speak(text, voice_id=""):
