@@ -2831,8 +2831,13 @@ def main(argv: list[str] | None = None) -> int:
             # failed proceed can still be retried.
             if report.status == "stopped" and report.mode_stop:
                 try:
+                    from ..interface.mode_stops import enrich_mode_stop
+                    enriched = enrich_mode_stop(config.home, report.mode_stop)
+                except Exception:
+                    enriched = dict(report.mode_stop)
+                try:
                     if run_id in server._web_runs:
-                        server._web_runs[run_id]["mode_stop"] = dict(report.mode_stop)
+                        server._web_runs[run_id]["mode_stop"] = enriched
                 except Exception:
                     pass
             if _resume_stop_id and report.status == "done":

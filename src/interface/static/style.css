@@ -231,6 +231,12 @@ html[data-theme="light"] .msg.user { background: #c7dcf4; color: #102343; }
   border: 1px solid var(--border); border-bottom-left-radius: 4px; }
 .msg.stage-line { align-self: center; background: none; border: none;
   font-size: 11.5px; color: var(--muted); padding: 2px; }
+.spec-detail {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .run-stats { display: flex; align-items: center; gap: 6px; margin-top: 12px;
   padding-top: 8px; border-top: 1px solid var(--border); color: var(--muted);
   font-family: var(--font-mono); font-size: 10.5px; }

@@ -12,6 +12,7 @@ from src.agentic.semantic_router import SemanticRouter
 from src.capabilities.sandbox import Sandbox
 from src.interface.mode_stops import (
     delete_mode_stop,
+    enrich_mode_stop,
     latest_mode_stop,
     load_mode_stop,
     save_mode_stop,
@@ -291,3 +292,27 @@ def test_webui_proceed_dispatches_resume(tmp_path):
     server.start_goal({"goal": "/proceed", "conversation_id": "other"})
     time.sleep(0.2)
     assert len(events) == 1
+
+
+def test_enrich_mode_stop_attaches_spec_and_plan(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    spec = {"goal": "make tarts", "deliverables": ["12 tarts"],
+            "constraints": ["milk-free"], "assumptions": [],
+            "open_questions": []}
+    ask_id = save_mode_stop(home, "ask", "make tarts", spec=spec,
+                            conversation_key="c1")
+    enriched = enrich_mode_stop(home, {"stop_id": ask_id, "mode": "ask",
+                                       "goal": "make tarts"})
+    assert enriched["spec"] == spec
+    assert "plan" not in enriched
+    plan = {"steps": [{"tool": "write", "args": {}, "deliverable": "a.md"}],
+            "deliverables": ["a.md"], "criteria": []}
+    plan_id = save_mode_stop(home, "plan", "make notes", plan=plan,
+                             conversation_key="c1")
+    enriched_plan = enrich_mode_stop(home, {"stop_id": plan_id, "mode": "plan",
+                                            "goal": "make notes"})
+    assert enriched_plan["plan"] == plan
+    assert enrich_mode_stop(home, {"stop_id": "missing", "mode": "ask",
+                                   "goal": "x"}) == {"stop_id": "missing",
+                                                    "mode": "ask", "goal": "x"}

@@ -70,6 +70,25 @@ def load_mode_stop(home: Path, stop_id: str) -> dict | None:
     return dict(record) if isinstance(record, dict) else None
 
 
+def enrich_mode_stop(home: Path, mode_stop: dict) -> dict:
+    """Attach the stored spec/plan to a run's mode_stop for the frontend.
+
+    The loop's mode_stop carries only stop_id/mode/goal; the frozen spec
+    (Ask) or plan (Plan) lives in the stop record. The Proceed card's
+    View spec/plan button renders from these fields. Unknown ids pass
+    through unchanged.
+    """
+    out = dict(mode_stop or {})
+    record = load_mode_stop(home, str(out.get("stop_id") or ""))
+    if record is None:
+        return out
+    if isinstance(record.get("spec"), dict):
+        out["spec"] = record["spec"]
+    if isinstance(record.get("plan"), dict):
+        out["plan"] = record["plan"]
+    return out
+
+
 def delete_mode_stop(home: Path, stop_id: str) -> bool:
     """Delete a stop record; True when one was there."""
     stops = _load(home)

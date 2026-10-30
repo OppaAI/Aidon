@@ -1025,6 +1025,44 @@
       decide(run.run_id, "rejected", ""));
   }
 
+  // Readable rendering of a frozen Ask spec or Plan for the Proceed
+  // card's View button. Unknown fields fall back to JSON lines so
+  // nothing the stop stored is hidden.
+  function renderStopDetail(stop) {
+    const lines = [];
+    const pushList = (label, items) => {
+      const arr = Array.isArray(items) ? items : [];
+      if (!arr.length) return;
+      lines.push("<strong>" + esc(label) + "</strong>");
+      arr.forEach((item) => lines.push("• " + esc(String(item))));
+    };
+    if (stop.spec) {
+      const s = stop.spec;
+      if (s.goal) lines.push("<strong>Goal</strong><br>" + esc(String(s.goal)));
+      pushList("Deliverables", s.deliverables);
+      pushList("Constraints", s.constraints);
+      pushList("Assumptions", s.assumptions);
+      pushList("Open questions", s.open_questions);
+      if (s.deadline) lines.push("<strong>Deadline</strong><br>" + esc(String(s.deadline)));
+      if (s.budget_cents != null) lines.push("<strong>Budget (cents)</strong><br>" + esc(String(s.budget_cents)));
+    } else if (stop.plan) {
+      const p = stop.plan;
+      pushList("Deliverables", p.deliverables);
+      pushList("Criteria", p.criteria);
+      const steps = Array.isArray(p.steps) ? p.steps : [];
+      if (steps.length) {
+        lines.push("<strong>Steps</strong>");
+        steps.forEach((st, i) => {
+          const label = st && typeof st === "object"
+            ? (st.tool || st.deliverable || JSON.stringify(st)) : String(st);
+          lines.push((i + 1) + ". " + esc(String(label)));
+        });
+      }
+    }
+    if (!lines.length) lines.push(esc(JSON.stringify(stop.spec || stop.plan || {})));
+    return lines.join("<br>");
+  }
+
   // A stopped Ask/Plan run renders one Proceed button, not an
   // approval card: proceeding resumes the run, it does not approve
   // an action. The button posts to /api/proceed and follows the
@@ -1032,6 +1070,7 @@
   function showProceedCard(run, stop) {
     if (proceedShownFor === run.run_id) return;
     proceedShownFor = run.run_id;
+    const detail = stop.spec || stop.plan || null;
     approvalSlot.innerHTML = "";
     const card = document.createElement("div");
     card.className = "card approval-card";
@@ -1040,7 +1079,11 @@
       "<h3>" + (stop.mode === "ask" ? "Spec ready" : "Plan ready") + "</h3>" +
       '<div class="row">' +
       '<button class="approve" data-d="proceed">Proceed</button>' +
-      "</div>";
+      (detail
+        ? '<button data-d="spec">View ' + (stop.mode === "ask" ? "spec" : "plan") + "</button>"
+        : "") +
+      "</div>" +
+      '<div class="spec-detail" hidden></div>';
     approvalSlot.appendChild(card);
     card.querySelector('[data-d="proceed"]').addEventListener("click", async () => {
       const btn = card.querySelector('[data-d="proceed"]');
@@ -1074,6 +1117,22 @@
         showMiddleStatus("Could not proceed: " + e.message, "error");
       }
     });
+    const specBtn = card.querySelector('[data-d="spec"]');
+    if (specBtn) {
+      specBtn.addEventListener("click", () => {
+        const box = card.querySelector(".spec-detail");
+        if (!box) return;
+        const label = stop.mode === "ask" ? "spec" : "plan";
+        if (!box.hidden) {
+          box.hidden = true;
+          specBtn.textContent = "View " + label;
+          return;
+        }
+        box.innerHTML = renderStopDetail(stop);
+        box.hidden = false;
+        specBtn.textContent = "Hide " + label;
+      });
+    }
   }
 
   async function decide(runId, decision, editedText) {
@@ -1259,7 +1318,10 @@
         guidanceInput.disabled = false;
         input.placeholder = defaultGoalPlaceholder;
         steerRow.hidden = true;
-        approvalSlot.innerHTML = ""; // no stale card survives completion
+        // A stopped run's Proceed card is not stale: it is the way back
+        // in, so the terminal cleanup leaves it standing. Every other
+        // terminal status clears the slot as before.
+        if (!run.mode_stop) approvalSlot.innerHTML = "";
         // loadHistory lives in the sidebar IIFE below (exposed on window)
         if (window.aidonLoadHistory) window.aidonLoadHistory();
         // no "Finished" chat line — the stage bar + status already show it
