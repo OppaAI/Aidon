@@ -236,7 +236,7 @@ def _make_governor(config):
         max_acquisition_seconds=getattr(config, "acq_max_seconds", 600.0))
 
 
-def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None, governor=None) -> dict:
+def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None, governor=None, optional_tools=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     The loop approval-gates any extra tool whose name contains
@@ -1314,6 +1314,15 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     tools["whatsapp_send_media"] = whatsapp_send_media
     tools["list_schedule"] = list_schedule
     tools["cancel_schedule"] = cancel_schedule
+    if optional_tools is None:
+        # Legacy callers (tests, tools without the field) keep the
+        # full set; production Config always sets the field, whose
+        # default is False (core only).
+        optional_tools = bool(getattr(config, "optional_tools", True))
+    if not optional_tools:
+        from ..agentic.kernel import CORE_LADDER_TOOLS
+        tools = {k: v for k, v in tools.items()
+                 if k in CORE_LADDER_TOOLS or k in ("read_file", "write_file")}
     return tools
 
 

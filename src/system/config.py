@@ -205,6 +205,7 @@ class Config:
     sam_model: str = "meta-sam"
     router_fast_phases: str = "interpret,learn,respond"
     kernel_mode: bool = False
+    optional_tools: bool = False
     computer_driver: str = ""
     # Clef decision tier: AIDON_ROUTER=clef selects the Clef intent
     # router (else semantic); AIDON_CLEF_URL enables Clef at all
@@ -343,6 +344,7 @@ class Config:
             clef_key=os.environ.get("AIDON_CLEF_KEY", ""),
             clef_secret=os.environ.get("AIDON_CLEF_SECRET", ""),
             kernel_mode=os.environ.get("AIDON_KERNEL", "0") not in ("0", "false", "no"),
+            optional_tools=os.environ.get("AIDON_OPTIONAL_TOOLS", "0") not in ("0", "false", "no", "off", ""),
             computer_driver=os.environ.get("AIDON_COMPUTER_DRIVER", "").strip().lower(),
         )
 

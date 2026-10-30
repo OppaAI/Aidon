@@ -31,7 +31,8 @@ def _setup(tmp_path, monkeypatch):
     config.api_key = "test-key"
     config.api_base = "https://example.com/v1"
     gate = _Gate()
-    tools = _goal_extra_tools(config, home / "workspace", gate=gate)
+    tools = _goal_extra_tools(config, home / "workspace", gate=gate,
+                              optional_tools=True)
     return config, gate, photo, tools
 
 

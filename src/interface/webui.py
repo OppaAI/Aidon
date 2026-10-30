@@ -2095,6 +2095,7 @@ class WebUIServer:
         "research_allowlist": "AIDON_RESEARCH_ALLOWLIST",
         "router_fast_phases": "AIDON_ROUTER_FAST_PHASES",
         "kernel": "AIDON_KERNEL",
+        "optional_tools": "AIDON_OPTIONAL_TOOLS",
         "computer_driver": "AIDON_COMPUTER_DRIVER",
         # Historical spelling remains writable for old installations.
         # New configuration uses the canonical Slack variable below.
@@ -2138,6 +2139,7 @@ class WebUIServer:
             {"key": "AIDON_SANDBOX_NETWORK", "label": "Sandbox network", "type": "bool", "default": "0", "desc": "Allow network access inside sandbox commands.", "secret": False},
             {"key": "AIDON_SANDBOX_REQUIRE_ISOLATION", "label": "Require isolation", "type": "bool", "default": "0", "desc": "Refuse sandbox commands when bubblewrap isolation is unavailable.", "secret": False},
             {"key": "AIDON_KERNEL", "label": "Kernel mode", "type": "bool", "default": "0", "desc": "Kernel mode: write/read/list/shell only, no calculate, no plugins.", "secret": False},
+            {"key": "AIDON_OPTIONAL_TOOLS", "label": "Optional tools", "type": "bool", "default": "0", "desc": "Show the full built-in toolset (web search, documents, social, media, email, webcam, YouTube). Off: only the minimal core ladder tools (fetch, ask, installs, MCP connect, plugin adoption). Adopted plugins and trusted skills are never gated. Default: off (0).", "secret": False},
             {"key": "AIDON_COMPUTER_DRIVER", "label": "Computer driver", "type": "enum", "default": "", "desc": "Opt-in desktop driver; requires a graphical session and kernel mode off.", "secret": False, "options": ["", "x11"]},
             {"key": "AIDON_SLACK_AUTOSTART", "label": "Slack polling autostart", "type": "bool", "default": "0", "desc": "Start Slack polling automatically with the WebUI.", "secret": False},
             {"key": "AIDON_AUTONOMY_ENABLED", "label": "Autonomy enabled", "type": "bool", "default": "1", "desc": "Trust-based autonomy for repeated skills.", "secret": False},
