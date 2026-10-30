@@ -184,6 +184,14 @@ class Config:
     router_fast_phases: str = "interpret,learn,respond"
     kernel_mode: bool = False
     computer_driver: str = ""
+    # Clef decision tier: AIDON_ROUTER=clef selects the Clef intent
+    # router (else semantic); AIDON_CLEF_URL enables Clef at all
+    # (router + capability triage). Empty URL = no Clef anywhere.
+    intent_router: str = "semantic"
+    clef_url: str = ""
+    clef_model: str = "Cloudflare/clef-flash"
+    clef_key: str = ""
+    clef_secret: str = ""
 
     @classmethod
     def load(cls, home: Path | None = None) -> "Config":
@@ -293,6 +301,11 @@ class Config:
             image_model=os.environ.get("AIDON_IMAGE_MODEL", "muse-image-1.0"),
             sam_model=os.environ.get("AIDON_SAM_MODEL", "meta-sam"),
             router_fast_phases=os.environ.get("AIDON_ROUTER_FAST_PHASES", "interpret,learn,respond,webchat"),
+            intent_router=os.environ.get("AIDON_ROUTER", "semantic"),
+            clef_url=os.environ.get("AIDON_CLEF_URL", ""),
+            clef_model=os.environ.get("AIDON_CLEF_MODEL", "Cloudflare/clef-flash"),
+            clef_key=os.environ.get("AIDON_CLEF_KEY", ""),
+            clef_secret=os.environ.get("AIDON_CLEF_SECRET", ""),
             kernel_mode=os.environ.get("AIDON_KERNEL", "0") not in ("0", "false", "no"),
             computer_driver=os.environ.get("AIDON_COMPUTER_DRIVER", "").strip().lower(),
         )

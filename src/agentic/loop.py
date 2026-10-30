@@ -490,7 +490,8 @@ class GoalRunner:
                  think_max: bool = False, research_mode: bool = False,
                  deep_researcher=None, deadline_seconds: float | None = None,
                  mode: str | None = None, question_ask=None,
-                 conversation_key: str = "", resume_plan=None):
+                 conversation_key: str = "", resume_plan=None,
+                 clef_client=None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -536,6 +537,10 @@ class GoalRunner:
         self._effort_escalated = False
         if self.model_verifier is not None:
             self.model_verifier.effort_escalated = False
+        # Clef decision client (None = Clef not configured): used by
+        # capability triage in run(). Routing via Clef arrives as
+        # the semantic_router argument instead (ClefRouter).
+        self.clef_client = clef_client
         self.kernel_mode = kernel_mode
         self.semantic_router = semantic_router
         self.use_semantic_router_skip = use_semantic_router_skip
@@ -1185,13 +1190,39 @@ class GoalRunner:
                             tool_rows.setdefault(t, "")
                     except Exception:
                         pass
-                matches = lookup_capability(name, tools=tool_rows)
+                # The ladder's skill and MCP rungs used to be dead
+                # here: only tools were passed, so skills and
+                # approved MCP servers could never match. Pass all
+                # three, from the same live sources triage uses.
+                skill_rows = []
+                if self.plugins is not None:
+                    try:
+                        for _name, _text in (self.plugins.skill_texts() or {}).items():
+                            skill_rows.append({"name": str(_name),
+                                               "description": str(_text or "")[:160]})
+                    except Exception:
+                        pass
+                mcp_rows = []
+                try:
+                    import json as _mcp_json
+                    _mcp_data = _mcp_json.loads(
+                        (self.home / "mcp_servers.json").read_text())
+                    if isinstance(_mcp_data, dict):
+                        mcp_rows = [str(k) for k in _mcp_data]
+                    elif isinstance(_mcp_data, list):
+                        mcp_rows = [str(i.get("name", i)) if isinstance(i, dict)
+                                    else str(i) for i in _mcp_data]
+                except Exception:
+                    pass
+                matches = lookup_capability(name, tools=tool_rows,
+                                            skills=skill_rows,
+                                            mcp_servers=mcp_rows)
                 raise ValueError(f"unknown tool: {name}\n{recovery_note(name, matches)}")
             raise
 
     def _plan(self, goal: str, failure_context: str = "",
               spec=None, research_context: str = "",
-              skill_full: dict | None = None) -> Plan:
+              skill_full: dict | None = None, triage_note: str = "") -> Plan:
         if self.kernel_mode:
             system = ("Propose a short plan as JSON with keys steps, "
                       "deliverables, criteria. Each step is an object "
@@ -1417,6 +1448,17 @@ class GoalRunner:
             # than calling make_plan, so the block is appended here.
             from .prompts import guidance_block
             user = user + f"\n\n{guidance_block(self.guidance)}"
+        if triage_note:
+            # Capability triage ran before planning (see run()):
+            # the planner plans around a named gap instead of
+            # inventing a tool. This is context, not a previous
+            # failure, so it carries its own label.
+            user = user + (
+                f"\n\nCapability triage note, from before planning: "
+                f"{triage_note}\nPlan only with tools Aidon actually "
+                "has or the user approved; if a needed capability is "
+                "missing, climb the ladder (skill, MCP, plugin) or "
+                "say so instead of calling a tool that does not exist.")
         self._trace("plan", "started", goal[:100])
         if self.budget is not None:
             self.budget.add_tokens(user)
@@ -1472,7 +1514,8 @@ class GoalRunner:
                 return self._plan(goal, failure_context=failure_context,
                                   spec=spec,
                                   research_context=research_context,
-                                  skill_full=resolved)
+                                  skill_full=resolved,
+                                  triage_note=triage_note)
         return plan
 
     def _attachment_message(self, text: str) -> Message:
@@ -1744,10 +1787,46 @@ class GoalRunner:
             if callable(self.route_callback):
                 self.route_callback(self.last_route)
         self._start_mission(goal)
+        # Capability triage, before any planning: inventory what
+        # Aidon has, classify the gap with Clef when configured,
+        # and stop with a notification when blocked instead of
+        # planning an impossible goal. Skipped silently when no
+        # Clef client is configured or triage itself fails — an
+        # uncertain triage must never block a doable goal. Runs
+        # resumed from a Plan stop skip triage (they return
+        # before this point): a plan the user already approved
+        # is not re-blocked unless a tool disappeared, which the
+        # execution-time lookup still catches.
+        self._triage_note = ""
+        if self.clef_client is not None:
+            try:
+                from .capability_triage import build_inventory, triage
+                _inventory = build_inventory(
+                    self.home, self.tools, self.plugins, self.extra_tools)
+                _spec_text = ""
+                if spec is not None:
+                    try:
+                        _spec_text = json.dumps(
+                            spec.to_dict() if hasattr(spec, "to_dict") else spec)[:1000]
+                    except Exception:
+                        _spec_text = ""
+                _triage = triage(goal, _inventory, self.clef_client,
+                                 spec_text=_spec_text)
+                self._trace("capability", "triage",
+                            f"{_triage['status']} ({_triage['confidence']:.2f})")
+                if _triage["status"] == "blocked":
+                    return self._finalize(RunReport(
+                        "failed", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                        False, False, error=_triage["note"][:500],
+                        backend=self._backend_name()))
+                if _triage["status"] != "covered":
+                    self._triage_note = _triage["note"]
+            except Exception as exc:
+                self._trace("capability", "triage-skipped", str(exc)[:100])
         if spec is not None:
             spec_deliverables = spec.deliverables if hasattr(spec, "deliverables") else spec.get("deliverables", [])
             try:
-                plan = self._plan(goal, spec=spec)
+                plan = self._plan(goal, spec=spec, triage_note=self._triage_note)
             except Exception as exc:
                 # A budget breach (or any plan failure) on the
                 # initial plan call is a failed run, not a crash
@@ -1858,7 +1937,8 @@ class GoalRunner:
             except Exception:
                 pass
         try:
-            plan = self._plan(goal, failure_context=failure_note)
+            plan = self._plan(goal, failure_context=failure_note,
+                              triage_note=self._triage_note)
         except Exception as exc:
             # Same rule as the spec branch above: an initial
             # plan failure (including a budget breach) fails

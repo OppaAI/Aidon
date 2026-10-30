@@ -2419,11 +2419,24 @@ def main(argv: list[str] | None = None) -> int:
                     from ..agentic.interview import Spec as _CliSpec
                     _cli_resume_spec = _CliSpec.from_dict(_stop["spec"])
             try:
-                from ..agentic.semantic_router import SemanticRouter as _CliRouter
-                _cli_router = _CliRouter(memory.embedder, cache_path=config.home / "semantic_router_vectors.json")
+                from ..agentic.clef_router import build_router as _cli_build_router
+                _cli_router = _cli_build_router(
+                    config, memory.embedder,
+                    config.home / "semantic_router_vectors.json")
             except Exception:
                 _cli_router = None
-            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, conversation_id="cli", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, conversation_id="cli"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), think_max=_cli_once or _cli_think_state["on"], research_mode=_cli_research_once or _cli_research_state["on"], deep_researcher=make_deep_researcher(config), mode=_cli_mode_once or _cli_mode_state["mode"], question_ask=lambda q: input(f"\nAidon: {q}\nYou: "), conversation_key="cli", resume_plan=_cli_resume_plan, semantic_router=_cli_router)
+            _cli_clef_client = None
+            try:
+                if getattr(config, "clef_url", ""):
+                    from ..agentic.clef_client import ClefClient as _CliClefClient
+                    _cli_clef_client = _CliClefClient(
+                        config.clef_url,
+                        model=getattr(config, "clef_model", "") or "Cloudflare/clef-flash",
+                        key=getattr(config, "clef_key", "") or "",
+                        secret=getattr(config, "clef_secret", "") or "")
+            except Exception:
+                _cli_clef_client = None
+            runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, conversation_id="cli", plugins=_plugins, execution_backend=_backend, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, conversation_id="cli"), model_verifier=_MV2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), think_max=_cli_once or _cli_think_state["on"], research_mode=_cli_research_once or _cli_research_state["on"], deep_researcher=make_deep_researcher(config), mode=_cli_mode_once or _cli_mode_state["mode"], question_ask=lambda q: input(f"\nAidon: {q}\nYou: "), conversation_key="cli", resume_plan=_cli_resume_plan, semantic_router=_cli_router, clef_client=_cli_clef_client)
             if _cli_resume_spec is not None:
                 report = runner.run(goal, spec=_cli_resume_spec)
             else:
@@ -2554,9 +2567,26 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 execution_backend = None
             try:
-                semantic_router = SemanticRouter(memory.embedder, cache_path=config.home / 'semantic_router_vectors.json')
+                from ..agentic.clef_router import build_router as _build_router
+                semantic_router = _build_router(
+                    config, memory.embedder,
+                    config.home / 'semantic_router_vectors.json')
             except Exception:
                 semantic_router = None
+            # Clef decision client for capability triage in run().
+            # None when no URL is configured: triage is skipped and
+            # the run behaves exactly as before.
+            _clef_client = None
+            try:
+                if getattr(config, "clef_url", ""):
+                    from ..agentic.clef_client import ClefClient as _ClefClient
+                    _clef_client = _ClefClient(
+                        config.clef_url,
+                        model=getattr(config, "clef_model", "") or "Cloudflare/clef-flash",
+                        key=getattr(config, "clef_key", "") or "",
+                        secret=getattr(config, "clef_secret", "") or "")
+            except Exception:
+                _clef_client = None
             conversation_context = ""
             conversation_id = str(event.payload.get("conversation_id", "") or "")
             if conversation_id:
@@ -2707,6 +2737,7 @@ def main(argv: list[str] | None = None) -> int:
                                 trace=trace, model_verifier=ModelVerifier(client),
                                 kernel_mode=config.kernel_mode,
                                 semantic_router=semantic_router,
+                                clef_client=_clef_client,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
                                 researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages)), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan)
