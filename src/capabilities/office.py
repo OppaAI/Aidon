@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import re
+import sys
 import zipfile
 from pathlib import Path
 from xml.sax.saxutils import escape as _xml_escape
@@ -96,6 +97,8 @@ def make_spreadsheet(sheets, output) -> str:
         "Spreadsheet fallback: openpyxl is not installed, so each sheet "
         "was written as a CSV file.\n" + "\n".join(manifest_lines) + "\n",
         encoding="utf-8")
+    print("warning: openpyxl is not installed; wrote CSV files plus a manifest instead of XLSX",
+          file=sys.stderr)
     return str(manifest)
 
 

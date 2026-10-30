@@ -534,13 +534,20 @@ for spec in \
   "ebooklib:ebooklib:EPUB building:docs" \
   "markdown:markdown:EPUB building:docs" \
   "markitdown:markitdown:universal document reading:docs" \
+  "openpyxl:openpyxl:spreadsheet output:office" \
+  "python-pptx:pptx:presentation output:office" \
+  "pytesseract:pytesseract:OCR support:office" \
   ; do
   pkg=$(printf '%s' "$spec" | cut -d: -f1)
   mod=$(printf '%s' "$spec" | cut -d: -f2)
   what=$(printf '%s' "$spec" | cut -d: -f3)
   extra=$(printf '%s' "$spec" | cut -d: -f4)
   if "$PYTHON" -c "import $mod" 2>/dev/null; then
-    ok "$pkg is ready — $what."
+    if [ "$pkg" = "pytesseract" ] && ! command -v tesseract >/dev/null 2>&1; then
+      warn "$pkg is installed, but the tesseract binary is not on PATH; install tesseract-ocr to enable OCR."
+    else
+      ok "$pkg is ready — $what."
+    fi
   else
     warn "$pkg is not installed — $what."
     if [ "$WITH_OPTIONAL" = 1 ]; then

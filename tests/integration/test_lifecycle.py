@@ -15,7 +15,10 @@
   hint; with network True or unknown the message is unchanged.
 """
 
+import hashlib
+import hmac
 import json
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -259,15 +262,29 @@ def test_slack_handler_attaches_image_markers(tmp_path):
             seen.append(event)
 
     server = WebUIServer(tmp_path, dispatcher=_Dispatcher())
+    server.slack_signing_secret = "secret123"
     body = {"event": {"type": "message", "text": "what is this",
                       "channel": "C1", "user": "U1",
                       "files": [{"id": "F1", "mimetype": "image/png",
                                  "name": "photo.png", "filetype": "png"}]}}
-    status, _payload = server.handle_slack_post(b"", {}, body)
+    raw = json.dumps(body).encode()
+    status, _payload = server.handle_slack_post(raw, _sign("secret123", raw), body)
     assert status == 200
     assert len(seen) == 1
     assert "[image slack_file_id=F1" in seen[0].goal
     assert seen[0].payload["images"][0]["id"] == "F1"
+
+
+def _sign(secret, raw):
+    """Valid Slack HMAC headers for raw, as production sends them."""
+    import hashlib
+    import hmac
+    import time
+
+    ts = str(int(time.time()))
+    sig = "v0=" + hmac.new(secret.encode(), f"v0:{ts}:".encode() + raw,
+                            hashlib.sha256).hexdigest()
+    return {"x-slack-request-timestamp": ts, "x-slack-signature": sig}
 
 
 def test_slack_handler_plain_text_unchanged(tmp_path):
@@ -286,9 +303,11 @@ def test_slack_handler_plain_text_unchanged(tmp_path):
             seen.append(event)
 
     server = WebUIServer(tmp_path, dispatcher=_Dispatcher())
+    server.slack_signing_secret = "secret123"
     body = {"event": {"type": "message", "text": "hello",
                       "channel": "C1", "user": "U1"}}
-    status, _payload = server.handle_slack_post(b"", {}, body)
+    raw = json.dumps(body).encode()
+    status, _payload = server.handle_slack_post(raw, _sign("secret123", raw), body)
     assert status == 200
     assert seen[0].goal == "hello"
     assert seen[0].payload == {"force_web": False, "think_max": False,

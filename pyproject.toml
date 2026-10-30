@@ -39,9 +39,15 @@ docs = [
     "markdown>=3.11.2",
     "markitdown>=0.1.9",
 ]
+office = [
+    "openpyxl",
+    "python-pptx",
+    "pytesseract",
+]
 
 [tool.setuptools]
 packages = ["src", "src.system", "src.memory", "src.agentic", "src.interface", "src.capabilities", "src.social"]
 
 [tool.setuptools.package-data]
 "src.interface" = ["static/**/*"]
+"src.capabilities" = ["security_rules/*.yml"]

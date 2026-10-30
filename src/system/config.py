@@ -178,6 +178,7 @@ class Config:
     parallel_tools: int = 4
     research_allowlist: str = ""
     webui_token: str = ""
+    webui_allowed_hosts: str = ""
     image_model: str = "muse-image-1.0"
     sam_model: str = "meta-sam"
     router_fast_phases: str = "interpret,learn,respond"
@@ -288,6 +289,7 @@ class Config:
             parallel_tools=_env_int("AIDON_PARALLEL_TOOLS", 4),
             research_allowlist=os.environ.get("AIDON_RESEARCH_ALLOWLIST", ""),
             webui_token=os.environ.get("AIDON_WEBUI_TOKEN", ""),
+            webui_allowed_hosts=os.environ.get("AIDON_WEBUI_ALLOWED_HOSTS", ""),
             image_model=os.environ.get("AIDON_IMAGE_MODEL", "muse-image-1.0"),
             sam_model=os.environ.get("AIDON_SAM_MODEL", "meta-sam"),
             router_fast_phases=os.environ.get("AIDON_ROUTER_FAST_PHASES", "interpret,learn,respond,webchat"),

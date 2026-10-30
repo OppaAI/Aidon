@@ -123,17 +123,17 @@ def _resolve_url(path_or_url: str, allowlist=None, grants=None,
     return None, "READ_FAILED: too many redirects"
 
 
-def _ocr_image(path: Path) -> str:
+def _ocr_image(path: Path) -> str | None:
     """Best-effort OCR for images when markitdown returns nothing useful."""
     import shutil
     if shutil.which("tesseract") is None:
-        return ""
+        return None
     try:
         from PIL import Image
         import pytesseract  # type: ignore
-        return pytesseract.image_to_string(Image.open(path)).strip()
-    except Exception:
-        return ""
+    except ImportError:
+        return None
+    return pytesseract.image_to_string(Image.open(path)).strip()
 
 
 def read_document(path_or_url: str, sandbox=None,
@@ -211,10 +211,12 @@ def read_document(path_or_url: str, sandbox=None,
             ocr = _ocr_image(local)
             if ocr:
                 text = f"[OCR via tesseract]\n\n{ocr}"
+            elif ocr is None:
+                text = ("[OCR unavailable: install the tesseract binary "
+                        "and pytesseract for OCR]")
             else:
-                text = ("[image: no text extracted — markitdown returns "
-                        "metadata only without a vision LLM; install tesseract "
-                        "for OCR]")
+                text = ("[image: no text extracted by OCR — "
+                        "the image may contain no text]")
         if not text:
             return f"READ_FAILED: no text content extracted from {path_or_url}"
         if len(text) > max_chars:

@@ -10,6 +10,9 @@ question is delivered to the channel, and the next message there is
 the answer, not a new goal.
 """
 
+import hashlib
+import hmac
+import json
 import sys
 import threading
 import time
@@ -117,10 +120,23 @@ def _wait_for_waiter(server, run_id, timeout=5.0):
     return False
 
 
+def _sign(secret, raw):
+    """Valid Slack HMAC headers for raw, as production sends them."""
+    import hashlib
+    import hmac
+    import time
+
+    ts = str(int(time.time()))
+    sig = "v0=" + hmac.new(secret.encode(), f"v0:{ts}:".encode() + raw,
+                            hashlib.sha256).hexdigest()
+    return {"x-slack-request-timestamp": ts, "x-slack-signature": sig}
+
+
 def test_slack_answer_is_not_a_new_goal(tmp_path):
     sent = []
     server = WebUIServer(tmp_path,
                          slack_sender=lambda c, t, ts=None: sent.append((c, t)))
+    server.slack_signing_secret = "secret123"
     answers = []
     thread = threading.Thread(
         target=lambda: answers.append(
@@ -128,10 +144,10 @@ def test_slack_answer_is_not_a_new_goal(tmp_path):
         daemon=True)
     thread.start()
     assert _wait_for_waiter(server, "run-9")
-    status, payload = server.handle_slack_post(
-        b"", {},
-        {"event": {"type": "message", "text": "Plan B",
-                   "channel": "C1", "ts": "1.0"}})
+    body = {"event": {"type": "message", "text": "Plan B",
+                   "channel": "C1", "ts": "1.0"}}
+    raw = json.dumps(body).encode()
+    status, payload = server.handle_slack_post(raw, _sign("secret123", raw), body)
     assert status == 200
     assert payload["replies"] and payload["replies"][0] in QUESTION_ACKS
     assert sent and sent[0][0] == "C1" and sent[0][1] in QUESTION_ACKS

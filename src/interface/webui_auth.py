@@ -21,6 +21,8 @@ Rules, fail closed:
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 _LOCALHOSTS = {"127.0.0.1", "::1", "[::1]", "localhost"}
 
 
@@ -52,3 +54,61 @@ def is_authorized(headers: dict, token: str | None, remote_addr: str = "127.0.0.
         return _is_localhost(remote_addr)
     expected = f"Bearer {token}"
     return _authorization(headers) == expected
+
+
+def _host_name(host: str) -> str:
+    """Hostname part of a Host header: lowercased, port stripped."""
+    h = (host or "").strip().lower()
+    if h.startswith("["):
+        return h[1:].split("]", 1)[0]
+    if h.count(":") > 1:  # bare IPv6, no port to strip
+        return h
+    return h.split(":", 1)[0]
+
+
+def is_allowed_host(host: str, allowed_hosts=None) -> bool:
+    """True only if the Host is loopback or explicitly configured.
+
+    An Origin check that compares Origin to Host is meaningless when
+    the Host itself is attacker-controlled: a rebinding domain that
+    resolves to 127.0.0.1 sends a matching Host and Origin pair. So
+    the Host must first be loopback (127.*, ::1, localhost) or listed
+    in AIDON_WEBUI_ALLOWED_HOSTS (comma-separated string or iterable
+    of names). A missing Host is rejected.
+    """
+    name = _host_name(host)
+    if not name:
+        return False
+    if _is_localhost(name):
+        return True
+    if allowed_hosts is None:
+        return False
+    if isinstance(allowed_hosts, str):
+        allowed_hosts = [h.strip() for h in allowed_hosts.split(",")]
+    return any(name == _host_name(a) for a in allowed_hosts if a)
+
+
+def is_allowed_origin(headers: dict, host: str) -> bool:
+    """Same-origin check for browser POSTs to the WebUI.
+
+    A missing Origin header (curl, non-browser clients) is allowed:
+    those callers still pass the localhost/token auth check. A present
+    Origin must match the request Host exactly (host and port); a
+    foreign Origin is a cross-site POST and is rejected. Origin
+    "null" (sandboxed iframe, file URL) is rejected: the WebUI page
+    is never served from such a context.
+    """
+    origin = None
+    if isinstance(headers, dict):
+        for key, value in headers.items():
+            if str(key).lower() == "origin":
+                if isinstance(value, (list, tuple)):
+                    value = value[0] if value else None
+                origin = str(value).strip() if value is not None else None
+                break
+    if origin is None or origin == "":
+        return True
+    netloc = urlparse(origin).netloc
+    if not netloc:
+        return False
+    return netloc.lower() == (host or "").strip().lower()

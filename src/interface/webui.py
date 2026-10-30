@@ -31,7 +31,8 @@ Messaging, WhatsApp and Slack, both two-way, no Telegram:
   Slack signature, HMAC SHA256 with AIDON_SLACK_SIGNING_SECRET,
   timestamp within 5 minutes, and the X-Slack-Signature
   header, before parsing any event. A bad signature
-  is 401, never parsed, never dispatched. Events
+  is 401, never parsed, never dispatched. Without a
+  configured signing secret every request is 401 (fail-closed). Events
   that are not user messages, for example url_verification
   and bot messages, are handled or ignored, never
   treated as a user goal. A user message creates a
@@ -60,6 +61,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import html
 import json
 import mimetypes
 import os
@@ -826,6 +828,16 @@ VRM_HTML = VRM_HTML.replace("</head>", "<link rel=\"icon\" type=\"image/svg+xml\
 FACTORY_HTML = FACTORY_HTML.replace("</head>", "<link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/favicon.svg\"><style>" + BASE_CSS + "</style></head>", 1)
 
 
+def _api_key_row(key: dict) -> str:
+    """One API-key row of the settings page, escaped: key names are owner-supplied text."""
+    name = html.escape(str(key.get("name", "")))
+    scope = html.escape(str(key.get("scope", "")))
+    prefix = html.escape(str(key.get("key_hash_prefix", "")))
+    return (f"<div class=\"set-row\"><div class=\"set-label\"><label>{name}</label>"
+            f"<span class=\"set-key\">{scope}</span></div><div class=\"set-input\">"
+            f"<span class=\"set-key\">hash {prefix}</span></div></div>")
+
+
 class WebUIServer:
     def __init__(self, home: Path, dispatcher: TriggerDispatcher | None = None,
                  auth_store=None, memory=None, whatsapp_reply=None,
@@ -877,6 +889,7 @@ class WebUIServer:
         self._question_by_conversation: dict[str, dict] = {}
         self._question_lock = threading.Lock()
         self.webui_token = webui_token
+        self.webui_allowed_hosts = getattr(config, "webui_allowed_hosts", "") or ""
         self.transcribe_key = transcribe_key
         # Live realtime transcription sessions, by id: the browser
         # sends PCM chunks and reads partials over HTTP, while the
@@ -1753,6 +1766,10 @@ class WebUIServer:
 
     def handle_slack_post(self, raw: bytes, headers: dict, body: dict) -> tuple[int, dict]:
         # Verify signature before parsing any event as a goal.
+        # Fail closed: without a configured signing secret no
+        # Slack request is verified, so none is dispatched.
+        if not self.slack_signing_secret:
+            return 401, {"error": "slack signing secret not configured"}
         if self.slack_signing_secret:
             timestamp = headers.get("x-slack-request-timestamp", "")
             signature = headers.get("x-slack-signature", "")
@@ -2158,7 +2175,6 @@ class WebUIServer:
         {"group": "Scheduler", "settings": [
             {"key": "AIDON_DAILY_REPORT_TIME", "label": "Daily report time", "type": "string", "default": "", "desc": "Time of day for the daily report.", "secret": False},
             {"key": "AIDON_APPROVAL_NUDGE_MIN", "label": "Approval nudge minutes", "type": "int", "default": "15", "desc": "Minutes before an approval card is nudged.", "secret": False},
-            {"key": "AIDON_TICK_AUTOSTART", "label": "Tick autostart", "type": "bool", "default": "1", "desc": "Run the scheduler tick loop inside the WebUI process; off means run `aidon tick --loop` yourself or via the systemd unit. Default: 1.", "secret": False},
         ]},
         {"group": "System", "settings": [
             {"key": "AIDON_APPROVAL_TIMEOUT_S", "label": "Approval timeout seconds", "type": "int", "default": "900", "desc": "Seconds an approval card waits before failing closed.", "secret": False},
@@ -2179,7 +2195,7 @@ class WebUIServer:
             {"key": "AIDON_SANDBOX_REQUIRE_ISOLATION", "label": "Require isolation", "type": "bool", "default": "0", "desc": "Refuse sandbox commands when bubblewrap isolation is unavailable.", "secret": False},
             {"key": "AIDON_KERNEL", "label": "Kernel mode", "type": "bool", "default": "0", "desc": "Kernel mode: write/read/list/shell only, no calculate, no plugins.", "secret": False},
             {"key": "AIDON_COMPUTER_DRIVER", "label": "Computer driver", "type": "enum", "default": "", "desc": "Opt-in desktop driver; requires a graphical session and kernel mode off.", "secret": False, "options": ["", "x11"]},
-            {"key": "AIDON_SLACK_AUTOSTART", "label": "Slack polling autostart", "type": "bool", "default": "1", "desc": "Start Slack polling automatically with the WebUI.", "secret": False},
+            {"key": "AIDON_SLACK_AUTOSTART", "label": "Slack polling autostart", "type": "bool", "default": "0", "desc": "Start Slack polling automatically with the WebUI.", "secret": False},
             {"key": "AIDON_AUTONOMY_ENABLED", "label": "Autonomy enabled", "type": "bool", "default": "1", "desc": "Trust-based autonomy for repeated skills.", "secret": False},
             {"key": "AIDON_AUTONOMY_THRESHOLD", "label": "Autonomy threshold", "type": "int", "default": "5", "desc": "Successes before a skill graduates a trust tier.", "secret": False},
             {"key": "AIDON_AUTONOMY_DECAY_DAYS", "label": "Autonomy decay days", "type": "string", "default": "14", "desc": "Days after which trust decays.", "secret": False},
@@ -2275,7 +2291,7 @@ class WebUIServer:
             {"key": "AIDON_WHATSAPP_APP_SECRET", "label": "WhatsApp app secret", "type": "string", "default": "", "desc": "App secret for WhatsApp signature checks.", "secret": True},
             {"key": "AIDON_WHATSAPP_OWNER", "label": "WhatsApp owner", "type": "string", "default": "", "desc": "Owner phone number for the WhatsApp owner gate.", "secret": False},
             {"key": "SLACK_BOT_TOKEN", "label": "Slack bot token", "type": "string", "default": "", "desc": "Slack bot token for inbound/outbound Slack polling.", "secret": True},
-            {"key": "AIDON_SLACK_SIGNING_SECRET", "label": "Slack signing secret", "type": "string", "default": "", "desc": "Only needed if Slack webhook signature verification is enabled.", "secret": True},
+            {"key": "AIDON_SLACK_SIGNING_SECRET", "label": "Slack signing secret", "type": "string", "default": "", "desc": "Required for the Slack webhook; requests are rejected when it is empty.", "secret": True},
             {"key": "AIDON_THREADS_ACCOUNT_ID", "label": "Threads account id", "type": "string", "default": "", "desc": "Threads account id for publishing.", "secret": False},
             {"key": "AIDON_THREADS_ACCESS_TOKEN", "label": "Threads access token", "type": "string", "default": "", "desc": "Threads access token for publishing.", "secret": True},
             {"key": "AIDON_IG_USER_ID", "label": "Instagram user id", "type": "string", "default": "", "desc": "Instagram user id for publishing.", "secret": False},
@@ -3547,10 +3563,13 @@ class WebUIServer:
             def do_GET(self):
                 parsed = urlparse(self.path)
                 if not parsed.path.startswith(("/webhook/", "/webhooks/")):
-                    from .webui_auth import is_authorized
+                    from .webui_auth import is_allowed_host, is_authorized
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     if not is_authorized(headers, server.webui_token, self.client_address[0]):
                         self._send_json(401, {"error": "unauthorized"})
+                        return
+                    if not is_allowed_host(self.headers.get("Host", ""), server.webui_allowed_hosts):
+                        self._send_json(403, {"error": "foreign host"})
                         return
                 if server.webhook_only and parsed.path not in (
                         "/webhook/whatsapp", "/webhooks/whatsapp"):
@@ -3572,7 +3591,7 @@ class WebUIServer:
 <div id="settings-footer"><span id="settings-note">Use sliders where safe bounds are known; fields without bounds accept a value directly.</span><button id="settings-save">Save settings</button><span id="settings-status"></span></div>
 <div class="set-group"><h2>API access keys</h2>"""
                     for key in keys:
-                        html += f"<div class=\"set-row\"><div class=\"set-label\"><label>{key['name']}</label><span class=\"set-key\">{key['scope']}</span></div><div class=\"set-input\"><span class=\"set-key\">hash {key['key_hash_prefix']}</span></div></div>"
+                        html += _api_key_row(key)
                     html += """</div></div><script>
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 async function loadSettings(){
@@ -3908,10 +3927,16 @@ loadSettings();
             def do_POST(self):
                 parsed = urlparse(self.path)
                 if not parsed.path.startswith(("/webhook/", "/webhooks/")):
-                    from .webui_auth import is_authorized
+                    from .webui_auth import is_allowed_host, is_allowed_origin, is_authorized
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     if not is_authorized(headers, server.webui_token, self.client_address[0]):
                         self._send_json(401, {"error": "unauthorized"})
+                        return
+                    if not is_allowed_host(self.headers.get("Host", ""), server.webui_allowed_hosts):
+                        self._send_json(403, {"error": "foreign host"})
+                        return
+                    if not is_allowed_origin(headers, self.headers.get("Host", "")):
+                        self._send_json(403, {"error": "foreign origin"})
                         return
                 if server.webhook_only and parsed.path not in (
                         "/webhook/whatsapp", "/webhooks/whatsapp",
@@ -4277,10 +4302,13 @@ loadSettings();
             def do_DELETE(self):
                 parsed = urlparse(self.path)
                 if not parsed.path.startswith(("/webhook/", "/webhooks/")):
-                    from .webui_auth import is_authorized
+                    from .webui_auth import is_allowed_host, is_authorized
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     if not is_authorized(headers, server.webui_token, self.client_address[0]):
                         self._send_json(401, {"error": "unauthorized"})
+                        return
+                    if not is_allowed_host(self.headers.get("Host", ""), server.webui_allowed_hosts):
+                        self._send_json(403, {"error": "foreign host"})
                         return
                 if parsed.path.startswith("/api/memory/episodes/") or \
                         parsed.path.startswith("/api/memory/knowledge/"):
@@ -4329,10 +4357,13 @@ loadSettings();
             def do_PUT(self):
                 parsed = urlparse(self.path)
                 if not parsed.path.startswith(("/webhook/", "/webhooks/")):
-                    from .webui_auth import is_authorized
+                    from .webui_auth import is_allowed_host, is_authorized
                     headers = {k.lower(): v for k, v in self.headers.items()}
                     if not is_authorized(headers, server.webui_token, self.client_address[0]):
                         self._send_json(401, {"error": "unauthorized"})
+                        return
+                    if not is_allowed_host(self.headers.get("Host", ""), server.webui_allowed_hosts):
+                        self._send_json(403, {"error": "foreign host"})
                         return
                 raw = self._read_body()
                 try:
