@@ -167,3 +167,48 @@ def test_make_backend_modal_branch(tmp_path):
     assert backend.app_name == "aidon-sandbox"
     backend2 = make_backend("modal", None, modal_app="custom-app")
     assert backend2.app_name == "custom-app"
+
+
+def _make_tar(spec):
+    """spec: list of (name, data-or-None, kind, linkname-or-None)."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        for name, data, kind, linkname in spec:
+            info = tarfile.TarInfo(name)
+            if kind == "sym":
+                info.type = tarfile.SYMTYPE
+                info.linkname = linkname
+                tf.addfile(info)
+            elif kind == "lnk":
+                info.type = tarfile.LNKTYPE
+                info.linkname = linkname
+                tf.addfile(info)
+            else:
+                raw = data or b""
+                info.size = len(raw)
+                tf.addfile(info, io.BytesIO(raw))
+    return buf.getvalue()
+
+
+def test_untar_rejects_escaping_members(tmp_path):
+    backend = ModalBackend()
+    cases = [
+        [("/tmp/evil.txt", b"x", "file", None)],
+        [("../evil.txt", b"x", "file", None)],
+        [("sub/../../evil.txt", b"x", "file", None)],
+        [("link", None, "sym", "/tmp/evil")],
+        [("link", None, "sym", "../evil")],
+        [("link", None, "lnk", "/tmp/evil")],
+    ]
+    for spec in cases:
+        with pytest.raises((ValueError, tarfile.TarError)):
+            backend._untar_bytes(_make_tar(spec), tmp_path)
+
+
+def test_untar_allows_links_inside_workspace(tmp_path):
+    backend = ModalBackend()
+    data = _make_tar([("real.txt", b"hello", "file", None),
+                      ("link", None, "sym", "real.txt")])
+    backend._untar_bytes(data, tmp_path)
+    assert (tmp_path / "real.txt").read_text() == "hello"
+    assert (tmp_path / "link").read_text() == "hello"

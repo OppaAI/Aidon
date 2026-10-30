@@ -33,10 +33,10 @@ def _runner(work, tmp_path, clef, verifier):
 
 def _plan():
     return Plan(
-        steps=[Step(tool="write", args={"file": "out.txt", "text": "v1"},
-                    deliverable="out.txt")],
-        deliverables=["out.txt"],
-        criteria=["out.txt exists"])
+        steps=[Step(tool="write", args={"file": "out.json", "text": "v1"},
+                    deliverable="out.json")],
+        deliverables=["out.json"],
+        criteria=["out.json exists"])
 
 
 def _verifier_stub(calls):
@@ -53,7 +53,7 @@ def test_accept_skips_model_verifier(tmp_path, monkeypatch):
     calls = []
     runner = _runner(work, tmp_path, _StubClef([("accept", 0.9)]),
                      _verifier_stub(calls))
-    report = runner._execute_plan("Write out.txt", _plan())
+    report = runner._execute_plan("Write out.json", _plan())
     assert report.status == "done"
     assert calls == [], "gate accept must skip the model verifier"
 
@@ -67,14 +67,14 @@ def test_retry_repairs_then_accept_finishes(tmp_path, monkeypatch):
                      _StubClef([("retry", 0.9), ("accept", 0.9)]),
                      _verifier_stub(calls))
     repair_json = json.dumps({
-        "steps": [{"tool": "write", "args": {"file": "out.txt", "text": "v2"},
-                   "deliverable": "out.txt"}],
-        "deliverables": ["out.txt"],
-        "criteria": ["out.txt exists"]})
+        "steps": [{"tool": "write", "args": {"file": "out.json", "text": "v2"},
+                   "deliverable": "out.json"}],
+        "deliverables": ["out.json"],
+        "criteria": ["out.json exists"]})
     runner._chat = lambda phase, messages: repair_json
-    report = runner._execute_plan("Write out.txt", _plan())
+    report = runner._execute_plan("Write out.json", _plan())
     assert report.status == "done"
-    assert (work / "out.txt").read_text() == "v2"
+    assert (work / "out.json").read_text() == "v2"
     assert calls == [], "gate retry must not need the model verifier"
 
 
@@ -89,6 +89,6 @@ def test_gate_failure_defers_to_model_verifier(tmp_path, monkeypatch):
             raise RuntimeError("clef down")
 
     runner = _runner(work, tmp_path, _Broken(), _verifier_stub(calls))
-    report = runner._execute_plan("Write out.txt", _plan())
+    report = runner._execute_plan("Write out.json", _plan())
     assert report.status == "done"
     assert len(calls) == 1, "a failed gate must defer to the model verifier"

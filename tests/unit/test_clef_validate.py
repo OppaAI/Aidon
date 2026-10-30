@@ -20,9 +20,18 @@ class _StubClef:
 
 
 def test_accept_skips_verifier():
-    result = validate_gate("goal", ["a.txt"], ["a.txt exists"],
+    result = validate_gate("goal", ["a.json"], ["a.json exists"],
                            "/tmp", _StubClef("accept", 0.9))
     assert result["action"] == "accept"
+
+
+def test_accept_defers_for_content_deliverables():
+    # A good-looking sample is not evidence about content.
+    for deliverables in (["report.md"], ["a.json", "notes.md"],
+                         ["script.py"], ["data"], ["image.png"]):
+        result = validate_gate("goal", deliverables, ["x exists"],
+                               "/tmp", _StubClef("accept", 0.95))
+        assert result["action"] == "escalate", deliverables
 
 
 def test_low_confidence_accept_defers():

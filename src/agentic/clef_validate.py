@@ -10,11 +10,19 @@ probabilities are not proof — and it never writes a repair
 plan or judges content on its own.
 
 Decision table, mirroring triage and DAG ranking:
-- accept, confidence >= 0.6: skip the model verifier. When
-  the verifier is off this changes nothing; when it is on,
-  it saves a full LLM call. The gate is not a second
-  opinion on top of the verifier; it is the reason the
-  verifier is not needed for this attempt.
+- accept, confidence >= 0.6: skip the model verifier, but
+  ONLY for structured deliverables (JSON, JSONL, CSV, TSV).
+  A short text sample is not evidence that a report,
+  recipe, or document is correct, and the gate must not
+  override an explicit "always" for content. For prose,
+  document, code, or image deliverables an accept verdict
+  defers to the model verifier exactly like escalate: the
+  gate may recommend, never declare content correct. In
+  selective mode this is consistent by construction, since
+  selective already skips the verifier for structured-only
+  runs and runs it for everything else; in always mode it
+  restores the mode's meaning. When the verifier is off,
+  the gate changes nothing either way.
 - retry, confidence >= 0.8: treat as a generic model NO.
   The reason names no file, so the deadlock rule keeps
   every deliverable repairable and the repair loop re-runs
@@ -43,6 +51,10 @@ RETRY_CONFIDENCE = 0.8
 MAX_STATE_CHARS = 2000
 MAX_SAMPLE_CHARS = 400
 MAX_CRITERIA_CHARS = 500
+# The selective verifier's skip set, reused here so the two
+# policies cannot drift: code checks are complete for these,
+# and a model opinion adds no quality signal.
+STRUCTURED_SUFFIXES = {".json", ".jsonl", ".csv", ".tsv"}
 
 ACTION_CRITERIA = {
     "accept": "The deliverables satisfy the goal and the criteria; "
@@ -85,6 +97,19 @@ def summarize_deliverables(workdir, deliverables) -> str:
     return "\n".join(lines)
 
 
+def accept_eligible(deliverables) -> bool:
+    """True only when every deliverable is structured data.
+    A content deliverable (prose, document, code, image, or
+    a bare name with no suffix) never earns a verifier skip
+    from the gate, whatever Clef's confidence."""
+    if not deliverables:
+        return False
+    for name in deliverables:
+        if Path(str(name)).suffix.lower() not in STRUCTURED_SUFFIXES:
+            return False
+    return True
+
+
 def validate_gate(goal: str, deliverables, criteria, workdir, client) -> dict:
     """One Clef choice -> {action, confidence, reason}.
 
@@ -105,6 +130,11 @@ def validate_gate(goal: str, deliverables, criteria, workdir, client) -> dict:
         "criteria, what should verification do next?",
         ACTION_CRITERIA)
     if choice == "accept" and confidence >= ACCEPT_CONFIDENCE:
+        if not accept_eligible(deliverables):
+            # A sample that looks good is not evidence about
+            # content; defer to the model verifier instead.
+            return {"action": "escalate", "confidence": confidence,
+                    "reason": ""}
         return {"action": "accept", "confidence": confidence,
                 "reason": "accepted deliverables"}
     if choice == "retry" and confidence >= RETRY_CONFIDENCE:

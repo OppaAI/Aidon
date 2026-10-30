@@ -414,16 +414,49 @@ class ModalBackend(ExecutionBackend):
             tf.add(str(workspace), arcname=".")
         return buf.getvalue()
 
+    def _validate_tar_members(self, tf) -> None:
+        """Explicit pre-scan before any extraction. An archive
+        returned by a sandbox running generated code is
+        untrusted: reject absolute paths, parent traversal,
+        and links whose target escapes the workspace, so a
+        symlink created by one member cannot redirect a later
+        member outside. This runs before filter="data", so
+        the defense does not depend on one Python version's
+        filter behavior."""
+        import posixpath
+        for member in tf.getmembers():
+            name = member.name
+            if posixpath.isabs(name):
+                raise ValueError(f"tar member escapes workspace: {name}")
+            parts = [p for p in posixpath.normpath(name).split("/")
+                     if p not in ("", ".")]
+            if ".." in parts:
+                raise ValueError(f"tar member escapes workspace: {name}")
+            if member.issym() or member.islnk():
+                target = member.linkname
+                if posixpath.isabs(target):
+                    raise ValueError(
+                        f"tar link escapes workspace: {name} -> {target}")
+                base = posixpath.dirname(name)
+                resolved = posixpath.normpath(
+                    posixpath.join(base, target))
+                rparts = [p for p in resolved.split("/")
+                          if p not in ("", ".")]
+                if ".." in rparts:
+                    raise ValueError(
+                        f"tar link escapes workspace: {name} -> {target}")
+
     def _untar_bytes(self, data: bytes, workspace: Path) -> None:
         import io
         import tarfile
         buf = io.BytesIO(data)
         with tarfile.open(fileobj=buf, mode="r") as tf:
-            try:
-                tf.extractall(path=str(workspace), filter="data")
-            except TypeError:
-                # Older 3.11 without the filter argument.
-                tf.extractall(path=str(workspace))
+            self._validate_tar_members(tf)
+            # No fallback: an unrestricted extract would let a
+            # malicious archive write outside the workspace. If
+            # this Python cannot filter, the sync fails closed
+            # and the run reports a sync-back failure.
+            tf.extractall(path=str(workspace), filter="data")
 
     def run(self, command: list[str], workspace: Path,
             timeout_seconds: int = 120) -> ExecutionResult:
