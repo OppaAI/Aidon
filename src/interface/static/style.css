@@ -296,12 +296,17 @@ html[data-theme="light"] .msg.user { background: #c7dcf4; color: #102343; }
   align-items: center; justify-content: center; }
 .composer-icon:hover { color: var(--accent); border-color: var(--accent); }
 .composer-icon.active { color: var(--accent); border-color: var(--accent); }
-#mode-chooser { appearance: none; width: auto; min-width: 86px; padding: 0 8px;
-  font-size: 13px; font-weight: 600; }
+#composer-left label[for="mode-chooser"] { font-family: var(--font-display);
+  font-size: 15px; font-weight: 600; color: var(--muted);
+  letter-spacing: .02em; white-space: nowrap; }
+#mode-chooser { appearance: none; width: auto; min-width: 86px; padding: 0 10px;
+  font-family: var(--font-display); font-size: 15px; font-weight: 600;
+  text-align: center; text-align-last: center; }
 #mode-chooser option { color: #111; }
 #preapprove-btn { color: var(--toggle-off); font-weight: 700; }
-#preapprove-btn.preapprove-control { width: auto; min-width: 132px; padding: 0 11px;
-  gap: 6px; font-family: var(--font-display); font-size: 12px; font-weight: 600; }
+#preapprove-btn.preapprove-control { flex: 0 0 auto; width: auto; min-width: 132px; padding: 0 11px;
+  gap: 6px; font-family: var(--font-display); font-size: 14px; font-weight: 600;
+  white-space: nowrap; }
 .preapprove-icon { font-size: 18px; line-height: 1; }
 #preapprove-btn.active { background: transparent; color: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 12px color-mix(in srgb, var(--cyan) 35%, transparent); }
 #composer-inputs { width: 100%; display: flex; flex-direction: column; gap: 6px; }
@@ -455,6 +460,7 @@ html[data-theme="light"] [data-status="model"] { color: #193353; }
   #composer-tools { align-items: stretch; }
   #composer-left, #composer-right { gap: 5px; }
   #composer-left .composer-icon, #composer-right button { width: 38px; height: 38px; flex-basis: 38px; }
+  #preapprove-btn.preapprove-control { flex-basis: auto; }
   #goal-input { min-height: 78px; }
 }
 
