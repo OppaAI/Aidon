@@ -88,8 +88,12 @@ def run_learn_cycle(home, sandbox=None, governor_check=None, max_per_day: int = 
         return summary
 
     def _governor_allows(name: str) -> bool:
+        # Fail closed: a learn cycle without a governor check
+        # promotes nothing. Production call sites always pass
+        # the lifecycle store's check; only an explicit caller
+        # (a test) may pass an allowing callback.
         if governor_check is None:
-            return True
+            return False
         try:
             return bool(governor_check(name, max_per_day))
         except TypeError:
@@ -118,6 +122,12 @@ def run_learn_cycle(home, sandbox=None, governor_check=None, max_per_day: int = 
         except Exception as exc:
             summary["skipped"].append(
                 f"promotion failed for {skill.name}: {type(exc).__name__}: {exc}")
+        else:
+            try:
+                from ..capabilities.skill_lifecycle import LifecycleStore
+                LifecycleStore(home).record_learn(skill.name)
+            except Exception:
+                pass
 
     try:
         validated = library.list(states=("validated",))

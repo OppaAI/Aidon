@@ -1027,6 +1027,11 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
 
                     tools[local_name] = call_remote
                     registered.append(local_name)
+                try:
+                    from ..capabilities.capability_registry import CapabilityRegistry
+                    CapabilityRegistry(config.home).record_use(server_name)
+                except Exception:
+                    pass
                 return f"MCP_CONNECTED {server_name!r}: {', '.join(registered) or 'no safe tools'}"
             except Exception as exc:
                 try:
@@ -1491,6 +1496,9 @@ def main(argv: list[str] | None = None) -> int:
     tools_parser = sub.add_parser("tools", help="Inspect the tool registry")
     tools_parser.add_argument("action", choices=["list", "check"], help="list = list plugin tools, check = check a tool exists")
     tools_parser.add_argument("name", nargs="?", default="", help="Tool name for check")
+    capabilities_parser = sub.add_parser("capabilities", help="Inspect registered capabilities (images, MCP servers)")
+    capabilities_parser.add_argument("action", choices=["list", "stale"], help="list = list entries, stale = entries idle too long, retirement candidates")
+    capabilities_parser.add_argument("--days", type=int, default=90, help="Idle days for stale (default 90)")
     dag_parser = sub.add_parser("dag", help="Inspect saved DAG workflows")
     dag_parser.add_argument("action", choices=["list", "show", "run"], help="list = list saved DAGs, show = show one DAG, run = execute one DAG's tool nodes")
     dag_parser.add_argument("id", nargs="?", default="", help="DAG id for show/run")
@@ -1683,8 +1691,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "learn":
         from ..agentic.learn_cycle import run_learn_cycle
+        from ..capabilities.skill_lifecycle import LifecycleStore
         summary = run_learn_cycle(
             config.home, sandbox,
+            governor_check=LifecycleStore(config.home).governor_check,
             max_per_day=max(0, config.learn_max_skills_per_day))
         print(f"Learn cycle: promoted={summary.get('promoted', [])} "
               f"retired={summary.get('retired_duplicates', [])} "
@@ -1981,6 +1991,21 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.action == "check":
             print(f"{args.name} exists: {args.name in available}")
+            return 0
+        return 2
+    if args.command == "capabilities":
+        from ..capabilities.capability_registry import CapabilityRegistry
+        registry = CapabilityRegistry(config.home)
+        if args.action == "list":
+            for entry in registry.list():
+                print(f"{entry.get('kind')}:{entry.get('name')} {entry.get('status')} uses={entry.get('use_count', 0)} last_used={entry.get('last_used', '') or 'never'}")
+            return 0
+        if args.action == "stale":
+            stale = registry.stale_entries(days=args.days)
+            for entry in stale:
+                print(f"{entry['kind']}:{entry['name']} {entry['status']} idle={entry['idle_days']}d uses={entry['use_count']}")
+            if not stale:
+                print("No stale capabilities.")
             return 0
         return 2
     if args.command == "dag":
@@ -3602,8 +3627,11 @@ def main(argv: list[str] | None = None) -> int:
                 _handled = False
                 if job.kind == "learn":
                     from ..agentic.learn_cycle import run_learn_cycle as _learn
-                    _summary = _learn(config.home, sandbox,
-                                      max_per_day=max(0, config.learn_max_skills_per_day))
+                    from ..capabilities.skill_lifecycle import LifecycleStore
+                    _summary = _learn(
+                        config.home, sandbox,
+                        governor_check=LifecycleStore(config.home).governor_check,
+                        max_per_day=max(0, config.learn_max_skills_per_day))
                     print(f"Job {job.name}: learn cycle {_summary}")
                     _handled = True
                 elif job.kind == "report":

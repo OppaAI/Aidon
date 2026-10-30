@@ -158,10 +158,17 @@ def _stored_config(config: dict, tools: list) -> dict:
 
 
 def acquire_mcp_server(home, name: str, config: dict, approve,
-                       client_factory=None, test_call: dict | None = None) -> dict:
+                       client_factory=None, test_call: dict | None = None,
+                       governor=None) -> dict:
     """Approve, connect, list, scan, and register an MCP
     server as validated. Trust is separate: promote the
-    returned entry with the registry's promote approval."""
+    returned entry with the registry's promote approval.
+
+    When a governor is given, the connect/list/register
+    phase runs inside governor.timed("mcp") AFTER approval
+    passes, so a rejected approval consumes no budget and
+    a failed attempt still does — the same rule as the
+    per-use mcp_connect tool."""
     from .capability_registry import CapabilityRegistry
     name = str(name).strip()
     if not name:
@@ -178,41 +185,42 @@ def acquire_mcp_server(home, name: str, config: dict, approve,
     _check_approval(approve(
         "install", f"Connect MCP server {name}?",
         f"Start/connect to MCP server {name!r}: {_describe_config(config)}"))
-    factory = client_factory or _default_client
-    client = factory(config)
-    try:
-        offered = client.list_tools() or []
-        safe = [str(t.get("name", "")).strip() for t in offered]
-        safe = [n for n in safe if _safe_tool_name(n)]
-        safe = list(dict.fromkeys(safe))
-        if not safe:
-            raise RuntimeError(
-                f"MCP server {name!r} offered no safe tools")
-        evidence = [
-            {"test": "connect", "passed": True, "transport": transport},
-            {"test": "list_tools", "passed": True, "tools": safe},
-        ]
-        if test_call is not None:
-            tool = str(test_call.get("tool", ""))
-            if tool not in safe:
-                raise ValueError(
-                    f"test tool {tool!r} is not an offered tool")
-            result = client.call_tool(tool, dict(test_call.get("args") or {}))
-            evidence.append({"test": "call_tool", "passed": True,
-                             "tool": tool,
-                             "result": str(result)[:200]})
-        findings = _scan_descriptions(offered)
-        entry = CapabilityRegistry(home).register(
-            name, "mcp", _stored_config(config, safe), evidence)
-        return {"entry": entry, "tools": safe, "evidence": evidence,
-                "scan_findings": findings}
-    finally:
+    from contextlib import nullcontext
+    _gov_ctx = governor.timed("mcp") if governor is not None else nullcontext()
+    with _gov_ctx:
+        factory = client_factory or _default_client
+        client = factory(config)
         try:
-            client.close()
-        except Exception:
-            pass
-
-
+            offered = client.list_tools() or []
+            safe = [str(t.get("name", "")).strip() for t in offered]
+            safe = [n for n in safe if _safe_tool_name(n)]
+            safe = list(dict.fromkeys(safe))
+            if not safe:
+                raise RuntimeError(
+                    f"MCP server {name!r} offered no safe tools")
+            evidence = [
+                {"test": "connect", "passed": True, "transport": transport},
+                {"test": "list_tools", "passed": True, "tools": safe},
+            ]
+            if test_call is not None:
+                tool = str(test_call.get("tool", ""))
+                if tool not in safe:
+                    raise ValueError(
+                        f"test tool {tool!r} is not an offered tool")
+                result = client.call_tool(tool, dict(test_call.get("args") or {}))
+                evidence.append({"test": "call_tool", "passed": True,
+                                 "tool": tool,
+                                 "result": str(result)[:200]})
+            findings = _scan_descriptions(offered)
+            entry = CapabilityRegistry(home).register(
+                name, "mcp", _stored_config(config, safe), evidence)
+            return {"entry": entry, "tools": safe, "evidence": evidence,
+                    "scan_findings": findings}
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
 def _resolve_mcp_config(home, name: str):
     """Registered config first, operator config second.
     Returns (config, registered_entry_or_None)."""

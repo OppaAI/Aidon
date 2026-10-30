@@ -177,6 +177,8 @@ class CapabilityRegistry:
             "test_evidence": list(test_evidence),
             "created_at": now,
             "updated_at": now,
+            "use_count": 0,
+            "last_used": "",
         }
         entries[name] = entry
         self._write(entries)
@@ -211,6 +213,55 @@ class CapabilityRegistry:
         entry["updated_at"] = datetime.now(timezone.utc).isoformat()
         self._write(entries)
         return entry
+
+    def record_use(self, name: str) -> dict:
+        """Mark a capability used: count + last-used timestamp.
+
+        Unknown names raise KeyError: callers that observe
+        use opportunistically (an MCP connect for an
+        operator-config server with no registry entry) catch
+        it and move on.
+        """
+        entries = self._read()
+        entry = entries.get(name)
+        if entry is None:
+            raise KeyError(f"unknown capability: {name}")
+        now = datetime.now(timezone.utc).isoformat()
+        entry["use_count"] = entry.get("use_count", 0) + 1
+        entry["last_used"] = now
+        entry["updated_at"] = now
+        self._write(entries)
+        return entry
+
+    def stale_entries(self, days: int = 90) -> list[dict]:
+        """Trusted/validated entries idle for at least `days`.
+
+        Never-used entries age from created_at; used entries
+        from last_used. Unparseable dates are skipped, never
+        silently declared stale. Retirement stays a human
+        decision: this only proposes candidates.
+        """
+        now = datetime.now(timezone.utc)
+        out = []
+        for entry in self._read().values():
+            if entry.get("status") not in (VALIDATED, TRUSTED):
+                continue
+            stamp = entry.get("last_used") or entry.get("created_at") or ""
+            try:
+                seen = datetime.fromisoformat(stamp)
+            except ValueError:
+                continue
+            idle = (now - seen).days
+            if idle >= days:
+                out.append({"name": entry.get("name"),
+                            "kind": entry.get("kind"),
+                            "status": entry.get("status"),
+                            "use_count": entry.get("use_count", 0),
+                            "last_used": entry.get("last_used", ""),
+                            "created_at": entry.get("created_at", ""),
+                            "idle_days": idle})
+        out.sort(key=lambda e: e["idle_days"], reverse=True)
+        return out
 
     def flag(self, name: str, reason: str) -> dict:
         """Trusted -> validated (safe direction, no approval)."""

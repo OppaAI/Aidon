@@ -1579,6 +1579,30 @@ class GoalRunner:
             current = replanned
         return current
 
+    def _failure_lessons_note(self, goal: str) -> str:
+        """Past failure lessons for this goal, as planner context.
+
+        Best effort: a lessons-store failure never fails the
+        run. Returns "" when there are no lessons.
+        """
+        try:
+            from ..memory.failure_lessons import FailureLessons
+            lessons = FailureLessons(self.home).lessons_for(goal, limit=3)
+        except Exception:
+            return ""
+        if not lessons:
+            return ""
+        bits = []
+        for lesson in lessons:
+            repair = (lesson.get("repair") or {}).get("description", "") or "none recorded"
+            bits.append(
+                f"{lesson.get('failure_class', 'failure')}: "
+                f"{str(lesson.get('failure_text', ''))[:200]} "
+                f"(seen {lesson.get('times_seen', 1)}x; repair: {str(repair)[:150]})")
+        return ("Failure lessons from past runs — do not repeat these "
+                "approaches; prefer the recorded repair when present: "
+                + "; ".join(bits))
+
     def run(self, goal: str, spec=None, research_report=None,
             live_actions=None) -> RunReport:
         self._elapsed_timer = ElapsedTimer().start()
@@ -1824,6 +1848,10 @@ class GoalRunner:
                     self._triage_note = _triage["note"]
             except Exception as exc:
                 self._trace("capability", "triage-skipped", str(exc)[:100])
+        _lessons_note = self._failure_lessons_note(goal)
+        if _lessons_note:
+            self._triage_note = ((self._triage_note + "\n") if self._triage_note else "") + _lessons_note
+            self._trace("capability", "failure-lessons", "recalled past failure lessons")
         if spec is not None:
             spec_deliverables = spec.deliverables if hasattr(spec, "deliverables") else spec.get("deliverables", [])
             try:
@@ -2222,6 +2250,39 @@ class GoalRunner:
                 record_failure(self.memory, report.goal,
                                (report.error or "")[:500],
                                failed_tools, failed_deliverables)
+            except Exception:
+                pass
+        # Failure-lessons store: the same failure, with repair
+        # linkage and recurrence, independent of memory. A
+        # rejection or cancellation is not evidence the
+        # approach was wrong, so those are not recorded.
+        # Best effort, as above.
+        if report.status == "failed":
+            _err = (report.error or "").lower()
+            if "reject" not in _err and "cancel" not in _err:
+                try:
+                    from ..memory.failure_lessons import FailureLessons
+                    _tools = []
+                    for _step in report.plan.normalized_steps():
+                        if _step.tool not in _tools:
+                            _tools.append(_step.tool)
+                    FailureLessons(self.home).record_failure(
+                        report.goal, report.error or "",
+                        context={"tools": _tools,
+                                 "deliverables": list(report.plan.deliverables or []),
+                                 "files": list(report.files or [])})
+                except Exception:
+                    pass
+        elif report.status == "done":
+            try:
+                from ..memory.failure_lessons import FailureLessons
+                _store = FailureLessons(self.home)
+                for _lesson in _store.lessons_for(report.goal, limit=3):
+                    if not _lesson.get("repair"):
+                        _store.record_repair(
+                            _lesson["id"],
+                            "A later run for a similar goal succeeded.")
+                        break
             except Exception:
                 pass
         try:

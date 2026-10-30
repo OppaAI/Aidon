@@ -182,7 +182,8 @@ def test_learn_cycle_promotes_and_consolidates_validated(tmp_path):
     library.promote("old_csv", {"passed": True})
     library.add(_skill("new_csv", description="write a csv report"))
     library.promote("new_csv", {"passed": True})
-    summary = run_learn_cycle(tmp_path, FakeSandbox())
+    summary = run_learn_cycle(tmp_path, FakeSandbox(),
+                                  governor_check=lambda name, max_per_day=5: True)
     assert "cand_csv" in summary["promoted"]
     assert library.get("cand_csv").state == "validated"
     # Validated duplicates: older retired, newer kept.
@@ -197,7 +198,8 @@ def test_learn_cycle_trusted_duplicates_only_reported(tmp_path):
     library.trust("t1", approved=True)
     library.add(_skill("t2", description="write a csv report"))
     library.trust("t2", approved=True)
-    summary = run_learn_cycle(tmp_path, FakeSandbox())
+    summary = run_learn_cycle(tmp_path, FakeSandbox(),
+                                  governor_check=lambda name, max_per_day=5: True)
     assert library.get("t1").state == "trusted"
     assert library.get("t2").state == "trusted"
     assert summary["trusted_duplicates_for_review"] == ["t1 ~ t2"]
@@ -214,7 +216,8 @@ def test_learn_cycle_skips_failing_candidate(tmp_path):
     library = SkillLibrary(tmp_path)
     library.add(_skill("broken"))
     summary = run_learn_cycle(
-        tmp_path, FakeSandbox(failing=["python3 -m pytest tests/test_csv.py -q"]))
+        tmp_path, FakeSandbox(failing=["python3 -m pytest tests/test_csv.py -q"]),
+        governor_check=lambda name, max_per_day=5: True)
     assert summary["promoted"] == []
     assert library.get("broken").state == "candidate"
     assert any("broken" in item for item in summary["skipped"])
