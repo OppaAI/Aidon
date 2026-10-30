@@ -220,20 +220,39 @@ def make_deep_researcher(config):
     return deep_researcher
 
 
-def _make_governor(config):
+def _make_governor(config, budget_key=None):
     """One acquisition governor per run, from config caps.
 
     getattr defaults keep old configs working: a config
     without the acq_* fields still gets the starting policy.
+    With a budget_key, counts and seconds resume from the
+    mission's saved record instead of starting at zero.
     """
-    from ..capabilities.acquisition_governor import AcquisitionGovernor
-    return AcquisitionGovernor(
+    from ..capabilities.acquisition_governor import (
+        AcquisitionGovernor, load_budget_record)
+    gov = AcquisitionGovernor(
         max_tools=getattr(config, "acq_max_tools", 2),
         max_skills=getattr(config, "acq_max_skills", 2),
         max_mcp=getattr(config, "acq_max_mcp", 1),
         max_dependency_sets=getattr(config, "acq_max_dependency_sets", 2),
         max_repair_cycles=getattr(config, "acq_max_repair_cycles", 3),
-        max_acquisition_seconds=getattr(config, "acq_max_seconds", 600.0))
+        max_acquisition_seconds=getattr(config, "acq_max_seconds", 600.0),
+        home=getattr(config, "home", None),
+        budget_key=budget_key)
+    if budget_key:
+        record = load_budget_record(getattr(config, "home", None), budget_key)
+        if record:
+            try:
+                gov.tools = int(record.get("tools", 0))
+                gov.skills = int(record.get("skills", 0))
+                gov.mcp = int(record.get("mcp", 0))
+                gov.dependency_sets = int(record.get("dependency_sets", 0))
+                gov.repair_cycles = int(record.get("repair_cycles", 0))
+                gov.acquisition_seconds = float(
+                    record.get("acquisition_seconds", 0.0))
+            except (TypeError, ValueError):
+                pass
+    return gov
 
 
 def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None, governor=None, optional_tools=None) -> dict:
@@ -988,58 +1007,80 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             command_parts = shlex.split(str(command)) + [str(x) for x in (args or [])]
             if not command_parts:
                 return "MCP_REFUSED: command is required for stdio transport"
-            description = " ".join(command_parts)
+            mcp_config = {"transport": "stdio",
+                          "command": str(command),
+                          "args": [str(x) for x in (args or [])],
+                          "env": dict(env or {})}
+
+            def _factory(_cfg, _parts=command_parts, _env=dict(env or {})):
+                from ..interface.mcp_client import McpClient
+                _client = McpClient(_parts, env=_env)
+                _client.start()
+                return _client
         elif transport in ("http", "streamable-http"):
             if not url:
                 return "MCP_REFUSED: url is required for HTTP transport"
-            description = str(url)
+            mcp_config = {"transport": transport, "url": str(url),
+                          "token": str(token or "")}
+
+            def _factory(_cfg, _url=str(url), _token=str(token or "")):
+                from ..interface.mcp_http import McpHttpClient
+                _client = McpHttpClient(_url, token=_token or None)
+                _client.initialize()
+                return _client
         else:
             return f"MCP_REFUSED: unsupported transport {transport!r}"
-        ok, why = _approval("install", "Connect MCP server",
-                            f"Start/connect to MCP server {server_name!r}: {description}",
-                            force_ask=True,
-                        )
-        if not ok:
-            return f"MCP_REFUSED: {why}"
-        with _acq("mcp"):
-            try:
-                if transport == "stdio":
-                    from ..interface.mcp_client import McpClient
-                    client = McpClient(command_parts, env=dict(env or {}))
-                    client.start()
-                else:
-                    from ..interface.mcp_http import McpHttpClient
-                    client = McpHttpClient(str(url), token=str(token or "") or None)
-                    client.initialize()
-                offered = client.list_tools()
-                if not offered:
-                    client.close()
-                    return f"MCP_REFUSED: {server_name!r} offered no tools"
-                mcp_connections[server_name] = client
-                registered = []
-                for info in offered:
-                    remote_name = str(info.get("name", "")).strip()
-                    if not remote_name or not remote_name.replace("_", "").isalnum():
-                        continue
-                    local_name = f"mcp_{server_name}_{remote_name}"
+        # One approval, through the acquisition lifecycle: the
+        # lifecycle approves (bound to the exact command/URL),
+        # connects, lists, scans descriptions, and registers
+        # the server as validated; this tool then keeps the
+        # client for the run's namespaced tools. The governor
+        # counts once, inside the lifecycle after approval.
+        _why = {}
 
-                    def call_remote(_args=None, _client=client, _remote=remote_name):
-                        return json.dumps(_client.call_tool(_remote, _args or {}), ensure_ascii=False)
+        class _Decision:
+            def __init__(self, verdict):
+                self.verdict = verdict
 
-                    tools[local_name] = call_remote
-                    registered.append(local_name)
-                try:
-                    from ..capabilities.capability_registry import CapabilityRegistry
-                    CapabilityRegistry(config.home).record_use(server_name)
-                except Exception:
-                    pass
-                return f"MCP_CONNECTED {server_name!r}: {', '.join(registered) or 'no safe tools'}"
-            except Exception as exc:
-                try:
-                    client.close()
-                except Exception:
-                    pass
-                return f"MCP_REFUSED: {type(exc).__name__}: {exc}"
+        def _acquire_approve(kind, title, body):
+            ok, why = _approval(kind, title, body, force_ask=True)
+            if not ok:
+                _why["why"] = why
+            return _Decision("approved" if ok else "rejected")
+
+        from ..capabilities.acquisition_governor import AcquisitionBudgetExceeded
+        from ..capabilities.mcp_acquisition import acquire_mcp_server
+        try:
+            result = acquire_mcp_server(
+                config.home, server_name, mcp_config, _acquire_approve,
+                client_factory=_factory, governor=governor, keep_client=True)
+        except AcquisitionBudgetExceeded:
+            raise
+        except Exception as exc:
+            if "rejected by approval" in str(exc) and _why.get("why"):
+                return f"MCP_REFUSED: {_why['why']}"
+            return f"MCP_REFUSED: {type(exc).__name__}: {exc}"
+        client = result["client"]
+        mcp_connections[server_name] = client
+        registered = []
+        for remote_name in result["tools"]:
+            local_name = f"mcp_{server_name}_{remote_name}"
+
+            def call_remote(_args=None, _client=client, _remote=remote_name):
+                return json.dumps(_client.call_tool(_remote, _args or {}), ensure_ascii=False)
+
+            tools[local_name] = call_remote
+            registered.append(local_name)
+        try:
+            from ..capabilities.capability_registry import CapabilityRegistry
+            CapabilityRegistry(config.home).record_use(server_name)
+        except Exception:
+            pass
+        scan_note = ""
+        if result.get("scan_findings"):
+            scan_note = (f"; description scan findings: "
+                         f"{len(result['scan_findings'])} (informational, not blocking)")
+        return f"MCP_CONNECTED {server_name!r}: {', '.join(registered) or 'no safe tools'}{scan_note}"
 
     def mcp_disconnect(name):
         server_name = str(name).strip()
@@ -1057,15 +1098,28 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     tools["mcp_disconnect"] = mcp_disconnect
 
     try:
-        from ..capabilities.plugins import PluginRegistry
+        from ..capabilities.plugins import (
+            PluginRegistry, ask_plugin_approval, commit_plugin,
+            preflight_plugin)
 
         def adopt_tool_plugin(path):
+            # Order matters: preflight and approval cost nothing.
+            # The governor counts only the commit, after the
+            # owner has said yes — a rejection, whether by the
+            # scanner or by the owner, consumes no budget.
             source = _confined(path)
             if not source.is_dir():
                 return f"adoption refused: plugin directory not found: {path}"
             registry = PluginRegistry(config.home)
-            with _acq("tool"):
-                approved, _findings, message = registry.adopt(source, gate=gate)
+            preflight = preflight_plugin(source)
+            if not preflight.ok:
+                return f"adoption refused: {preflight.message}"
+            if not ask_plugin_approval(gate, None, preflight):
+                return "adoption refused: Adoption rejected by owner"
+            if governor is not None:
+                governor.acquire("tool")
+            approved, _findings, message = commit_plugin(
+                registry, source, preflight)
             return message if approved else f"adoption refused: {message}"
 
         tools["adopt_tool_plugin"] = adopt_tool_plugin
@@ -2876,7 +2930,26 @@ def main(argv: list[str] | None = None) -> int:
             if isinstance(event.payload.get("resume_spec"), dict):
                 from ..agentic.interview import Spec as _ResumeSpec
                 _resume_spec = _ResumeSpec.from_dict(event.payload["resume_spec"])
-            _governor = _make_governor(config)
+            # Mission budget key: a proceed rejoins the stopped
+            # run's record via the stop; a fresh run gets a fresh
+            # key, so a later mission never inherits an earlier
+            # mission's spent budget. Stops saved before keys
+            # existed fall back to the (chat, goal) hash.
+            _budget_key = None
+            try:
+                if _resume_stop_id:
+                    from ..interface.mode_stops import load_mode_stop as _site_load_stop
+                    _stop = _site_load_stop(config.home, _resume_stop_id)
+                    _budget_key = (_stop or {}).get("budget_key") or None
+                    if not _budget_key:
+                        from ..capabilities.acquisition_governor import budget_key_for
+                        _budget_key = budget_key_for(_conversation_key, event.goal)
+                else:
+                    import uuid as _budget_uuid
+                    _budget_key = f"mission:{_budget_uuid.uuid4().hex[:16]}"
+            except Exception:
+                _budget_key = None
+            _governor = _make_governor(config, _budget_key)
             runner = GoalRunner(client, run_sandbox, _gate,
                                 config.home, memory=memory,
                                 conversation_id=event.conversation_id, plugins=plugins,
@@ -3023,6 +3096,18 @@ def main(argv: list[str] | None = None) -> int:
                 try:
                     from ..interface.mode_stops import delete_mode_stop
                     delete_mode_stop(config.home, _resume_stop_id)
+                except Exception:
+                    pass
+            # The mission is over: done always clears the budget
+            # record; a failed run clears it only when no stop
+            # survives (a failed proceed keeps its stop, so its
+            # retry keeps its budget). Stopped runs keep it.
+            if _budget_key and (report.status == "done"
+                                or (report.status == "failed"
+                                    and not _resume_stop_id)):
+                try:
+                    from ..capabilities.acquisition_governor import discard_budget_record
+                    discard_budget_record(config.home, _budget_key)
                 except Exception:
                     pass
             if report.status == "stopped":

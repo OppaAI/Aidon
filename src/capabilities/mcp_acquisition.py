@@ -1,11 +1,12 @@
 """MCP acquisition and health checks: the last hub item.
 
-Discovery today is manual: the planner searches the web,
-proposes a config, and the per-use mcp_connect tool
-connects with a force_ask approval bound to the exact
-command or URL. Nothing records the server, its tools,
-or whether it still answers. Acquisition turns that
-manual path into a tested, approval-based lifecycle:
+Discovery today is manual: the planner searches the web
+and proposes a config. The per-use mcp_connect tool runs
+the acquisition lifecycle below: one force_ask approval
+bound to the exact command or URL, then connect, list,
+scan, and register as validated, keeping the client for
+the run's namespaced tools. Acquisition turns that path
+into a tested, approval-based lifecycle:
 
   propose -> approve (exact command/URL) -> connect
   -> list tools -> scan descriptions -> register
@@ -44,7 +45,9 @@ What acquisition does NOT do:
   server that needs a token takes it at each connect
   from the environment ($VAR form), exactly as the
   per-use tool does.
-- It does not keep the connection. Acquisition
+- It does not keep the connection, unless the caller
+  passes keep_client: the per-use tool keeps it for the
+  run and closes it on disconnect. Otherwise acquisition
   registers; later runs connect per-use, as today.
 - It does not block on scan findings. Tool names are
   validated (alphanumeric plus underscore, the same
@@ -159,7 +162,7 @@ def _stored_config(config: dict, tools: list) -> dict:
 
 def acquire_mcp_server(home, name: str, config: dict, approve,
                        client_factory=None, test_call: dict | None = None,
-                       governor=None) -> dict:
+                       governor=None, keep_client: bool = False) -> dict:
     """Approve, connect, list, scan, and register an MCP
     server as validated. Trust is separate: promote the
     returned entry with the registry's promote approval.
@@ -168,7 +171,15 @@ def acquire_mcp_server(home, name: str, config: dict, approve,
     phase runs inside governor.timed("mcp") AFTER approval
     passes, so a rejected approval consumes no budget and
     a failed attempt still does — the same rule as the
-    per-use mcp_connect tool."""
+    per-use mcp_connect tool.
+
+    Re-acquiring an already registered server with the
+    same connection config (transport, command/args, or
+    URL) succeeds without duplicating the record and
+    returns the existing entry; a different config raises
+    until the old entry is retired. With keep_client the
+    connected client is returned in the result instead
+    of closed, for the caller to use and close."""
     from .capability_registry import CapabilityRegistry
     name = str(name).strip()
     if not name:
@@ -190,6 +201,7 @@ def acquire_mcp_server(home, name: str, config: dict, approve,
     with _gov_ctx:
         factory = client_factory or _default_client
         client = factory(config)
+        result = None
         try:
             offered = client.list_tools() or []
             safe = [str(t.get("name", "")).strip() for t in offered]
@@ -212,15 +224,34 @@ def acquire_mcp_server(home, name: str, config: dict, approve,
                                  "tool": tool,
                                  "result": str(result)[:200]})
             findings = _scan_descriptions(offered)
-            entry = CapabilityRegistry(home).register(
-                name, "mcp", _stored_config(config, safe), evidence)
-            return {"entry": entry, "tools": safe, "evidence": evidence,
-                    "scan_findings": findings}
+            stored = _stored_config(config, safe)
+            registry = CapabilityRegistry(home)
+            existing = registry.get(name)
+            if existing is not None and existing.get("status") != "retired":
+                econ = existing.get("config") or {}
+                same = (econ.get("transport") == stored.get("transport")
+                        and econ.get("command", "") == stored.get("command", "")
+                        and list(econ.get("args") or []) == list(stored.get("args") or [])
+                        and econ.get("url", "") == stored.get("url", ""))
+                if not same:
+                    raise ValueError(
+                        f"capability already registered: {name!r} with different "
+                        "config; retire it first")
+                result = {"entry": existing, "tools": safe, "evidence": evidence,
+                          "scan_findings": findings, "already_registered": True}
+            else:
+                entry = registry.register(name, "mcp", stored, evidence)
+                result = {"entry": entry, "tools": safe, "evidence": evidence,
+                          "scan_findings": findings, "already_registered": False}
         finally:
-            try:
-                client.close()
-            except Exception:
-                pass
+            if not (keep_client and result is not None):
+                try:
+                    client.close()
+                except Exception:
+                    pass
+        if keep_client and result is not None:
+            result["client"] = client
+        return result
 def _resolve_mcp_config(home, name: str):
     """Registered config first, operator config second.
     Returns (config, registered_entry_or_None)."""

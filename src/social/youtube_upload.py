@@ -140,10 +140,53 @@ def refresh_access_token(client_id: str, client_secret: str,
     return token
 
 
+def _parse_video_resource(raw: bytes) -> dict:
+    try:
+        return json.loads(raw.decode() or "{}")
+    except ValueError:
+        return {"id": "",
+                "raw": raw[:500].decode("utf-8", "replace")}
+
+
+def _range_end(headers: dict) -> int | None:
+    """Last byte the server confirms, from a 308 Range
+    header ("bytes=0-123"), or None when absent or malformed."""
+    raw = _header(headers, "Range")
+    try:
+        _unit, _, span = raw.partition("=")
+        _start, _, end = span.partition("-")
+        return int(end)
+    except (ValueError, AttributeError):
+        return None
+
+
+def _query_upload_offset(put, session_url: str, access_token: str,
+                         total: int) -> tuple[int | None, dict | None]:
+    """Ask the server what it has (Content-Range bytes */total).
+    Returns (last_confirmed_byte_or_None, resource_or_None):
+    a resource means the upload already completed."""
+    status, raw, headers = put(
+        session_url, b"",
+        {"Authorization": f"Bearer {access_token}",
+         "Content-Length": "0",
+         "Content-Range": f"bytes */{total}"},
+        timeout=120.0)
+    if status in (200, 201):
+        return None, _parse_video_resource(raw)
+    if status == 308:
+        return _range_end(headers), None
+    raise RuntimeError(
+        f"upload status query failed: HTTP {status}: {raw[:200]!r}")
+
+
 def upload_video(video_path, metadata: dict, access_token: str,
                  post=None, put=None, chunk_size: int = CHUNK_SIZE) -> dict:
-    """Init a resumable session, then upload in chunks.
-    Returns the API's video resource (id plus snippet/status).
+    """Init a resumable session, then upload in chunks,
+    streamed from disk (never the whole file in memory).
+    A 308 reconciles its offset with the server's Range
+    header, querying status when the header is absent, so
+    a partial receipt never skips bytes. Returns the
+    API's video resource (id plus snippet/status).
     Raises on init failure, missing file, or exhausted retries."""
     path = Path(video_path)
     if not path.is_file():
@@ -166,37 +209,56 @@ def upload_video(video_path, metadata: dict, access_token: str,
     if not session_url:
         raise RuntimeError(
             "YouTube upload init returned no session URL")
-    data = path.read_bytes()
-    total = len(data)
+    total = path.stat().st_size
     if total == 0:
         raise RuntimeError("video file is empty")
     offset = 0
-    while offset < total:
-        chunk = data[offset:offset + chunk_size]
-        end = offset + len(chunk) - 1
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Length": str(len(chunk)),
-            "Content-Range": f"bytes {offset}-{end}/{total}",
-        }
-        for _attempt in range(3):
-            status, raw, _headers = put(session_url, chunk, headers,
-                                        timeout=120.0)
-            if status in (200, 201):
-                try:
-                    return json.loads(raw.decode() or "{}")
-                except ValueError:
-                    return {"id": "",
-                            "raw": raw[:500].decode("utf-8", "replace")}
-            if status == 308:
-                offset = end + 1
-                break
-            if status >= 500:
-                continue
-            raise RuntimeError(
-                "YouTube upload failed: "
-                f"HTTP {status}: {raw[:500]!r}")
-        else:
-            raise RuntimeError(
-                "YouTube upload failed after retries: HTTP 5xx")
+    stalls = 0
+    with open(path, "rb") as stream:
+        while offset < total:
+            stream.seek(offset)
+            chunk = stream.read(chunk_size)
+            if not chunk:
+                raise RuntimeError("video file shrank during upload")
+            end = offset + len(chunk) - 1
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Length": str(len(chunk)),
+                "Content-Range": f"bytes {offset}-{end}/{total}",
+            }
+            for _attempt in range(3):
+                status, raw, resp_headers = put(session_url, chunk, headers,
+                                                timeout=120.0)
+                if status in (200, 201):
+                    return _parse_video_resource(raw)
+                if status == 308:
+                    confirmed = _range_end(resp_headers)
+                    if confirmed is None:
+                        confirmed, resource = _query_upload_offset(
+                            put, session_url, access_token, total)
+                        if resource is not None:
+                            return resource
+                    if confirmed is None:
+                        raise RuntimeError(
+                            "YouTube upload status unknown: "
+                            "308 without Range")
+                    new_offset = confirmed + 1
+                    if new_offset <= offset:
+                        stalls += 1
+                        if stalls >= 3:
+                            raise RuntimeError(
+                                "YouTube upload stalled: server keeps "
+                                "confirming the same offset")
+                    else:
+                        stalls = 0
+                        offset = new_offset
+                    break
+                if status >= 500:
+                    continue
+                raise RuntimeError(
+                    "YouTube upload failed: "
+                    f"HTTP {status}: {raw[:500]!r}")
+            else:
+                raise RuntimeError(
+                    "YouTube upload failed after retries: HTTP 5xx")
     raise RuntimeError("YouTube upload ended without a video id")

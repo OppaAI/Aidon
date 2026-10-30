@@ -291,6 +291,181 @@ def plugin_tree_size(source_dir: Path) -> int:
     return sum(p.stat().st_size for p in source_dir.rglob("*") if p.is_file())
 
 
+
+class Preflight:
+    """Everything adoption needs except the owner's decision
+    and the copy itself: the validated plugin, the scan and
+    security-gate findings, the approved tree hash, and the
+    approval card body. Built without approval and without
+    touching the installed plugins directory, so a caller
+    can approve first and only then spend budget."""
+
+    def __init__(self, ok, plugin=None, findings=None,
+                 gate_findings=None, approved_hash="", body="",
+                 message=""):
+        self.ok = ok
+        self.plugin = plugin
+        self.findings = findings or []
+        self.gate_findings = gate_findings or []
+        self.approved_hash = approved_hash
+        self.body = body
+        self.message = message
+
+
+def preflight_plugin(source_dir: Path) -> Preflight:
+    """Scan, size-cap, hash, security-gate, and statically
+    validate a plugin source tree. No approval, no copy,
+    no import of the plugin's code (validation is AST-only).
+    A failed preflight is a refusal, never a budget charge."""
+    source_dir = Path(source_dir)
+    findings = scan_plugin(source_dir)
+    blocking = [f for f in findings if f.type in BLOCKING_TYPES]
+    if blocking:
+        return Preflight(False, findings=findings, message=(
+            "Adoption rejected: blocking scan findings ("
+            + ", ".join(sorted({f.type for f in blocking})) + ")"))
+    # Size cap, before any approval card: an oversized source is
+    # not something the owner should be asked to approve.
+    total_size = plugin_tree_size(source_dir)
+    if total_size > MAX_PLUGIN_BYTES:
+        return Preflight(False, findings=findings, message=(
+            f"Adoption rejected: plugin source is {total_size} bytes, "
+            f"over the {MAX_PLUGIN_BYTES} byte cap"))
+    # Approval binding: hash the approved bytes now, re-hash
+    # immediately before the copy, and abort if they changed.
+    try:
+        approved_hash = plugin_tree_hash(source_dir)
+    except OSError as exc:
+        return Preflight(False, findings=findings, message=(
+            f"Adoption rejected: cannot hash source: {exc}"))
+    # Full security gate over the plugin's own code: a fail
+    # verdict (os.system, eval/exec, piped download-to-shell,
+    # secret-like strings) blocks adoption even when the
+    # pattern scan above passed; review verdicts go on the
+    # approval card below.
+    gate_findings = []
+    try:
+        from .security_gate import gate_text
+        for py_path in sorted(source_dir.rglob("*.py")):
+            try:
+                result = gate_text(str(py_path), py_path.read_text(encoding="utf-8"))
+            except OSError:
+                continue
+            gate_findings.extend(result.findings)
+            if result.verdict == "fail":
+                return Preflight(False, findings=findings,
+                                 gate_findings=gate_findings,
+                                 message="Adoption rejected: security gate fail")
+    except Exception as exc:
+        # Fail closed: a gate that failed to run must never present
+        # as a clean scan. The old code reset findings to [] and
+        # proceeded to an approval card showing "no findings".
+        return Preflight(False, findings=findings,
+                         message=f"Adoption rejected: security gate error: {exc}")
+    try:
+        # Static validation only. Importing the module here would
+        # run its top-level code on the host before the owner has
+        # seen the scan report or approved anything.
+        plugin = load_plugin(source_dir, execute=False)
+    except Exception as exc:
+        return Preflight(False, findings=findings,
+                         gate_findings=gate_findings,
+                         message=f"Adoption rejected: invalid plugin: {exc}")
+    # Approval card: scan report as body, path/line/type only.
+    body_lines = [f"Plugin: {plugin.name} {plugin.version}",
+                  f"Description: {plugin.description}",
+                  f"Tools: {', '.join(plugin.tool_names()) or 'none'}",
+                  f"Skills: {', '.join(plugin.skills) or 'none'}",
+                  f"Approved source hash: {approved_hash}"]
+    if findings:
+        body_lines.append("Scan warnings:")
+        body_lines.extend(f"  {f.path}:{f.line} {f.type}" for f in findings)
+    else:
+        body_lines.append("Scan: no findings")
+    if gate_findings:
+        body_lines.append("Security gate findings:")
+        body_lines.extend(f"  {f.severity} {f.source}: {f.message}" for f in gate_findings)
+    return Preflight(True, plugin=plugin, findings=findings,
+                     gate_findings=gate_findings,
+                     approved_hash=approved_hash,
+                     body="\n".join(body_lines))
+
+
+def ask_plugin_approval(gate, approve, preflight: Preflight) -> bool:
+    """Ask the owner about a preflighted plugin. Returns
+    True only on an approved or auto_approved verdict."""
+    approved = False
+    if approve is not None:
+        # Callback approvers see exactly what the gate.ask path
+        # shows: the approved tree hash and the card body, so
+        # the approval binds to the same bytes. Older
+        # two-argument callbacks keep working via fallback.
+        try:
+            approved = bool(approve(preflight.plugin, preflight.findings,
+                                    preflight.approved_hash, preflight.body))
+        except TypeError:
+            approved = bool(approve(preflight.plugin, preflight.findings))
+    elif gate is not None:
+        # Gates from out-of-tree callers and test doubles may take
+        # only (kind, title, body). The action_class is an
+        # autonomy hint, not part of the decision, so a plain gate
+        # is asked without it rather than crashing adoption.
+        try:
+            decision = gate.ask(
+                "plugin",
+                "Adopt this plugin?",
+                preflight.body,
+                action_class="plugin",
+            )
+        except TypeError:
+            decision = gate.ask("plugin", "Adopt this plugin?", preflight.body)
+        approved = decision.verdict in ("approved", "auto_approved")
+    return approved
+
+
+def commit_plugin(registry, source_dir: Path, preflight: Preflight,
+                  memory=None, conversation_id: str = "") -> tuple[bool, list, str]:
+    """Copy a preflighted, approved plugin into place. The
+    re-hash immediately before the copy is the binding: if
+    the source changed after approval, the approval no
+    longer covers these bytes, so abort and leave any
+    previously installed version untouched."""
+    source_dir = Path(source_dir)
+    plugin = preflight.plugin
+    findings = preflight.findings
+    try:
+        current_hash = plugin_tree_hash(source_dir)
+    except OSError as exc:
+        return False, findings, f"Adoption aborted: cannot re-hash source: {exc}"
+    if current_hash != preflight.approved_hash:
+        return False, findings, (
+            "Adoption aborted: plugin source changed after approval "
+            f"(approved hash {preflight.approved_hash}, current hash {current_hash}); "
+            "approve the new source to adopt it")
+    target = registry.plugins_dir / plugin.name
+    registry.plugins_dir.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(source_dir, target)
+    registry.plugins[plugin.name] = load_plugin(target)
+    # Replacement invalidates cached health: the old verdict
+    # judged the previous bytes, not these.
+    from .capability_hub import invalidate_health
+    invalidate_health(registry.home, f"plugin:{plugin.name}")
+    for skill in plugin.skills:
+        invalidate_health(registry.home,
+                          f"skill:{plugin.name}/{skill}")
+    if memory is not None:
+        try:
+            memory.record_episodic(
+                conversation_id, f"Adopted plugin {plugin.name}",
+                {"plugin": plugin.name, "version": plugin.version,
+                 "tools": plugin.tool_names()})
+        except Exception:
+            pass
+    return True, findings, f"Adopted plugin {plugin.name}"
+
+
 class PluginRegistry:
     def __init__(self, home: Path):
         self.home = Path(home)
@@ -369,7 +544,8 @@ class PluginRegistry:
 
     def adopt(self, source_dir: Path, gate=None, approve=None, memory=None,
               conversation_id: str = "") -> tuple[bool, list[ScanFinding], str]:
-        """Adopt a plugin: scan, approve, then copy. Returns (ok, findings, message).
+        """Adopt a plugin, in stages: preflight, approval,
+        then commit. Returns (ok, findings, message).
 
         The approve callback, when given, receives (plugin, findings,
         tree_hash, body): the same approved tree hash and card body
@@ -379,129 +555,14 @@ class PluginRegistry:
         No caller in the repo passes a callback today (the WebUI
         route passes approve=None, the CLI passes a gate only);
         the callback path exists for tests and out-of-tree callers.
+        Budget accounting is the caller's job: the run tool
+        closure acquires the governor between approval and
+        commit, so a rejection consumes nothing.
         """
-        source_dir = Path(source_dir)
-        findings = scan_plugin(source_dir)
-        blocking = [f for f in findings if f.type in BLOCKING_TYPES]
-        if blocking:
-            return False, findings, (
-                "Adoption rejected: blocking scan findings ("
-                + ", ".join(sorted({f.type for f in blocking})) + ")")
-        # Size cap, before any approval card: an oversized source is
-        # not something the owner should be asked to approve.
-        total_size = plugin_tree_size(source_dir)
-        if total_size > MAX_PLUGIN_BYTES:
-            return False, findings, (
-                f"Adoption rejected: plugin source is {total_size} bytes, "
-                f"over the {MAX_PLUGIN_BYTES} byte cap")
-        # Approval binding: hash the approved bytes now, re-hash
-        # immediately before the copy, and abort if they changed.
-        try:
-            approved_hash = plugin_tree_hash(source_dir)
-        except OSError as exc:
-            return False, findings, f"Adoption rejected: cannot hash source: {exc}"
-        # Full security gate over the plugin's own code: a fail
-        # verdict (os.system, eval/exec, piped download-to-shell,
-        # secret-like strings) blocks adoption even when the
-        # pattern scan above passed; review verdicts go on the
-        # approval card below.
-        gate_findings = []
-        try:
-            from .security_gate import gate_text
-            for py_path in sorted(source_dir.rglob("*.py")):
-                try:
-                    result = gate_text(str(py_path), py_path.read_text(encoding="utf-8"))
-                except OSError:
-                    continue
-                gate_findings.extend(result.findings)
-                if result.verdict == "fail":
-                    return False, findings, "Adoption rejected: security gate fail"
-        except Exception as exc:
-            # Fail closed: a gate that failed to run must never present
-            # as a clean scan. The old code reset findings to [] and
-            # proceeded to an approval card showing "no findings".
-            return False, findings, f"Adoption rejected: security gate error: {exc}"
-        try:
-            # Static validation only. Importing the module here would
-            # run its top-level code on the host before the owner has
-            # seen the scan report or approved anything.
-            plugin = load_plugin(source_dir, execute=False)
-        except Exception as exc:
-            return False, findings, f"Adoption rejected: invalid plugin: {exc}"
-        # Approval card: scan report as body, path/line/type only.
-        body_lines = [f"Plugin: {plugin.name} {plugin.version}",
-                      f"Description: {plugin.description}",
-                      f"Tools: {', '.join(plugin.tool_names()) or 'none'}",
-                      f"Skills: {', '.join(plugin.skills) or 'none'}",
-                      f"Approved source hash: {approved_hash}"]
-        if findings:
-            body_lines.append("Scan warnings:")
-            body_lines.extend(f"  {f.path}:{f.line} {f.type}" for f in findings)
-        else:
-            body_lines.append("Scan: no findings")
-        if gate_findings:
-            body_lines.append("Security gate findings:")
-            body_lines.extend(f"  {f.severity} {f.source}: {f.message}" for f in gate_findings)
-        body = "\n".join(body_lines)
-        approved = False
-        if approve is not None:
-            # Callback approvers see exactly what the gate.ask path
-            # shows: the approved tree hash and the card body, so
-            # the approval binds to the same bytes. Older
-            # two-argument callbacks keep working via fallback.
-            try:
-                approved = bool(approve(plugin, findings, approved_hash, body))
-            except TypeError:
-                approved = bool(approve(plugin, findings))
-        elif gate is not None:
-            # Gates from out-of-tree callers and test doubles may take
-            # only (kind, title, body). The action_class is an
-            # autonomy hint, not part of the decision, so a plain gate
-            # is asked without it rather than crashing adoption.
-            try:
-                decision = gate.ask(
-                    "plugin",
-                    "Adopt this plugin?",
-                    body,
-                    action_class="plugin",
-                )
-            except TypeError:
-                decision = gate.ask("plugin", "Adopt this plugin?", body)
-            approved = decision.verdict in ("approved", "auto_approved")
-        if not approved:
-            return False, findings, "Adoption rejected by owner"
-        # Re-hash immediately before the copy, before touching any
-        # existing install: if the source changed after approval, the
-        # approval no longer binds to these bytes, so abort and leave
-        # any previously installed version untouched.
-        try:
-            current_hash = plugin_tree_hash(source_dir)
-        except OSError as exc:
-            return False, findings, f"Adoption aborted: cannot re-hash source: {exc}"
-        if current_hash != approved_hash:
-            return False, findings, (
-                "Adoption aborted: plugin source changed after approval "
-                f"(approved hash {approved_hash}, current hash {current_hash}); "
-                "approve the new source to adopt it")
-        target = self.plugins_dir / plugin.name
-        self.plugins_dir.mkdir(parents=True, exist_ok=True)
-        if target.exists():
-            shutil.rmtree(target)
-        shutil.copytree(source_dir, target)
-        self.plugins[plugin.name] = load_plugin(target)
-        # Replacement invalidates cached health: the old verdict
-        # judged the previous bytes, not these.
-        from .capability_hub import invalidate_health
-        invalidate_health(self.home, f"plugin:{plugin.name}")
-        for skill in plugin.skills:
-            invalidate_health(self.home,
-                              f"skill:{plugin.name}/{skill}")
-        if memory is not None:
-            try:
-                memory.record_episodic(
-                    conversation_id, f"Adopted plugin {plugin.name}",
-                    {"plugin": plugin.name, "version": plugin.version,
-                     "tools": plugin.tool_names()})
-            except Exception:
-                pass
-        return True, findings, f"Adopted plugin {plugin.name}"
+        preflight = preflight_plugin(source_dir)
+        if not preflight.ok:
+            return False, preflight.findings, preflight.message
+        if not ask_plugin_approval(gate, approve, preflight):
+            return False, preflight.findings, "Adoption rejected by owner"
+        return commit_plugin(self, source_dir, preflight,
+                             memory=memory, conversation_id=conversation_id)

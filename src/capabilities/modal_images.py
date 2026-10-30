@@ -182,29 +182,50 @@ class CapabilityImageBuilder:
                 raise RuntimeError(
                     "Capability image build rejected by approval")
 
+        # Hard deadline: when a governor is present, every
+        # phase timeout clamps to the acquisition time left
+        # when the build started, so one build cannot run
+        # past the run's acquisition budget. Without a
+        # governor the configured timeouts stand.
+        _deadline = None
+        if self._governor is not None:
+            import time as _time
+            _deadline = _time.monotonic() + self._governor.remaining_seconds()
+
+        def _clamp(want: int) -> int:
+            if _deadline is None:
+                return want
+            import time as _time
+            left = _deadline - _time.monotonic()
+            if left <= 0:
+                from .acquisition_governor import AcquisitionBudgetExceeded
+                raise AcquisitionBudgetExceeded(
+                    "acquisition time budget exhausted during image build")
+            return max(1, min(int(want), int(left)))
+
         setup = self._create_sandbox(True, self._base_image(),
-                                     self.setup_timeout)
+                                     _clamp(self.setup_timeout))
         try:
             if apt_packages:
                 rc, _out, err = self._exec(
-                    setup, ["apt-get", "update"], 300)
+                    setup, ["apt-get", "update"], _clamp(300))
                 if rc != 0:
                     raise RuntimeError(f"apt-get update failed: {err}")
                 rc, _out, err = self._exec(
                     setup, ["env", "DEBIAN_FRONTEND=noninteractive",
                             "apt-get", "install", "-y", *apt_packages],
-                    self.setup_timeout)
+                    _clamp(self.setup_timeout))
                 if rc != 0:
                     raise RuntimeError(f"apt-get install failed: {err}")
             if pip_packages:
                 rc, _out, err = self._exec(
                     setup, ["python", "-m", "pip", "install",
                             *pip_packages],
-                    self.setup_timeout)
+                    _clamp(self.setup_timeout))
                 if rc != 0:
                     raise RuntimeError(f"pip install failed: {err}")
                 _frc, _freeze, _ferr = self._exec(
-                    setup, ["python", "-m", "pip", "freeze"], 300)
+                    setup, ["python", "-m", "pip", "freeze"], _clamp(300))
                 if _frc == 0:
                     for _line in _freeze.splitlines():
                         if "==" in _line:
@@ -217,12 +238,12 @@ class CapabilityImageBuilder:
             except Exception:
                 pass
 
-        test = self._create_sandbox(False, snapshot, self.test_timeout)
+        test = self._create_sandbox(False, snapshot, _clamp(self.test_timeout))
         try:
             script = test_command or _default_test_command(
                 pip_packages, apt_packages)
             rc, _out, err = self._exec(
-                test, ["sh", "-c", script], self.test_timeout)
+                test, ["sh", "-c", script], _clamp(self.test_timeout))
             if rc != 0:
                 raise RuntimeError(
                     f"capability image test failed: {err}")

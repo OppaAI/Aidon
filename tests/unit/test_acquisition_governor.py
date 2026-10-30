@@ -1,6 +1,7 @@
 """Acquisition governor: per-run caps across acquisition
 kinds, a shared time budget, and the tool-closure wiring."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -88,6 +89,17 @@ def test_adopt_and_install_wiring_caps(tmp_path):
     plugin_dir.mkdir()
     gov = AcquisitionGovernor(max_tools=0, max_dependency_sets=0)
     tools = _tools(tmp_path, gov)
+    # A preflight refusal costs nothing, even with no budget left.
+    assert tools["adopt_tool_plugin"](str(plugin_dir)).startswith(
+        "adoption refused")
+    assert gov.tools == 0
+    # A valid, approved plugin reaches the count and exhausts it.
+    (plugin_dir / "plugin.json").write_text(json.dumps({
+        "name": "cap-plug", "version": "1", "description": "test",
+        "tools": [{"name": "echo", "module": "tool.py",
+                   "function": "echo"}],
+        "skills": []}))
+    (plugin_dir / "tool.py").write_text("def echo(args):\n    return 'hi'\n")
     with pytest.raises(AcquisitionBudgetExceeded, match="tool"):
         tools["adopt_tool_plugin"](str(plugin_dir))
     with pytest.raises(AcquisitionBudgetExceeded, match="dependency"):

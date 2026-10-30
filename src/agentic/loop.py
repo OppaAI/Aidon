@@ -1738,7 +1738,10 @@ class GoalRunner:
             stop_id = save_mode_stop(
                 self.home, mode="ask", goal=goal, spec=spec_dict,
                 conversation_key=getattr(self, "conversation_key", ""),
-                conversation_id=self.conversation_id)
+                conversation_id=self.conversation_id,
+                budget_key=getattr(
+                    getattr(self, "acquisition_governor", None),
+                    "budget_key", None) or "")
             return self._finalize(RunReport(
                 "stopped", goal, Plan(steps=[], deliverables=[], criteria=[]),
                 False, False,
@@ -2778,7 +2781,10 @@ class GoalRunner:
             stop_id = save_mode_stop(
                 self.home, mode="plan", goal=goal, plan=plan_to_dict(plan),
                 conversation_key=getattr(self, "conversation_key", ""),
-                conversation_id=self.conversation_id)
+                conversation_id=self.conversation_id,
+                budget_key=getattr(
+                    getattr(self, "acquisition_governor", None),
+                    "budget_key", None) or "")
             return RunReport("stopped", goal, plan, False, False,
                              mode_stop={"stop_id": stop_id, "mode": "plan",
                                         "goal": goal,

@@ -55,8 +55,12 @@ def test_chunked_upload_ranges_and_id(tmp_path):
         assert url == "https://session.invalid/upload"
         ranges.append(headers["Content-Range"])
         calls["n"] += 1
-        if calls["n"] < 3:
-            return 308, b"", {}
+        # A real 308 carries the received Range; the old fake
+        # omitted it, encoding the blind-advance behavior.
+        if calls["n"] == 1:
+            return 308, b"", {"Range": "bytes=0-3"}
+        if calls["n"] == 2:
+            return 308, b"", {"Range": "bytes=0-7"}
         return 200, json.dumps({"id": "abc123"}).encode(), {}
 
     result = upload_video(_make_video(tmp_path),
@@ -168,3 +172,55 @@ def test_closure_rejection_and_missing_file(tmp_path):
     tools2 = _yt_tools(tmp_path, gate2)
     assert tools2["youtube_upload"](
         str(tmp_path / "nope.mp4"), "T").startswith("upload refused")
+
+
+def test_partial_receipt_resumes_from_confirmed_offset(tmp_path):
+    """A 308 confirming only part of a chunk must not skip bytes."""
+    ranges = []
+
+    def _put(url, body, headers, timeout=120.0):
+        ranges.append(headers["Content-Range"])
+        if headers["Content-Range"] == "bytes 0-3/11":
+            return 308, b"", {"Range": "bytes=0-1"}
+        if headers["Content-Range"] == "bytes 2-5/11":
+            return 308, b"", {"Range": "bytes=0-5"}
+        return 200, json.dumps({"id": "part1"}).encode(), {}
+
+    result = upload_video(_make_video(tmp_path),
+                          build_metadata("T"), "tok123",
+                          post=_post_init, put=_put, chunk_size=4)
+    assert result["id"] == "part1"
+    assert ranges == ["bytes 0-3/11", "bytes 2-5/11", "bytes 6-9/11"]
+
+
+def test_missing_range_queries_status(tmp_path):
+    """A 308 without Range triggers a status query, not a guess."""
+    ranges = []
+
+    def _put(url, body, headers, timeout=120.0):
+        ranges.append(headers["Content-Range"])
+        if headers["Content-Range"] == "bytes */11":
+            return 308, b"", {"Range": "bytes=0-3"}
+        if headers["Content-Range"] == "bytes 0-3/11":
+            return 308, b"", {}
+        return 200, json.dumps({"id": "q1"}).encode(), {}
+
+    result = upload_video(_make_video(tmp_path),
+                          build_metadata("T"), "tok123",
+                          post=_post_init, put=_put, chunk_size=4)
+    assert result["id"] == "q1"
+    assert ranges == ["bytes 0-3/11", "bytes */11", "bytes 4-7/11"]
+
+
+def test_repeated_same_offset_stalls(tmp_path):
+    """A server that keeps confirming the same offset fails visibly."""
+
+    def _put(url, body, headers, timeout=120.0):
+        if headers["Content-Range"] == "bytes 0-3/11":
+            return 308, b"", {"Range": "bytes=0-3"}
+        return 308, b"", {"Range": "bytes=0-3"}
+
+    with pytest.raises(RuntimeError, match="stalled"):
+        upload_video(_make_video(tmp_path),
+                     build_metadata("T"), "tok123",
+                     post=_post_init, put=_put, chunk_size=4)

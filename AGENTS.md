@@ -69,7 +69,9 @@ approval → live → learn
     has no camera device). Always approval-gated, kind `record`.
   - `youtube_upload` — upload a video file to YouTube, private by
     default. Always approval-gated, kind `live`, showing file, size,
-    title, description, visibility, and category.
+    title, description, visibility, and category. Uploads
+    stream from disk; a 308 reconciles its offset with the
+    server's Range, querying status when Range is absent.
   - `transcribe_audio` — speech to text (local whisper if available,
     else the Meta transcription API when a key is set).
   - `build_ebook` — markdown sources → EPUB.
@@ -158,18 +160,27 @@ a rung:
 Capability acquisition is budgeted per run: at most 2 tools,
 1 MCP server, 2 dependency sets, 3 repair cycles, and 600
 seconds of acquisition time. The time budget is cumulative
-and checked between acquisitions — it does not interrupt
-an operation in flight, so one long build can run past
-600s. On the MCP and install paths, a rejected approval
-consumes nothing (counting starts after approval passes);
-a failed attempt does consume. Plugin adoption still
-counts before its internal approval — a known ordering
-gap, fix pending. Skill promotion in goal runs is
-reserved, not counted; the learn cycle enforces its own
-daily per-skill cap and fails closed without a lifecycle
-check. Image builds record the pip versions actually
-resolved, and Modal sandboxes default to 1 CPU / 1024 MB
-(`AIDON_MODAL_CPU`, `AIDON_MODAL_MEMORY_MB`).
+and checked between acquisitions; image builds
+additionally clamp every phase timeout to the time left,
+so a build cannot run past the budget. A rejected
+approval consumes nothing on every path: plugin adoption
+runs preflight, then approval, then the count at commit
+(the commit re-hashes first and aborts on changed bytes);
+a failed attempt does consume. Skill promotion in goal
+runs is reserved, not counted; the learn cycle enforces
+its own daily per-skill cap and fails closed without a
+lifecycle check. A mission's budget survives its stops:
+the run site assigns a mission key, carried through stop
+records, and clears it when the mission finishes done
+(or failed with no surviving stop). Image builds record
+the pip versions actually resolved, and Modal sandboxes
+default to 1 CPU / 1024 MB (`AIDON_MODAL_CPU`,
+`AIDON_MODAL_MEMORY_MB`). The per-use MCP connect runs
+the acquisition lifecycle (approval, connect, list,
+description scan, register as validated) and keeps the
+client for the run; re-connecting an already registered
+server with the same config succeeds without duplicating
+the record.
 
 Stale capabilities surface, they are not auto-retired:
 `aidon capabilities list` shows use counts, and
