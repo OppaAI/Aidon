@@ -174,6 +174,59 @@ def test_interview_does_not_prefill_from_other_chat_spec(tmp_path):
     assert "no milk" not in " ".join(result.spec.constraints)
 
 
+def test_interview_prefills_newest_spec_only(tmp_path):
+    # Two specs in one chat: the old dinner spec must not seed
+    # a report interview. List order is oldest first; the seed
+    # is the newest spec, not the first.
+    memory = _memory(tmp_path)
+    memory.record_episodic("work", "Interview spec: Plan a dinner",
+                           {"spec": {"goal": "Plan a dinner",
+                                     "deliverables": ["menu.pdf"]}})
+    memory.record_episodic("work", "Interview spec: Write a report",
+                           {"spec": {"goal": "Write a report",
+                                     "deliverables": ["report.pdf"]}})
+    class EmptySpecClient(FakeClient):
+        def chat(self, messages):
+            return json.dumps({"question": None, "complete": True,
+                               "spec": {"goal": "Write a report about sales",
+                                        "deliverables": []}})
+    gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
+    runner = InterviewRunner(EmptySpecClient(), tmp_path / "home",
+                             memory=memory, gate=gate, conversation_id="work")
+    result = runner.start_from_message("Write a report about sales",
+                                       ask=lambda q: "x")
+    assert result.spec.deliverables == ["report.pdf"]
+
+
+def test_interview_greeting_does_not_prefill_previous_task(tmp_path):
+    # Yesterday's bug: a greeting after a failed task got
+    # interviewed about that task, because the prefill took the
+    # chat's oldest spec whatever the message said. A greeting
+    # shares no content word with the task goal, so no seed, and
+    # the model never even sees the old spec in context.
+    memory = _memory(tmp_path)
+    memory.record_episodic("work", "Interview spec: Plan a dinner",
+                           {"spec": {"goal": "Plan a dinner",
+                                     "deliverables": ["menu.pdf"],
+                                     "constraints": ["no milk"]}})
+    seen = {}
+
+    class CapClient(FakeClient):
+        def chat(self, messages):
+            seen["user"] = messages[1].content
+            return json.dumps({"question": None, "complete": True,
+                               "spec": {"goal": "Hey Aidon, how are you doing tonight?",
+                                        "deliverables": []}})
+    gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
+    runner = InterviewRunner(CapClient(), tmp_path / "home",
+                             memory=memory, gate=gate, conversation_id="work")
+    result = runner.start_from_message(
+        "Hey Aidon, how are you doing tonight?", ask=lambda q: "x")
+    assert result.spec.deliverables == []
+    assert result.spec.constraints == []
+    assert "previous_spec" not in json.loads(seen["user"])["from_memory"]
+
+
 def test_spec_sheet_done_when_and_section_aliases_parse(tmp_path):
     text = ("# Spec Sheet\n\n## Goal\n\nDo X\n\n"
             "## Done when\n\n- X exists\n- Y count is 3\n\n"

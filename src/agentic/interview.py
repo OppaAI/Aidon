@@ -452,6 +452,33 @@ def parse_spec_sheet(text: str) -> Spec:
     return spec
 
 
+# Words that carry no task meaning: greetings, question words,
+# pronouns, and generic verbs. The prefill gate below keeps only
+# the rest, so "hey, how are you" shares nothing with any task.
+_PREFILL_STOPWORDS = frozenset(
+    "a an the and or to of for in on with at by me my i you he she it "
+    "we they is are was were be been being please hey hi hello how what "
+    "why when where who which can could would should do does did make "
+    "get give help want need just really".split())
+
+
+def _content_words(text: str) -> set[str]:
+    import re
+    return set(re.findall(r"[a-z0-9]+", text.lower())) - _PREFILL_STOPWORDS
+
+
+def _goals_related(new_goal: str, prev_goal: str) -> bool:
+    """Prefill seeds a continuation, never a new task.
+
+    A greeting shares no content word with the previous task's
+    goal, so it can never inherit that task's spec. Without this
+    gate, a greeting after a failed task was interviewed about
+    that task's gaps: the prefill took the oldest spec in the
+    chat, whatever the user just said.
+    """
+    return bool(_content_words(new_goal) & _content_words(prev_goal))
+
+
 @dataclass
 class InterviewResult:
     spec: Spec
@@ -535,18 +562,34 @@ class InterviewRunner:
                     for p in context["exchanges"][-5:]]
                 if context["summary"]:
                     memory_context["previous_summary"] = context["summary"]
-                # Previous specs: episodic points carrying a spec, from
-                # THIS chat only. A spec from another chat must
-                # never seed this interview.
+                # Previous specs: the NEWEST episodic spec from
+                # THIS chat only, and only when the new message
+                # is about the same task (shares a content word
+                # with that spec's goal). List order is oldest
+                # first, so taking the first match seeded a new
+                # interview with the oldest task's spec — a
+                # greeting after a failed task got interviewed
+                # about that task. A spec from another chat must
+                # never seed this interview, and a proceeded or
+                # rejected spec needs no special case: an
+                # unrelated message shares nothing with it, so
+                # the gate already keeps it from seeding again.
+                best = None
+                best_created = ""
                 for point in self.memory.list_points("episodic", limit=100):
                     if point.payload.get("conversation_id") != self.conversation_id:
                         continue
                     saved = point.payload.get("spec")
-                    if isinstance(saved, dict) and saved.get("goal"):
-                        previous = Spec.from_dict(saved)
-                        spec = self._prefill(spec, previous)
-                        memory_context["previous_spec"] = previous.to_dict()
-                        break
+                    if not (isinstance(saved, dict) and saved.get("goal")):
+                        continue
+                    created = str(point.payload.get("created_at", ""))
+                    if best is None or created >= best_created:
+                        best, best_created = saved, created
+                if best is not None and _goals_related(
+                        message, str(best.get("goal", ""))):
+                    previous = Spec.from_dict(best)
+                    spec = self._prefill(spec, previous)
+                    memory_context["previous_spec"] = previous.to_dict()
                 # Previous runs: Experience deliverables and lesson.
                 try:
                     from ..memory.experience import recall_experiences
