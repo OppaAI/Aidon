@@ -99,9 +99,10 @@ class _RemoteDir:
 
 
 def _factory(remote):
-    def _make(app_name, allow_network):
+    def _make(app_name, allow_network, image=None):
         assert app_name == "aidon-sandbox"
         assert allow_network is False
+        assert image is None, "default backend uses the base image"
         return remote
     return _make
 
@@ -212,3 +213,17 @@ def test_untar_allows_links_inside_workspace(tmp_path):
     backend._untar_bytes(data, tmp_path)
     assert (tmp_path / "real.txt").read_text() == "hello"
     assert (tmp_path / "link").read_text() == "hello"
+
+
+def test_backend_passes_custom_image_to_factory(tmp_path):
+    seen = {}
+    remote_dir = tmp_path / "remote"
+    remote_dir.mkdir()
+
+    def _make(app_name, allow_network, image=None):
+        seen["image"] = image
+        return _RemoteDir(remote_dir)
+
+    backend = ModalBackend(sandbox_factory=_make, image="custom-image")
+    backend.run(["echo", "hi"], tmp_path / "work")
+    assert seen["image"] == "custom-image"

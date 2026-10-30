@@ -326,7 +326,8 @@ def make_backend(name: str, sandbox: Sandbox, image: str = "python:3.12-slim",
                  vm_remote_workspace: str | None = None,
                  vm_sudo_password: str | None = None,
                  vm_use_sudo: bool = False,
-                 modal_app: str | None = None) -> ExecutionBackend:
+                 modal_app: str | None = None,
+                 modal_image=None) -> ExecutionBackend:
     """Owner-chosen backend, never model-chosen."""
     if name == "docker":
         return DockerBackend(image=image, allow_network=allow_network)
@@ -339,7 +340,8 @@ def make_backend(name: str, sandbox: Sandbox, image: str = "python:3.12-slim",
                          use_sudo=vm_use_sudo)
     if name == "modal":
         return ModalBackend(app_name=modal_app or "aidon-sandbox",
-                            allow_network=allow_network)
+                            allow_network=allow_network,
+                            image=modal_image)
     if name in ("bubblewrap", "sandbox", ""):
         return BubblewrapBackend(sandbox)
     raise ValueError(f"unknown execution backend: {name}")
@@ -356,25 +358,41 @@ class ModalBackend(ExecutionBackend):
     def __init__(self, app_name: str = "aidon-sandbox",
                  allow_network: bool = False,
                  timeout_seconds: int = 600,
-                 sandbox_factory=None):
+                 sandbox_factory=None,
+                 image=None):
         self.app_name = app_name
         self.allow_network = allow_network
         self.timeout_seconds = timeout_seconds
         self._sandbox_factory = sandbox_factory
+        # An image object from the capability image builder;
+        # None means the default base image. Set by the
+        # builder's caller, not by config: images are
+        # objects, not names.
+        self._image_obj = image
         self._sb = None
 
     def _image(self):
+        # Mirrors modal/sandbox_deploy.py BASE_IMAGE, as the
+        # capability image builder does; keep both in sync.
         import modal
-        return (modal.Image.from_registry("ubuntu:24.04", add_python="3.12")
-                .apt_install("git", "curl", "build-essential", "tree")
-                .pip_install("requests", "numpy"))
+        return (
+            modal.Image.from_registry("ubuntu:24.04", add_python="3.12")
+            .run_commands(
+                "apt-get update",
+                "DEBIAN_FRONTEND=noninteractive apt-get upgrade -y",
+            )
+            .apt_install("git", "curl", "build-essential", "tree")
+            .run_commands("python -m pip install --upgrade pip")
+            .pip_install("requests", "numpy")
+        )
 
     def _ensure_sandbox(self):
         if self._sb is not None:
             return self._sb
         if self._sandbox_factory is not None:
             self._sb = self._sandbox_factory(self.app_name,
-                                             self.allow_network)
+                                             self.allow_network,
+                                             self._image_obj)
             return self._sb
         try:
             import modal
@@ -385,7 +403,7 @@ class ModalBackend(ExecutionBackend):
         try:
             app = modal.App.lookup(self.app_name, create_if_missing=True)
             self._sb = modal.Sandbox.create(
-                app=app, image=self._image(),
+                app=app, image=self._image_obj or self._image(),
                 timeout=self.timeout_seconds,
                 block_network=not self.allow_network)
         except Exception as exc:
