@@ -2933,6 +2933,59 @@ class GoalRunner:
                                  files=sorted(passed),
                                  error="; ".join(failures)[:500],
                                  attempts=attempt)
+            # Clef recovery router: classify the failure before
+            # replanning. retry_execution skips the repair plan
+            # (the next attempt re-executes the same plan, passed
+            # files untouched); acquire_capability adds a note
+            # steering the repair toward the capability ladder;
+            # escalate at high confidence stops the run instead
+            # of burning attempts on an ambiguous failure.
+            # Anything else, low confidence, no client, or a
+            # router error, is the current repair path. Retry is
+            # once per run: a misclassified persistent failure
+            # must not burn every attempt on identical
+            # re-execution.
+            recovery_note = ""
+            if getattr(self, "clef_client", None) is not None:
+                try:
+                    from .clef_recovery import route_failure
+                    route = route_failure(
+                        goal, attempt, failures,
+                        getattr(self, "clef_client", None))
+                    self._trace("recovery", route["route"],
+                                f"clef recovery {route['route']} "
+                                f"({route['confidence']:.2f})")
+                    if (route["route"] == "escalate"
+                            and route["confidence"] >= 0.8):
+                        return RunReport(
+                            "failed", goal, current_plan, False, False,
+                            files=sorted(passed),
+                            error=("recovery router escalated "
+                                   f"({route['confidence']:.2f}); failure "
+                                   "needs a user decision or cannot be "
+                                   "safely routed")[:500],
+                            attempts=attempt,
+                            backend=self._backend_name())
+                    if (route["route"] == "acquire_capability"
+                            and route["confidence"] >= 0.6):
+                        recovery_note = (
+                            "\nRecovery router: a needed capability "
+                            "(tool, package, skill, or MCP connection) "
+                            "is suspected missing. Prefer finding, "
+                            "building, or connecting it via the "
+                            "capability ladder over rewriting the "
+                            "artifact.")
+                    elif (route["route"] == "retry_execution"
+                            and route["confidence"] >= 0.6):
+                        if not getattr(self, "_recovery_retried", False):
+                            self._recovery_retried = True
+                            self._trace("recovery", "retry",
+                                        "re-executing plan unchanged")
+                            continue
+                        self._trace("recovery", "retry-spent",
+                                    "retry already used; repairing instead")
+                except Exception as exc:
+                    self._trace("recovery", "skipped", str(exc)[:100])
             # Repair: ask for a repaired plan, passed files untouched.
             # Raise effort only for substantive verification rejection. A
             # shell/tool/network exception is operational, not something
@@ -2947,6 +3000,8 @@ class GoalRunner:
                        + "\nFailures:\n" + "\n".join(failures))
             if steer_notes:
                 context += "\nSteer notes from the owner, apply to the repair:\n" + "\n".join(steer_notes)
+            if recovery_note:
+                context += recovery_note
             try:
                 current_plan = self._plan(
                     goal, failure_context=context,
