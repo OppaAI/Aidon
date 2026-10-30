@@ -1798,7 +1798,7 @@ class GoalRunner:
         # is not re-blocked unless a tool disappeared, which the
         # execution-time lookup still catches.
         self._triage_note = ""
-        if self.clef_client is not None:
+        if getattr(self, "clef_client", None) is not None:
             try:
                 from .capability_triage import build_inventory, triage
                 _inventory = build_inventory(
@@ -1810,7 +1810,7 @@ class GoalRunner:
                             spec.to_dict() if hasattr(spec, "to_dict") else spec)[:1000]
                     except Exception:
                         _spec_text = ""
-                _triage = triage(goal, _inventory, self.clef_client,
+                _triage = triage(goal, _inventory, getattr(self, "clef_client", None),
                                  spec_text=_spec_text)
                 self._trace("capability", "triage",
                             f"{_triage['status']} ({_triage['confidence']:.2f})")
@@ -1861,10 +1861,10 @@ class GoalRunner:
                 # stays the pre-filter; Clef only reorders within
                 # the recalled set, and any failure or low
                 # confidence keeps the recalled order.
-                if self.clef_client is not None and len(experiences) > 1:
+                if getattr(self, "clef_client", None) is not None and len(experiences) > 1:
                     try:
                         from .clef_dag import rank_dags
-                        _ranked = rank_dags(goal, experiences, self.clef_client)
+                        _ranked = rank_dags(goal, experiences, getattr(self, "clef_client", None))
                         self._trace("dag", "ranked",
                                     f"{len(_ranked)} candidate(s) after Clef ranking")
                         experiences = _ranked
@@ -2805,7 +2805,32 @@ class GoalRunner:
             verifier_mode = _resolve_model_verifier_mode()
             verifier_wanted = _model_verifier_wanted(
                 verifier_mode, current_plan.deliverables)
-            if ok and self.model_verifier is not None and verifier_wanted:
+            # Clef validate gate, after code verification passes
+            # and before the model verifier: accept skips the
+            # model call, a high-confidence retry acts as a
+            # generic model NO (every deliverable stays
+            # repairable), and anything else defers to the model
+            # verifier as today. A gate failure also defers;
+            # the gate never blocks a code-passing run.
+            gate_skip_verifier = False
+            if ok and getattr(self, "clef_client", None) is not None:
+                try:
+                    from .clef_validate import validate_gate
+                    gate = validate_gate(
+                        goal, current_plan.deliverables, criteria,
+                        self.sandbox.workdir, getattr(self, "clef_client", None))
+                    self._trace("verify", f"gate-{gate['action']}",
+                                f"clef gate {gate['action']} "
+                                f"({gate['confidence']:.2f})")
+                    if gate["action"] == "accept":
+                        gate_skip_verifier = True
+                    elif gate["action"] == "retry":
+                        model_failed = True
+                        failures.append(f"clef gate: {gate['reason']}")
+                except Exception as exc:
+                    self._trace("verify", "gate-skipped", str(exc)[:100])
+            if (ok and not model_failed and self.model_verifier is not None
+                    and verifier_wanted and not gate_skip_verifier):
                 try:
                     mv = self.model_verifier.verify(goal, current_plan.deliverables, self.sandbox.workdir, criteria)
                     self._trace("verify", mv["verdict"], f"model verifier {mv['reason'][:100]}")
@@ -2814,7 +2839,8 @@ class GoalRunner:
                         failures.append(f"model verifier: {mv['reason']}")
                 except Exception as exc:
                     self._trace("verify", "failed", str(exc)[:100])
-            elif ok and self.model_verifier is not None:
+            elif (ok and self.model_verifier is not None
+                    and not gate_skip_verifier):
                 self._trace("verify", "skipped",
                             f"model verifier {verifier_mode}")
             # Passed means existence AND no failure mentions
