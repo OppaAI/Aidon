@@ -448,6 +448,27 @@ def run_react(client, messages: list, tools, *, max_rounds: int | None = None,
             "rounds": total_rounds, "error": "ReAct round limit exceeded"}
 
 
+def _normalize_shell_args(args: dict) -> dict:
+    """Coerce a shell step's command to the backend's list form.
+
+    The planner emits commands as strings and plan validation accepts
+    them (it only rejects empty commands), but the execution-backend
+    branch requires a non-empty list — and it ran before the shlex
+    normalization further down, so every string command died on
+    backend runs while the sandbox path worked. Normalize up front
+    so validation, backend, and sandbox all agree on the form.
+    """
+    if not isinstance(args, dict):
+        return args
+    out = dict(args)
+    if "command" not in out and "cmd" in out:
+        out["command"] = out["cmd"]
+    if isinstance(out.get("command"), str):
+        import shlex
+        out["command"] = shlex.split(out["command"])
+    return out
+
+
 class GoalRunner:
     def __init__(self, client: ModelClient, sandbox: Sandbox,
                  gate: ApprovalGate, home: Path, memory=None,
@@ -1016,6 +1037,8 @@ class GoalRunner:
             from .kernel import kernel_allowed
             if not kernel_allowed(name, True):
                 raise ValueError(f"kernel mode: tool {name} is not a seed tool")
+        if name == "shell":
+            args = _normalize_shell_args(args)
         if name == "shell":
             # Mandatory-approval commands always need a human,
             # even in autonomous mode: recursive delete, piped
