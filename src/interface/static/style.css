@@ -284,6 +284,8 @@ html[data-theme="light"] .msg.user { background: #c7dcf4; color: #102343; }
   background: var(--surface2); color: var(--text); font-size: 13.5px; }
 .spec-card .spec-save-status { font-size: 12.5px; color: var(--muted);
   margin-top: 8px; min-height: 16px; }
+.spec-card .spec-note { font-size: 12.5px; color: var(--muted);
+  margin: 6px 0 0; }
 .card details { margin-top: 10px; font-size: 12.5px; }
 .card summary { cursor: pointer; color: var(--muted); }
 #composer { display: flex; flex-direction: column; gap: 4px; padding: 10px 0 4px; }

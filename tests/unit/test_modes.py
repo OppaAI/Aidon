@@ -141,6 +141,67 @@ def test_mode_stop_spec_save_round_trip(tmp_path):
     assert server.handle_mode_stop_latest("nobody") is None
 
 
+def test_proceed_ask_stop_goes_to_plan_mode(tmp_path):
+    # Mode chain: Ask -> Plan -> Execute. An Ask stop's Proceed
+    # builds a plan for approval; a Plan stop's Proceed executes.
+    import time
+    from src.interface.webui import WebUIServer
+    from src.interface.mode_stops import save_mode_stop
+    seen = []
+
+    class _Dispatcher:
+        def __init__(self):
+            self.handlers = {}
+
+        def register(self, name, fn):
+            self.handlers[name] = fn
+
+        def dispatch(self, event):
+            seen.append(event)
+
+    server = WebUIServer(tmp_path, dispatcher=_Dispatcher(), memory=None)
+    ask_id = save_mode_stop(tmp_path, "ask", "plan dinner",
+                            spec={"goal": "plan dinner"},
+                            conversation_key="conv-1",
+                            conversation_id="conv-1")
+    plan_id = save_mode_stop(tmp_path, "plan", "plan dinner",
+                             plan={"steps": []}, conversation_key="conv-1",
+                             conversation_id="conv-1")
+    result = server.start_goal({"goal": f"/proceed {ask_id}",
+                                "conversation_id": "conv-1"})
+    assert "run_id" in result
+    for _ in range(100):
+        if seen:
+            break
+        time.sleep(0.02)
+    assert seen[0].payload["mode"] == "plan"
+    assert seen[0].payload["resume_spec"] == {"goal": "plan dinner"}
+    assert seen[0].payload["resume_stop_id"] == ask_id
+    seen.clear()
+    result = server.start_goal({"goal": f"/proceed {plan_id}",
+                                "conversation_id": "conv-1"})
+    assert "run_id" in result
+    for _ in range(100):
+        if seen:
+            break
+        time.sleep(0.02)
+    assert seen[0].payload["mode"] == "execute"
+    assert seen[0].payload["resume_plan"] == {"steps": []}
+
+
+def test_mode_stop_delete_via_server(tmp_path):
+    from src.interface.webui import WebUIServer
+    from src.interface.mode_stops import load_mode_stop, save_mode_stop
+    server = WebUIServer(tmp_path, memory=None)
+    stop_id = save_mode_stop(tmp_path, "ask", "plan dinner",
+                             spec={"goal": "plan dinner"},
+                             conversation_key="conv-1")
+    assert server.handle_mode_stop_delete(stop_id) == {"ok": True}
+    assert load_mode_stop(tmp_path, stop_id) is None
+    assert server.handle_mode_stop_delete(stop_id) == {"ok": False}
+    assert server.handle_mode_stop_latest("conv-1") is None
+
+
 def test_mode_stops_reject_unknown_mode(tmp_path):
     with pytest.raises(ValueError):
         save_mode_stop(tmp_path, "execute", "do it")

@@ -1039,8 +1039,12 @@
     if (stop.spec) {
       const s = stop.spec;
       if (s.goal) lines.push("<strong>Goal</strong><br>" + esc(String(s.goal)));
+      pushList("Done when", s.criteria);
       pushList("Deliverables", s.deliverables);
       pushList("Constraints", s.constraints);
+      pushList("Recipients", s.recipients);
+      pushList("Files", s.files);
+      pushList("Notifications", s.notifications);
       pushList("Assumptions", s.assumptions);
       pushList("Open questions", s.open_questions);
       if (s.deadline) lines.push("<strong>Deadline</strong><br>" + esc(String(s.deadline)));
@@ -1089,74 +1093,119 @@
     card.className = "msg aidon";
     card.dataset.stopId = stop.stop_id;
     const isAsk = stop.mode === "ask";
-    const s = stop.spec || null;
-    if (isAsk && s) {
+    // Local copy: Save updates it, so View always shows the latest
+    // saved sheet, and Proceed never runs a stale one.
+    let spec = stop.spec ? JSON.parse(JSON.stringify(stop.spec)) : null;
+    const shell = document.createElement("div");
+    shell.className = "card approval-card spec-card";
+    card.appendChild(shell);
+    let dirty = false;
+    let editing = false;
+    function formFields() {
       const listFields = [["criteria", "Done when"],
         ["deliverables", "Deliverables"], ["constraints", "Constraints"],
         ["recipients", "Recipients"], ["files", "Files"],
         ["notifications", "Notifications"], ["assumptions", "Assumptions"],
         ["open_questions", "Open questions"]];
       let fields = '<label>Goal</label><textarea data-f="goal" rows="3">' +
-        esc(specFieldText(s, "goal")) + "</textarea>";
+        esc(specFieldText(spec, "goal")) + "</textarea>";
       listFields.forEach(([key, label]) => {
         fields += "<label>" + label + '</label><textarea data-f="' + key +
-          '" rows="3">' + esc(specFieldText(s, key)) + "</textarea>";
+          '" rows="3">' + esc(specFieldText(spec, key)) + "</textarea>";
       });
       fields += '<label>Budget</label><input type="text" data-f="budget" value="' +
-        esc(specBudgetText(s)) + '"><label>Deadline</label>' +
+        esc(specBudgetText(spec)) + '"><label>Deadline</label>' +
         '<input type="text" data-f="deadline" value="' +
-        esc(specFieldText(s, "deadline")) + '">';
-      card.innerHTML =
-        '<div class="card approval-card spec-card"><div class="kind">stopped — spec ready</div>' +
-        "<h3>Spec ready — edit, save, then proceed</h3>" + fields +
-        '<div class="spec-save-status"></div><div class="row">' +
-        '<button data-d="save">Save</button>' +
-        '<button class="approve" data-d="proceed">Proceed</button></div></div>';
-      const saveBtn = card.querySelector('[data-d="save"]');
-      const status = card.querySelector(".spec-save-status");
-      saveBtn.addEventListener("click", async () => {
-        const spec = {};
-        card.querySelectorAll("[data-f]").forEach((el) => {
-          const key = el.dataset.f;
-          if (key === "goal" || key === "budget" || key === "deadline") {
-            spec[key] = el.value;
-          } else {
-            spec[key] = el.value.split("\n").map((x) => x.trim()).filter(Boolean);
+        esc(specFieldText(spec, "deadline")) + '">';
+      return fields;
+    }
+    function readForm() {
+      const out = {};
+      shell.querySelectorAll("[data-f]").forEach((el) => {
+        const key = el.dataset.f;
+        if (key === "goal" || key === "budget" || key === "deadline") {
+          out[key] = el.value;
+        } else {
+          out[key] = el.value.split("\n").map((x) => x.trim()).filter(Boolean);
+        }
+      });
+      return out;
+    }
+    async function saveForm() {
+      const r = await fetch("/api/mode-stops/" +
+        encodeURIComponent(stop.stop_id) + "/spec", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spec: readForm() }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) throw new Error((data && data.error) || "save failed");
+      spec = data.spec;
+      dirty = false;
+      return data;
+    }
+    function setStatus(text) {
+      const el = shell.querySelector(".spec-save-status");
+      if (el) el.textContent = text;
+    }
+    function render() {
+      if (isAsk && spec && editing) {
+        shell.innerHTML =
+          '<div class="kind">stopped — spec ready</div><h3>Edit spec</h3>' +
+          formFields() +
+          '<div class="spec-save-status"></div><div class="row">' +
+          '<button data-d="save">Save</button>' +
+          '<button class="approve" data-d="proceed">Proceed</button>' +
+          '<button class="reject" data-d="reject">Reject</button></div>';
+        shell.querySelectorAll("[data-f]").forEach((el) =>
+          el.addEventListener("input", () => { dirty = true; }));
+        shell.querySelector('[data-d="save"]').addEventListener("click", async () => {
+          const btn = shell.querySelector('[data-d="save"]');
+          btn.disabled = true;
+          try {
+            const data = await saveForm();
+            editing = false;
+            render();
+            setStatus(data.verified ? "Saved · spec verified"
+              : "Saved · not verified: " + (data.failures || []).join("; "));
+          } catch (e) {
+            setStatus("Could not save: " + e.message);
+            btn.disabled = false;
           }
         });
-        saveBtn.disabled = true;
-        try {
-          const r = await fetch("/api/mode-stops/" +
-            encodeURIComponent(stop.stop_id) + "/spec", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ spec }),
-          });
-          const data = await r.json().catch(() => ({}));
-          if (!r.ok || !data.ok) throw new Error((data && data.error) || "save failed");
-          status.textContent = data.verified
-            ? "Saved · spec verified"
-            : "Saved · not verified: " + (data.failures || []).join("; ");
-        } catch (e) {
-          status.textContent = "Could not save: " + e.message;
-        }
-        saveBtn.disabled = false;
-      });
-    } else {
-      // Plan stops, and Ask stops whose spec did not arrive enriched:
-      // read-only detail plus Proceed, never a blank edit form that
-      // could save over the frozen spec.
-      card.innerHTML =
-        '<div class="card approval-card spec-card"><div class="kind">stopped — ' +
-        esc(stop.mode) + " ready</div>" +
-        "<h3>" + (isAsk ? "Spec ready" : "Plan ready") + "</h3>" +
-        (stop.spec || stop.plan
-          ? '<div class="spec-detail">' + renderStopDetail(stop) + "</div>" : "") +
-        '<div class="row"><button class="approve" data-d="proceed">Proceed</button></div></div>';
+      } else {
+        shell.innerHTML =
+          '<div class="kind">stopped — ' + esc(stop.mode) + " ready</div>" +
+          "<h3>" + (isAsk ? "Spec ready" : "Plan ready") + "</h3>" +
+          (isAsk
+            ? '<p class="spec-note">Proceeding builds a plan for your approval — nothing runs yet.</p>'
+            : '<p class="spec-note">Proceeding runs the plan.</p>') +
+          ((spec || stop.plan)
+            ? '<div class="spec-detail">' +
+              renderStopDetail({ spec: spec, plan: stop.plan }) + "</div>" : "") +
+          '<div class="spec-save-status"></div><div class="row">' +
+          '<button class="approve" data-d="proceed">Proceed</button>' +
+          (isAsk && spec ? '<button data-d="edit">Edit</button>' : "") +
+          '<button class="reject" data-d="reject">Reject</button></div>';
+        const editBtn = shell.querySelector('[data-d="edit"]');
+        if (editBtn) editBtn.addEventListener("click", () => {
+          editing = true;
+          render();
+        });
+      }
+      shell.querySelector('[data-d="proceed"]').addEventListener("click", onProceed);
+      shell.querySelector('[data-d="reject"]').addEventListener("click", onReject);
     }
-    card.querySelector('[data-d="proceed"]').addEventListener("click", async () => {
-      const btn = card.querySelector('[data-d="proceed"]');
+    async function onProceed() {
+      const btn = shell.querySelector('[data-d="proceed"]');
       btn.disabled = true;
       try {
+        // Proceeding from the editor saves first, so Proceed never
+        // runs a spec older than what is on screen.
+        if (editing && dirty) {
+          const data = await saveForm();
+          setStatus(data.verified ? "Saved · spec verified"
+            : "Saved · not verified: " + (data.failures || []).join("; "));
+        }
         const convCtx = window.aidonConversation ? window.aidonConversation() : {};
         const r = await fetch("/api/proceed", {
           method: "POST",
@@ -1183,7 +1232,25 @@
         btn.disabled = false;
         showMiddleStatus("Could not proceed: " + e.message, "error");
       }
-    });
+    }
+    async function onReject() {
+      const btn = shell.querySelector('[data-d="reject"]');
+      btn.disabled = true;
+      try {
+        const r = await fetch("/api/mode-stops/" +
+          encodeURIComponent(stop.stop_id), { method: "DELETE" });
+        if (!r.ok) throw new Error("reject failed");
+        // The card stays as history: rejected, not vanished.
+        shell.innerHTML =
+          '<div class="kind">stopped — ' + esc(stop.mode) + " rejected</div>" +
+          "<h3>" + (isAsk ? "Spec rejected" : "Plan rejected") + "</h3>" +
+          '<p class="spec-note">This run was abandoned. Start a new goal to try again.</p>';
+      } catch (e) {
+        btn.disabled = false;
+        showMiddleStatus("Could not reject: " + e.message, "error");
+      }
+    }
+    render();
     thread.appendChild(card);
     if (typeof scrollThreadToLatest === "function") scrollThreadToLatest();
     return card;

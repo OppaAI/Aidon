@@ -1297,7 +1297,11 @@ class WebUIServer:
                     _ptext = "No stopped run to proceed with."
                 return self._simple_command_response(conversation_id, goal, _ptext)
             goal = stop["goal"]
-            mode = "execute"
+            # Mode chain: Ask -> Plan -> Execute. Ask is for
+            # beginners and detail, so its Proceed builds a plan
+            # for approval; only the plan's Proceed executes. A
+            # Plan stop proceeds straight to execution, as before.
+            mode = "plan" if stop.get("mode") == "ask" else "execute"
             resume_stop_id = stop["stop_id"]
             resume_spec = stop.get("spec")
             resume_plan = stop.get("plan")
@@ -2818,6 +2822,15 @@ class WebUIServer:
             record)
         return record
 
+    def handle_mode_stop_delete(self, stop_id: str) -> dict:
+        """Reject/abandon a stop: delete its record.
+
+        The card stays in the thread as a rejected note; the stop
+        itself is gone, so Proceed on it can no longer resume.
+        """
+        from .mode_stops import delete_mode_stop
+        return {"ok": delete_mode_stop(self.home, stop_id)}
+
     def handle_mode_stop_latest(self, conversation_id: str) -> dict | None:
         """Newest pending Ask/Plan stop for a chat, spec/plan attached.
 
@@ -4244,6 +4257,10 @@ loadSettings();
                 elif parsed.path.startswith("/api/ideas/"):
                     idea_id = parsed.path[len("/api/ideas/"):]
                     result = server.handle_idea_delete(idea_id)
+                    self._send_json(200 if result["ok"] else 404, result)
+                elif parsed.path.startswith("/api/mode-stops/"):
+                    stop_id = parsed.path[len("/api/mode-stops/"):].strip("/")
+                    result = server.handle_mode_stop_delete(stop_id)
                     self._send_json(200 if result["ok"] else 404, result)
                 elif parsed.path.startswith("/api/library/"):
                     item_id = parsed.path[len("/api/library/"):].strip("/")
