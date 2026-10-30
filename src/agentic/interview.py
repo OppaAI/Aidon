@@ -393,6 +393,37 @@ class InterviewRunner:
         self.project_id = project_id
         self.max_questions = max_questions
 
+    def _reply(self, messages) -> str:
+        """One model answer for the interview, streamed when possible.
+
+        A non-streaming request sends nothing back until the whole
+        answer is ready, so a slow thinking model can sit past the
+        socket read timeout and fail the whole interview with
+        "The read operation timed out". Streaming hands back chunks as
+        they arrive, which keeps the connection alive and turns the
+        wait into visible progress.
+
+        The base client's ``chat_stream`` yields one block, so this
+        degrades to exactly the old call for clients that do not
+        stream. A stream that dies before its first chunk retries once
+        non-streaming; one that dies mid-answer does not, because a
+        retry there could duplicate text.
+        """
+        stream = getattr(self.client, "chat_stream", None)
+        if not callable(stream):
+            return self.client.chat(messages)
+        chunks: list[str] = []
+        try:
+            for delta in stream(messages):
+                if delta:
+                    chunks.append(str(delta))
+        except Exception:
+            if chunks:
+                raise
+            return self.client.chat(messages)
+        text = "".join(chunks)
+        return text if text.strip() else self.client.chat(messages)
+
     def start_from_message(self, message: str, ask, approve=None) -> InterviewResult:
         """Entry point: a chat message starts the interview.
 
@@ -453,7 +484,7 @@ class InterviewRunner:
         # the interview is in chat history from the start.
         self._record_exchange("user", message, exchanges)
         for _ in range(self.max_questions):
-            reply = self.client.chat([
+            reply = self._reply([
                 Message("system",
                         "You are interviewing the user to build a frozen "
                         "spec. Reply as JSON with keys question and spec. "

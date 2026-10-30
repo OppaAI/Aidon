@@ -1531,7 +1531,10 @@
     const previousRun = currentRun;
     const guidance = guidanceInput.value.trim();
     const forceWeb = document.getElementById("web-btn")?.classList.contains("active") || false;
-    const runMode = document.getElementById("mode-chooser")?.value || "ask";
+    // Chat is the default: no mode is sent, so the router decides
+    // chat, webchat, artifact, or agentic. Ask/Plan/Execute are
+    // explicit choices and always send their mode.
+    const runMode = document.getElementById("mode-chooser")?.value || "";
     const imgs = pendingImages.slice();
     const fls = pendingFiles.slice();
     const files = imgs.concat(fls);
@@ -1558,7 +1561,7 @@
         const fd = new FormData();
         fd.append("goal", goal);
         fd.append("guidance", guidance);
-        fd.append("mode", runMode);
+        if (runMode) fd.append("mode", runMode);
         if (forceWeb) fd.append("force_web", "true");
         if (convCtx.conversation_id)
           fd.append("conversation_id", convCtx.conversation_id);
