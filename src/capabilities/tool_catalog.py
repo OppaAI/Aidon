@@ -9,6 +9,7 @@ GOAL_TOOL_NAMES = (
     "github_search", "github_fetch", "make_bar_chart", "make_line_chart",
     "make_chart", "generate_document", "build_ebook", "make_spreadsheet",
     "make_docx", "make_slides", "make_latex", "record_system_audio",
+    "capture_webcam_photo", "record_webcam",
     "tts_speak", "transcribe_audio", "email_make_draft", "email_send",
     "slack_send", "whatsapp_send", "threads_publish", "threads_post",
     "instagram_publish", "instagram_post", "write_versioned", "read_file",

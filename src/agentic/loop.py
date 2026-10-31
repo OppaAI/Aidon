@@ -1283,6 +1283,13 @@ class GoalRunner:
                    "permission-gated features, test the page up to the "
                    "permission boundary and state clearly if a human grant "
                    "is still needed.")
+        system += (" When the user explicitly asks to take a photo or video "
+                   "with this PC's webcam, use capture_webcam_photo or "
+                   "record_webcam if available. These host camera tools "
+                   "always require the human's record approval before the "
+                   "camera opens; never bypass that gate or claim a capture "
+                   "before it succeeds. Browser camera permission is a "
+                   "separate browser grant and must not be bypassed.")
         system += (" Terminology: the user calls the workdir the 'workspace "
                    "folder'. They are the same folder — this run's "
                    "timestamped folder. When the user says 'workspace "

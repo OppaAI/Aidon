@@ -579,7 +579,22 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     except Exception:
         pass
     try:
-        from ..capabilities.webcam import record_webcam_clip
+        from ..capabilities.webcam import (capture_webcam_photo,
+                                           record_webcam_clip)
+
+        def webcam_photo(output="photo.png", device=""):
+            # Still-image capture is a host-side action. Each use
+            # requires a fresh, explicit approval before the device
+            # is opened; the output stays inside this run's workdir.
+            ok, why = _approval(
+                "record", "Capture webcam photo",
+                f"Activate the camera ({device or '/dev/video0'}) and "
+                f"capture one photo to {output}?",
+                force_ask=True)
+            if not ok:
+                return f"webcam photo capture rejected: {why}"
+            return capture_webcam_photo(str(_confined(output)),
+                                        device or "/dev/video0")
 
         def record_webcam(seconds, output="clip.mp4", device=""):
             # Kind "record", force_ask: camera activation is
@@ -596,6 +611,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             return record_webcam_clip(int(seconds), str(_confined(output)),
                                       device or "/dev/video0")
 
+        tools["capture_webcam_photo"] = webcam_photo
         tools["record_webcam"] = record_webcam
     except Exception:
         pass
@@ -3363,6 +3379,28 @@ def main(argv: list[str] | None = None) -> int:
                 elif event.source == "whatsapp":
                     _deliver_files(report.files,
                                    ("whatsapp", str(event.payload.get("from", ""))))
+                elif event.source == "webui":
+                    # WebUI results go to the linked Slack conversation,
+                    # or to the configured outbound channel when there is
+                    # no conversation link. The text result is mirrored in
+                    # _surface_reply; deliver the actual file bytes too.
+                    try:
+                        from ..interface.surfaces import slack_for_conversation
+                        _linked_slack = slack_for_conversation(
+                            config.home,
+                            str(event.payload.get("conversation_id", "") or ""))
+                        _delivery = event.payload.get("result_delivery") or {}
+                        _explicit_slack = (
+                            str(_delivery.get("channel", "")).lower() == "slack"
+                            and str(msg.slack_outbound_channel or ""))
+                        _slack_target = (_linked_slack or
+                                         msg.slack_outbound_channel or "")
+                        if (_slack_target and
+                                str(_slack_target) != _explicit_slack):
+                            _deliver_files(report.files,
+                                           ("slack", str(_slack_target)))
+                    except Exception:
+                        pass
 
         dispatcher.register("webui", _goal_handler)
         dispatcher.register("whatsapp", _goal_handler)
