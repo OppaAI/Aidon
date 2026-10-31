@@ -94,7 +94,7 @@ def test_commit_rejects_changed_source(tmp_path):
         PluginRegistry(home), plug, preflight)
     assert ok is False
     assert "changed after approval" in message
-    assert not (home / "plugins" / "five-plug").exists()
+    assert not (home / "toolbox" / "five-plug").exists()
 
 
 class _FakeMcpClient:

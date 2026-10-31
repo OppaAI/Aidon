@@ -1291,9 +1291,25 @@ class GoalRunner:
                    "never send plaintext to the model verifier. Default "
                    "cipher AES-256-GCM unless the user specifies another.")
         if self.plugins is not None and not self.kernel_mode:
-            plugin_tools = self.plugins.tool_names()
-            if plugin_tools:
-                system += f" Adopted plugin tools: {', '.join(plugin_tools)}."
+            plugin_entries = []
+            for plugin in self.plugins.plugins.values():
+                for spec in getattr(plugin, "tools", ()):
+                    tool_name = str(spec.get("name", "")).strip()
+                    if tool_name:
+                        description = str(spec.get("description", "")).strip()
+                        entry = tool_name + (": " + description if description else "")
+                        plugin_entries.append(entry[:300])
+            if plugin_entries:
+                system += (" Toolbox (the local adopted-tool hub) currently has: "
+                           + "; ".join(plugin_entries[:100]) + ".")
+            system += (" Capability rule: before planning a tool step, check the "
+                       "built-in tools and the Toolbox tools above for a suitable "
+                       "match. If none fits, follow the capability ladder: check "
+                       "relevant skills and known MCP options, then draft a plugin "
+                       "in the workdir only when needed, sandbox-test it, and use "
+                       "adopt_tool_plugin. Adoption requires the owner's approval. "
+                       "After approval, the new tool is added to this run's live "
+                       "registry and may be used by later steps in this workflow.")
             skill_texts = self.plugins.skill_texts()
             if skill_texts:
                 system += " Skills, follow them when relevant: " + " ".join(
@@ -1321,7 +1337,11 @@ class GoalRunner:
             system += (" Extra tools available to plan steps: "
                        + ", ".join(sorted(self.extra_tools)) + ".")
             if "self_modify" in self.extra_tools:
-                system += (" Tier 3 self-modification: stage a complete proposed "
+                system += (" For a new reusable capability, use the Toolbox "
+                           "plugin workflow above; do not edit Aidon's core source. "
+                           "Use Tier 3 self_modify only when the goal explicitly "
+                           "requires changing Aidon's core behavior. In that case, "
+                           "stage a complete proposed "
                            "Python file in the workdir, sandbox-check it (and run "
                            "relevant tests in the sandbox), then call self_modify "
                            "with target='src/relative/module.py' and "

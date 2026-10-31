@@ -184,12 +184,22 @@ sheet, or by choosing Execute mode.
 
 ## 🧰 Tool, skill, and plugin system
 
-Aidon builds his own capability tools by climbing, this
-module is the arena around that climb, not the tools
-themselves. A tool is code, a skill is Markdown
-instructions, a plugin is a bundle of both, with a
-plugin.json manifest, living in `~/.aidon/plugins/<name>/`,
-never in the repo.
+Aidon builds his own capability tools by climbing. The
+**Toolbox** is his local, persistent hub of adopted tools;
+it is implemented by the plugin registry and stored at
+`~/.aidon/toolbox/<name>/`. It runs inside Aidon, so it needs no separate tool,
+MCP, or API server. A tool is code, a skill is Markdown
+instructions, and a plugin bundles them with a `plugin.json`
+manifest.
+
+At the start of each workflow, the planner receives the
+available Toolbox tool names and descriptions alongside the
+built-in tools. It should use a suitable existing tool first.
+If none fits, it follows the capability ladder and can draft,
+sandbox-test, and propose adoption of a plugin. Adoption
+always presents an explicit owner decision, even when graduated
+autonomy or pre-approval is enabled. Once approved, the registry
+updates immediately, so later steps in the same workflow can use it.
 
 - Adopt: `python -m src.system.main plugin scan <dir>`,
   then `python -m src.system.main plugin adopt <dir>`, then
@@ -207,7 +217,10 @@ never in the repo.
   client. File and network work stays with the sandbox
   tools and with later, explicitly approved capability
   plugins.
-- Tier 3 is available when `AIDON_TOOL_POSTURE=selfmod`.
+- Tier 3 core-source editing is available when
+  `AIDON_TOOL_POSTURE=selfmod`; use it only when a goal
+  requires changing Aidon's core behavior. For new reusable
+  tools, use the Toolbox plugin workflow above instead.
   Aidon can stage a complete replacement Python file in the
   goal workdir, check it in the sandbox, and call
   `self_modify` with `target` (an existing `src/**/*.py`

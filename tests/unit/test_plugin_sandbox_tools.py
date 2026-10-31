@@ -95,7 +95,7 @@ def test_sandbox_tool_requires_adoption(tmp_path):
     code = "def heavy(args):\n    return 'ok'\n"
     directory = _sandbox_plugin(tmp_path, code)
     # Hand place: no .adopted marker.
-    target = tmp_path / "home" / "plugins" / "heavy"
+    target = tmp_path / "home" / "toolbox" / "heavy"
     target.parent.mkdir(parents=True)
     target.mkdir()
     (target / "plugin.json").write_text((directory / "plugin.json").read_text())

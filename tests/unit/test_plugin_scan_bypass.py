@@ -75,4 +75,4 @@ def test_adopt_refuses_unpinned_dependencies(tmp_path):
     assert ok is False
     assert "unpinned_dependency" in _types(findings)
     assert "unpinned_dependency" in message
-    assert not (home / "plugins" / "unpinned-plug").exists()
+    assert not (home / "toolbox" / "unpinned-plug").exists()

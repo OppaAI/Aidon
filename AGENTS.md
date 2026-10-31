@@ -12,7 +12,7 @@ approves them — this file is never rewritten silently.
 This repository uses the `src/` package layout. The old `aidon/` paths
 mentioned below map to `src/agentic/`, `src/capabilities/`,
 `src/interface/`, `src/memory/`, `src/social/`, and `src/system/`.
-Runtime plugins live under `<AIDON_HOME>/plugins/`; the repository example
+Runtime plugins live under `<AIDON_HOME>/toolbox/`; the repository example
 is in `examples/tool_plugins/example_echo/`.
 
 ## The loop
@@ -84,7 +84,7 @@ approval → live → learn
   - `tts_speak`, `slack_send`, `threads_publish` — voice, notifications,
     publishing (publishing always approval-gated).
   - `adopt_tool_plugin` — adopt a tested tool plugin from the workdir
-    into `aidon/tool_plugins/` (mandatory human approval, kind
+    into `<AIDON_HOME>/toolbox/` (mandatory human approval, kind
     `install`). Adopted tools register immediately — usable by the
     rest of the current run and every later goal, no restart needed.
 - **Meta**: `ask_user` (questions), `declare_blocked` (true dead-ends),

@@ -133,10 +133,10 @@ def test_adopted_plugin_gets_declared_capabilities(tmp_path):
 
 
 def test_hand_placed_plugin_gets_no_capabilities(tmp_path):
-    """A plugin copied straight into <home>/plugins/ was never
+    """A plugin copied straight into <home>/toolbox/ was never
     approved, so its broker refuses every declared capability."""
     home = tmp_path / "home"
-    target = home / "plugins" / "gadget"
+    target = home / "toolbox" / "gadget"
     target.mkdir(parents=True)
     (target / "plugin.json").write_text(json.dumps({
         "name": "gadget", "version": "1.0.0", "description": "hand placed",

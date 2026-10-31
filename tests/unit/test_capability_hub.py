@@ -18,7 +18,7 @@ def _approve(kind, title, body):
 
 
 def _plugin(tmp_path):
-    plug = tmp_path / "plugins" / "demo"
+    plug = tmp_path / "toolbox" / "demo"
     plug.mkdir(parents=True)
     (plug / "plugin.json").write_text(json.dumps({
         "name": "demo", "version": "1",
@@ -66,7 +66,7 @@ def _by_id(hub):
 
 
 def test_preloaded_registry_is_reused_without_reimport(tmp_path):
-    plug = tmp_path / "plugins" / "demo"
+    plug = tmp_path / "toolbox" / "demo"
     plug.mkdir(parents=True)
     (plug / "plugin.json").write_text(json.dumps({
         "name": "demo", "version": "1", "description": "Demo plugin",
@@ -202,7 +202,7 @@ def test_plugin_and_its_skill(home):
     plugin = entries["plugin:demo"]
     assert plugin["lifecycle"] == "trusted"
     assert plugin["tools"] == ["demo_tool"]
-    assert plugin["source"] == "plugins/demo"
+    assert plugin["source"] == "toolbox/demo"
     skill = entries["skill:demo/demo_skill.md"]
     assert skill["lifecycle"] == "trusted"
     assert skill["provenance"] == "operator"

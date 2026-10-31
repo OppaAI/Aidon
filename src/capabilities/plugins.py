@@ -21,7 +21,7 @@ Definitions, kept separate:
 - A plugin is a bundle: a directory with a plugin.json
   manifest (name, version, description, tools, skills),
   plus the tool modules and skill files it names.
-  Plugins live in <home>/plugins/<name>/, never in the
+  Plugins live in <home>/toolbox/<name>/, never in the
   repo, never in a central service.
 
 Adoption, in order, no step skipped:
@@ -41,7 +41,7 @@ Adoption, in order, no step skipped:
    they are disclosed, and adoption still needs approval.
 4. The owner approves on a decision card, with the scan
    report as the card body. No approval, no adoption.
-5. Only then is the plugin copied to <home>/plugins/,
+5. Only then is the plugin copied to <home>/toolbox/,
    and recorded as episodic memory and in learned/.
 
 Manifest validation, by code:
@@ -124,7 +124,7 @@ def plugin_is_adopted(plugin) -> bool:
     """True only for a plugin the owner approved.
 
     ``commit_plugin`` writes a ``.adopted`` marker into the installed
-    copy after approval. A directory hand-placed in ``<home>/plugins/``
+    copy after approval. A directory hand-placed in ``<home>/toolbox/``
     has no marker, so it never gets capabilities and never runs a
     sandbox tool: no approval, no power.
     """
@@ -523,8 +523,9 @@ def preflight_plugin(source_dir: Path) -> Preflight:
 
 
 def ask_plugin_approval(gate, approve, preflight: Preflight) -> bool:
-    """Ask the owner about a preflighted plugin. Returns
-    True only on an approved or auto_approved verdict."""
+    """Ask the owner about a preflighted plugin. Adoption is an
+    explicit install decision, so graduated autonomy and preapproval
+    cannot approve it implicitly."""
     approved = False
     if approve is not None:
         # Callback approvers see exactly what the gate.ask path
@@ -547,10 +548,16 @@ def ask_plugin_approval(gate, approve, preflight: Preflight) -> bool:
                 "Adopt this plugin?",
                 preflight.body,
                 action_class="plugin",
+                force_ask=True,
             )
         except TypeError:
-            decision = gate.ask("plugin", "Adopt this plugin?", preflight.body)
-        approved = decision.verdict in ("approved", "auto_approved")
+            try:
+                decision = gate.ask("plugin", "Adopt this plugin?",
+                                    preflight.body, force_ask=True)
+            except TypeError:
+                decision = gate.ask("plugin", "Adopt this plugin?",
+                                    preflight.body)
+        approved = decision.verdict == "approved"
     return approved
 
 
@@ -573,14 +580,14 @@ def commit_plugin(registry, source_dir: Path, preflight: Preflight,
             "Adoption aborted: plugin source changed after approval "
             f"(approved hash {preflight.approved_hash}, current hash {current_hash}); "
             "approve the new source to adopt it")
-    target = registry.plugins_dir / plugin.name
-    registry.plugins_dir.mkdir(parents=True, exist_ok=True)
+    target = registry.toolbox_dir / plugin.name
+    registry.toolbox_dir.mkdir(parents=True, exist_ok=True)
     if target.exists():
         shutil.rmtree(target)
     shutil.copytree(source_dir, target)
     # Adoption marker: the broker only grants a plugin's declared
     # capabilities when this marker exists. A directory hand-placed in
-    # <home>/plugins/ (never adopted, never approved) still loads as a
+    # <home>/toolbox/ (never adopted, never approved) still loads as a
     # pure tool, but its capability methods refuse. The marker holds
     # the approved tree hash for audit; it is written after the copy,
     # so it never perturbs the hash the owner approved.
@@ -609,16 +616,16 @@ def commit_plugin(registry, source_dir: Path, preflight: Preflight,
 class PluginRegistry:
     def __init__(self, home: Path):
         self.home = Path(home)
-        self.plugins_dir = self.home / "plugins"
+        self.toolbox_dir = self.home / "toolbox"
         self.plugins: dict[str, Plugin] = {}
         self.skills_dir = self.home / "skills"
 
     def load_all(self) -> list[Plugin]:
-        """Load every valid plugin in <home>/plugins/, skip invalid ones."""
+        """Load every valid plugin in <home>/toolbox/, skip invalid ones."""
         self.plugins = {}
-        if not self.plugins_dir.exists():
+        if not self.toolbox_dir.exists():
             return []
-        for path in sorted(self.plugins_dir.iterdir()):
+        for path in sorted(self.toolbox_dir.iterdir()):
             if not path.is_dir():
                 continue
             try:

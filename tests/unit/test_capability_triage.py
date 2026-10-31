@@ -28,7 +28,7 @@ def _inventory():
 def test_inventory_reads_tools_skills_and_mcp_file(tmp_path):
     (tmp_path / "mcp_servers.json").write_text(
         json.dumps({"notion": {}, "todoist": {}}))
-    plug = tmp_path / "plugins" / "demo"
+    plug = tmp_path / "toolbox" / "demo"
     plug.mkdir(parents=True)
     (plug / "plugin.json").write_text(json.dumps({
         "name": "demo", "version": "1", "description": "Demo plugin",
