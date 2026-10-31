@@ -255,8 +255,13 @@ def _make_governor(config, budget_key=None):
     return gov
 
 
-def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None, governor=None, optional_tools=None) -> dict:
+def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None, governor=None, optional_tools=None,
+                      plugin_registry=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
+
+    If ``plugin_registry`` is given (a ``PluginRegistry`` instance that is
+    already loaded and live), plugin adoption updates the registry the goal
+    runner uses for subsequent tool calls in this workflow.
 
     The loop approval-gates any extra tool whose name contains
     post, send, or publish before dispatch, and that gate is not
@@ -278,7 +283,6 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     Every one of these returns a readable string on failure and
     never raises out of the tool.
     """
-    from pathlib import Path
     from ..capabilities.tools import ToolResult
     workdir = Path(workdir)
     tools: dict = {}
@@ -1115,7 +1119,10 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             source = _confined(path)
             if not source.is_dir():
                 return f"adoption refused: plugin directory not found: {path}"
-            registry = PluginRegistry(config.home)
+            if plugin_registry is None:
+                registry = PluginRegistry(config.home)
+            else:
+                registry = plugin_registry
             preflight = preflight_plugin(source)
             if not preflight.ok:
                 return f"adoption refused: {preflight.message}"
@@ -1133,6 +1140,12 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                 governor.acquire("tool")
             approved, _findings, message = commit_plugin(
                 registry, source, preflight)
+            # commit_plugin installs the validated plugin into this registry
+            # after copying it. When this is the goal runner's live registry,
+            # later steps can call the new tool immediately.
+            if approved:
+                available = ", ".join(preflight.plugin.tool_names()) or "none"
+                return f"{message}; tools available now: {available}"
             return message if approved else f"adoption refused: {message}"
 
         tools["adopt_tool_plugin"] = adopt_tool_plugin
@@ -2987,7 +3000,7 @@ def main(argv: list[str] | None = None) -> int:
                                 clef_client=_clef_client,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor)
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor)
             def _deliver_files(files, target):
                 """Upload run deliverables as bytes to a Slack/WhatsApp target.
 
@@ -3840,7 +3853,7 @@ def main(argv: list[str] | None = None) -> int:
                         getattr(sandbox, "bwrap", False))
                     _job_gate = _scheduled_gate(sandboxed=_job_sandboxed)
                     _job_governor = _make_governor(config)
-                    _job_tools = _goal_extra_tools(config, sandbox.workdir, gate=_job_gate, researcher=_job_researcher, question_answer=None, scheduled=True, governor=_job_governor)
+                    _job_tools = _goal_extra_tools(config, sandbox.workdir, gate=_job_gate, researcher=_job_researcher, question_answer=None, scheduled=True, governor=_job_governor, plugin_registry=_plugins)
                     try:
                         _job_deadline = float(job.time_limit or 0) or None
                     except (TypeError, ValueError):
@@ -4101,7 +4114,7 @@ def main(argv: list[str] | None = None) -> int:
         _i_governor = _make_governor(config)
         goal_runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home,
                                  memory=memory,
-                                 conversation_id=args.conversation, plugins=plugins, execution_backend=execution_backend, researcher=_interview_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds), researcher=_interview_researcher, governor=_i_governor), router=model_router, versioned_writes=True,
+                                 conversation_id=args.conversation, plugins=plugins, execution_backend=execution_backend, researcher=_interview_researcher, extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds), researcher=_interview_researcher, governor=_i_governor, plugin_registry=plugins), router=model_router, versioned_writes=True,
                                  budget=_IBudget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
                                  trace=_ITrace(config.home, conversation_id=args.conversation),
                                  model_verifier=_IModelVerifier(client),
@@ -4157,7 +4170,7 @@ def main(argv: list[str] | None = None) -> int:
                         budget=budget, trace=trace, model_verifier=model_verifier,
                         kernel_mode=config.kernel_mode, semantic_router=_cli_router,
                         use_semantic_router_skip=True, researcher=_researcher,
-                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds, args.conversation), researcher=_researcher, model_chat=lambda messages: client.chat(messages), governor=_governor),
+                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=_cli_gate(config.home, config.approval_timeout_seconds, args.conversation), researcher=_researcher, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins),
                         router=model_router, versioned_writes=True,
                         run_id=_goal_run_id, run_control=_goal_control,
                         network_available=_network_available(execution_backend, sandbox),
@@ -4192,7 +4205,7 @@ def main(argv: list[str] | None = None) -> int:
                                         semantic_router=_cli_router,
                                         use_semantic_router_skip=True,
                                         researcher=_researcher,
-                                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=runner.gate, researcher=_researcher, governor=getattr(runner, "acquisition_governor", None)),
+                                        extra_tools=_goal_extra_tools(config, sandbox.workdir, gate=runner.gate, researcher=_researcher, governor=getattr(runner, "acquisition_governor", None), plugin_registry=plugins),
                                         router=model_router, versioned_writes=True,
                                         run_id=_sub_id, run_control=_goal_control, network_available=_network_available(execution_backend, sandbox), acquisition_governor=getattr(runner, "acquisition_governor", None))
                 sub_report = sub_runner.run(subgoal, spec=spec)
