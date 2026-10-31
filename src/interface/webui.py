@@ -2699,6 +2699,9 @@ class WebUIServer:
         source = Path(path)
         if not source.is_dir():
             return {"ok": False, "error": f"plugin directory not found: {path}"}
+        if self.config is None:
+            return {"ok": False,
+                    "error": "plugin adoption requires a configured isolated acceptance-test backend"}
         from ..capabilities.plugins import PluginRegistry
         from ..capabilities.plugin_acceptance import acceptance_backend
         registry = PluginRegistry(self.home)

@@ -29,10 +29,13 @@ def _plugin_dir(tmp_path, name="upper"):
         "description": "Test plugin",
         "tools": [{"name": "upper", "description": "Uppercase text",
                    "module": "tool.py", "function": "upper"}],
-        "skills": []}), encoding="utf-8")
+        "skills": [], "acceptance_tests": [["python3", "test_plugin.py"]]}),
+        encoding="utf-8")
     (directory / "tool.py").write_text(
         "def upper(args):\n    return str(args.get('text', '')).upper()\n",
         encoding="utf-8")
+    (directory / "test_plugin.py").write_text("assert 2 + 2 == 4\n",
+                                              encoding="utf-8")
     return directory
 
 
@@ -118,9 +121,29 @@ def test_skill_edit_updates_library_and_records_missing(tmp_path):
     assert server.handle_skill_edit("", "")["ok"] is False
 
 
-def test_plugin_adopt_needs_approval_and_copies_when_approved(tmp_path):
-    server = _server(tmp_path)
+def test_plugin_adopt_needs_configured_acceptance_tests_and_approval(tmp_path, monkeypatch):
     directory = _plugin_dir(tmp_path, "upper")
+    unconfigured = _server(tmp_path)
+    refused = unconfigured.handle_plugin_adopt(str(directory), approve=lambda plugin, f: True)
+    assert refused["ok"] is False
+    assert "acceptance-test backend" in refused["error"]
+    assert not (tmp_path / "home" / "toolbox" / "upper").exists()
+
+    from types import SimpleNamespace
+    import src.capabilities.plugin_acceptance as acceptance
+
+    class Backend:
+        name = "docker"
+        allow_network = False
+        def run(self, command, workspace, timeout_seconds):
+            assert (workspace / "test_plugin.py").is_file()
+            return SimpleNamespace(isolated=True, ok=True, returncode=0)
+        def cleanup(self):
+            pass
+
+    monkeypatch.setattr(acceptance, "acceptance_backend",
+                        lambda config, workspace: Backend())
+    server = WebUIServer(tmp_path / "home", config=SimpleNamespace())
     refused = server.handle_plugin_adopt(str(directory), approve=lambda plugin, f: False)
     assert refused["ok"] is False
     assert not (tmp_path / "home" / "toolbox" / "upper").exists()

@@ -38,6 +38,7 @@ Covered goal; reject lab; uncertain user compares options; approve and revise br
 - Interview steps (including model output, original goal, questions and answers) persist in SQLite with FULL synchronization. Retrying the same goal in the same conversation replays committed steps and refuses changed prompts. Reopened chats show a recovery action; automatic process restart orchestration remains open.
 - Research is available during uncertain-choice interviews through the configured researcher. Source URLs are now retained for citations; unavailable research is labeled unverified.
 - Plugin replacement now stages and hashes new bytes, preserves the previous version until installation, and rolls back on copy/load failures. Sudden process termination during rename still needs startup reconciliation.
+- The WebUI refuses plugin adoption when it has no configured isolated acceptance-test backend. Lower-level registry callers can still omit acceptance testing; that API boundary remains part of the functional-validation blocker.
 - SSH sync-back now uses Python's data-filtered archive extraction, matching Modal's extraction policy.
 - Workflow fixtures now supply executable model plans. Empty/invalid real model plans remain rejected. Updated assertions reflect the current lab and tool contracts.
 - Actual model, Modal and PC integration checks remain unrun without the required configured endpoints, authentication and reachable PC. These cannot be established by offline tests.
