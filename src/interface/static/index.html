@@ -157,18 +157,32 @@
       <div id="avatar-placeholder" aria-label="Aidon robot avatar">
         <svg class="fallback-robot" viewBox="0 0 200 200" role="img" aria-label="Aidon robot">
           <g class="robot-body-anim">
-            <rect x="28" y="35" width="16" height="42" rx="8" fill="#1a2a4a"/>
-            <rect x="156" y="35" width="16" height="42" rx="8" fill="#1a2a4a"/>
-            <rect x="40" y="18" width="120" height="72" rx="22" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
-            <rect x="55" y="28" width="90" height="52" rx="14" fill="#1a2a4a"/>
-            <ellipse class="robot-eye" cx="82" cy="54" rx="10" ry="16" fill="#7de9ff"/>
-            <ellipse class="robot-eye" cx="118" cy="54" rx="10" ry="16" fill="#7de9ff"/>
-            <path d="M88 72 Q100 78 112 72" fill="none" stroke="#7de9ff" stroke-width="3" stroke-linecap="round"/>
-            <rect x="92" y="90" width="16" height="12" fill="#c2c2b8"/>
-            <path d="M62 102 Q100 92 138 102 L138 140 Q100 155 62 140Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
-            <path d="M58 108 Q35 120 32 145 Q32 160 45 160 L58 150Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
-            <path d="M142 108 Q165 120 168 145 Q168 160 155 160 L142 150Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
-            <path d="M75 155 Q100 170 125 155 Q100 165 75 155Z" fill="#1a2a4a"/>
+            <g class="robot-arm-left">
+              <path d="M68 99 Q53 100 45 113 Q36 130 28 150 Q24 160 31 165 Q38 169 46 160 L65 139Z" fill="#eef2e4" stroke="#d7dbea" stroke-width="2"/>
+              <path d="M45 116 Q39 137 30 153 Q28 158 32 161 Q37 163 42 155 L59 135Z" fill="#c2c8d9"/>
+              <path d="M29 159 Q24 165 22 172 M37 163 Q34 171 33 176 M44 162 Q44 170 46 175" fill="none" stroke="#1a2a4a" stroke-width="5" stroke-linecap="round"/>
+            </g>
+            <g class="robot-arm-right">
+              <path d="M132 99 Q147 100 155 113 Q164 130 172 150 Q176 160 169 165 Q162 169 154 160 L135 139Z" fill="#eef2e4" stroke="#d7dbea" stroke-width="2"/>
+              <path d="M155 116 Q161 137 170 153 Q172 158 168 161 Q163 163 158 155 L141 135Z" fill="#c2c8d9"/>
+              <path d="M171 159 Q176 165 178 172 M163 163 Q166 171 167 176 M156 162 Q156 170 154 175" fill="none" stroke="#1a2a4a" stroke-width="5" stroke-linecap="round"/>
+            </g>
+            <g class="robot-head">
+              <rect x="18" y="37" width="23" height="61" rx="12" fill="#1a2a4a"/>
+              <rect x="159" y="37" width="23" height="61" rx="12" fill="#1a2a4a"/>
+              <path d="M54 17 Q61 11 75 11 L125 11 Q139 11 146 17 Q164 33 164 57 L164 73 Q164 103 143 108 L57 108 Q36 103 36 73 L36 57 Q36 33 54 17Z" fill="#eef2e4" stroke="#d7dbea" stroke-width="2"/>
+              <path d="M48 43 Q51 28 68 27 L132 27 Q149 28 152 43 L152 73 Q150 91 137 94 L63 94 Q50 91 48 73Z" fill="#1a2a4a"/>
+              <path d="M55 43 Q58 34 69 34 L131 34 Q142 34 145 43 L145 69 Q144 84 133 86 L67 86 Q56 84 55 69Z" fill="#223b70"/>
+              <path d="M58 47 Q62 39 72 39 L128 39 Q138 39 142 47 L142 60 Q104 78 58 65Z" fill="#29477e" opacity=".72"/>
+              <rect class="robot-eye" x="65" y="43" width="17" height="34" rx="8" fill="#32c5ec"/>
+              <rect class="robot-eye" x="118" y="43" width="17" height="34" rx="8" fill="#32c5ec"/>
+              <path d="M87 79 Q100 85 113 79" fill="none" stroke="#32c5ec" stroke-width="3" stroke-linecap="round"/>
+            </g>
+            <path d="M84 99 Q100 108 116 99 L115 111 Q100 118 85 111Z" fill="#c2c8d9"/>
+            <path d="M67 103 Q74 111 100 111 Q126 111 133 103 L137 141 Q134 160 117 168 Q100 176 83 168 Q66 160 63 141Z" fill="#eef2e4" stroke="#d7dbea" stroke-width="2"/>
+            <path d="M66 122 Q81 140 100 141 Q119 140 134 122 L137 142 Q133 158 117 165 Q100 170 83 165 Q67 158 63 142Z" fill="#c2c8d9"/>
+            <path d="M74 151 Q100 161 126 151" fill="none" stroke="#1a2a4a" stroke-width="1.5"/>
+            <path d="M81 165 Q100 180 119 165 Q115 184 100 185 Q85 184 81 165Z" fill="#1a2a4a"/>
           </g>
         </svg>
       </div>

@@ -392,11 +392,21 @@ html[data-theme="light"] #guidance-input::placeholder { color: var(--muted); }
   font-family: var(--font-display); }
 #avatar-placeholder .fallback-robot { width: 184px; height: 184px; }
 #avatar-placeholder .robot-body-anim { animation: fallback-robot-bob 4s ease-in-out infinite;
-  transform-origin: 100px 190px; }
+  transform-origin: 100px 170px; }
+#avatar-placeholder .robot-head { animation: fallback-robot-head-sway 6s ease-in-out infinite;
+  transform-origin: 100px 58px; }
+#avatar-placeholder .robot-arm-left { animation: fallback-robot-arm-sway 5s ease-in-out infinite;
+  transform-origin: 52px 111px; }
+#avatar-placeholder .robot-arm-right { animation: fallback-robot-arm-sway 5s ease-in-out infinite reverse;
+  transform-origin: 148px 111px; }
 #avatar-placeholder .robot-eye { animation: fallback-robot-blink 4.2s infinite;
   transform-origin: center; transform-box: fill-box; }
 @keyframes fallback-robot-bob { 0%,100% { transform: translateY(0); }
   50% { transform: translateY(-3px); } }
+@keyframes fallback-robot-head-sway { 0%,100% { transform: rotate(0); }
+  25% { transform: rotate(1deg); } 75% { transform: rotate(-1deg); } }
+@keyframes fallback-robot-arm-sway { 0%,100% { transform: rotate(0); }
+  50% { transform: rotate(3deg); } }
 @keyframes fallback-robot-blink { 0%,92%,98%,100% { transform: scaleY(1); }
   94%,96% { transform: scaleY(.1); } }
 #avatar-wrap.has-model #avatar-placeholder { display: none; }
