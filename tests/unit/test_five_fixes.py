@@ -148,6 +148,20 @@ def test_web_adoption_requires_successful_acceptance_tests(tmp_path):
     assert tools["adopt_tool_plugin"]("plug").startswith("Adopted plugin")
 
 
+def test_configured_cli_adoption_fails_closed_without_isolated_backend(tmp_path):
+    from src.system.config import Config
+    plug = tmp_path / "plug"
+    _valid_plugin(plug)
+    manifest = json.loads((plug / "plugin.json").read_text())
+    manifest["acceptance_tests"] = [["python3", "test_tool.py"]]
+    (plug / "plugin.json").write_text(json.dumps(manifest))
+    (plug / "test_tool.py").write_text("assert True\n")
+    config = Config(home=tmp_path, execution_backend="bubblewrap")
+    tools = _goal_extra_tools(config, tmp_path, gate=_ApproveGate())
+    assert "acceptance tests failed" in tools["adopt_tool_plugin"]("plug")
+    assert not (tmp_path / "toolbox" / "five-plug").exists()
+
+
 def test_commit_rejects_changed_source(tmp_path):
     home = tmp_path / "home"
     plug = tmp_path / "plug"

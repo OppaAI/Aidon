@@ -293,6 +293,14 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     from ..capabilities.tools import ToolResult
     workdir = Path(workdir)
     tools: dict = {}
+    if test_backend_factory is None and isinstance(config, Config):
+        def test_backend_factory():
+            from ..capabilities.execution import make_backend
+            sandbox = Sandbox(workdir, require_isolation=True)
+            return make_backend(
+                config.execution_backend, sandbox, image=config.docker_image,
+                allow_network=False, modal_app=config.modal_app,
+                modal_cpu=config.modal_cpu, modal_memory_mb=config.modal_memory_mb)
 
     def _free_path(path: Path) -> Path:
         """First non-existing sibling: stem, stem_2, stem_3, ..."""
