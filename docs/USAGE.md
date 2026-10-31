@@ -89,9 +89,11 @@ shows, and a CLI run or a scheduled job honours it too.
   arrive. The existing buffered endpoint remains the fallback when
   streaming audio is unavailable. Karaoke text follows the same audio
   element, so it stays aligned with playback.
-- The WebUI has dark and light themes, a robot avatar fallback, an
-  optional VRM avatar viewer, and a compact final-run footer showing
-  elapsed time and token usage.
+- The WebUI opens in the warm editorial pastel light theme and keeps
+  dark mode as an option. Its serif display and rounded sans-serif
+  stacks use installed system fonts, so the interface stays offline.
+  It also has a robot avatar fallback, an optional VRM avatar viewer,
+  and a compact final-run footer showing elapsed time and token usage.
 
 ## 📎 Attachments
 

@@ -15,22 +15,27 @@
   --accent: #0082fb; --accent2: #7c5cff;
   --accent-glow: rgba(0, 130, 251, .35);
   --green: #3ecf8e; --cyan: #67e8f9; --toggle-off: #52617b; --amber: #f5a623; --red: #f0564f;
-  --font-display: "Rajdhani", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Avenir Next", Avenir, "Trebuchet MS", system-ui, sans-serif;
+  --font-serif: Georgia, "Times New Roman", serif;
+  --font-body: "Avenir Next", Avenir, "Trebuchet MS", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 html[data-theme="light"] {
-  --bg: #dfe8f4; --surface: #eef3f9; --surface2: #d5e1ef;
-  --text: #131a2c; --muted: #5f6b87; --border: #d9e0ee;
-  --accent: #0064e0; --accent2: #6a4dff;
-  --accent-glow: rgba(0, 100, 224, .22);
-  --green: #1f9d63; --cyan: #0891b2; --toggle-off: #74839a; --amber: #c47b12; --red: #d43d36;
-  --font-display: "Rajdhani", "Segoe UI", system-ui, sans-serif;
+  /* Warm Editorial Pastel: cream paper, ink outlines, and quiet accents. */
+  --bg: #f3f0e8; --surface: #fffdf8; --surface2: #eeeae1;
+  --text: #292823; --muted: #777469; --border: #d4cfc3;
+  --accent: #cf793e; --accent2: #9380b5;
+  --accent-glow: rgba(207, 121, 62, .18);
+  --green: #74a895; --cyan: #74a9a1; --toggle-off: #a8a294; --amber: #bd7952; --red: #bd6f72;
+  --font-display: "Avenir Next", Avenir, "Trebuchet MS", system-ui, sans-serif;
+  --font-serif: Georgia, "Times New Roman", serif;
+  --font-body: "Avenir Next", Avenir, "Trebuchet MS", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-body);
   overflow: hidden; }
 body::before { /* faint sci-fi grid backdrop */
   content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
@@ -40,6 +45,15 @@ body::before { /* faint sci-fi grid backdrop */
   background-size: 56px 56px; opacity: .14;
   mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 75%);
 }
+html[data-theme="light"] body::before { display: none; }
+h1, h2, .dash-title, #title { font-family: var(--font-serif); letter-spacing: -.025em; }
+html[data-theme="light"] .card,
+html[data-theme="light"] .set-group,
+html[data-theme="light"] .dag-panel,
+html[data-theme="light"] .panel {
+  box-shadow: 2px 3px 0 rgba(41, 40, 35, .16);
+}
+html[data-theme="light"] .card { border-color: color-mix(in srgb, var(--text) 60%, var(--border)); }
 
 /* ── 3-column app shell ─────────────────────────────────────────── */
 #app { position: relative; z-index: 1; display: flex; height: 100vh; }
@@ -215,7 +229,7 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
 .msg.user { align-self: flex-end;
   background: color-mix(in srgb, var(--accent) 48%, var(--surface2)); color: #fff;
   border-bottom-right-radius: 4px; }
-html[data-theme="light"] .msg.user { background: #c7dcf4; color: #102343; }
+html[data-theme="light"] .msg.user { background: #eee4f3; color: #302b35; }
 .msg.aidon { align-self: flex-start; background: var(--surface);
   border: 1px solid var(--border); border-bottom-left-radius: 4px; }
 .msg.stage-line { align-self: center; background: none; border: none;
@@ -325,7 +339,7 @@ html[data-theme="light"] .msg.user { background: #c7dcf4; color: #102343; }
   box-shadow: 0 0 0 2px var(--accent-glow), 0 0 18px var(--accent-glow); }
 #goal-input::placeholder, #guidance-input::placeholder { color: #596984; opacity: 1; }
 html[data-theme="light"] #goal-input::placeholder,
-html[data-theme="light"] #guidance-input::placeholder { color: #65758b; }
+html[data-theme="light"] #guidance-input::placeholder { color: var(--muted); }
 #guidance-input { width: 100%; padding: 8px 14px; border-radius: 16px;
   border: 1px dashed var(--border); background: var(--surface2); color: var(--muted);
   font-size: 12px; outline: none; font-family: inherit; }
@@ -408,7 +422,7 @@ html[data-theme="light"] #guidance-input::placeholder { color: #65758b; }
 .dash-status b { font-weight: 500; }
 .status-ready { color: var(--green); }
 [data-status="model"] { color: #fff; }
-html[data-theme="light"] [data-status="model"] { color: #193353; }
+html[data-theme="light"] [data-status="model"] { color: #536f68; }
 .think-phase { font-size: 10.5px; color: var(--accent); text-transform: uppercase;
   letter-spacing: .05em; margin: 8px 2px 0; font-weight: 600;
   flex: 0 0 auto; }

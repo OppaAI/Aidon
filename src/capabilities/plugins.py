@@ -694,11 +694,13 @@ class PluginRegistry:
             if not path.is_dir():
                 continue
             try:
-                # Check adopted bytes before any inline module is imported.
-                if (path / ".adopted").is_file():
-                    static_plugin = load_plugin(path, execute=False)
-                    if not plugin_is_adopted(static_plugin):
-                        continue
+                # Unadopted directories are untrusted data. Validate their
+                # approved bytes statically before importing any module code.
+                if not (path / ".adopted").is_file():
+                    continue
+                static_plugin = load_plugin(path, execute=False)
+                if not plugin_is_adopted(static_plugin):
+                    continue
                 plugin = load_plugin(path)
                 self.plugins[plugin.name] = plugin
             except Exception:
@@ -708,6 +710,8 @@ class PluginRegistry:
     def tool_names(self) -> list[str]:
         names: list[str] = []
         for plugin in list(self.plugins.values()):
+            if not plugin_is_adopted(plugin):
+                continue
             names.extend(plugin.tool_names())
         return sorted(names)
 
@@ -768,6 +772,8 @@ class PluginRegistry:
         loudly instead of silently dropping its capabilities.
         """
         for plugin in list(self.plugins.values()):
+            if not plugin_is_adopted(plugin):
+                continue
             spec = getattr(plugin, "tool_spec", lambda _n: None)(name)
             if spec is not None and str(spec.get("mode", "")).lower() == "sandbox":
                 if not plugin_is_adopted(plugin):

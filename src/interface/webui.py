@@ -105,11 +105,11 @@ def _app_version() -> str:
 # pages shipped no <head> at all, so they rendered as plain white text.
 # No external assets: everything here is inline, so pages work offline.
 BASE_CSS = """
-:root{--bg:#030b1c;--surface:#07152d;--surface2:#0c2040;--text:#e9eef8;--muted:#8b96b3;--border:#1e2a45;--accent:#0082fb;--accent2:#7c5cff;--green:#3ecf8e;--amber:#f5a623;--red:#f0564f}
-body.light{--bg:#dfe8f4;--surface:#eef3f9;--surface2:#d5e1ef;--text:#131a2c;--muted:#5f6b87;--border:#c7d4e5;--accent:#0064e0;--accent2:#6a4dff;--green:#1f9d63;--amber:#c47b12;--red:#d43d36}
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0 auto;padding:24px;max-width:980px;line-height:1.5}
-body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:56px 56px;opacity:.14}
-h1{font-family:Rajdhani,"Segoe UI",system-ui,sans-serif;font-size:1.8em;color:var(--text);margin:0 0 0.5em;text-transform:uppercase;letter-spacing:.12em}
+:root{--bg:#f3f0e8;--surface:#fffdf8;--surface2:#eeeae1;--text:#292823;--muted:#777469;--border:#d4cfc3;--accent:#cf793e;--accent2:#9380b5;--green:#74a895;--amber:#bd7952;--red:#bd6f72}
+body.dark{--bg:#030b1c;--surface:#07152d;--surface2:#0c2040;--text:#e9eef8;--muted:#8b96b3;--border:#1e2a45;--accent:#0082fb;--accent2:#7c5cff;--green:#3ecf8e;--amber:#f5a623;--red:#f0564f}
+body{font-family:"Avenir Next",Avenir,"Trebuchet MS",system-ui,sans-serif;background:var(--bg);color:var(--text);margin:0 auto;padding:24px;max-width:980px;line-height:1.5}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:56px 56px;opacity:.14}body:not(.dark)::before{display:none}
+h1{font-family:Georgia,"Times New Roman",serif;font-size:1.8em;color:var(--text);margin:0 0 0.5em;letter-spacing:-.025em}
 h2{font-size:1.2em;color:var(--text);margin:1.2em 0 0.4em}
 h3{font-size:1em;margin:1em 0 0.3em}
 a{color:var(--accent)}
@@ -173,7 +173,7 @@ body.chat-page h1{display:inline-block;margin-right:12px;vertical-align:middle}
 def _page_html(title, body):
     """Wrap a handler-built fragment in a full styled page."""
     return ("<!doctype html><html><head><meta charset=\"utf-8\"><title>" + title +
-            "</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/favicon.svg\"><style>" + BASE_CSS + "</style></head><body><script>try{if(localStorage.getItem('aidon-theme')==='light'){document.body.classList.add('light')}}catch(e){}</script>" + body + "</body></html>")
+            "</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/favicon.svg\"><style>" + BASE_CSS + "</style></head><body><script>try{if(localStorage.getItem('aidon-theme')==='dark'){document.body.classList.add('dark')}}catch(e){}</script>" + body + "</body></html>")
 
 
 CHAT_HTML = """<!doctype html>
@@ -429,10 +429,10 @@ async function refreshApprovals() {
 }
 setInterval(refreshApprovals, 2000); refreshApprovals();
 try {
-  if (localStorage.getItem('aidon-theme') === 'light') { document.body.classList.add('light'); }
+  if (localStorage.getItem('aidon-theme') === 'dark') { document.body.classList.add('dark'); }
   document.getElementById('theme-toggle').addEventListener('click', function() {
-    var light = document.body.classList.toggle('light');
-    try { localStorage.setItem('aidon-theme', light ? 'light' : 'dark'); } catch (e) {}
+    var dark = document.body.classList.toggle('dark');
+    try { localStorage.setItem('aidon-theme', dark ? 'dark' : 'light'); } catch (e) {}
   });
 } catch (e) {}
 </script>
@@ -3579,7 +3579,16 @@ async function loadSettings(){
       if (s.type === 'bool') {
         out += '<label class="switch"><input type="checkbox" data-key="' + esc(s.key) + '"' + ((s.value === '1' || s.value === 'true') ? ' checked' : '') + '><span></span></label>';
       } else if (s.type === 'enum') {
-        out += '<select data-key="' + esc(s.key) + '">' + (s.options || []).map(function(o){ return '<option' + (o === s.value ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>';
+        const postureLabels = {
+          locked: 'Locked — core tools only',
+          standard: 'Junior — pure plugins',
+          developer: 'Intermediate — capability plugins',
+          selfmod: 'Self-modifying — source edits need approval'
+        };
+        out += '<select data-key="' + esc(s.key) + '">' + (s.options || []).map(function(o){
+          const label = s.key === 'AIDON_TOOL_POSTURE' ? (postureLabels[o] || o) : o;
+          return '<option value="' + esc(o) + '"' + (o === s.value ? ' selected' : '') + '>' + esc(label) + '</option>';
+        }).join('') + '</select>';
       } else if (s.type === 'int' && s.min !== undefined && s.max !== undefined) {
         const n = Number(s.value); const safe = Number.isFinite(n) ? Math.min(s.max, Math.max(s.min, n)) : s.min;
         out += '<div class="range-control"><input type="range" min="' + s.min + '" max="' + s.max + '" step="' + (s.step || 1) + '" value="' + safe + '" data-range-for="' + esc(s.key) + '"><input type="number" min="' + s.min + '" max="' + s.max + '" step="' + (s.step || 1) + '" data-key="' + esc(s.key) + '" value="' + esc(s.value) + '"></div><div class="range-meta"><span>' + s.min + '</span><span>' + s.max + '</span></div>';
@@ -3616,7 +3625,7 @@ async function saveSettings(){
 }
 document.getElementById('settings-save').addEventListener('click', saveSettings);
 document.getElementById('theme-toggle').addEventListener('click', function(){
-  const light = document.body.classList.toggle('light'); localStorage.setItem('aidon-theme', light ? 'light' : 'dark');
+  const dark = document.body.classList.toggle('dark'); localStorage.setItem('aidon-theme', dark ? 'dark' : 'light');
 });
 loadSettings();
 </script>"""

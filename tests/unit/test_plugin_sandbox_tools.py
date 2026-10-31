@@ -103,7 +103,7 @@ def test_sandbox_tool_requires_adoption(tmp_path):
     (target / "tool.py").write_text(code)
     registry = PluginRegistry(tmp_path / "home")
     registry.load_all()
-    with pytest.raises(ValueError, match="not adopted"):
+    with pytest.raises(ValueError, match="unknown plugin tool"):
         registry.call("heavy", {}, sandbox=Sandbox(tmp_path / "work"))
 
 

@@ -2076,7 +2076,7 @@
     const btn = document.getElementById("theme-toggle");
     if (btn) btn.textContent = t === "dark" ? "◐" : "◑";
   }
-  setTheme(localStorage.getItem("aidon-theme") || "dark");
+  setTheme(localStorage.getItem("aidon-theme") || "light");
   document.getElementById("theme-toggle").addEventListener("click", () => {
     setTheme(rootEl.dataset.theme === "dark" ? "light" : "dark");
   });

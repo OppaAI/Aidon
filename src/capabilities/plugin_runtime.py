@@ -160,6 +160,14 @@ class PluginContext:
         if self.policy.allowed_hosts and host not in self.policy.allowed_hosts:
             raise PermissionError(
                 f"host not allowed by plugin capability: {host}")
+        # HTTP runs in Aidon's process, so a plugin must not use the
+        # broker to reach loopback, LAN, link-local, or cloud metadata
+        # endpoints. Apply this to the first URL and every redirect hop.
+        from ..agentic.research_allow import guard_reason
+        reason = guard_reason(
+            str(url), list(self.policy.allowed_hosts) or None)
+        if reason:
+            raise PermissionError(f"plugin URL blocked: {reason}")
         return str(url)
 
     def http_get(self, url, headers=None, timeout=30) -> str:
