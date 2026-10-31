@@ -63,3 +63,17 @@ def test_standalone_lab_persists_and_rejects_stale_writes(tmp_path):
     assert store.load_lab("tool")["state"] == state
     with pytest.raises(ValueError, match="invalid lab"):
         store.load_lab("../../secret")
+
+
+def test_saved_lab_turns_restore_only_to_their_conversation(tmp_path):
+    from src.interface.webui import WebUIServer
+    server = WebUIServer(tmp_path)
+    first = server.handle_conversation_create({})["id"]
+    second = server.handle_conversation_create({})["id"]
+    journal = InterviewStore(tmp_path)
+    turn = journal.question("run", first, "Which format?", True)
+    journal.answer(turn, "MP4")
+    journal.question("run", first, "Ordinary question", False)
+    assert server.handle_conversation_get(first)["lab_turns"] == [
+        {"run_id": "run", "question": "Which format?", "answer": "MP4"}]
+    assert server.handle_conversation_get(second)["lab_turns"] == []

@@ -196,6 +196,13 @@
     labCard.appendChild(turn);
     scrollThreadToLatest();
   }
+  window.aidonRestoreLabTurns = (turns) => {
+    labCard = null;
+    (turns || []).forEach(turn => {
+      addLabTurn("aidon", turn.question || "");
+      if (turn.answer != null) addLabTurn("user", turn.answer);
+    });
+  };
 
   function finalMessageParts(text) {
     const value = String(text || "");
@@ -2669,6 +2676,7 @@
         (outputsByRun[ex.run_id] || []).forEach(renderAtt);
       });
     }
+    if (window.aidonRestoreLabTurns) window.aidonRestoreLabTurns(conv.lab_turns || []);
     if (window.aidonScrollThread) window.aidonScrollThread();
     if (window.aidonRenderStopCardForConversation)
       window.aidonRenderStopCardForConversation(conv.id);

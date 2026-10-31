@@ -2935,7 +2935,12 @@ class WebUIServer:
             history = db.history(conversation_id)
             ids = {r["id"] for r in db.list_all_conversations()}
             if conversation_id in ids:
-                return {"id": conversation_id, "turns": history}
+                from .interview_store import InterviewStore
+                try:
+                    lab_turns = InterviewStore(self.home).lab_transcript(conversation_id)
+                except (OSError, ValueError):
+                    lab_turns = []
+                return {"id": conversation_id, "turns": history, "lab_turns": lab_turns}
         except Exception:
             pass
         return self._read_json_file(
