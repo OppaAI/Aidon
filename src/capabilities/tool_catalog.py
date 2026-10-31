@@ -14,7 +14,7 @@ GOAL_TOOL_NAMES = (
     "slack_send", "whatsapp_send", "threads_publish", "threads_post",
     "instagram_publish", "instagram_post", "write_versioned", "read_file",
     "write_file", "notify", "sam_segment", "uv_venv",
-    "install_python_package", "apt_install", "adopt_tool_plugin",
+    "install_python_package", "apt_install", "adopt_tool_plugin", "adopt_skill",
     "mcp_connect", "mcp_disconnect",
     "computer_use",
 )

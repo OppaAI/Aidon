@@ -15,6 +15,11 @@ from src.capabilities.plugins import PluginRegistry, load_plugin, scan_plugin
 from src.capabilities.sandbox import Sandbox
 
 
+class _PassingSandbox:
+    def run(self, command):
+        return {"ok": True, "output": "pass"}
+
+
 def _plugin_dir(tmp_path, name="upper", code=None, skills=None):
     directory = tmp_path / name
     directory.mkdir(parents=True, exist_ok=True)
@@ -61,10 +66,13 @@ def test_skill_texts_only_trusted_standalone_skills(tmp_path):
     assert ok is True
     from src.capabilities.skill_library import Skill, SkillLibrary
     lib = SkillLibrary(home)
-    lib.add(Skill(name="trusted-one", description="Trusted."))
+    lib.add(Skill(name="trusted-one", description="Trusted.",
+                  test_commands=["python3 --version"]))
+    lib.promote("trusted-one", lib.run_tests("trusted-one", _PassingSandbox()))
     lib.trust("trusted-one", approved=True)
-    lib.add(Skill(name="validated-one", description="Staged."))
-    lib.promote("validated-one", {"passed": True})
+    lib.add(Skill(name="validated-one", description="Staged.",
+                  test_commands=["python3 --version"]))
+    lib.promote("validated-one", lib.run_tests("validated-one", _PassingSandbox()))
     (home / "skills" / "validated-one.md").write_text(
         "# Staged draft\n", encoding="utf-8")
     (home / "skills" / "hand.md").write_text(

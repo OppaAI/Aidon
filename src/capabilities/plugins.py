@@ -816,21 +816,20 @@ class PluginRegistry:
                 texts[f"{plugin.name}/{skill}"] = path.read_text(encoding="utf-8")
         # Standalone skills in <home>/skills/, Markdown only.
         if self.skills_dir.exists():
-            trusted = self._trusted_skill_stems()
-            for path in sorted(self.skills_dir.glob("*.md")):
-                if path.stem in trusted:
-                    texts[path.name] = path.read_text(encoding="utf-8")
+            try:
+                from .skill_library import SkillLibrary
+                texts.update(SkillLibrary(self.home).trusted_markdown())
+            except Exception:
+                pass
         return texts
 
     def _trusted_skill_stems(self) -> set[str]:
         """Sanitized stems of trusted library skills, matching
         the filename rule trust() publishes with."""
         try:
-            import re as _re
             from .skill_library import SkillLibrary
-            return {_re.sub(r"[^A-Za-z0-9_.-]+", "-", skill.name)
-                    for skill in SkillLibrary(self.home).list(
-                        states=("trusted",))}
+            return {Path(name).stem for name in
+                    SkillLibrary(self.home).trusted_markdown()}
         except Exception:
             return set()
 

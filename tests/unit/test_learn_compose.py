@@ -17,6 +17,11 @@ from src.memory.memory import InMemoryStore, Memory
 from src.system.model_client import FakeClient
 
 
+class _PassingSkillSandbox:
+    def run(self, command):
+        return {"ok": True, "output": "pass"}
+
+
 def _memory(tmp_path):
     return Memory(tmp_path / "home", embedder=HashEmbedder(),
                   store=InMemoryStore())
@@ -264,7 +269,9 @@ def test_experience_promotes_to_discoverable_skill(tmp_path):
     texts = PluginRegistry(tmp_path / "home").skill_texts()
     assert not any("Write a snake game" in value for value in texts.values())
     lib = SkillLibrary(tmp_path / "home")
-    lib.add(Skill(name=path.stem, description="Snake game workflow"))
+    lib.add(Skill(name=path.stem, description="Snake game workflow",
+                  test_commands=["python3 --version"]))
+    lib.promote(path.stem, lib.run_tests(path.stem, _PassingSkillSandbox()))
     lib.trust(path.stem, approved=True)
     texts = PluginRegistry(tmp_path / "home").skill_texts()
     assert path.name in texts
@@ -285,8 +292,10 @@ def test_trust_publishes_and_retire_removes_discovery(tmp_path):
     """
     from src.capabilities.skill_library import Skill, SkillLibrary
     lib = SkillLibrary(tmp_path / "home")
-    lib.add(Skill(name="greeter", description="Says hello."))
+    lib.add(Skill(name="greeter", description="Says hello.",
+                  test_commands=["python3 --version"]))
     assert not (tmp_path / "home" / "skills" / "greeter.md").exists()
+    lib.promote("greeter", lib.run_tests("greeter", _PassingSkillSandbox()))
     lib.trust("greeter", approved=True)
     published = tmp_path / "home" / "skills" / "greeter.md"
     assert published.exists()

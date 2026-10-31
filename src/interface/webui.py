@@ -3520,7 +3520,7 @@ class WebUIServer:
             "threads_publish", "threads_post", "instagram_publish",
             "instagram_post", "email_send", "record_system_audio", "notify",
             "uv_venv", "install_python_package", "apt_install",
-            "adopt_tool_plugin", "mcp_connect", "mcp_disconnect", "self_modify", "tts_speak",
+            "adopt_tool_plugin", "adopt_skill", "mcp_connect", "mcp_disconnect", "self_modify", "tts_speak",
             "write_file", "write_versioned", "sam_segment",
         }
         tool_rows = []

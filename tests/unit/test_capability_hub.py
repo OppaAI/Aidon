@@ -17,6 +17,11 @@ def _approve(kind, title, body):
     return SimpleNamespace(verdict="approved")
 
 
+class _PassingSandbox:
+    def run(self, command):
+        return {"ok": True, "output": "pass"}
+
+
 def _plugin(tmp_path):
     plug = tmp_path / "toolbox" / "demo"
     plug.mkdir(parents=True)
@@ -39,9 +44,9 @@ def _plugin(tmp_path):
 def home(tmp_path):
     _plugin(tmp_path)
     lib = SkillLibrary(tmp_path)
-    lib.add(Skill(name="paper-search",
-                  description="Search academic papers"))
-    lib.promote("paper-search", {"passed": True})
+    lib.add(Skill(name="paper-search", description="Search academic papers",
+                  test_commands=["python3 --version"]))
+    lib.promote("paper-search", lib.run_tests("paper-search", _PassingSandbox()))
     lib.trust("paper-search", approved=True)
     lib.add(Skill(name="draft-skill", description="Unfinished"))
     (tmp_path / "skills" / "hand.md").write_text(
@@ -105,7 +110,9 @@ def test_invalidate_drops_health(home):
 def test_skill_retire_prunes_health(tmp_path):
     from src.capabilities.skill_library import Skill, SkillLibrary
     lib = SkillLibrary(tmp_path)
-    lib.add(Skill(name="doomed", description="Doomed."))
+    lib.add(Skill(name="doomed", description="Doomed.",
+                  test_commands=["python3 --version"]))
+    lib.promote("doomed", lib.run_tests("doomed", _PassingSandbox()))
     lib.trust("doomed", approved=True)
     hub = CapabilityHub(tmp_path)
     hub.record_health("skill:doomed", "degraded")

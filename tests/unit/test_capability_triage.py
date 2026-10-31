@@ -25,6 +25,11 @@ def _inventory():
             "mcp_servers": ["notion"]}
 
 
+class _PassingSandbox:
+    def run(self, command):
+        return {"ok": True, "output": "pass"}
+
+
 def test_inventory_reads_tools_skills_and_mcp_file(tmp_path):
     (tmp_path / "mcp_servers.json").write_text(
         json.dumps({"notion": {}, "todoist": {}}))
@@ -57,10 +62,13 @@ def test_inventory_reads_tools_skills_and_mcp_file(tmp_path):
 def test_inventory_skills_are_trusted_only(tmp_path):
     from src.capabilities.skill_library import Skill, SkillLibrary
     lib = SkillLibrary(tmp_path)
-    lib.add(Skill(name="trusted-skill", description="Trusted."))
+    lib.add(Skill(name="trusted-skill", description="Trusted.",
+                  test_commands=["python3 --version"]))
+    lib.promote("trusted-skill", lib.run_tests("trusted-skill", _PassingSandbox()))
     lib.trust("trusted-skill", approved=True)
-    lib.add(Skill(name="validated-skill", description="Staged."))
-    lib.promote("validated-skill", {"passed": True})
+    lib.add(Skill(name="validated-skill", description="Staged.",
+                  test_commands=["python3 --version"]))
+    lib.promote("validated-skill", lib.run_tests("validated-skill", _PassingSandbox()))
     lib.add(Skill(name="candidate-skill", description="Draft."))
     (tmp_path / "skills" / "hand.md").write_text("# Hand\n")
     tools = SimpleNamespace(names=lambda: ["write"])

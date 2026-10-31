@@ -71,6 +71,32 @@ def test_harvest_skips_failing_and_untested_candidates(tmp_path):
     assert library.get("untested").state == "candidate"
 
 
+def test_validation_evidence_is_bound_to_skill_contents(tmp_path):
+    library = SkillLibrary(tmp_path)
+    library.add(_skill("summarizer", ["python3 --version"]))
+    report = library.run_tests("summarizer", _FakeSandbox(ok=True))
+    skill = library.get("summarizer")
+    skill.description = "Changed after tests"
+    library.add(skill)
+    try:
+        library.promote("summarizer", report)
+    except ValueError as exc:
+        assert "does not match" in str(exc)
+    else:
+        raise AssertionError("stale test evidence must not validate changed skill bytes")
+    assert library.get("summarizer").state == "candidate"
+
+
+def test_real_skill_tests_refuse_host_or_network_execution(tmp_path):
+    library = SkillLibrary(tmp_path)
+    library.add(_skill("unsafe-test", ["python3 --version"]))
+    sandbox = Sandbox(tmp_path / "work", backend="disabled",
+                      allow_network=True, require_isolation=False)
+    report = library.run_tests("unsafe-test", sandbox)
+    assert report["passed"] is False
+    assert "network-disabled sandbox" in report["note"]
+
+
 def test_harvest_stops_at_skill_budget(tmp_path):
     library = SkillLibrary(tmp_path)
     library.add(_skill("first", ["python3 --version"]))

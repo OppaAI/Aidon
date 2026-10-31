@@ -1201,6 +1201,78 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     except Exception:
         pass
 
+    def adopt_skill(path, name=""):
+        """Test a drafted SKILL.md offline, then request separate trust approval."""
+        source = _confined(path)
+        if not source.is_file() or source.suffix.lower() != ".md":
+            return "skill adoption refused: provide a Markdown file in the goal workdir"
+        try:
+            import hashlib
+            import re as _re
+            from ..capabilities.skill_library import SkillLibrary, import_skill_file
+            from ..capabilities.sandbox import Sandbox as _SkillSandbox
+
+            raw_name = str(name or source.stem).strip()
+            clean_name = _re.sub(r"[^A-Za-z0-9_.-]+", "-", raw_name)
+            if not clean_name:
+                return "skill adoption refused: name is required"
+            sandbox = _SkillSandbox(
+                workdir, getattr(config, "sandbox_timeout_seconds", 120),
+                mem_mb=getattr(config, "sandbox_mem_mb", 1024),
+                nproc=getattr(config, "sandbox_nproc", 256),
+                fsize_mb=getattr(config, "sandbox_fsize_mb", 512),
+                cpu_seconds=getattr(config, "sandbox_cpu_seconds", 0),
+                backend=getattr(config, "sandbox_backend", "auto"),
+                allow_network=False, require_isolation=True)
+            if not sandbox.isolated or sandbox.allow_network:
+                return "skill adoption refused: tests need working bubblewrap isolation with network disabled"
+
+            library = SkillLibrary(config.home)
+            skill = library.get(clean_name)
+            if skill is None:
+                skill = import_skill_file(config.home, source, clean_name)
+            else:
+                stored = Path(config.home) / "skills" / f"{clean_name}.md"
+                if not stored.is_file() or stored.read_bytes() != source.read_bytes():
+                    return (f"skill adoption refused: {clean_name!r} already exists with different bytes; "
+                            "retire it before replacing it")
+            if not skill.test_commands:
+                return "skill adoption refused: add meaningful commands under a ## Tests section"
+
+            source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+            report = library.run_tests(skill.name, sandbox)
+            if not report.get("passed"):
+                return "skill tests failed or are unprovisioned; the draft remains untrusted"
+            library.promote(skill.name, report)
+            if library.get(skill.name).state == "trusted":
+                return f"Skill {skill.name} is already trusted with passing tests"
+            stored = Path(config.home) / "skills" / f"{skill.name}.md"
+            if (hashlib.sha256(source.read_bytes()).hexdigest() != source_hash
+                    or not stored.is_file() or stored.read_bytes() != source.read_bytes()):
+                return "skill adoption refused: draft changed during testing; review and test it again"
+
+            ok, why = _approval(
+                "skill", f"Trust tested skill {skill.name}?",
+                f"Skill: {skill.name}\nDescription: {skill.description or '(none)'}\n"
+                f"Passing checks: {report.get('count', 0)}\n"
+                f"Tested bytes (SHA-256): {source_hash}\n"
+                "Trust makes this procedure available to future plans.",
+                action_class="skill_privileged" if skill.privileged else "skill",
+                force_ask=True)
+            if not ok:
+                return f"{skill.name} passed tests and remains validated; trust was not approved ({why})"
+            if hashlib.sha256(stored.read_bytes()).hexdigest() != source_hash:
+                return "skill adoption refused: validated file changed after approval; run the tests again"
+            if governor is not None:
+                governor.acquire("skill")
+            library.trust(skill.name, approved=True)
+            return (f"Trusted skill {skill.name}; its tested procedure is available to future plans. "
+                    "The current plan is unchanged and needs an explicit replan to use it.")
+        except Exception as exc:
+            return f"skill adoption refused: {type(exc).__name__}: {exc}"
+
+    tools["adopt_skill"] = adopt_skill
+
     # Tier 3: source changes are a separate, forced install approval.
     # The proposal is prepared in the goal workdir; only the approved,
     # syntax-valid bytes can be copied into Aidon's own src/ tree.
@@ -2089,11 +2161,30 @@ def main(argv: list[str] | None = None) -> int:
             skill = lib.get(args.name)
             print(skill if skill else f"No skill {args.name}"); return 0 if skill else 2
         if args.action == "promote":
-            print(lib.promote(args.name, {"passed": True, "evidence": "CLI promote"})); return 0
+            import tempfile
+            skill = lib.get(args.name)
+            if skill is None:
+                print(f"No skill named {args.name}"); return 2
+            with tempfile.TemporaryDirectory(prefix="aidon-skill-tests-") as test_dir:
+                test_sandbox = Sandbox(
+                    Path(test_dir), config.sandbox_timeout_seconds,
+                    mem_mb=config.sandbox_mem_mb, nproc=config.sandbox_nproc,
+                    fsize_mb=config.sandbox_fsize_mb,
+                    cpu_seconds=config.sandbox_cpu_seconds,
+                    backend=config.sandbox_backend, allow_network=False,
+                    require_isolation=True)
+                report = lib.run_tests(skill.name, test_sandbox)
+            if not report.get("passed"):
+                print(f"Skill tests did not pass: {report.get('note', report.get('results', []))}")
+                return 1
+            print(lib.promote(args.name, report)); return 0
         if args.action == "trust":
             skill = lib.get(args.name)
             if skill is None:
                 print(f"No skill {args.name}"); return 2
+            if skill.state != "validated":
+                print(f"trust refused: {args.name} must pass skill-library promote first")
+                return 1
             action_class = "skill_privileged" if skill.privileged else "skill"
             gate = _cli_gate(config.home)
             decision = gate.ask(

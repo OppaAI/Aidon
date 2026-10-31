@@ -25,6 +25,7 @@ No secrets are stored here.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import asdict, dataclass, field
@@ -313,6 +314,8 @@ class Skill:
         if self.provenance:
             lines += ["## Provenance", ""]
             for key, value in self.provenance.items():
+                if key == "test_evidence":
+                    continue
                 lines.append(f"- {key}: {value}")
             lines.append("")
         if self.test_commands:
@@ -342,6 +345,26 @@ class Skill:
             if name and name not in out:
                 out.append(name)
         return out
+
+
+def _skill_hash(skill: Skill) -> str:
+    """Fingerprint the procedure and tests, excluding lifecycle state."""
+    fields = {
+        "name": skill.name, "version": skill.version,
+        "description": skill.description, "privileged": skill.privileged,
+        "capabilities": skill.capabilities, "dependencies": skill.dependencies,
+        "test_commands": skill.test_commands, "code_sources": skill.code_sources,
+    }
+    payload = json.dumps(fields, sort_keys=True, ensure_ascii=False,
+                         separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _markdown_hash(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return ""
 
 
 
@@ -399,8 +422,9 @@ class SkillLibrary:
             raise ValueError(f"unknown skill state: {skill.state!r}")
         self._refresh()
         existing = self._data["skills"].get(skill.name)
-        if existing is not None and skill.version <= existing["version"]:
-            skill.version = existing["version"]
+        previous = Skill.from_dict(existing) if existing is not None else None
+        if previous is not None and skill.version <= previous.version:
+            skill.version = previous.version
         if existing is None:
             # Creation order, persisted: consolidation keeps the
             # newest skill, and JSON key sorting must not be
@@ -410,7 +434,14 @@ class SkillLibrary:
                 default=0) + 1
         else:
             skill.seq = existing.get("seq", 0)
-        skill.state = "candidate" if existing is None else existing["state"]
+        changed = previous is not None and _skill_hash(skill) != _skill_hash(previous)
+        if changed:
+            skill.version = max(skill.version, previous.version + 1)
+            skill.state = "candidate"
+            skill.provenance = {k: v for k, v in skill.provenance.items()
+                                if k != "test_evidence"}
+        else:
+            skill.state = "candidate" if existing is None else existing["state"]
         if existing is not None and skill.state == "retired":
             skill.state = "candidate"
         skill.updated_at = _now()
@@ -444,19 +475,46 @@ class SkillLibrary:
         """candidate -> validated, only on a passing test report.
 
         A report that did not pass refuses the promotion. No
-        report means the caller already verified the tests.
+        report is not accepted: the caller must provide passing
+        evidence from run_tests for this exact skill content.
         Retired skills are never promoted back by this path.
         """
         skill = self.get(name)
         if skill is None:
             raise KeyError(f"no skill named {name!r}")
-        if test_report is not None and not test_report.get("passed"):
+        if not isinstance(test_report, dict) or not test_report.get("passed"):
             raise ValueError(f"skill {name!r} has no passing test report")
+        if test_report.get("skill_hash") != _skill_hash(skill):
+            raise ValueError(f"skill {name!r} test evidence does not match its current contents")
+        skill_path = self.home / "skills" / f"{skill.name}.md"
+        if test_report.get("markdown_hash", "") != _markdown_hash(skill_path):
+            raise ValueError(f"skill {name!r} Markdown changed after testing")
+        results = test_report.get("results")
+        if (not isinstance(results, list)
+                or not any(not result.get("trivial") for result in results)
+                or any(not result.get("ok") for result in results
+                       if not result.get("trivial"))):
+            raise ValueError(f"skill {name!r} has no meaningful passing test evidence")
         if skill.state == "retired":
             raise ValueError(f"skill {name!r} is retired")
-        if skill.state == "candidate":
+        previous_evidence = (skill.provenance or {}).get("test_evidence", {})
+        if not isinstance(previous_evidence, dict):
+            previous_evidence = {}
+        changed_since_validation = (
+            previous_evidence.get("skill_hash") != test_report.get("skill_hash")
+            or previous_evidence.get("markdown_hash", "")
+            != test_report.get("markdown_hash", ""))
+        if skill.state == "candidate" or (
+                skill.state == "trusted" and changed_since_validation):
             skill.state = "validated"
-            self._update(skill)
+        skill.provenance = dict(skill.provenance)
+        skill.provenance["test_evidence"] = {
+            "skill_hash": test_report["skill_hash"],
+            "markdown_hash": test_report.get("markdown_hash", ""),
+            "ran_at": test_report.get("ran_at", ""),
+            "results": results,
+        }
+        self._update(skill)
         return skill
 
     def harvest_candidates(self, sandbox, governor=None) -> list[str]:
@@ -507,6 +565,14 @@ class SkillLibrary:
         skill = self.get(name)
         if skill is None:
             raise KeyError(f"no skill named {name!r}")
+        evidence = (skill.provenance or {}).get("test_evidence", {})
+        if not isinstance(evidence, dict):
+            evidence = {}
+        skill_path = self.home / "skills" / f"{skill.name}.md"
+        if (skill.state != "validated"
+                or evidence.get("skill_hash") != _skill_hash(skill)
+                or evidence.get("markdown_hash", "") != _markdown_hash(skill_path)):
+            raise ValueError(f"skill {name!r} must pass tests for its current contents before trust")
         if skill.state == "retired":
             raise ValueError(f"skill {name!r} is retired")
         unpinned = [dep for dep in (skill.dependencies or [])
@@ -516,9 +582,26 @@ class SkillLibrary:
                 f"trusting skill {name!r} needs pinned dependencies: "
                 f"{', '.join(sorted(set(unpinned)))} (use name==version)")
         skill.state = "trusted"
+        if not skill_path.exists():
+            evidence["markdown_hash"] = hashlib.sha256(
+                skill.to_markdown().encode("utf-8")).hexdigest()
+            skill.provenance["test_evidence"] = evidence
         self._update(skill)
         self._sync_discovery(skill)
+        if _markdown_hash(skill_path) != evidence.get("markdown_hash"):
+            raise ValueError(f"skill {name!r} discovery file changed during trust")
         return skill
+
+    def trusted_markdown(self) -> dict[str, str]:
+        """Return trusted skill files whose tested Markdown bytes still match."""
+        result = {}
+        for skill in self.list(states=("trusted",)):
+            path = self.home / "skills" / f"{skill.name}.md"
+            expected = (skill.provenance or {}).get("test_evidence", {}).get(
+                "markdown_hash", "")
+            if expected and _markdown_hash(path) == expected:
+                result[f"{skill.name}.md"] = path.read_text(encoding="utf-8")
+        return result
 
     def _sync_discovery(self, skill: Skill) -> None:
         """Keep the planner's discovery surface in step with trust.
@@ -618,6 +701,16 @@ class SkillLibrary:
         skill = self.get(name)
         if skill is None:
             raise KeyError(f"no skill named {name!r}")
+        from .sandbox import Sandbox as _Sandbox
+        if isinstance(sandbox, _Sandbox) and (
+                not sandbox.isolated or sandbox.allow_network):
+            skill_path = self.home / "skills" / f"{skill.name}.md"
+            return {"passed": False, "results": [],
+                    "count": len(skill.test_commands or []),
+                    "skill_hash": _skill_hash(skill),
+                    "markdown_hash": _markdown_hash(skill_path),
+                    "ran_at": _now(),
+                    "note": "skill tests require an isolated, network-disabled sandbox"}
         results: list[dict] = []
         meaningful = 0
         meaningful_ok = True
@@ -635,8 +728,12 @@ class SkillLibrary:
             results.append({"cmd": cmd, "ok": ok, "output": output[:500]})
             meaningful_ok = meaningful_ok and ok
         passed = meaningful > 0 and meaningful_ok and not missing
+        skill_path = self.home / "skills" / f"{skill.name}.md"
         report = {"passed": passed, "results": results,
-                  "count": len(skill.test_commands or []), "ran_at": _now()}
+                  "count": len(skill.test_commands or []),
+                  "skill_hash": _skill_hash(skill),
+                  "markdown_hash": _markdown_hash(skill_path),
+                  "ran_at": _now()}
         if missing:
             report["missing_dependencies"] = missing
             report["note"] = (

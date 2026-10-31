@@ -35,6 +35,11 @@ def _skill(name, description="write a csv report", **kwargs):
     return Skill(name=name, description=description, **kwargs)
 
 
+def _promote(library, name):
+    report = library.run_tests(name, FakeSandbox())
+    return library.promote(name, report)
+
+
 # ── license gate ──
 
 def test_license_gate_mit_ok_gpl_and_unknown_blocked():
@@ -71,7 +76,7 @@ def test_promote_trust_retire_rollback_and_history(tmp_path):
     assert skill.state == "candidate" and skill.version == 1
     assert len(library.version_history("csv_writer")) == 1
 
-    library.promote("csv_writer", {"passed": True})
+    _promote(library, "csv_writer")
     assert library.get("csv_writer").state == "validated"
     with pytest.raises(PermissionError):
         library.trust("csv_writer", approved=False)
@@ -161,8 +166,9 @@ def test_relevant_trusted_only_by_default(tmp_path):
     library = SkillLibrary(tmp_path)
     library.add(_skill("cand", description="write a csv report"))
     library.add(_skill("val", description="write a csv report"))
-    library.promote("val", {"passed": True})
+    _promote(library, "val")
     library.add(_skill("trust", description="write a csv report"))
+    _promote(library, "trust")
     library.trust("trust", approved=True)
     assert [skill.name for skill in library.relevant("csv report", limit=3)] == ["trust"]
     names = [skill.name for skill in library.relevant(
@@ -179,9 +185,9 @@ def test_learn_cycle_promotes_and_consolidates_validated(tmp_path):
     # consolidation step, not be retired as a duplicate.
     library.add(_skill("cand_csv", description="convert json to yaml"))
     library.add(_skill("old_csv", description="write a csv report"))
-    library.promote("old_csv", {"passed": True})
+    _promote(library, "old_csv")
     library.add(_skill("new_csv", description="write a csv report"))
-    library.promote("new_csv", {"passed": True})
+    _promote(library, "new_csv")
     summary = run_learn_cycle(tmp_path, FakeSandbox(),
                                   governor_check=lambda name, max_per_day=5: True)
     assert "cand_csv" in summary["promoted"]
@@ -195,8 +201,10 @@ def test_learn_cycle_promotes_and_consolidates_validated(tmp_path):
 def test_learn_cycle_trusted_duplicates_only_reported(tmp_path):
     library = SkillLibrary(tmp_path)
     library.add(_skill("t1", description="write a csv report"))
+    _promote(library, "t1")
     library.trust("t1", approved=True)
     library.add(_skill("t2", description="write a csv report"))
+    _promote(library, "t2")
     library.trust("t2", approved=True)
     summary = run_learn_cycle(tmp_path, FakeSandbox(),
                                   governor_check=lambda name, max_per_day=5: True)

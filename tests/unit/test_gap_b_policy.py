@@ -12,21 +12,33 @@ from src.capabilities.modal_images import CapabilityImageBuilder
 from src.capabilities.skill_library import Skill, SkillLibrary
 
 
+class _Sandbox:
+    def run(self, command):
+        return {"ok": True, "output": "pass"}
+
+
 def test_trust_requires_pinned_dependencies(tmp_path):
     lib = SkillLibrary(tmp_path)
     lib.add(Skill(name="loose", description="x",
-                  dependencies=["requests"]))
+                  dependencies=["requests"],
+                  test_commands=["python3 --version"]))
+    report = lib.run_tests("loose", _Sandbox())
+    lib.promote("loose", report)
     with pytest.raises(ValueError, match="pinned"):
         lib.trust("loose", approved=True)
-    assert lib.get("loose").state == "candidate"
+    assert lib.get("loose").state == "validated"
 
 
 def test_trust_accepts_pinned_and_dict_dependencies(tmp_path):
     lib = SkillLibrary(tmp_path)
     lib.add(Skill(name="pinned", description="x",
-                  dependencies=["requests==2.32.3"]))
+                  dependencies=["requests==2.32.3"],
+                  test_commands=["python3 --version"]))
     lib.add(Skill(name="verified", description="x",
-                  dependencies=[{"name": "numpy", "version": "1.26.0"}]))
+                  dependencies=[{"name": "numpy", "version": "1.26.0"}],
+                  test_commands=["python3 --version"]))
+    for name in ("pinned", "verified"):
+        lib.promote(name, lib.run_tests(name, _Sandbox()))
     assert lib.trust("pinned", approved=True).state == "trusted"
     assert lib.trust("verified", approved=True).state == "trusted"
 

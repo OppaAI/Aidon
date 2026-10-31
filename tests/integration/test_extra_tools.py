@@ -36,7 +36,7 @@ def _tools(tmp_path, **kw):
 
 EXPECTED = ["web_search", "fetch_url", "read_document", "search_document",
             "search_research_cache", "slack_send", "whatsapp_send",
-            "list_schedule", "cancel_schedule"]
+            "list_schedule", "cancel_schedule", "adopt_skill"]
 
 
 def test_all_nine_tools_present(tmp_path):
@@ -113,3 +113,59 @@ def test_messaging_sends_unconfigured_return_strings(tmp_path, monkeypatch):
     assert isinstance(slack, str) and "failed" in slack
     wa = tools["whatsapp_send"]("+1234567890", "hello")
     assert isinstance(wa, str) and "failed" in wa
+
+
+def test_adopt_skill_tests_offline_and_requires_separate_approval(tmp_path, monkeypatch):
+    from src.capabilities.skill_library import SkillLibrary
+    from src.interface.approval import Decision
+    import src.capabilities.sandbox as sandbox_module
+
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    draft = workdir / "summarize.md"
+    draft.write_text("# Summarize\n\nSummarize reports.\n\n## Tests\n\npython3 --version\n")
+
+    class FakeSandbox:
+        def __init__(self, root, *args, allow_network=False,
+                     require_isolation=False, **kwargs):
+            self.workdir = Path(root)
+            self.isolated = True
+            self.allow_network = allow_network
+        def run(self, command):
+            assert command == ["sh", "-c", "python3 --version"]
+            return {"ok": True, "output": "Python 3"}
+
+    class Approve:
+        def ask(self, *args, **kwargs):
+            return Decision("approved")
+
+    monkeypatch.setattr(sandbox_module, "Sandbox", FakeSandbox)
+    config = _Config()
+    config.home = tmp_path
+    result = _goal_extra_tools(config, workdir, gate=Approve())["adopt_skill"](
+        "summarize.md")
+    assert "Trusted skill summarize" in result
+    assert SkillLibrary(tmp_path).get("summarize").state == "trusted"
+
+
+def test_adopt_skill_refuses_without_isolation(tmp_path, monkeypatch):
+    from src.capabilities.skill_library import SkillLibrary
+    import src.capabilities.sandbox as sandbox_module
+
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    (workdir / "unsafe.md").write_text(
+        "# Unsafe\n\nProcedure.\n\n## Tests\n\npython3 --version\n")
+
+    class HostSandbox:
+        def __init__(self, root, *args, allow_network=False,
+                     require_isolation=False, **kwargs):
+            self.isolated = False
+            self.allow_network = allow_network
+
+    monkeypatch.setattr(sandbox_module, "Sandbox", HostSandbox)
+    config = _Config()
+    config.home = tmp_path
+    result = _goal_extra_tools(config, workdir)["adopt_skill"]("unsafe.md")
+    assert "need working bubblewrap isolation" in result
+    assert SkillLibrary(tmp_path).get("unsafe") is None
