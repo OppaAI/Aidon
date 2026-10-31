@@ -173,6 +173,7 @@ class Step:
     args: dict = field(default_factory=dict)
     deliverable: str = ""
     criteria: str = ""
+    description: str = ""
     executor: str = "tool"
     # DAG identity: steps from a DAG carry the node id and its
     # declared dependencies, so the executor can schedule
@@ -250,6 +251,8 @@ class Plan:
                     args=dict(step.get("args", {})),
                     deliverable=str(step.get("deliverable", "")),
                     criteria=str(step.get("criteria", "")),
+                    description=str(step.get("description", "") or
+                                    step.get("title", "")),
                     executor=str(step.get("executor", "tool")),
                     id=str(step.get("id", "") or f"step-{index}"),
                     depends_on=[str(d) for d in step.get("depends_on", [])]
@@ -626,7 +629,9 @@ class GoalRunner:
                 clients.append(candidate)
         return clients
 
-    def _trace(self, kind: str, status: str, detail: str = "") -> None:
+    def _trace(self, kind: str, status: str, detail: str = "", *,
+               usage_phase: str | None = None,
+               trace_key: str | None = None) -> None:
         # Attribute to this runner's own run id: sub-runners share
         # their parent's recorder, and without the override their
         # events would land in the parent's trace file. A runner
@@ -644,20 +649,18 @@ class GoalRunner:
             started = self._trace_started = {}
         seconds = 0.0
         tokens_in = tokens_out = thinking_tokens = 0
-        thinking = ""
+        key = trace_key or kind
         if status == "started":
-            started[kind] = time.monotonic()
+            started[key] = time.monotonic()
         else:
-            begin = started.pop(kind, None)
+            begin = started.pop(key, None)
             if begin is not None:
                 seconds = round(time.monotonic() - begin, 1)
             for client in self._counting_clients():
-                usage = client.take_phase_usage(kind)
+                usage = client.take_phase_usage(usage_phase or kind)
                 tokens_in += usage["tokens_in"]
                 tokens_out += usage["tokens_out"]
                 thinking_tokens += usage["thinking_tokens"]
-                if usage["thinking"]:
-                    thinking = usage["thinking"]
         if self.trace is not None:
             event = self.trace.record(kind, status, detail, run_id=self.run_id)
             if callable(self.trace_callback):
@@ -667,8 +670,6 @@ class GoalRunner:
                     "tokens_in": tokens_in, "tokens_out": tokens_out,
                     "thinking_tokens": thinking_tokens,
                 }
-                if thinking:
-                    payload["thinking"] = thinking
                 self.trace_callback(payload)
         if self.run_control is not None and self.run_id:
             stage_map = {
@@ -916,7 +917,7 @@ class GoalRunner:
 
         return judge
 
-    def _chat(self, phase: str, messages) -> str:
+    def _chat(self, phase: str, messages, usage_phase: str | None = None) -> str:
         """One model call, router-aware.
 
         Fast phases (interpret, learn, respond) go through the
@@ -1010,9 +1011,13 @@ class GoalRunner:
             chat_phase = getattr(self.router, "chat_phase", None)
             if callable(chat_phase):
                 try:
-                    return chat_phase(phase, messages, sampling=sampling)
+                    return chat_phase(phase, messages, sampling=sampling,
+                                      usage_phase=usage_phase)
                 except TypeError:
-                    return chat_phase(phase, messages)
+                    try:
+                        return chat_phase(phase, messages, sampling=sampling)
+                    except TypeError:
+                        return chat_phase(phase, messages)
             chat = getattr(self.router, "chat", None)
             if callable(chat):
                 try:
@@ -1021,9 +1026,15 @@ class GoalRunner:
                     return chat(messages)
         if hasattr(self.client, "chat_phase"):
             try:
-                return self.client.chat_phase(phase, messages, sampling=sampling)
+                return self.client.chat_phase(
+                    phase, messages, sampling=sampling,
+                    usage_phase=usage_phase)
             except TypeError:
-                return self.client.chat_phase(phase, messages)
+                try:
+                    return self.client.chat_phase(phase, messages,
+                                                  sampling=sampling)
+                except TypeError:
+                    return self.client.chat_phase(phase, messages)
         try:
             return self.client.chat(messages, sampling=sampling)
         except TypeError:
@@ -1239,8 +1250,10 @@ class GoalRunner:
                       "of what the user will get. deliverable_descriptions is "
                       "an object mapping every deliverable filename to a short, "
                       "human-readable explanation of what that file contains "
-                      "and how it is used. Each step is an object "
-                      "with tool, args, deliverable. Tools: write, read, "
+                      "and how it is used. Each step is an object with tool, "
+                      "args, deliverable, and a short human-facing description "
+                      "of its purpose (never private chain-of-thought). "
+                      "Tools: write, read, "
                       "list, shell only, kernel mode, no calculate, "
                       "no plugin tools. Keep every file inside "
                       "the workdir.")
@@ -1252,8 +1265,10 @@ class GoalRunner:
                       "deliverable_descriptions is an object mapping every "
                       "deliverable filename to a short, human-readable "
                       "explanation of what that file contains and how it is "
-                      "used. Each step is an object "
-                      "with tool, args, deliverable. Tools: write, read, "
+                      "used. Each step is an object with tool, args, "
+                      "deliverable, and a short human-facing description "
+                      "of its purpose (never private chain-of-thought). "
+                      "Tools: write, read, "
                       "list, shell, calculate. Keep every file inside "
                       "the workdir.")
         system += (" Every item in deliverables MUST be produced by exactly "
@@ -2457,6 +2472,30 @@ class GoalRunner:
         """
         from contextlib import nullcontext
         guard = lock if lock is not None else nullcontext()
+        llm_step = step.tool == "llm"
+        model_phase = "respond" if step.executor == "fast" else "plan"
+        usage_phase = (f"llm-step:{step.id or step.deliverable or 'unnamed'}"
+                       if llm_step else "sandbox")
+        trace_key = f"{usage_phase}:{id(step)}" if llm_step else "sandbox"
+        description = str(getattr(step, "description", "") or "").strip()
+        if step.tool == "shell":
+            import shlex
+            raw_command = step.args.get("command", step.args.get("cmd", ""))
+            command_text = (shlex.join([str(part) for part in raw_command])
+                            if isinstance(raw_command, (list, tuple))
+                            else str(raw_command))
+            try:
+                from ..memory.redaction import redact_text
+                command_text = redact_text(command_text)
+            except Exception:
+                pass
+            trace_detail = "Shell command: " + command_text[:1200]
+        else:
+            trace_detail = description or (
+                f"{step.tool} → {step.deliverable}" if step.deliverable
+                else f"Run tool: {step.tool}")
+            if llm_step:
+                trace_detail = "LLM step: " + trace_detail
         if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
             return "cancelled"
         try:
@@ -2467,7 +2506,9 @@ class GoalRunner:
             from .step_lines import record_attempt
             with guard:
                 record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "started")
-            self._trace("sandbox", "started", step.tool)
+            trace_kind = "llm" if llm_step else "sandbox"
+            self._trace(trace_kind, "started", trace_detail,
+                        usage_phase=usage_phase, trace_key=trace_key)
             if step.tool == "write" and not step.args:
                 step.args = {"file": step.deliverable,
                              "text": f"Goal: {goal}\n"}
@@ -2477,8 +2518,8 @@ class GoalRunner:
                 # phase, strong via the plan phase — and its
                 # reply becomes the deliverable file.
                 _prompt = str(step.args.get("prompt", "") or step.args.get("text", ""))
-                _reply = self._chat("respond" if step.executor == "fast" else "plan",
-                                    [Message("user", _prompt)])
+                _reply = self._chat(model_phase, [Message("user", _prompt)],
+                                    usage_phase=usage_phase)
                 if step.deliverable:
                     self._call_tool("write", {"file": step.deliverable, "text": _reply})
             else:
@@ -2531,7 +2572,8 @@ class GoalRunner:
                             pass
             with guard:
                 record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "done")
-            self._trace("sandbox", "done", step.tool)
+            self._trace(trace_kind, "done", "Completed: " + trace_detail,
+                        usage_phase=usage_phase, trace_key=trace_key)
             if step.deliverable:
                 with guard:
                     passed.add(step.deliverable)
@@ -2548,7 +2590,9 @@ class GoalRunner:
                     record_attempt(self._step_lines, step.deliverable or step.tool, step.tool, "failed", str(exc)[:100])
             except Exception:
                 pass
-            self._trace("sandbox", "failed", str(exc)[:100])
+            self._trace("llm" if llm_step else "sandbox", "failed",
+                        (trace_detail + " · " + str(exc))[:500],
+                        usage_phase=usage_phase, trace_key=trace_key)
             return msg
 
     def _run_plan_levels(self, goal, current_plan, passed, verified, attempt):
@@ -2973,10 +3017,31 @@ class GoalRunner:
             for step in current_plan.normalized_steps():
                 if step.criteria and step.criteria not in criteria:
                     criteria.append(step.criteria)
-            self._trace("verify", "started", "verifying deliverables")
+            criteria_note = "; ".join(str(item) for item in criteria)
+            checked_names = ", ".join(str(item)
+                                       for item in current_plan.deliverables)
+            verify_detail = ("Code verifier: checked that deliverables exist "
+                             "and are non-empty; criteria: " +
+                             (criteria_note or "none specified") +
+                             "; files: " + (checked_names or "none"))
+            try:
+                from ..memory.redaction import redact_text
+                verify_detail = redact_text(verify_detail)
+            except Exception:
+                pass
+            self._trace("verify", "started", verify_detail[:1200])
             ok, verify_failures, verified = verify_plan(
                 self.sandbox.workdir, current_plan.deliverables, criteria)
-            self._trace("verify", "done" if ok else "failed", f"verified={len(verified)}")
+            outcome = ("Code verifier passed" if ok else "Code verifier failed")
+            outcome += f"; verified {len(verified)} file(s)"
+            if verify_failures:
+                outcome += "; findings: " + "; ".join(verify_failures)
+            try:
+                from ..memory.redaction import redact_text
+                outcome = redact_text(outcome)
+            except Exception:
+                pass
+            self._trace("verify", "done" if ok else "failed", outcome[:1200])
             failures.extend(verify_failures)
             # Model verifier, second opinion only, after code
             # verification passes. A "no" triggers incremental repair,

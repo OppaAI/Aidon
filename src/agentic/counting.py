@@ -193,8 +193,10 @@ class CountingClient(ModelClient):
             self.tokens_by_phase[phase] = self.tokens_by_phase.get(phase, 0) + tokens
         return reply
 
-    def chat_phase(self, phase: str, messages, sampling=None) -> str:
-        return self.chat(messages, phase=phase, sampling=sampling)
+    def chat_phase(self, phase: str, messages, sampling=None,
+                   usage_phase: str | None = None) -> str:
+        return self.chat(messages, phase=usage_phase or phase,
+                         sampling=sampling)
 
     def chat_stream(self, messages, sampling=None, phase: str = "stream"):
         chunks = []

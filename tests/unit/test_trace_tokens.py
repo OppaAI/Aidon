@@ -89,7 +89,7 @@ def test_trace_done_event_carries_step_tokens():
     assert payload["tokens_in"] == 100
     assert payload["tokens_out"] == 50
     assert payload["thinking_tokens"] == 30
-    assert payload["thinking"] == "some reasoning"
+    assert "thinking" not in payload
     assert payload["seconds"] >= 0
 
 

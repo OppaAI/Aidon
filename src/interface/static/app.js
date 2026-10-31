@@ -1128,8 +1128,11 @@
         lines.push("<strong>Steps</strong>");
         steps.forEach((st, i) => {
           const label = st && typeof st === "object"
-            ? (st.tool || st.deliverable || JSON.stringify(st)) : String(st);
-          lines.push((i + 1) + ". " + esc(String(label)));
+            ? (st.description || st.title || st.deliverable || st.tool || JSON.stringify(st))
+            : String(st);
+          const tool = st && typeof st === "object" && st.tool
+            ? " <span class=\"step-tool\">(" + esc(String(st.tool)) + ")</span>" : "";
+          lines.push((i + 1) + ". " + esc(String(label)) + tool);
         });
       }
     }

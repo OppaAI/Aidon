@@ -157,6 +157,7 @@ def plan_to_dict(plan: Any) -> dict:
                 "args": dict(step.args or {}),
                 "deliverable": step.deliverable or "",
                 "criteria": step.criteria or "",
+                "description": getattr(step, "description", "") or "",
                 "executor": getattr(step, "executor", "tool") or "tool",
             })
         elif isinstance(step, dict):
