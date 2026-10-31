@@ -3,6 +3,8 @@ from src.capabilities.x11_driver import X11Driver
 
 def test_x11_driver_uses_fixed_xdotool_commands(monkeypatch):
     calls = []
+    monkeypatch.setenv("AIDON_MODEL_API_KEY", "must-not-reach-xdotool")
+    monkeypatch.setenv("XAUTHORITY", "/tmp/test-xauthority")
 
     def fake_run(argv, **kwargs):
         calls.append((argv, kwargs))
@@ -22,6 +24,9 @@ def test_x11_driver_uses_fixed_xdotool_commands(monkeypatch):
         ["xdotool", "click", "--repeat", "3", "--delay", "10", "5"],
     ]
     assert all(call[1]["check"] is True for call in calls)
+    assert all("AIDON_MODEL_API_KEY" not in call[1]["env"] for call in calls)
+    assert all(call[1]["env"]["XAUTHORITY"] == "/tmp/test-xauthority"
+               for call in calls)
 
 
 def test_x11_driver_requires_display(monkeypatch):

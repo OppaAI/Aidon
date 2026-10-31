@@ -23,8 +23,14 @@ class X11Driver:
             raise RuntimeError("DISPLAY is not set")
 
     def _run(self, args: list[str]) -> None:
-        env = os.environ.copy()
+        # xdotool only needs the X11 connection and a small runtime context.
+        # Do not pass model, messaging, or MCP credentials to a child process.
+        env = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL")
+               if key in os.environ}
         env["DISPLAY"] = self.display
+        for key in ("XAUTHORITY",):
+            if key in os.environ:
+                env[key] = os.environ[key]
         subprocess.run([self.executable, *args], env=env, check=True,
                        capture_output=True, text=True, timeout=15)
 
