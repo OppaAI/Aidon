@@ -115,9 +115,11 @@ def _scheduled_gate(sandboxed: bool = False) -> ApprovalGate:
 
 
 def _make_web_researcher(config, conversation_context: str = ""):
-    """Snippet researcher from config, shared by interactive and
-    scheduled runs. Returns title/snippet strings (no URLs — the
-    deep researcher is the citation-carrying path)."""
+    """Search researcher shared by interactive and scheduled runs.
+
+    Include result URLs so interview recommendations can cite the
+    sources behind current claims instead of presenting snippets alone.
+    """
     def _researcher(goal_text):
         try:
             from ..agentic.research_allow import DomainGrants, load_allowlist
@@ -129,7 +131,8 @@ def _make_web_researcher(config, conversation_context: str = ""):
             _r = _s(search_text, backend=config.search_backend, tavily_key=config.tavily_api_key, searxng_url=config.searxng_url,
                     allowlist=load_allowlist(config.home, config.research_allowlist),
                     grants=DomainGrants(config.home))
-            return [f"{x.get('title', '')}: {x.get('snippet', '')}" for x in _r.get("results", [])]
+            return [f"{x.get('title', '')}: {x.get('snippet', '')} ({x.get('url', '')})"
+                    for x in _r.get("results", []) if x.get("url")]
         except Exception:
             return []
     return _researcher

@@ -13,11 +13,11 @@ Reviewed against the requested chat → capability inventory → Tool Crafting L
 
 ## Release blockers
 
-1. **Acquisition orchestration:** an approved brief is currently planner context. There is no deterministic state machine proving acquisition, successful tests, registration and resumption of the original goal. Add explicit states and evidence before claiming completion.
-2. **Functional validation:** plugin preflight scans and validates source; it does not enforce successful functional acceptance tests before adoption. MCP connection/list checks do not validate every tool's behavior. Require scoped acceptance evidence without speculative calls with side effects.
-3. **Recovery:** question waiters and interview state live in process memory. Persist the original goal, interview, approved brief and stage, restore them after restart, and make acquisition retries idempotent. Browser refresh and conversation switching need browser tests.
-4. **Recommendations:** the interview model currently has no research tool loop. It must not claim current prices, compatibility or MCP endpoints are verified. Add cited discovery before presenting researched options.
-5. **Regression failures:** the full suite still fails. Several older tests depend on empty FakeClient replies becoming executable plans; preserve rejection of invalid plans and provide valid scripted plans in workflow tests.
+1. **Acquisition orchestration — open:** an approved brief is currently planner context. There is no deterministic state machine proving acquisition, successful tests, registration and resumption of the original goal. Add explicit states and evidence before claiming completion.
+2. **Functional validation — open:** configured plugin acquisition runs manifest acceptance tests in an isolated backend and stores evidence bound to plugin bytes. Test quality is not proven, and MCP connection/list checks do not validate every tool's behavior. Require meaningful scoped evidence without speculative external actions.
+3. **Recovery — open:** interview steps persist, live runs reconnect, and reopened chats show an explicit recovery action. Process restart still requires user action; automatic workflow restoration, idempotent acquisition retries, and browser refresh/switching tests remain incomplete.
+4. **Recommendations — in progress:** uncertain-choice interviews can call web search, but the configured researcher previously discarded source URLs. Preserve citations and verify them in the interview flow before claiming current prices, compatibility or MCP endpoints.
+5. **Regression failures — closed for current revision:** full suite passed 1,376 tests with 7 environment-dependent skips on 2026-10-31. Re-run after subsequent code changes and in CI.
 6. **PC execution:** SSH is an alternative execution backend, not a separate scoped PC capability alongside Modal. Desktop actions run on Aidon's host. Verify target selection, permissions and credentials before enabling remote installations or desktop access.
 7. **Deployment validation:** real model, Modal authentication/networking, browser interactions and PC/X11 control have not been validated end to end in this session.
 
@@ -35,11 +35,11 @@ Covered goal; reject lab; uncertain user compares options; approve and revise br
 ## Repair validation update
 
 - Baseline regression run: 1,346 passed, 7 skipped. Namespace-dependent tests now explicitly probe the runner and skip when isolation is unavailable; execution still fails closed by default. Subsequent focused checks cover durable replay and plugin replacement rollback.
-- Interview steps (including model output, original goal, questions and answers) persist in SQLite with FULL synchronization. Retrying the same goal in the same conversation replays committed steps and refuses changed prompts. This is retry recovery, not automatic process restart orchestration.
-- Research is available during uncertain-choice interviews through the configured researcher. Unavailable research is labeled unverified.
+- Interview steps (including model output, original goal, questions and answers) persist in SQLite with FULL synchronization. Retrying the same goal in the same conversation replays committed steps and refuses changed prompts. Reopened chats show a recovery action; automatic process restart orchestration remains open.
+- Research is available during uncertain-choice interviews through the configured researcher. Source URLs are now retained for citations; unavailable research is labeled unverified.
 - Plugin replacement now stages and hashes new bytes, preserves the previous version until installation, and rolls back on copy/load failures. Sudden process termination during rename still needs startup reconciliation.
 - SSH sync-back now uses Python's data-filtered archive extraction, matching Modal's extraction policy.
 - Workflow fixtures now supply executable model plans. Empty/invalid real model plans remain rejected. Updated assertions reflect the current lab and tool contracts.
 - Actual model, Modal and PC integration checks remain unrun without the required configured endpoints, authentication and reachable PC. These cannot be established by offline tests.
 
-The numbered release blockers above remain a tracking list. Some have mitigations described here, but deterministic acceptance-test enforcement, guaranteed acquisition/resumption, full standalone-lab recovery and real deployment validation are still open. Do not interpret green offline tests as production readiness.
+Items marked open or in progress remain release blockers. Green offline tests do not establish production readiness or validate real model, Modal, browser, PC or X11 integration.
