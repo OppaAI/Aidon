@@ -6,49 +6,70 @@
 <title>Aidon — Documents</title>
 <link rel="stylesheet" href="/static/style.css?v=__ASSET_V__">
 <style>
-.doc-body { max-width: 860px; margin: 0 auto; padding: 24px 20px 64px; line-height: 1.55; }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+.doc-layout { height: 100dvh; display: grid; grid-template-columns: 270px minmax(0, 1fr); }
+.doc-sidebar { min-height: 0; overflow-y: auto; padding: 24px 16px; background: var(--surface); border-right: 1px solid var(--border); }
+.doc-brand { display: block; margin-bottom: 8px; color: var(--moss); text-decoration: none; font-weight: 700; }
+.doc-sidebar h1 { font-size: 22px; margin: 0 0 20px; }
+.doc-toc { display: flex; flex-direction: column; gap: 3px; }
+.doc-toc strong { margin: 0 0 8px; color: var(--muted); font: 600 11px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.doc-toc a { display: block; padding: 7px 9px; border-radius: 7px; color: var(--muted); text-decoration: none; font-size: 14px; }
+.doc-toc a:hover, .doc-toc a:focus-visible { background: var(--surface2); color: var(--moss); }
+.doc-content { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scroll-behavior: smooth; }
+.doc-body { max-width: 900px; margin: 0 auto; padding: 30px 34px 64px; line-height: 1.65; }
 .doc-top { display: flex; align-items: baseline; gap: 16px; margin-bottom: 8px; }
-.doc-top a { text-decoration: none; }
 .doc-top h1 { margin: 0; }
-.doc-sub { opacity: 0.75; margin: 0 0 24px; }
-.doc-toc { border: 1px solid #444; border-radius: 8px; padding: 12px 20px; margin-bottom: 32px; }
-.doc-toc a { text-decoration: none; }
-.doc h2 { margin-top: 32px; border-bottom: 1px solid #444; padding-bottom: 4px; }
-.doc code { background: #222; padding: 1px 5px; border-radius: 4px; }
-.doc pre { background: #222; padding: 12px; border-radius: 8px; overflow-x: auto; }
+.doc-sub { color: var(--muted); margin: 0 0 32px; }
+.doc h2 { margin-top: 40px; border-bottom: 1px solid var(--border); padding-bottom: 6px; scroll-margin-top: 18px; }
+.doc code { background: var(--surface2); padding: 1px 5px; border-radius: 4px; }
+.doc pre { background: var(--surface2); padding: 12px; border-radius: 8px; overflow-x: auto; }
 .doc pre code { background: none; padding: 0; }
-.doc-foot { margin-top: 48px; opacity: 0.7; }
+.doc-foot { margin-top: 48px; color: var(--muted); }
+@media (max-width: 700px) {
+  .doc-layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .doc-sidebar { max-height: 34dvh; border-right: 0; border-bottom: 1px solid var(--border); padding: 12px 14px; }
+  .doc-sidebar h1 { font-size: 18px; margin-bottom: 8px; }
+  .doc-brand { display: inline-block; margin: 0 10px 0 0; }
+  .doc-toc { display: flex; flex-flow: row wrap; gap: 2px; }
+  .doc-toc strong { flex: 0 0 100%; }
+  .doc-toc a { padding: 5px 7px; font-size: 12px; }
+  .doc-body { padding: 22px 18px 48px; }
+}
 </style>
 </head>
 <body>
+<div class="doc-layout">
+<aside class="doc-sidebar" aria-label="Document navigation">
+  <a class="doc-brand" href="/">◈ Aidon</a>
+  <h1>Documents</h1>
+  <nav class="doc-toc" aria-label="Table of contents">
+  <strong>On this page</strong>
+  <a href="#start">Start here</a>
+  <a href="#modes">Run modes</a>
+  <a href="#interview">Interview and spec sheet</a>
+  <a href="#commands">Chat commands</a>
+  <a href="#approvals">Approvals and pre-approvals</a>
+  <a href="#voice">Voice</a>
+  <a href="#memory">Memory</a>
+  <a href="#dags">DAGs, factory, replay</a>
+  <a href="#capabilities">Capabilities, skills, plugins</a>
+  <a href="#sandbox">Sandbox and backends</a>
+  <a href="#research">Research</a>
+  <a href="#scheduler">Scheduler and practice</a>
+  <a href="#settings">Settings</a>
+  <a href="#safety">Safety rules</a>
+  <a href="#cli">Command line</a>
+  </nav>
+</aside>
+<div class="doc-content" id="doc-content">
 <main class="doc-body doc">
 <header class="doc-top">
-  <a href="/">◈ Aidon</a>
   <h1>Documents</h1>
 </header>
 <p class="doc-sub">How to use Aidon, and everything it can do. Aidon is a self-hosted
 agent: you give it a goal in plain language, and it interviews you, plans,
 runs the work in a sandbox, verifies the result, asks before anything live,
 and learns from the run so the next similar goal is cheaper.</p>
-
-<nav class="doc-toc">
-  <strong>On this page:</strong>
-  <a href="#start">Start here</a> ·
-  <a href="#modes">Run modes</a> ·
-  <a href="#interview">Interview and spec sheet</a> ·
-  <a href="#commands">Chat commands</a> ·
-  <a href="#approvals">Approvals and pre-approvals</a> ·
-  <a href="#voice">Voice</a> ·
-  <a href="#memory">Memory</a> ·
-  <a href="#dags">DAGs, factory, replay</a> ·
-  <a href="#capabilities">Capabilities, skills, plugins</a> ·
-  <a href="#sandbox">Sandbox and backends</a> ·
-  <a href="#research">Research</a> ·
-  <a href="#scheduler">Scheduler and practice</a> ·
-  <a href="#settings">Settings</a> ·
-  <a href="#safety">Safety rules</a> ·
-  <a href="#cli">Command line</a>
-</nav>
 
 <h2 id="start">Start here</h2>
 <p>Talk to Aidon in the WebUI chat, on WhatsApp, on Slack, or on the command
@@ -232,5 +253,7 @@ and roadmap.</p>
   <a href="/dag">DAGs</a>
 </footer>
 </main>
+</div>
+</div>
 </body>
 </html>
