@@ -240,7 +240,7 @@ CHAT_HTML = """<!doctype html>
 </g>
 <rect x="89" y="88" width="22" height="18" rx="6" fill="#1a2a4a"/>
 <g id="robot-body">
-<path d="M74 104 C82 96 118 96 126 104 C140 119 139 153 127 173 C119 185 108 190 100 190 C92 190 81 185 73 173 C61 153 60 119 74 104 Z" fill="url(#robot-shell)" stroke="#c6d0df" stroke-width="1.5"/>
+<path d="M74 104 C82 101 118 101 126 104 C140 119 139 153 127 173 C119 185 108 190 100 190 C92 190 81 185 73 173 C61 153 60 119 74 104 Z" fill="url(#robot-shell)" stroke="#c6d0df" stroke-width="1.5"/>
 <ellipse cx="81" cy="119" rx="13" ry="6" fill="#fff" opacity=".72"/>
 <path d="M71 151 C82 164 118 164 129 151 Q124 173 109 181 Q100 186 91 181 Q76 173 71 151 Z" fill="#aebbd4" opacity=".24"/>
 <path d="M81 177 Q100 188 119 177 Q114 187 100 188 Q86 187 81 177Z" fill="#1a2a4a" opacity=".92"/>
