@@ -39,7 +39,11 @@ class X11Driver:
         elif kind == "key":
             self._run(["key", "--clearmodifiers", str(action["key"])])
         elif kind == "scroll":
-            self._run(["scroll", str(action["delta"])])
+            delta = int(action["delta"])
+            if delta:
+                # X11 wheel buttons: 4 scrolls up, 5 scrolls down.
+                self._run(["click", "--repeat", str(min(abs(delta), 100)),
+                           "--delay", "10", "4" if delta > 0 else "5"])
         else:
             raise ValueError(f"X11 driver cannot execute {kind}")
 

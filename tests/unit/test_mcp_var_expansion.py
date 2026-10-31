@@ -148,9 +148,12 @@ def test_stdio_client_env_expansion(monkeypatch):
 
 def test_stdio_client_env_reaches_server_process(monkeypatch, tmp_path):
     monkeypatch.setenv("MCP_TEST_TOKEN", "tok-123")
+    monkeypatch.setenv("UNRELATED_PRIVATE_KEY", "must-not-reach-server")
     script = tmp_path / "fake_mcp.py"
     script.write_text(
-        "import json, sys\n"
+        "import json, sys, os\n"
+        "assert 'UNRELATED_PRIVATE_KEY' not in os.environ\n"
+        "assert os.environ.get('MCP_TOKEN') == 'tok-123'\n"
         "for line in sys.stdin:\n"
         "    req = json.loads(line)\n"
         "    sys.stdout.write(json.dumps({'jsonrpc': '2.0', 'id': req['id'],"
@@ -162,5 +165,33 @@ def test_stdio_client_env_reaches_server_process(monkeypatch, tmp_path):
         client.start()
         assert client.env["MCP_TOKEN"] == "tok-123"
         assert client.token_var == "MCP_TEST_TOKEN"
+    finally:
+        client.close()
+
+
+def test_stdio_timeout_closes_unresponsive_server(tmp_path):
+    import sys
+    script = tmp_path / "silent.py"
+    script.write_text("import time\ntime.sleep(30)\n")
+    client = McpClient([sys.executable, str(script)], timeout=0.05)
+    with pytest.raises(TimeoutError):
+        client.start()
+    assert client.proc is None
+
+
+def test_stdio_notification_and_wrong_id(tmp_path):
+    import sys
+    script = tmp_path / "server.py"
+    script.write_text(
+        "import json,sys\n"
+        "for line in sys.stdin:\n"
+        " r=json.loads(line)\n"
+        " print(json.dumps({'jsonrpc':'2.0','method':'notice'}),flush=True)\n"
+        " print(json.dumps({'jsonrpc':'2.0','id':r['id'] if r['id']==1 else 99,'result':{}}),flush=True)\n")
+    client = McpClient([sys.executable, str(script)], timeout=1)
+    try:
+        client.start()
+        with pytest.raises(ValueError, match="ID mismatch"):
+            client.list_tools()
     finally:
         client.close()

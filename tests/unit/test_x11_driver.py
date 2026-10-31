@@ -19,7 +19,7 @@ def test_x11_driver_uses_fixed_xdotool_commands(monkeypatch):
         ["xdotool", "click", "1"],
         ["xdotool", "type", "--clearmodifiers", "--delay", "10", "hello; rm -rf /"],
         ["xdotool", "key", "--clearmodifiers", "Return"],
-        ["xdotool", "scroll", "-3"],
+        ["xdotool", "click", "--repeat", "3", "--delay", "10", "5"],
     ]
     assert all(call[1]["check"] is True for call in calls)
 

@@ -88,9 +88,10 @@ def _get(base, path):
 
 def test_file_route_serves_file_under_home_with_md_type(live_server):
     base, home = live_server
-    target = home / "notes.md"
+    target = home / "workspace" / "notes.md"
+    target.parent.mkdir()
     target.write_text("# hello\n")
-    status, ctype, body = _get(base, "notes.md")
+    status, ctype, body = _get(base, "workspace/notes.md")
     assert status == 200
     assert body == b"# hello\n"
     assert ctype == "text/markdown"
@@ -98,8 +99,8 @@ def test_file_route_serves_file_under_home_with_md_type(live_server):
 
 def test_file_route_serves_absolute_path_under_home(live_server):
     base, home = live_server
-    target = home / "sub" / "data.json"
-    target.parent.mkdir()
+    target = home / "workspace" / "sub" / "data.json"
+    target.parent.mkdir(parents=True)
     target.write_text('{"a": 1}')
     status, ctype, body = _get(base, str(target))
     assert status == 200
@@ -117,9 +118,17 @@ def test_file_route_rejects_traversal(live_server):
 
 def test_file_route_missing_is_404_and_directory_is_400(live_server):
     base, home = live_server
-    (home / "sub").mkdir()
-    assert _get(base, "nope-xyz.txt")[0] == 404
-    assert _get(base, "sub")[0] == 400
+    (home / "workspace" / "sub").mkdir(parents=True)
+    assert _get(base, "workspace/nope-xyz.txt")[0] == 404
+    assert _get(base, "workspace/sub")[0] == 400
+
+
+def test_file_route_rejects_private_home_files(live_server):
+    base, home = live_server
+    (home / ".env").write_text("SECRET=value")
+    (home / "registry.db").write_text("private")
+    assert _get(base, ".env")[0] == 403
+    assert _get(base, "registry.db")[0] == 403
 
 
 def test_file_route_refuses_symlink_escaping_home(live_server, tmp_path):

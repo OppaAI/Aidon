@@ -2839,6 +2839,12 @@ class WebUIServer:
             return 404, "application/json", b'{"error": "not found"}'
         if not resolved.is_relative_to(home):
             return 403, "application/json", b'{"error": "outside home"}'
+        relative = resolved.relative_to(home)
+        allowed_roots = (home / "workspace", home / "library" / "files", home / "images")
+        if (any(part.startswith(".") for part in relative.parts)
+                or resolved.suffix.lower() in (".db", ".sqlite", ".sqlite3", ".pem", ".key")
+                or not any(resolved.is_relative_to(root.resolve()) for root in allowed_roots)):
+            return 403, "application/json", b'{"error": "not a public artifact"}'
         if resolved.is_dir():
             return 400, "application/json", b'{"error": "is a directory"}'
         if not resolved.is_file():
