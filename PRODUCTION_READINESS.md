@@ -11,15 +11,32 @@ Reviewed against the requested chat → capability inventory → Tool Crafting L
 - Cancellation during the interview stops without preparing another brief.
 - Sandbox execution requires isolation by default; Modal keeps its independent network policy.
 
+## Code-level work still open
+
+These items need implementation before the release can be called complete; live checks below do not close them.
+
+1. **Durable end-to-end acquisition state:** the interview is persisted and approved skills trigger a bounded original-goal replan, but there is no durable state machine that automatically resumes acquisition, registration, and replanning after a process restart. The current recovery action is owner initiated.
+2. **Acquisition retry semantics:** test interrupted adoption at each side-effect boundary and make retries explicitly idempotent across plugins, skills, and MCP. Current skill adoption rejects changed bytes and recognizes an already-trusted identical skill; plugin replacement reconciles staged filesystem changes, but that is not a complete workflow transaction.
+3. **Acceptance-test quality:** obvious plugin no-ops are rejected and approval warns that static checks cannot prove coverage or safety. A stronger review/evaluation of authored tests is still needed; passing isolated commands alone is not proof of useful behavior.
+
+## Implemented in code; validate live before release
+
+The code changes and offline tests are complete for these items. This cloud workspace lacks the user's live browser, credentials, home PC, and configured services, so run the procedures below on the target setup and record evidence in the checklist.
+
+1. **Tool Lab acquisition and recovery UI:** code persists interview turns and lab state per conversation, renders questions in the lab card, and offers explicit recovery. Follow home-PC procedure 3 and 4 below; also open two conversations, save an answer in each, switch between them, and verify neither transcript overwrites the other. Force-close/restart Aidon mid-interview and verify the saved answer is offered by the recovery action, then continue without answering it twice.
+2. **Plugin test gate and approval:** using a disposable plugin, try `true` or `python -c 'assert True'` as its acceptance test and confirm adoption is refused. Replace it with a real assertion against a harmless plugin output, confirm the approval shows isolated backend, test count and candidate hash plus the quality caveat, then approve and verify the tool is registered. Do not use a plugin with external side effects.
+3. **MCP approval and functional probe:** configure a harmless local/test MCP server. Connect and confirm approval identifies the exact target and selected environment-variable names without values. Request an optional read-only test call; verify the approval shows its tool and redacted arguments before invocation, and that evidence stores only result type/hash. Confirm connect/list by itself is reported only as connectivity validation.
+4. **Research citation handling:** run a capability interview with configured search/research and compare the brief with returned search URLs. Confirm unsupported URLs are removed, returned URLs appear as references, and no-source research is labeled unverified. Manually verify each remaining URL supports the nearby claim; automated checks establish URL provenance only.
+5. **Browser persistence and rendering:** use procedure 2 below. Refresh while a conversation has Markdown, a code block, and a generated artifact; confirm the same conversation and content return. Repeat with the Tool Lab open, then switch conversations and return.
+6. **Actual sandbox backend:** use procedure 5 below with the backend you will deploy. For Modal, run from the configured Modal account and confirm the run card shows Modal, successful isolation, and the expected network policy. A local Bubblewrap/Docker run does not validate Modal.
+7. **SSH/PC isolation and cleanup (only if SSH is enabled):** SSH is intentionally unsandboxed. Configure a disposable reachable target using secure configuration (never chat or this Markdown), run a harmless command, confirm unattended shell approval is not bypassed, confirm the workspace is a unique child of the configured root, then confirm cleanup removes only that child and leaves sibling/parent files intact. If Aidon and the desktop are on the same PC, use the local X11 procedure instead of SSH.
+8. **Local X11/computer use:** use procedure 5 below, with a harmless test window. Verify screenshot, focus, click, typing and bounded wheel scroll against the intended DISPLAY/Xauthority. Confirm behavior on the actual desktop session; detecting `DISPLAY` or `xdotool` alone is insufficient.
+9. **Live model and deployment configuration:** submit a harmless acquisition goal through the production-configured model/provider and confirm it returns a valid plan, handles a missing capability interview, and fails clearly when the provider is unavailable. Never use a consequential goal for smoke testing.
+
 ## Release blockers
 
-1. **Acquisition orchestration — open:** plugin and skill adoption require separate approvals and test evidence, and newly trusted skills now trigger a bounded, validated replan of the original goal. A durable state machine still does not prove the full acquisition, registration and recovery workflow across process restart.
-2. **Functional validation — open, narrowed:** plugin and skill tests run in isolated, network-disabled backends and bind evidence to candidate bytes. Plugin acceptance now rejects obvious no-op commands and missing Python test scripts; the approval card warns that this does not prove behavioral coverage. MCP connect/list remains a connectivity check; an optional one-shot functional test requires approval showing the tool and arguments. Review authored test coverage and validate actual live MCP behavior.
-3. **Recovery — open:** interview steps persist, live runs reconnect, reopened chats show an explicit recovery action, and standalone lab sessions are now durable per conversation. Process restart still requires user action; automatic workflow restoration, idempotent acquisition retries, and browser refresh/switching tests remain incomplete.
-4. **Recommendations — in progress, narrowed:** unsupported URLs in capability interview recommendations are removed, retrieved URLs are shown as references, and missing research is labeled unverified. Live factual accuracy and source-to-claim fit still need runtime review.
-5. **Regression failures — closed for current revision:** full suite passed 1,410 tests with 7 environment-dependent skips on 2026-10-31. Re-run after subsequent code changes and in CI.
-6. **PC execution — in progress:** SSH remains a separately selected remote execution backend, not a scoped PC capability alongside Modal; real PC targeting, permissions, credentials and X11 control are unvalidated. SSH is now explicitly treated as unsandboxed, cannot trigger unattended shell auto-approval, and cleanup is confined to a unique per-run child directory.
-7. **Deployment validation:** real model, Modal authentication/networking, browser interactions and PC/X11 control have not been validated end to end in this session.
+- Regression failures are **closed for this revision**: 1,410 passed, 7 environment-dependent skips on 2026-10-31. Re-run after later code changes and in CI.
+- The code-level items above remain open. Runtime-only checks above remain pending until run on the target deployment. Green offline tests do not certify production readiness.
 
 ## Additional hardening — code fixes implemented
 
@@ -55,7 +72,7 @@ Covered goal; reject lab; uncertain user compares options; approve and revise br
 - Workflow fixtures now supply executable model plans. Empty/invalid real model plans remain rejected. Updated assertions reflect the current lab and tool contracts.
 - Actual model, Modal and PC integration checks remain unrun without the required configured endpoints, authentication and reachable PC. These cannot be established by offline tests.
 
-Items marked open or in progress remain release blockers. Green offline tests do not establish production readiness or validate real model, Modal, browser, PC or X11 integration.
+Only the code-level items under “Code-level work still open” are unimplemented. Items under “Implemented in code; validate live before release” have offline coverage but remain unverified against the target runtime until their procedures are completed.
 
 ## Fast home-PC validation (after pulling `dev`)
 
@@ -83,7 +100,7 @@ This is the short manual acceptance pass for the remaining runtime-only items. U
 
 4. Verify failure boundaries with a disposable invalid skill draft: make its isolated check fail and confirm it is not trusted or visible to the planner. Cancel another interview once and confirm it stops cleanly. Refresh the browser during an interview and verify the latest saved answer and current lab state return.
 
-5. If configured, run one harmless sandbox smoke test for the actual execution backend (`bubblewrap`, Docker, or Modal) and confirm the run card reports the expected backend and network state. Do not infer Modal readiness from local bubblewrap success. If using desktop automation, explicitly test only the configured local X11 display and an innocuous window; record display/Xauthority errors. Aidon on the same PC does not need SSH to control that PC. SSH is only a separate remote backend and needs an independently reachable target.
+5. If configured, run one harmless sandbox smoke test for the actual execution backend (`bubblewrap`, Docker, or Modal) and confirm the run card reports the expected backend and network state. Do not infer Modal readiness from local bubblewrap success. For X11, use an innocuous window and verify screenshot, focus, click, typing and wheel scroll on the configured display; record display/Xauthority errors. Aidon on the same PC does not need SSH to control that PC. SSH is only a separate remote backend and needs an independently reachable target.
 
 Record date, commit, backend, browser, outcome, and any error under the checklist below. Never paste credentials, API keys, cookies, or SSH passwords into this document.
 
@@ -96,3 +113,9 @@ Record date, commit, backend, browser, outcome, and any error under the checklis
 | Failed test and cancellation boundaries | Pending | |
 | Actual configured sandbox backend (Modal if used) | Pending | |
 | Local X11 / computer-use smoke test (if enabled) | Pending | |
+| Plugin no-op rejection and real isolated acceptance test | Pending | |
+| MCP target approval and optional functional probe (if used) | Pending | |
+| Research URL provenance and manual source/claim review | Pending | |
+| Restart during acquisition and resume behavior | Pending | |
+| SSH target/workspace/cleanup checks (only if SSH is enabled) | Pending | |
+| Live model/provider smoke test | Pending | |

@@ -9,7 +9,7 @@ The findings below describe the audited baseline; the status in this section ref
 - **Code mitigations implemented:** MCP child credential inheritance and blocking I/O, WebUI file/body bounds, local sandbox output/process-tree bounds, X11 wheel scrolling, staged plugin replacement, and filtered/validated remote archive extraction.
 - **Validation improvements implemented:** plugin acceptance rejects known no-op tests and missing/out-of-candidate Python scripts; unsupported recommendation URLs are removed in the capability interview.
 - **Additional hardening implemented:** MCP connection approvals now bind a SHA-256 fingerprint to the exact config and optional functional test; secrets are not printed or stored in test evidence. Lab transcripts are durable per conversation, with migration from the previous global-per-kind table.
-- **Still open:** durable acquisition completion and automatic workflow restoration after process restart. Home-PC browser refresh/switching, Modal, real MCP servers, and X11/desktop behavior require runtime validation and are not proven by offline tests.
+- **Still open in code:** durable acquisition completion and automatic workflow restoration after process restart; stronger acceptance-test quality assurance. Home-PC browser refresh/switching, Modal, real MCP servers, and X11/desktop behavior are implemented in code to the extent described below, but still require runtime validation.
 - **Current full suite:** 1,410 passed, 7 skipped on 2026-10-31; see `PRODUCTION_READINESS.md` for the home-PC procedure.
 
 ## Coverage and limits
@@ -20,39 +20,41 @@ The findings below describe the audited baseline; the status in this section ref
 - Checked edited JavaScript syntax. No live browser recovery, real model/Modal, PC SSH/X11, load/chaos, dependency vulnerability or penetration test was completed.
 - This is repository-wide automated coverage with targeted manual review, not a claim that every line, dependency, external integration or production configuration has been independently audited.
 
-## Confirmed findings to address
+## Findings from the audited baseline
 
-### P1 — MCP subprocesses inherit all host credentials
+The following findings were confirmed at the baseline commit but have since received code fixes on `dev`. They are retained as audit history; verify the listed runtime behavior before closing deployment readiness.
 
-`src/interface/mcp_client.py`, `McpClient.start`: `dict(os.environ)` forwards unrelated credentials to any approved third-party stdio server. The connection approval does not enumerate all inherited secrets. Build a minimal process environment and add only explicitly selected bindings; test that unrelated secrets never reach the child. Treat existing MCP servers as having host-account privileges until process isolation is implemented.
+### ~~P1 — MCP subprocesses inherit all host credentials~~ Fixed in code; runtime validation pending
 
-### P1 — MCP calls can block a workflow indefinitely
+`src/interface/mcp_client.py`, `McpClient.start`: the baseline forwarded unrelated credentials to approved stdio servers. The current implementation uses a minimal process environment with explicitly selected bindings. Runtime check: use a harmless test server, set a dummy unrelated environment variable, and confirm the child cannot read it while an explicitly selected binding is available. This limits inherited secrets but does not isolate the child filesystem or host account.
 
-`src/interface/mcp_client.py`, `_call`: blocking `stdout.readline()` has no deadline, does not match response IDs, and assumes the next line is a response rather than a notification. Add bounded protocol reads, response correlation, notification handling, cancellation and child-process cleanup. Test silent servers, interleaved notifications and wrong IDs.
+### ~~P1 — MCP calls can block a workflow indefinitely~~ Fixed in code; runtime validation pending
 
-### P1 — File serving includes sensitive Aidon-home files
+`src/interface/mcp_client.py`, `_call`: the baseline had unbounded reads. The current implementation applies request deadlines and response-ID checks. Runtime check: use a disposable server that stays silent, then one that sends a notification and a wrong-ID response before the correct response; confirm bounded timeout/correlation and child cleanup.
 
-`src/interface/webui.py`, `handle_file`: resolved-path confinement prevents escape from home, but allows every file inside it, including configuration and databases. Authentication is present; this is excessive exposure within the authenticated artifact-serving boundary. Restrict serving to registered artifacts/library attachments and deny configuration, credentials and internal databases. Test symlinks, encoded paths and generated links.
+### ~~P1 — File serving includes sensitive Aidon-home files~~ Fixed in code; runtime validation pending
 
-### P2 — Request bodies are not globally bounded
+`src/interface/webui.py`, `handle_file`: the baseline allowed sensitive files within Aidon's home. The current handler limits serving to workspace, library files and images and excludes private filenames and database/key extensions. Runtime check: while authenticated, verify a generated artifact and library attachment open, while config/database/key paths, encoded traversal and symlinks outside allowed roots are denied.
 
-`src/interface/webui.py`, handler `_read_body`: trusts Content-Length and reads it into memory without a general maximum. Specific upload limits do not protect every route or the initial read. Reject invalid/negative/oversized lengths before reading, return suitable HTTP errors, and configure read deadlines. Verify webhook routes too.
+### ~~P2 — Request bodies are not globally bounded~~ Fixed in code; runtime validation pending
 
-### P2 — Subprocess timeout/output limits are incomplete
+`src/interface/webui.py`, handler `_read_body`: the baseline accepted unbounded request bodies. The current handler rejects invalid framing, applies an 80 MiB cap, and sets a read deadline. Runtime check: on a disposable instance, submit malformed, oversized, and stalled bodies to harmless POST/PUT and webhook routes; confirm bounded errors and that the server remains responsive.
 
-`src/capabilities/sandbox.py`, `run`: capture_output buffers all output. Timeout handling does not explicitly terminate a whole process group. RLIMIT_FSIZE does not bound pipe output. Implement bounded collection and process-tree cleanup across supported backends, with noisy and child-spawning tests.
+### ~~P2 — Subprocess timeout/output limits are incomplete~~ Fixed for local runner; other backends need runtime validation
 
-### P2 — Acquisition completion is not enforced end to end
+`src/capabilities/sandbox.py`, `run`: the local runner now caps each output stream at 1 MiB and cleans up its process group on timeout/end. Runtime check: run noisy and child-spawning commands on the deployed local runner and confirm truncation and cleanup. Exercise Modal and SSH independently; local process-group handling does not guarantee their limits.
 
-The approved interview brief becomes planner context. Plugin static preflight and successful registration do not prove functional acceptance tests passed. MCP list-tools validates connectivity, not every remote action. Introduce durable acquisition states and recorded evidence tied to exact plugin bytes/server configuration, then resume the original goal only after successful tests and required approvals. Never test external actions speculatively.
+### P2 — Acquisition completion is not enforced end to end — partially open
 
-### P2 — Recovery still requires explicit retry
+The baseline lacked complete acceptance gating. Current plugin and skill paths require isolated test evidence, plugin evidence binds to candidate bytes, and MCP approval binds the exact config and optional functional probe. See runtime procedures above. Still open: durable acquisition state and process-restart completion across all steps; authored acceptance test quality is not fully established. MCP list-tools alone remains connectivity evidence, not proof of every remote action. Never test external actions speculatively.
 
-Interview steps persist and replay for the same goal/conversation; automatic waiter/workflow restoration is not implemented. Standalone lab pages still rely on browser storage. Plugin replacement rolls back ordinary failures, but process termination between renames needs startup reconciliation. Complete browser refresh, switching and process-restart tests before claiming outage-safe operation.
+### P2 — Recovery still requires explicit retry — partially open
 
-### P2 — Desktop scrolling uses an unsupported xdotool command
+Interview steps persist and replay for the same goal/conversation; automatic waiter/workflow restoration is not implemented. Standalone lab rows now use conversation-scoped server storage, and plugin replacement has startup reconciliation. Browser refresh/switching and restart recovery still need the procedures above; do not claim outage-safe automatic workflow resumption.
 
-`src/capabilities/x11_driver.py`, `X11Driver.__call__`: scroll emits `xdotool scroll ...`; implement signed mouse-wheel button events with a bounded count and verify on the target X11 session. Merely finding DISPLAY and xdotool does not demonstrate desktop control works.
+### ~~P2 — Desktop scrolling uses an unsupported xdotool command~~ Fixed in code; runtime validation pending
+
+`src/capabilities/x11_driver.py`, `X11Driver.__call__`: the baseline emitted an unsupported scroll command; it now sends bounded signed mouse-wheel button events. Runtime check: on the intended X11 display, verify actual scrolling and other desktop actions on an innocuous window. Merely finding DISPLAY and xdotool does not demonstrate desktop control works.
 
 ## Scanner findings triaged
 
@@ -63,16 +65,33 @@ Interview steps persist and replay for the same goal/conversation; automatic wai
 
 ## Release decision
 
-Green offline tests do not satisfy crash-recovery, functional-acquisition or real integration requirements. Keep unrestricted autonomous host access disabled until runtime and remaining workflow checks pass. Required PC access, accounts and credentials must be supplied through secure configuration; never put passwords in chat, commits or audit reports.
+Green offline tests do not satisfy the remaining crash-recovery, test-quality or live-integration requirements. Keep unrestricted autonomous host access disabled until runtime and remaining workflow checks pass. Required PC access, accounts and credentials must be supplied through secure configuration; never put passwords in chat, commits or audit reports.
 
 ## Subsequent repair progress
+
+### Fixed in code; target-runtime validation still required
+
+Use the matching detailed procedure in `PRODUCTION_READINESS.md` and record date, commit, environment and outcome in its checklist.
+
+- **MCP environment and protocol deadlines:** run the harmless local MCP smoke test, verify unrelated process environment secrets are absent, and test a silent server plus a notification before a matching response. Confirm the request times out and the child is cleaned up.
+- **File serving and request bounds:** while signed in, confirm workspace/library artifacts still open and config/database/key files and symlinks outside allowed roots are denied. Send malformed and oversized bodies to harmless test routes; verify bounded HTTP errors and no server hang. Use a disposable test instance.
+- **Local subprocess bounds:** on the target OS, run a noisy child and a child that spawns a subprocess; verify output truncation and process-tree cleanup at timeout. Test each deployed execution backend separately because local process-group handling does not prove Modal/SSH behavior.
+- **X11 scrolling:** confirm actual wheel scrolling, screenshot, click, typing and focus on the intended display and Xauthority with a harmless window.
+- **Plugin acceptance:** confirm trivial no-op checks are refused; use a harmless plugin with a meaningful assertion and verify approval is bound to its hash. Owner-review test source for coverage and safety.
+- **MCP approval, Tool Lab persistence, research sources, browser restoration, Modal, SSH and live model:** follow their itemized procedures in `PRODUCTION_READINESS.md`; these need target services, browser, credentials or host access unavailable to this audit runner.
+
+### Still open in code
+
+- Durable acquisition state machine and automatic process-restart restoration across interview, testing, approval, registration and original-goal continuation.
+- Idempotent retries for all acquisition side effects, including MCP; existing interview replay, skill identity checks and plugin filesystem reconciliation cover only parts of that workflow.
+- Stronger assurance that authored acceptance tests prove capability behavior and are safe, beyond rejecting known obvious no-ops.
 
 - MCP child environments now contain only runtime variables and explicitly configured bindings. Stdio reads and nonblocking writes share request deadlines, with response-ID checks. This is not filesystem isolation; approved MCP children still have the host account's filesystem access.
 - File serving is limited to workspace, library files and images, with private names and database/key extensions excluded. Existing links to files elsewhere in the Aidon home must be migrated to artifact locations.
 - POST and PUT body parsing rejects invalid framing and payloads above 80 MiB and uses a socket read deadline.
 - Local sandbox output is capped at 1 MiB per stream and its process group is killed at the end of a run or on timeout. Process groups are not a substitute for OS isolation: escaped sessions and other backends need separate verification.
-- X11 scrolling emits wheel button events; verification on a real desktop is still outstanding.
+- X11 scrolling emits wheel button events; verify it on the target desktop using the procedure above.
 - Plugin registry, goal-tool, and low-level commit paths now fail closed without successful isolated, network-disabled acceptance evidence bound to candidate bytes. Bubblewrap, Docker, and Modal are accepted only when the test run reports isolation and networking is disabled. Approval identifies the backend, test count and hash without exposing arbitrary test arguments or output. Test quality still requires review.
-- Durable end-to-end acquisition state and automatic interruption recovery remain unresolved.
+- Durable end-to-end acquisition state and automatic interruption recovery remain unresolved in code.
 - MCP connection approval now shows the exact target, selected environment-variable names, a config/test-call fingerprint, and any optional one-shot functional test's tool and redacted arguments. The test runs only after that approval; result text is not stored in evidence.
 - Standalone Tool, Skill, and MCP lab sessions are now keyed by conversation ID, migrate legacy records, and share a stable ID with their associated chat conversation. Browser-level restore and multi-browser conflict behavior still need a home-PC check.
