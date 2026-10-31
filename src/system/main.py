@@ -256,12 +256,16 @@ def _make_governor(config, budget_key=None):
 
 
 def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None, governor=None, optional_tools=None,
-                      plugin_registry=None) -> dict:
+                      plugin_registry=None, gate_context=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     If ``plugin_registry`` is given (a ``PluginRegistry`` instance that is
     already loaded and live), plugin adoption updates the registry the goal
     runner uses for subsequent tool calls in this workflow.
+
+    The ``self_modify`` tool is available only in the selfmod posture. It
+    applies a reviewed Python source replacement only after a forced owner
+    approval, and keeps a backup before changing the source tree.
 
     The loop approval-gates any extra tool whose name contains
     post, send, or publish before dispatch, and that gate is not
@@ -1151,6 +1155,142 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         tools["adopt_tool_plugin"] = adopt_tool_plugin
     except Exception:
         pass
+
+    # Tier 3: source changes are a separate, forced install approval.
+    # The proposal is prepared in the goal workdir; only the approved,
+    # syntax-valid bytes can be copied into Aidon's own src/ tree.
+    if (str(getattr(config, "tool_posture", "standard") or "standard")
+            .strip().lower() == "selfmod"
+            and not getattr(config, "kernel_mode", False)
+            and not scheduled):
+        def self_modify(target, proposal_file):
+            """Apply a staged Python source file after explicit approval."""
+            import difflib
+            import hashlib
+            import ast
+            import tempfile
+            import stat
+            from datetime import datetime, timezone
+
+            if gate is None:
+                return "self-modification refused: no approval gate is available"
+            raw_target = str(target).replace("\\", "/")
+            target_parts = Path(raw_target).parts
+            if (Path(raw_target).is_absolute() or ".." in target_parts
+                    or not raw_target.startswith("src/")):
+                return "self-modification refused: target must be an existing Python file under src/"
+
+            source_root = Path(__file__).resolve().parents[2]
+            source_dir = (source_root / "src").resolve()
+            destination = (source_root / raw_target).resolve()
+            if (destination.suffix != ".py" or destination == source_dir
+                    or source_dir not in destination.parents
+                    or not destination.is_file()):
+                return "self-modification refused: target must be an existing Python file under src/"
+
+            try:
+                proposal_path = _confined(proposal_file)
+                if not proposal_path.is_file():
+                    return "self-modification refused: proposal file was not found in the workdir"
+                proposed_bytes = proposal_path.read_bytes()
+                old_bytes = destination.read_bytes()
+                if len(proposed_bytes) > 256 * 1024 or len(old_bytes) > 256 * 1024:
+                    return "self-modification refused: source files are limited to 256 KiB"
+                proposed = proposed_bytes.decode("utf-8")
+                old_text = old_bytes.decode("utf-8")
+                proposed_tree = ast.parse(proposed, filename=raw_target)
+                from ..capabilities.plugins import SECRET_RE
+                for node in ast.walk(proposed_tree):
+                    if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                        continue
+                    targets = (node.targets if isinstance(node, ast.Assign)
+                               else [node.target])
+                    value = node.value
+                    if not (isinstance(value, ast.Constant)
+                            and isinstance(value.value, str)):
+                        continue
+                    if any(isinstance(item, ast.Name)
+                           and SECRET_RE.search(item.id)
+                           for target_node in targets
+                           for item in ast.walk(target_node)):
+                        return ("self-modification refused: proposed source "
+                                "assigns a secret-like name a string literal")
+            except (OSError, UnicodeError, SyntaxError, ValueError) as exc:
+                return f"self-modification refused: proposal validation failed ({type(exc).__name__})"
+
+            old_hash = hashlib.sha256(old_bytes).hexdigest()
+            proposed_hash = hashlib.sha256(proposed_bytes).hexdigest()
+            if old_hash == proposed_hash:
+                return "self-modification skipped: proposal matches the current source"
+            diff = "".join(difflib.unified_diff(
+                old_text.splitlines(keepends=True),
+                proposed.splitlines(keepends=True),
+                fromfile=f"current/{raw_target}",
+                tofile=f"proposed/{raw_target}"))
+            if len(diff) > 30_000:
+                return "self-modification refused: change is too large to review in one approval card"
+
+            body = (f"Target: {raw_target}\n"
+                    f"Current SHA-256: {old_hash}\n"
+                    f"Proposed SHA-256: {proposed_hash}\n"
+                    "Validation: Python syntax parsed successfully\n"
+                    "The complete change follows:\n\n" + diff)
+            try:
+                try:
+                    decision = gate.ask(
+                        "install", "Approve Aidon source change", body,
+                        force_ask=True, context=gate_context)
+                except TypeError:
+                    # Small gate adapters in embedding applications may not
+                    # accept the optional context keyword. Keep force_ask.
+                    decision = gate.ask(
+                        "install", "Approve Aidon source change", body,
+                        force_ask=True)
+            except Exception as exc:
+                return f"self-modification refused: approval failed ({type(exc).__name__})"
+            if getattr(decision, "verdict", "") != "approved":
+                return "self-modification refused: owner did not approve the source change"
+
+            # Bind approval to both files, preserve the old version, then
+            # atomically replace the destination. Recheck after the card
+            # because the source or proposal may have changed while waiting.
+            try:
+                current_old = destination.read_bytes()
+                current_proposal = proposal_path.read_bytes()
+                if (hashlib.sha256(current_old).hexdigest() != old_hash
+                        or hashlib.sha256(current_proposal).hexdigest() != proposed_hash):
+                    return "self-modification aborted: source or proposal changed after approval"
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                backup = (Path(config.home) / "self_modify_backups" /
+                          f"{stamp}_{old_hash[:12]}" / raw_target)
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                backup.write_bytes(old_bytes)
+                mode = stat.S_IMODE(destination.stat().st_mode)
+                temp_name = None
+                try:
+                    with tempfile.NamedTemporaryFile(
+                            mode="wb", dir=str(destination.parent),
+                            prefix=f".{destination.name}.", suffix=".tmp",
+                            delete=False) as temp_file:
+                        temp_name = temp_file.name
+                        temp_file.write(proposed_bytes)
+                        temp_file.flush()
+                        os.fsync(temp_file.fileno())
+                    os.chmod(temp_name, mode)
+                    # Last check immediately before the atomic replacement.
+                    if hashlib.sha256(destination.read_bytes()).hexdigest() != old_hash:
+                        return "self-modification aborted: source changed before replacement"
+                    os.replace(temp_name, destination)
+                finally:
+                    if temp_name and os.path.exists(temp_name):
+                        os.unlink(temp_name)
+            except OSError as exc:
+                return (f"self-modification failed ({type(exc).__name__}); "
+                        "inspect the target and backup before retrying")
+            return (f"Applied {raw_target}; backup: {backup}; "
+                    "restart Aidon for the change to load")
+
+        tools["self_modify"] = self_modify
 
     def ask_user(question):
         # Interview / clarifying questions are chat turns, not approval
@@ -2088,7 +2228,10 @@ def main(argv: list[str] | None = None) -> int:
         from ..capabilities.plugins import PluginRegistry
         from ..capabilities.tool_catalog import all_tool_names
         registry = PluginRegistry(config.home); registry.load_all()
-        available = all_tool_names(registry.tool_names())
+        available = all_tool_names(
+            registry.tool_names(),
+            selfmod=(config.tool_posture == "selfmod"
+                     and not config.kernel_mode))
         if args.action == "list":
             print(f"Plugin tools: {', '.join(registry.tool_names())}")
             print("Goal tools: " + ", ".join(available))
@@ -3000,7 +3143,7 @@ def main(argv: list[str] | None = None) -> int:
                                 clef_client=_clef_client,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor)
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins, gate_context=_gate_context), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor)
             def _deliver_files(files, target):
                 """Upload run deliverables as bytes to a Slack/WhatsApp target.
 

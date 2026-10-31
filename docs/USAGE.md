@@ -207,6 +207,19 @@ never in the repo.
   client. File and network work stays with the sandbox
   tools and with later, explicitly approved capability
   plugins.
+- Tier 3 is available when `AIDON_TOOL_POSTURE=selfmod`.
+  Aidon can stage a complete replacement Python file in the
+  goal workdir, check it in the sandbox, and call
+  `self_modify` with `target` (an existing `src/**/*.py`
+  path) and `proposal_file` (the staged file). The tool
+  checks Python syntax, presents the complete diff and
+  hashes, and always requests an explicit `install`
+  approval, even when autonomy or pre-approval is enabled.
+  Approved changes are backed up under
+  `~/.aidon/self_modify_backups/` before atomic replacement.
+  It refuses new files and paths outside `src/`; restart
+  Aidon to load the edited source. Scheduled runs do not
+  expose this tool.
 - Standalone skills, Markdown only, live in
   `~/.aidon/skills/<name>.md` and are passed to the
   planner as context, never executed as code.

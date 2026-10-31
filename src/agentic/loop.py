@@ -1320,6 +1320,16 @@ class GoalRunner:
             # extra tools are advertised only outside kernel mode.
             system += (" Extra tools available to plan steps: "
                        + ", ".join(sorted(self.extra_tools)) + ".")
+            if "self_modify" in self.extra_tools:
+                system += (" Tier 3 self-modification: stage a complete proposed "
+                           "Python file in the workdir, sandbox-check it (and run "
+                           "relevant tests in the sandbox), then call self_modify "
+                           "with target='src/relative/module.py' and "
+                           "proposal_file='<workdir file>'. The tool validates "
+                           "syntax, shows the full diff, and always requires an "
+                           "owner install approval. It only replaces existing "
+                           "Python files under src/; restart Aidon to load the "
+                           "approved source change.")
             if "schedule_job" in self.extra_tools:
                 system += (" schedule_job takes name, kind, schedule, goal, "
                            "and optional until (ISO datetime, the job "

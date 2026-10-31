@@ -2141,7 +2141,7 @@ class WebUIServer:
             {"key": "AIDON_SANDBOX_NETWORK", "label": "Sandbox network", "type": "bool", "default": "0", "desc": "Allow network access inside sandbox commands.", "secret": False},
             {"key": "AIDON_SANDBOX_REQUIRE_ISOLATION", "label": "Require isolation", "type": "bool", "default": "0", "desc": "Refuse sandbox commands when bubblewrap isolation is unavailable.", "secret": False},
             {"key": "AIDON_KERNEL", "label": "Kernel mode", "type": "bool", "default": "0", "desc": "Kernel mode: write/read/list/shell only, no calculate, no plugins.", "secret": False},
-            {"key": "AIDON_TOOL_POSTURE", "label": "Tool posture", "type": "enum", "default": "selfmod", "desc": "How far the self-development ladder is open: locked (seed only, no adoption), standard (pure plugins only), developer (capability plugins: http, fs, run, secrets), selfmod (developer plus self-modification of Aidon's own source). Every adoption still needs an approval card listing its capabilities.", "secret": False, "options": ["locked", "standard", "developer", "selfmod"]},
+            {"key": "AIDON_TOOL_POSTURE", "label": "Tool posture", "type": "enum", "default": "selfmod", "desc": "How far the self-development ladder is open: locked (seed only, no adoption), standard (pure plugins only), developer (capability plugins: http, fs, run, secrets), selfmod (developer plus source changes shown in full and gated by explicit owner approval). Source changes are limited to existing Python files under src/ and backed up before replacement.", "secret": False, "options": ["locked", "standard", "developer", "selfmod"]},
             {"key": "AIDON_OPTIONAL_TOOLS", "label": "Optional tools", "type": "bool", "default": "0", "desc": "Show the full built-in toolset (web search, documents, social, media, email, webcam, YouTube). Off: only the minimal core ladder tools (fetch, ask, installs, MCP connect, plugin adoption). Adopted plugins and trusted skills are never gated. Default: off (0).", "secret": False},
             {"key": "AIDON_COMPUTER_DRIVER", "label": "Computer driver", "type": "enum", "default": "", "desc": "Opt-in desktop driver; requires a graphical session and kernel mode off.", "secret": False, "options": ["", "x11"]},
             {"key": "AIDON_COMPUTER_SECRETS", "label": "Computer secrets", "type": "string", "default": "", "desc": "Comma-separated env names the owner authorizes for computer use. Only listed names resolve; the model names a handle, never a value.", "secret": True},
@@ -2654,7 +2654,11 @@ class WebUIServer:
         # from the WebUI just because the manifest was not edited.
         live_names = [str(item.get("name", "")) for item in discover_tools(self.home)
                       if item.get("name")]
-        goal_tools = list(dict.fromkeys(all_tool_names(plugin_tools) + live_names))
+        selfmod = (str(getattr(self.config, "tool_posture", "standard")
+                       or "standard").lower() == "selfmod"
+                   and not getattr(self.config, "kernel_mode", False))
+        goal_tools = list(dict.fromkeys(
+            all_tool_names(plugin_tools, selfmod=selfmod) + live_names))
         return {"sandbox_tools": ["write", "read", "list", "shell", "calculate"],
                 "goal_tools": goal_tools,
                 "plugin_tools": plugin_tools}
@@ -3318,7 +3322,7 @@ class WebUIServer:
             "threads_publish", "threads_post", "instagram_publish",
             "instagram_post", "email_send", "record_system_audio", "notify",
             "uv_venv", "install_python_package", "apt_install",
-            "adopt_tool_plugin", "mcp_connect", "mcp_disconnect", "tts_speak",
+            "adopt_tool_plugin", "mcp_connect", "mcp_disconnect", "self_modify", "tts_speak",
             "write_file", "write_versioned", "sam_segment",
         }
         tool_rows = []
@@ -3372,7 +3376,10 @@ class WebUIServer:
         # misleading 404 from the capabilities studio.
         try:
             from ..capabilities.tool_catalog import all_tool_names
-            if wanted in all_tool_names():
+            selfmod = (str(getattr(self.config, "tool_posture", "standard")
+                           or "standard").lower() == "selfmod"
+                       and not getattr(self.config, "kernel_mode", False))
+            if wanted in all_tool_names(selfmod=selfmod):
                 if wanted in {"write", "read", "list", "shell", "calculate"}:
                     source_module = importlib.import_module("src.capabilities.tools")
                     source = inspect.getsource(source_module.ToolRegistry)

@@ -57,7 +57,8 @@ def _tool_posture() -> str:
     The posture decides how far the self-development ladder is open:
     locked (seed tools only, no adoption), standard (pure plugins
     only), developer (capability plugins allowed), selfmod (developer
-    plus self-modification of Aidon's own source). An unknown value
+    plus reviewed, owner-approved edits to Aidon's own Python source).
+    An unknown value
     falls back to standard so a typo never silently opens the gate.
     """
     raw = os.environ.get("AIDON_TOOL_POSTURE", "selfmod").strip().lower()

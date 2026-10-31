@@ -19,7 +19,10 @@ GOAL_TOOL_NAMES = (
 )
 
 
-def all_tool_names(plugin_names=()):
+def all_tool_names(plugin_names=(), *, selfmod=False):
     """Return the deduplicated public tool list in stable order."""
-    return list(dict.fromkeys((*SANDBOX_TOOL_NAMES, *GOAL_TOOL_NAMES,
-                               *(str(name) for name in plugin_names))))
+    names = [*SANDBOX_TOOL_NAMES, *GOAL_TOOL_NAMES,
+             *(str(name) for name in plugin_names)]
+    if selfmod:
+        names.append("self_modify")
+    return list(dict.fromkeys(names))
