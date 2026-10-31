@@ -1786,7 +1786,7 @@
     const previousRun = currentRun;
     const guidance = guidanceInput.value.trim();
     const forceWeb = document.getElementById("web-btn")?.classList.contains("active") || false;
-    const runMode = document.getElementById("mode-chooser")?.value || "ask";
+    const runMode = document.getElementById("mode-chooser")?.value || "plan";
     const imgs = pendingImages.slice();
     const fls = pendingFiles.slice();
     const files = imgs.concat(fls);

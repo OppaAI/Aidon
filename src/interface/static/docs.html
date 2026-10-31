@@ -85,14 +85,14 @@ verified file to the output you named, with a snapshot backup.</p>
 <h2 id="modes">Run modes</h2>
 <p>Aidon runs in one of three modes, picked in the WebUI <strong>Run
 Mode</strong> chooser or with <code>/ask</code>, <code>/plan</code>,
-<code>/execute</code> on WebUI, WhatsApp, Slack, and the CLI.</p>
+<code>/execute</code> on WebUI, WhatsApp, Slack, and the CLI. Plan is the
+default when you have not selected a mode.</p>
 <ul>
-  <li><strong>Ask (the default).</strong> A goal starts with chat questions
-  and stops at a frozen spec. Nothing is planned or run until you approve the
-  spec and proceed. This is the mode for regular use: gathering details beats
-  an inaccurate full run.</li>
-  <li><strong>Plan.</strong> Stops after the plan, for review, before any
-  step runs.</li>
+  <li><strong>Plan (the default).</strong> Stops after the plan, for review,
+  before any step runs.</li>
+  <li><strong>Ask.</strong> A goal starts with chat questions and stops at a
+  frozen spec. Nothing is planned or run until you approve the spec and
+  proceed.</li>
   <li><strong>Execute.</strong> Runs straight through, as before.</li>
 </ul>
 <p><strong>Proceed</strong> resumes the frozen plan or spec exactly, without

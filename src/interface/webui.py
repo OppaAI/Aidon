@@ -1365,7 +1365,7 @@ class WebUIServer:
         if mode is None and str(body.get("mode", "") or "") in ("ask", "plan", "execute"):
             mode = str(body.get("mode"))
         if mode is None:
-            mode = mode_enabled(self.home, conversation_id) or "ask"
+            mode = mode_enabled(self.home, conversation_id) or "plan"
         run_id = new_run_id()
         if self.run_control is not None:
             self.run_control.register(run_id, goal, conversation_id)
@@ -1691,7 +1691,7 @@ class WebUIServer:
                                        "force_web": force_web,
                                        "think_max": wa_think_max or _wa_enabled(self.home, wa_key),
                                        "research_mode": wa_research_mode or _wa_research_enabled(self.home, wa_key),
-                                       "mode": wa_mode or _wa_mode_enabled(self.home, wa_key) or "ask"}
+                                       "mode": wa_mode or _wa_mode_enabled(self.home, wa_key) or "plan"}
                         if wa_resume_stop_id:
                             _wa_payload["resume_stop_id"] = wa_resume_stop_id
                         if isinstance(wa_resume_spec, dict):
@@ -1993,7 +1993,7 @@ class WebUIServer:
             payload["force_web"] = force_web
             payload["think_max"] = sl_think_max or _sl_enabled(self.home, sl_key)
             payload["research_mode"] = sl_research_mode or _sl_research_enabled(self.home, sl_key)
-            payload["mode"] = sl_mode or _sl_mode_enabled(self.home, sl_key) or "ask"
+            payload["mode"] = sl_mode or _sl_mode_enabled(self.home, sl_key) or "plan"
             if sl_resume_stop_id:
                 payload["resume_stop_id"] = sl_resume_stop_id
             if isinstance(sl_resume_spec, dict):

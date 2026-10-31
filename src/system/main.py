@@ -2736,7 +2736,7 @@ def main(argv: list[str] | None = None) -> int:
         from ..interface.repl import Repl
         _cli_think_state = {"on": False}
         _cli_research_state = {"on": False}
-        _cli_mode_state = {"mode": "ask"}
+        _cli_mode_state = {"mode": "plan"}
 
         def _repl_handler(goal: str) -> str:
             from ..agentic.budgets import Budget as _B2
