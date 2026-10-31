@@ -76,6 +76,7 @@ def test_settings_set_env_validates_types(tmp_path):
     assert "AIDON_MAX_STEPS=42" in (tmp_path / "home" / ".env").read_text()
     bad = server.settings_set_env("max_steps", "not-a-number")
     assert bad["ok"] is False
+    assert server.settings_set_env("AIDON_ACQ_MAX_TOOLS", "-1")["ok"] is False
     assert server.settings_set_env("autonomy_enabled", "yes")["ok"] is True
     assert "AIDON_AUTONOMY_ENABLED=1" in (tmp_path / "home" / ".env").read_text()
     assert server.settings_set_env("autonomy_enabled", "maybe")["ok"] is False
@@ -86,6 +87,8 @@ def test_settings_set_env_validates_types(tmp_path):
     # Float-valued keys must parse as numbers.
     assert server.settings_set_env("forget_half_life_days", "21.5")["ok"] is True
     assert server.settings_set_env("forget_half_life_days", "soon")["ok"] is False
+    assert server.settings_set_env("AIDON_ACQ_MAX_SECONDS", "-0.1")["ok"] is False
+    assert server.settings_set_env("AIDON_ACQ_MAX_SECONDS", "inf")["ok"] is False
     # Every non-secret catalog key is writable.
     for key in ("AIDON_MODEL_THINK", "AIDON_ROUTER_FAST_PHASES",
                 "AIDON_THREADS_ACCOUNT_ID", "AIDON_IG_USER_ID",
@@ -233,6 +236,8 @@ def test_catalog_new_group_placement(tmp_path):
     assert "AIDON_FISH_API_KEY" in groups["Voice"]
     assert "AIDON_VM_HOST" in groups["System"]
     assert "AIDON_MODAL_APP" in groups["System"]
+    assert "AIDON_MODAL_CPU" in groups["System"]
+    assert "AIDON_MODAL_MEMORY_MB" in groups["System"]
     assert "AIDON_ACQ_MAX_TOOLS" in groups["System"]
     assert "AIDON_COMPUTER_SECRETS" in groups["System"]
     assert "AIDON_HUB_TOKEN" in groups["System"]

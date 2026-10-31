@@ -1292,7 +1292,8 @@ class GoalRunner:
                    "cipher AES-256-GCM unless the user specifies another.")
         if self.plugins is not None and not self.kernel_mode:
             plugin_entries = []
-            for plugin in self.plugins.plugins.values():
+            registry_plugins = getattr(self.plugins, "plugins", {})
+            for plugin in list(registry_plugins.values()):
                 for spec in getattr(plugin, "tools", ()):
                     tool_name = str(spec.get("name", "")).strip()
                     if tool_name:
@@ -1309,7 +1310,8 @@ class GoalRunner:
                        "in the workdir only when needed, sandbox-test it, and use "
                        "adopt_tool_plugin. Adoption requires the owner's approval. "
                        "After approval, the new tool is added to this run's live "
-                       "registry and may be used by later steps in this workflow.")
+                       "registry. It can be used by a plan validated after adoption; "
+                       "replan if the current plan needs that new tool.")
             skill_texts = self.plugins.skill_texts()
             if skill_texts:
                 system += " Skills, follow them when relevant: " + " ".join(
@@ -2450,6 +2452,12 @@ class GoalRunner:
                     self._call_tool("write", {"file": step.deliverable, "text": _reply})
             else:
                 tool_result = self._call_tool(step.tool, step.args)
+                if (step.tool == "self_modify"
+                        and str(tool_result).startswith((
+                            "self-modification refused:",
+                            "self-modification aborted:",
+                            "self-modification failed ("))):
+                    raise RuntimeError(str(tool_result))
                 # File-producing extra tools return their actual
                 # path. Bind that path to the step when the model
                 # supplied a prose deliverable such as

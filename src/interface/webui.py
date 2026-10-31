@@ -62,6 +62,7 @@ import hashlib
 import hmac
 import html
 import json
+import math
 import mimetypes
 import os
 import threading
@@ -2438,6 +2439,9 @@ class WebUIServer:
                     text = str(int(text))
                 except ValueError:
                     return {"ok": False, "error": f"{env_key}: not an integer: {value!r}"}
+                if env_key == "AIDON_ACQ_MAX_TOOLS" and int(text) < 0:
+                    return {"ok": False,
+                            "error": f"{env_key}: must be nonnegative"}
             elif kind == "bool":
                 lowered = text.lower()
                 if lowered not in ("0", "1", "true", "false", "yes", "no"):
@@ -2448,9 +2452,16 @@ class WebUIServer:
                     return {"ok": False, "error": f"{env_key}: must be one of {entry.get('options')}"}
             elif env_key in self._CATALOG_FLOAT_KEYS:
                 try:
-                    float(text)
+                    parsed_float = float(text)
                 except ValueError:
                     return {"ok": False, "error": f"{env_key}: not a number: {value!r}"}
+                if not math.isfinite(parsed_float):
+                    return {"ok": False,
+                            "error": f"{env_key}: must be a finite number: {value!r}"}
+                if (env_key == "AIDON_ACQ_MAX_SECONDS"
+                        and parsed_float < 0):
+                    return {"ok": False,
+                            "error": f"{env_key}: must be nonnegative"}
         path = self.home / ".env"
         lines: list[str] = []
         if path.is_file():
@@ -2564,7 +2575,11 @@ class WebUIServer:
         gate = None if approve is not None else getattr(self.webui_gate, "gate", None)
         if approve is None and gate is None:
             return {"ok": False, "error": "adoption needs approval"}
-        ok, findings, message = registry.adopt(source, gate=gate, approve=approve)
+        ok, findings, message = registry.adopt(
+            source, gate=gate, approve=approve,
+            tool_posture=str(getattr(self.config, "tool_posture", "standard")
+                              or "standard").strip().lower(),
+            kernel_mode=bool(getattr(self.config, "kernel_mode", False)))
         finding_dicts = []
         for finding in findings:
             if hasattr(finding, "to_dict"):
@@ -2655,7 +2670,7 @@ class WebUIServer:
         live_names = [str(item.get("name", "")) for item in discover_tools(self.home)
                       if item.get("name")]
         selfmod = (str(getattr(self.config, "tool_posture", "standard")
-                       or "standard").lower() == "selfmod"
+                       or "standard").strip().lower() == "selfmod"
                    and not getattr(self.config, "kernel_mode", False))
         goal_tools = list(dict.fromkeys(
             all_tool_names(plugin_tools, selfmod=selfmod) + live_names))
@@ -3377,7 +3392,7 @@ class WebUIServer:
         try:
             from ..capabilities.tool_catalog import all_tool_names
             selfmod = (str(getattr(self.config, "tool_posture", "standard")
-                           or "standard").lower() == "selfmod"
+                           or "standard").strip().lower() == "selfmod"
                        and not getattr(self.config, "kernel_mode", False))
             if wanted in all_tool_names(selfmod=selfmod):
                 if wanted in {"write", "read", "list", "shell", "calculate"}:

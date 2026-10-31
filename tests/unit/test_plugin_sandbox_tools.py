@@ -9,6 +9,7 @@ plugin.
 
 import json
 import os
+import shutil
 
 import pytest
 
@@ -110,12 +111,15 @@ def test_registry_call_requires_sandbox(tmp_path):
     code = "def heavy(args):\n    return 'ok'\n"
     directory = _sandbox_plugin(tmp_path, code)
     registry = PluginRegistry(tmp_path / "home")
-    registry.adopt(directory, approve=lambda plugin, findings: True)
+    registry.adopt(directory, approve=lambda plugin, findings: True,
+                   tool_posture="developer")
     registry.load_all()
     with pytest.raises(ValueError, match="no sandbox"):
         registry.call("heavy", {})
 
 
+@pytest.mark.skipif(shutil.which("bwrap") is None,
+                    reason="bubblewrap is required for sandbox plugin tests")
 def test_run_sandbox_tool_end_to_end(tmp_path, monkeypatch):
     monkeypatch.setenv("AIDON_T2_SECRET", "tier2-secret")
     code = (
@@ -126,7 +130,8 @@ def test_run_sandbox_tool_end_to_end(tmp_path, monkeypatch):
     directory = _sandbox_plugin(
         tmp_path, code, capabilities=["secret:AIDON_T2_SECRET"])
     registry = PluginRegistry(tmp_path / "home")
-    registry.adopt(directory, approve=lambda plugin, findings: True)
+    registry.adopt(directory, approve=lambda plugin, findings: True,
+                   tool_posture="developer")
     registry.load_all()
     template = Sandbox(tmp_path / "template_work")
     result = registry.call("heavy", {"city": "Kyiv"}, sandbox=template)
@@ -136,25 +141,55 @@ def test_run_sandbox_tool_end_to_end(tmp_path, monkeypatch):
     assert secret == "tier2-secret"
 
 
+@pytest.mark.skipif(shutil.which("bwrap") is None,
+                    reason="bubblewrap is required for sandbox plugin tests")
 def test_run_sandbox_tool_reports_plugin_error(tmp_path):
     code = "def heavy(args):\n    raise RuntimeError('boom')\n"
     directory = _sandbox_plugin(tmp_path, code)
     registry = PluginRegistry(tmp_path / "home")
-    registry.adopt(directory, approve=lambda plugin, findings: True)
+    registry.adopt(directory, approve=lambda plugin, findings: True,
+                   tool_posture="developer")
     registry.load_all()
     with pytest.raises(RuntimeError, match="boom"):
         registry.call("heavy", {}, sandbox=Sandbox(tmp_path / "work"))
 
 
+@pytest.mark.skipif(shutil.which("bwrap") is None,
+                    reason="bubblewrap is required for sandbox plugin tests")
 def test_run_sandbox_tool_writes_no_result_outside_run_dir(tmp_path):
     """The runner's result file lives in the run dir, not the caller's
     cwd, and args never appear on the host command line."""
     code = "def heavy(args):\n    return args['payload']\n"
     directory = _sandbox_plugin(tmp_path, code)
     registry = PluginRegistry(tmp_path / "home")
-    registry.adopt(directory, approve=lambda plugin, findings: True)
+    registry.adopt(directory, approve=lambda plugin, findings: True,
+                   tool_posture="developer")
     registry.load_all()
     result = registry.call("heavy", {"payload": "hello"},
                            sandbox=Sandbox(tmp_path / "work"))
     assert result == "hello"
     assert (tmp_path / "home" / "plugin_runs" / "heavy").is_dir()
+
+
+@pytest.mark.skipif(shutil.which("bwrap") is None,
+                    reason="bubblewrap is required for sandbox isolation")
+def test_sandbox_plugin_cannot_write_outside_its_run_dir(tmp_path):
+    code = (
+        "from pathlib import Path\n"
+        "def heavy(args):\n"
+        "    try:\n"
+        "        Path(args['host_path']).write_text('escaped')\n"
+        "    except OSError:\n"
+        "        return 'blocked'\n"
+        "    return 'wrote'\n")
+    directory = _sandbox_plugin(tmp_path, code)
+    registry = PluginRegistry(tmp_path / "home")
+    registry.adopt(directory, approve=lambda plugin, findings: True,
+                   tool_posture="developer")
+    registry.load_all()
+    host_path = tmp_path / "outside.txt"
+    result = registry.call(
+        "heavy", {"host_path": str(host_path)},
+        sandbox=Sandbox(tmp_path / "template"))
+    assert result == "blocked"
+    assert not host_path.exists()

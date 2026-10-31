@@ -84,6 +84,8 @@ def load_dotenv(path: Path | None = None) -> None:
     missing .env is not an error. Quotes, comments, and an
     ``export `` prefix are handled, nothing else is parsed.
     """
+    process_environment = set(os.environ)
+    home_env = default_home() / ".env"
     candidates = []
     if path is not None:
         candidates.append(Path(path))
@@ -106,9 +108,13 @@ def load_dotenv(path: Path | None = None) -> None:
             key, value = key.strip(), value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
                 value = value[1:-1]
-            if key and key not in os.environ:
+            is_home_file = candidate.resolve() == home_env.resolve()
+            if (key and (key not in os.environ
+                         or (key == "AIDON_TOOL_POSTURE" and is_home_file
+                             and key not in process_environment))):
                 os.environ[key] = value
-        return
+        # Continue so keys absent from the current-directory file can
+        # still be supplied by the user's persistent Aidon home config.
 
 
 @dataclass

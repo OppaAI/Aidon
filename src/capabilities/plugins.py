@@ -76,6 +76,35 @@ NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 SECRET_RE = re.compile(r"(api[_-]?key|password|token|secret)", re.IGNORECASE)
 
 
+def _module_path(directory: Path, module_name: str) -> Path:
+    """Resolve a manifest module and keep it inside the plugin tree."""
+    root = Path(directory).resolve()
+    candidate = (root / str(module_name)).resolve()
+    if not candidate.is_relative_to(root):
+        raise ValueError(
+            f"plugin module is outside the plugin directory: {module_name}")
+    return candidate
+
+
+def _validate_module_paths(directory: Path) -> None:
+    directory = Path(directory)
+    manifest_path = directory / "plugin.json"
+    if not manifest_path.is_file():
+        return
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError("plugin manifest must be a JSON object")
+    tools = manifest.get("tools", []) or []
+    if not isinstance(tools, list):
+        raise ValueError("plugin tools must be a list")
+    for tool in tools:
+        if not isinstance(tool, dict):
+            raise ValueError("plugin tool entries must be JSON objects")
+        module_name = str(tool.get("module", ""))
+        if module_name:
+            _module_path(directory, module_name)
+
+
 @dataclass
 class ScanFinding:
     path: str
@@ -131,7 +160,16 @@ def plugin_is_adopted(plugin) -> bool:
     directory = getattr(plugin, "directory", None)
     if directory is None:
         return False
-    return (Path(directory) / ".adopted").is_file()
+    directory = Path(directory)
+    try:
+        marker = json.loads((directory / ".adopted").read_text(
+            encoding="utf-8"))
+        if not isinstance(marker, dict):
+            return False
+        approved_hash = str(marker.get("approved_hash", ""))
+        return bool(approved_hash) and plugin_tree_hash(directory) == approved_hash
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False
 
 
 def adoption_gate(posture: str, kernel_mode: bool,
@@ -145,14 +183,18 @@ def adoption_gate(posture: str, kernel_mode: bool,
     approval card still lists every capability, so the posture widens
     what can be *asked for*, never what is granted without a decision.
     """
-    posture = str(posture or "standard").lower()
+    posture = str(posture or "standard").strip().lower()
     if kernel_mode or posture == "locked":
         return False, "tool posture is locked; plugin adoption is disabled"
     if posture == "standard" and (list(capabilities or ()) or sandboxed):
         return False, ("posture 'standard' allows pure tools only; a "
                        "capability or sandbox plugin needs "
                        "AIDON_TOOL_POSTURE=developer or selfmod")
-    return True, ""
+    if posture == "standard":
+        return True, ""
+    if posture in ("developer", "selfmod"):
+        return True, ""
+    return False, f"unknown tool posture: {posture}"
 
 
 def sandbox_module_paths(directory) -> set[str]:
@@ -190,6 +232,7 @@ def scan_plugin(directory: Path) -> list[ScanFinding]:
     """Security scan, path/line/type only, never values."""
     findings: list[ScanFinding] = []
     directory = Path(directory)
+    _validate_module_paths(directory)
     for path in sorted(directory.rglob("*")):
         if not path.is_file():
             continue
@@ -307,6 +350,7 @@ def load_plugin(directory: Path, execute: bool = True) -> Plugin:
     imports it and binds the real callables.
     """
     directory = Path(directory)
+    _validate_module_paths(directory)
     manifest_path = directory / "plugin.json"
     if not manifest_path.exists():
         raise ValueError("plugin.json is missing")
@@ -333,7 +377,7 @@ def load_plugin(directory: Path, execute: bool = True) -> Plugin:
         tool_name = str(tool.get("name", ""))
         if not module_name or not func_name or not tool_name:
             raise ValueError("plugin tool needs name, module, and function")
-        module_path = directory / module_name
+        module_path = _module_path(directory, module_name)
         if not module_path.exists():
             raise ValueError(f"plugin module missing: {module_name}")
         sandboxed = str(tool.get("mode", "")).lower() == "sandbox"
@@ -355,6 +399,12 @@ def load_plugin(directory: Path, execute: bool = True) -> Plugin:
                 raise ValueError(
                     f"plugin function is not defined: {func_name}")
             continue
+        # Python bytecode is deliberately excluded from the adoption hash.
+        # Remove any supplied/generated cache before an adopted source file
+        # is imported so ignored bytecode can never replace approved source.
+        for cache_dir in directory.rglob("__pycache__"):
+            if cache_dir.is_dir():
+                shutil.rmtree(cache_dir, ignore_errors=True)
         spec = importlib.util.spec_from_file_location(
             f"aidon_plugin_{name}_{tool_name}", module_path)
         module = importlib.util.module_from_spec(spec)
@@ -370,19 +420,19 @@ def load_plugin(directory: Path, execute: bool = True) -> Plugin:
 
 
 def plugin_tree_hash(source_dir: Path) -> str:
-    """Deterministic sha256 over a plugin source tree.
+    """Deterministic sha256 over adopted plugin source files.
 
-    Covers everything copytree would copy: every entry's relative
-    path (directories included, so a structural change is detected)
-    and every file's bytes, in sorted relative-path order. Nothing
-    the copy would copy is skipped, so the hash binds an approval
-    to exactly the bytes that get adopted.
+    The marker and Python cache files are excluded so the same approved
+    hash can be checked after installation and interpreter imports.
     """
     source_dir = Path(source_dir)
     digest = hashlib.sha256()
     for path in sorted(source_dir.rglob("*"),
                        key=lambda p: str(p.relative_to(source_dir))):
         rel = str(path.relative_to(source_dir))
+        if (rel == ".adopted" or "__pycache__" in path.parts
+                or path.suffix == ".pyc"):
+            continue
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")
         if path.is_file():
@@ -424,7 +474,12 @@ def preflight_plugin(source_dir: Path) -> Preflight:
     no import of the plugin's code (validation is AST-only).
     A failed preflight is a refusal, never a budget charge."""
     source_dir = Path(source_dir)
-    findings = scan_plugin(source_dir)
+    try:
+        findings = scan_plugin(source_dir)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return Preflight(False, message=(
+            f"Adoption rejected: invalid plugin paths or manifest: "
+            f"{type(exc).__name__}"))
     blocking = [f for f in findings if f.type in BLOCKING_TYPES]
     if blocking:
         return Preflight(False, findings=findings, message=(
@@ -462,20 +517,21 @@ def preflight_plugin(source_dir: Path) -> Preflight:
             gate_findings.extend(result.findings)
             if result.verdict == "fail":
                 if rel in sandboxed:
-                    # Execution-side patterns are expected inside a
-                    # sandboxed tool. A secret literal still blocks:
-                    # it leaks wherever the code runs.
-                    secret_block = any(
-                        finding.severity == "block"
-                        and "secret-like" in finding.message
-                        for finding in result.findings)
-                    if secret_block:
-                        return Preflight(
-                            False, findings=findings,
-                            gate_findings=gate_findings,
-                            message=("Adoption rejected: security gate fail "
-                                     f"(secret literal in {rel})"))
-                    continue
+                    # Permit only execution patterns that the bubblewrap
+                    # boundary contains. Other blocks (including secrets,
+                    # destructive commands, and install scripts) still fail.
+                    allowed_execution_blocks = {
+                        "os.system() call",
+                        "eval()/exec() dynamic code execution",
+                    }
+                    blocking_findings = [
+                        finding for finding in result.findings
+                        if finding.severity == "block"]
+                    if (blocking_findings and all(
+                            finding.source == "builtin"
+                            and finding.message in allowed_execution_blocks
+                            for finding in blocking_findings)):
+                        continue
                 return Preflight(False, findings=findings,
                                  gate_findings=gate_findings,
                                  message="Adoption rejected: security gate fail")
@@ -585,6 +641,15 @@ def commit_plugin(registry, source_dir: Path, preflight: Preflight,
     if target.exists():
         shutil.rmtree(target)
     shutil.copytree(source_dir, target)
+    try:
+        installed_hash = plugin_tree_hash(target)
+    except OSError as exc:
+        shutil.rmtree(target, ignore_errors=True)
+        return False, findings, f"Adoption aborted: cannot verify installed copy: {exc}"
+    if installed_hash != preflight.approved_hash:
+        shutil.rmtree(target, ignore_errors=True)
+        return False, findings, (
+            "Adoption aborted: installed plugin differs from the approved source")
     # Adoption marker: the broker only grants a plugin's declared
     # capabilities when this marker exists. A directory hand-placed in
     # <home>/toolbox/ (never adopted, never approved) still loads as a
@@ -629,6 +694,11 @@ class PluginRegistry:
             if not path.is_dir():
                 continue
             try:
+                # Check adopted bytes before any inline module is imported.
+                if (path / ".adopted").is_file():
+                    static_plugin = load_plugin(path, execute=False)
+                    if not plugin_is_adopted(static_plugin):
+                        continue
                 plugin = load_plugin(path)
                 self.plugins[plugin.name] = plugin
             except Exception:
@@ -637,7 +707,7 @@ class PluginRegistry:
 
     def tool_names(self) -> list[str]:
         names: list[str] = []
-        for plugin in self.plugins.values():
+        for plugin in list(self.plugins.values()):
             names.extend(plugin.tool_names())
         return sorted(names)
 
@@ -658,7 +728,9 @@ class PluginRegistry:
         A library read failure fails closed: standalone
         files drop out, plugin skills are unaffected."""
         texts: dict[str, str] = {}
-        for plugin in self.plugins.values():
+        for plugin in list(self.plugins.values()):
+            if not plugin_is_adopted(plugin):
+                continue
             for skill in plugin.skills:
                 path = plugin.directory / str(skill)
                 texts[f"{plugin.name}/{skill}"] = path.read_text(encoding="utf-8")
@@ -695,7 +767,7 @@ class PluginRegistry:
         A tool that needs a broker or a sandbox but gets neither fails
         loudly instead of silently dropping its capabilities.
         """
-        for plugin in self.plugins.values():
+        for plugin in list(self.plugins.values()):
             spec = getattr(plugin, "tool_spec", lambda _n: None)(name)
             if spec is not None and str(spec.get("mode", "")).lower() == "sandbox":
                 if not plugin_is_adopted(plugin):
@@ -736,7 +808,7 @@ class PluginRegistry:
         broker method refuses, because no owner approved its powers.
         """
         from .plugin_runtime import build_context
-        for plugin in self.plugins.values():
+        for plugin in list(self.plugins.values()):
             spec = getattr(plugin, "tool_spec", lambda _n: None)(name)
             if spec is None and name not in getattr(plugin, "functions", {}):
                 continue
@@ -748,7 +820,8 @@ class PluginRegistry:
         return None
 
     def adopt(self, source_dir: Path, gate=None, approve=None, memory=None,
-              conversation_id: str = "") -> tuple[bool, list[ScanFinding], str]:
+              conversation_id: str = "", tool_posture: str = "standard",
+              kernel_mode: bool = False) -> tuple[bool, list[ScanFinding], str]:
         """Adopt a plugin, in stages: preflight, approval,
         then commit. Returns (ok, findings, message).
 
@@ -767,6 +840,12 @@ class PluginRegistry:
         preflight = preflight_plugin(source_dir)
         if not preflight.ok:
             return False, preflight.findings, preflight.message
+        allowed, reason = adoption_gate(
+            tool_posture, kernel_mode, preflight.plugin.capabilities,
+            sandboxed=any(str(tool.get("mode", "")).lower() == "sandbox"
+                          for tool in preflight.plugin.tools))
+        if not allowed:
+            return False, preflight.findings, f"Adoption refused: {reason}"
         if not ask_plugin_approval(gate, approve, preflight):
             return False, preflight.findings, "Adoption rejected by owner"
         return commit_plugin(self, source_dir, preflight,

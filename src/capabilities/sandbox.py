@@ -67,11 +67,10 @@ class Sandbox:
             input_text: str | None = None) -> SandboxResult:
         """Run command inside the workdir. command is a list, never a shell string.
 
-        ``env`` adds named variables to the child environment (used by
-        capability tools to receive approved secrets without putting
-        them on the host command line). ``input_text`` becomes the
-        child's stdin, so a JSON payload can travel without a temp
-        file or an argv leak.
+        ``env`` adds named variables to the child environment. The
+        bubblewrap backend refuses it because bwrap's ``--setenv``
+        would expose values in the host command line. Send secrets in
+        ``input_text`` and let the isolated runner read them from stdin.
         """
         if not command:
             raise ValueError("command must not be empty")
@@ -80,6 +79,10 @@ class Sandbox:
                 126, "", "REFUSED: isolation is required but bubblewrap "
                 "is unavailable or disabled", False)
         if self.bwrap:
+            if env:
+                raise ValueError(
+                    "env values are not accepted by bubblewrap; pass data "
+                    "through stdin instead")
             # Merge fix: run() used to inline a simpler argv here while
             # _bwrap_argv (the merged-usr version, with /bin, /sbin,
             # /lib, /lib64 symlinks, /proc, and the interpreter tree)

@@ -85,8 +85,9 @@ approval → live → learn
     publishing (publishing always approval-gated).
   - `adopt_tool_plugin` — adopt a tested tool plugin from the workdir
     into `<AIDON_HOME>/toolbox/` (mandatory human approval, kind
-    `install`). Adopted tools register immediately — usable by the
-    rest of the current run and every later goal, no restart needed.
+    `install`). Adopted tools register immediately. Plans validated
+    after adoption can use them; re-plan when the current plan needs a
+    newly adopted tool. Every later goal also sees the adopted tools.
 - **Meta**: `ask_user` (questions), `declare_blocked` (true dead-ends),
   `steer` (mid-run redirection, via the WebUI).
 - **Inbound chat**: `aidon slack listen` watches a Slack DM/channel

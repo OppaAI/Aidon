@@ -40,6 +40,9 @@ from .model_client import FakeClient
 from ..capabilities.sandbox import Sandbox
 
 
+_SELF_MODIFY_LOCK = threading.Lock()
+
+
 def _startup_style(kind: str, text: str) -> None:
     """Print compact, terminal-friendly startup diagnostics."""
     if sys.stderr.isatty():
@@ -1145,11 +1148,12 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             approved, _findings, message = commit_plugin(
                 registry, source, preflight)
             # commit_plugin installs the validated plugin into this registry
-            # after copying it. When this is the goal runner's live registry,
-            # later steps can call the new tool immediately.
+            # after copying it. Plans already validated cannot name it; a
+            # replan after adoption can use the new tool.
             if approved:
                 available = ", ".join(preflight.plugin.tool_names()) or "none"
-                return f"{message}; tools available now: {available}"
+                return (f"{message}; tools available to plans validated after "
+                        f"adoption: {available}")
             return message if approved else f"adoption refused: {message}"
 
         tools["adopt_tool_plugin"] = adopt_tool_plugin
@@ -1277,10 +1281,14 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                         temp_file.flush()
                         os.fsync(temp_file.fileno())
                     os.chmod(temp_name, mode)
-                    # Last check immediately before the atomic replacement.
-                    if hashlib.sha256(destination.read_bytes()).hexdigest() != old_hash:
-                        return "self-modification aborted: source changed before replacement"
-                    os.replace(temp_name, destination)
+                    # Serialize the final source check and replacement, so
+                    # concurrent approved calls cannot overwrite each other.
+                    with _SELF_MODIFY_LOCK:
+                        if (hashlib.sha256(destination.read_bytes()).hexdigest()
+                                != old_hash):
+                            return ("self-modification aborted: source changed "
+                                    "before replacement")
+                        os.replace(temp_name, destination)
                 finally:
                     if temp_name and os.path.exists(temp_name):
                         os.unlink(temp_name)
@@ -4180,7 +4188,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         ok, findings, message = registry.adopt(
             Path(args.path), gate=_cli_gate(config.home, config.approval_timeout_seconds), memory=memory,
-            conversation_id=args.conversation)
+            conversation_id=args.conversation,
+            tool_posture=str(getattr(config, "tool_posture", "standard")
+                             or "standard").strip().lower(),
+            kernel_mode=bool(getattr(config, "kernel_mode", False)))
         print(message)
         for finding in findings:
             print(f"{finding.path}:{finding.line} {finding.type}")

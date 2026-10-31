@@ -16,6 +16,9 @@ from src.capabilities.plugin_runtime import (
     CapabilityPolicy, PluginContext, build_context)
 from src.capabilities.plugins import (
     PluginRegistry, adoption_gate, load_plugin, scan_plugin)
+from src.capabilities.sandbox import Sandbox
+from src.agentic.loop import GoalRunner
+from src.system.model_client import FakeClient
 
 
 def _plugin_dir(tmp_path, name="gadget", capabilities=None, code="",
@@ -85,7 +88,8 @@ def test_pure_tool_still_one_arg(tmp_path):
     directory = _plugin_dir(tmp_path, capabilities=[], context_tool=False,
                             code="def gadget_tool(args):\n    return args['x'].upper()\n")
     registry = PluginRegistry(tmp_path / "home")
-    registry.adopt(directory, approve=lambda plugin, findings: True)
+    registry.adopt(directory, approve=lambda plugin, findings: True,
+                   tool_posture="developer")
     registry.load_all()
     assert registry.call("gadget", {"x": "hi"}) == "HI"
 
@@ -98,7 +102,8 @@ def test_context_tool_fs_is_confined(tmp_path):
               "    ctx.write_file(args['name'], args['text'])\n"
               "    return ctx.read_file(args['name'])\n"))
     registry = PluginRegistry(home)
-    registry.adopt(directory, approve=lambda plugin, findings: True)
+    registry.adopt(directory, approve=lambda plugin, findings: True,
+                   tool_posture="developer")
     registry.load_all()
     result = registry.call(
         "gadget", {"name": "note.txt", "text": "hello"},
@@ -124,7 +129,8 @@ def test_adopted_plugin_gets_declared_capabilities(tmp_path):
               "    ctx.write_file(args['name'], args['text'])\n"
               "    return ctx.read_file(args['name'])\n"))
     registry = PluginRegistry(home)
-    registry.adopt(directory, approve=lambda plugin, findings: True)
+    registry.adopt(directory, approve=lambda plugin, findings: True,
+                   tool_posture="developer")
     registry.load_all()
     plugin = registry.plugins["gadget"]
     assert (Path(plugin.directory) / ".adopted").is_file()
@@ -154,6 +160,29 @@ def test_hand_placed_plugin_gets_no_capabilities(tmp_path):
     assert broker.policy.fs is False
     with pytest.raises(PermissionError):
         broker.write_file("x", "y")
+
+
+def test_goal_runner_dispatch_refuses_hand_placed_capability(tmp_path):
+    home = tmp_path / "home"
+    target = home / "toolbox" / "gadget"
+    target.mkdir(parents=True)
+    (target / "plugin.json").write_text(json.dumps({
+        "name": "gadget", "version": "1.0.0", "description": "hand placed",
+        "capabilities": ["fs"],
+        "tools": [{"name": "gadget", "module": "tool.py",
+                   "function": "gadget_tool", "context": True}],
+    }))
+    (target / "tool.py").write_text(
+        "def gadget_tool(args, ctx):\n"
+        "    ctx.write_file('x', 'y')\n"
+        "    return 'ok'\n")
+    registry = PluginRegistry(home)
+    registry.load_all()
+    runner = GoalRunner(
+        FakeClient(""), Sandbox(home / "work"), None, home,
+        plugins=registry)
+    with pytest.raises(ValueError, match="PermissionError"):
+        runner._call_tool("gadget", {})
 
 
 def test_ctx_secret_requires_declaration(tmp_path):
@@ -205,7 +234,8 @@ def test_ctx_run_uses_sandbox(tmp_path):
 def test_context_tool_without_broker_fails_loudly(tmp_path):
     directory = _plugin_dir(tmp_path, capabilities=["fs"])
     registry = PluginRegistry(tmp_path / "home")
-    registry.adopt(directory, approve=lambda plugin, findings: True)
+    registry.adopt(directory, approve=lambda plugin, findings: True,
+                   tool_posture="developer")
     registry.load_all()
     with pytest.raises(ValueError):
         registry.call("gadget", {})

@@ -27,6 +27,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 import urllib.parse
 import urllib.request
 import uuid
@@ -42,6 +43,19 @@ CAPABILITY_NETWORK = "network"
 
 KNOWN_CAPABILITIES = (CAPABILITY_HTTP, CAPABILITY_FS, CAPABILITY_RUN,
                       CAPABILITY_SECRET, CAPABILITY_NETWORK)
+
+_ACTIVE_RUNS_LOCK = threading.Lock()
+_ACTIVE_RUNS: set[Path] = set()
+
+
+class _PluginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def __init__(self, check_url):
+        super().__init__()
+        self._check_url = check_url
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        self._check_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 @dataclass
@@ -152,7 +166,7 @@ class PluginContext:
         target = self._checked_url(url)
         request = urllib.request.Request(
             target, headers=dict(headers or {}), method="GET")
-        with urllib.request.urlopen(request, timeout=float(timeout)) as resp:
+        with self._open(request, timeout) as resp:
             return resp.read().decode("utf-8", errors="replace")
 
     def http_post(self, url, data=None, headers=None, timeout=30) -> str:
@@ -166,8 +180,13 @@ class PluginContext:
             body = data.encode("utf-8")
         request = urllib.request.Request(
             target, data=body, headers=merged_headers, method="POST")
-        with urllib.request.urlopen(request, timeout=float(timeout)) as resp:
+        with self._open(request, timeout) as resp:
             return resp.read().decode("utf-8", errors="replace")
+
+    def _open(self, request, timeout):
+        opener = urllib.request.build_opener(
+            _PluginRedirectHandler(self._checked_url))
+        return opener.open(request, timeout=float(timeout))
 
     # -- filesystem ---------------------------------------------------
 
@@ -272,8 +291,16 @@ def _prune_runs(runs_root: Path, keep: int = _MAX_KEPT_RUNS) -> None:
     try:
         dirs = sorted((p for p in runs_root.iterdir() if p.is_dir()),
                       key=lambda p: p.stat().st_mtime, reverse=True)
-        for old in dirs[keep:]:
-            shutil.rmtree(old, ignore_errors=True)
+        with _ACTIVE_RUNS_LOCK:
+            active = set(_ACTIVE_RUNS)
+        kept = 0
+        for run_dir in dirs:
+            if run_dir.resolve() in active:
+                continue
+            if kept < keep:
+                kept += 1
+            else:
+                shutil.rmtree(run_dir, ignore_errors=True)
     except OSError:
         return
 
@@ -296,12 +323,17 @@ def run_sandbox_tool(plugin, spec: dict, args: dict, sandbox, home: Path,
     # Defense in depth: the registry already refuses an unadopted
     # sandbox tool, but the runner repeats the check so no caller can
     # reach process execution without an approval marker.
-    if not (Path(plugin_dir) / ".adopted").is_file():
+    from .plugins import plugin_is_adopted
+    if not plugin_is_adopted(plugin):
         raise ValueError("sandbox tool plugin is not adopted")
     module_name = str(spec.get("module", ""))
     func_name = str(spec.get("function", ""))
     if not module_name or not func_name:
         raise ValueError("sandbox tool needs module and function")
+    from .plugins import _module_path
+    module_path = _module_path(Path(plugin_dir), module_name)
+    if not module_path.is_file():
+        raise ValueError("sandbox tool module is missing")
     timeout = int(spec.get("timeout", 120) or 120)
     policy = CapabilityPolicy.from_capabilities(
         getattr(plugin, "capabilities", []))
@@ -311,7 +343,27 @@ def run_sandbox_tool(plugin, spec: dict, args: dict, sandbox, home: Path,
     runs_root = Path(home) / "plugin_runs" / plugin_name
     runs_root.mkdir(parents=True, exist_ok=True)
     run_dir = runs_root / uuid.uuid4().hex
-    run_dir.mkdir()
+    run_key = run_dir.resolve()
+    with _ACTIVE_RUNS_LOCK:
+        _ACTIVE_RUNS.add(run_key)
+    try:
+        run_dir.mkdir()
+        return _run_sandbox_plugin(plugin, spec, args, sandbox, home,
+                                   network_available, run_dir, runs_root,
+                                   policy, secrets, module_name, func_name,
+                                   timeout)
+    finally:
+        with _ACTIVE_RUNS_LOCK:
+            _ACTIVE_RUNS.discard(run_key)
+        _prune_runs(runs_root)
+
+
+def _run_sandbox_plugin(plugin, spec, args, sandbox, home,
+                        network_available, run_dir, runs_root, policy,
+                        secrets, module_name, func_name, timeout):
+    from .sandbox import Sandbox
+
+    plugin_dir = Path(getattr(plugin, "directory"))
     code_dir = run_dir / "code"
     shutil.copytree(
         plugin_dir, code_dir,
@@ -320,15 +372,9 @@ def run_sandbox_tool(plugin, spec: dict, args: dict, sandbox, home: Path,
 
     # Reuse the run sandbox's isolation posture, but give this tool its
     # own workdir and its own network policy.
-    backend = "auto"
-    require_isolation = False
-    if sandbox is not None:
-        backend = ("bubblewrap" if getattr(sandbox, "bwrap", None)
-                   else "subprocess")
-        require_isolation = bool(getattr(sandbox, "require_isolation", False))
-    box = Sandbox(run_dir, timeout_seconds=timeout, backend=backend,
+    box = Sandbox(run_dir, timeout_seconds=timeout, backend="bubblewrap",
                   allow_network=policy.network,
-                  require_isolation=require_isolation)
+                  require_isolation=True)
 
     payload = json.dumps({"args": args, "env": secrets})
     result = box.run(
@@ -343,11 +389,12 @@ def run_sandbox_tool(plugin, spec: dict, args: dict, sandbox, home: Path,
         except (json.JSONDecodeError, OSError):
             data = None
     if data is not None:
-        _prune_runs(runs_root)
         if "error" in data:
             raise RuntimeError(str(data["error"]))
+        if not result.ok:
+            raise RuntimeError(
+                f"sandbox tool {func_name} exited {result.returncode}")
         return str(data.get("result", ""))
     detail = (result.stderr or result.stdout or "").strip()[:300]
-    _prune_runs(runs_root)
     raise RuntimeError(
         f"sandbox tool {func_name} failed: {detail or 'no output'}")

@@ -198,8 +198,9 @@ built-in tools. It should use a suitable existing tool first.
 If none fits, it follows the capability ladder and can draft,
 sandbox-test, and propose adoption of a plugin. Adoption
 always presents an explicit owner decision, even when graduated
-autonomy or pre-approval is enabled. Once approved, the registry
-updates immediately, so later steps in the same workflow can use it.
+autonomy or pre-approval is enabled. Once approved, the live
+registry updates immediately. Plans validated after adoption can
+use the tool; re-plan if the current plan needs it.
 
 - Adopt: `python -m src.system.main plugin scan <dir>`,
   then `python -m src.system.main plugin adopt <dir>`, then
@@ -218,7 +219,8 @@ updates immediately, so later steps in the same workflow can use it.
   tools and with later, explicitly approved capability
   plugins.
 - Tier 3 core-source editing is available when
-  `AIDON_TOOL_POSTURE=selfmod`; use it only when a goal
+  `AIDON_TOOL_POSTURE=selfmod` and kernel mode is off
+  (`AIDON_KERNEL=0`); use it only when a goal
   requires changing Aidon's core behavior. For new reusable
   tools, use the Toolbox plugin workflow above instead.
   Aidon can stage a complete replacement Python file in the
