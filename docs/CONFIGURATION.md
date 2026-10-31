@@ -52,7 +52,7 @@ Important runtime settings include the model backend, execution isolation, memor
 - `AIDON_API_KEY` — API key for that endpoint
 - `AIDON_MODEL` — model name at that endpoint
 - `AIDON_HOME` — where Aidon keeps its state (default `~/.aidon`)
-- `AIDON_EXECUTION_BACKEND` — `bubblewrap` by default, or `docker`, `subprocess`, or `vm` (SSH to a VM you already run)
+- `AIDON_EXECUTION_BACKEND` — `bubblewrap` by default, or `docker`, `subprocess`, `vm` (SSH to a VM you already run), or `modal` (Modal cloud sandboxes; needs `AIDON_MODAL_APP` and `modal setup`)
 - `AIDON_DOCKER_IMAGE` — Docker image when Docker execution is selected
 - `AIDON_DOCKER_NETWORK` — keep `0` unless network access is required
 - `AIDON_EMBED_MODEL` / `AIDON_SPARSE_MODEL` — dense and sparse memory models

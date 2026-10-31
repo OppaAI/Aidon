@@ -228,9 +228,18 @@ def test_catalog_new_group_placement(tmp_path):
     groups = {group["group"]: {entry["key"] for entry in group["settings"]}
               for group in server.settings_catalog()["groups"]}
     assert groups["Interface"] == {"AIDON_WEBUI_TOKEN", "AIDON_WEBUI_PORT",
-                                   "AIDON_WEBUI_ALLOWED_HOSTS", "AIDON_VRM_PATH"}
+                                   "AIDON_WEBUI_ALLOWED_HOSTS", "AIDON_VRM_PATH",
+                                   "AIDON_VERSION"}
     assert "AIDON_FISH_API_KEY" in groups["Voice"]
     assert "AIDON_VM_HOST" in groups["System"]
+    assert "AIDON_MODAL_APP" in groups["System"]
+    assert "AIDON_ACQ_MAX_TOOLS" in groups["System"]
+    assert "AIDON_COMPUTER_SECRETS" in groups["System"]
+    assert "AIDON_HUB_TOKEN" in groups["System"]
+    assert "AIDON_ROUTER" in groups["Cognitive"]
+    assert "AIDON_CLEF_URL" in groups["Cognitive"]
+    assert "AIDON_EMBEDDER" in groups["Memory"]
+    assert "AIDON_SLACK_OUTBOUND_CHANNEL" in groups["Social"]
     assert "AIDON_CHOICE_POLICY" in groups["Agentic"]
     assert "AIDON_WHATSAPP_TOKEN" in groups["Social"]
     assert "AIDON_SEARCH_BACKEND" in groups["Research"]

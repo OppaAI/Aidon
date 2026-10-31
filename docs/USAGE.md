@@ -318,9 +318,14 @@ verification arena they will run in.
    docker.sock, no host credentials, and no silent
    fallback to a host shell if Docker is missing. The
    backend is chosen by the owner in config, never by the
-   model. A full VM is post-hackathon, future only, not
-   built here. Set `AIDON_EXECUTION_BACKEND=docker` to
-   use Docker, `AIDON_DOCKER_IMAGE` for the pinned image,
+   model. Modal is a cloud backend: commands run in Modal
+   sandboxes (`AIDON_MODAL_APP`, CPU/memory caps, network
+   off unless `AIDON_DOCKER_NETWORK=1`). A VM backend over
+   SSH to a VM you already run is built; setup does not
+   provision a VM, and disposable VM per run is
+   post-hackathon. Set `AIDON_EXECUTION_BACKEND=docker`
+   to use Docker, `AIDON_EXECUTION_BACKEND=modal` for
+   Modal, `AIDON_DOCKER_IMAGE` for the pinned image,
    `AIDON_DOCKER_NETWORK=1` only when a task needs network.
 4. **Verify** — a result is verified by evidence, not by
    assertion. Deliverables must exist and be non-empty,
@@ -469,8 +474,7 @@ collection.
   to require Bearer token for WebUI, localhost
   alone needs no token, remote without a token
   is denied.
-- Post-hackathon, not built, not demoed: VM backend,
-  Unity factory, procedural 3D assets, local server
+- Post-hackathon, not built, not demoed: Unity factory, procedural 3D assets, local server
   manager, stronger sandbox, dedicated live toolset,
   and SAM 3.1 segmentation, see [ROADMAP.md](ROADMAP.md).
 

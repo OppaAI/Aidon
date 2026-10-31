@@ -356,6 +356,20 @@ VM and will be available inside a future VM once that backend exists.
   post-hackathon: trusted capabilities informing more
   than the triage note.
 
+- Built in v0.4.0: Ask → Plan → Execute run-mode chain with spec
+  cards; Clef intent router, DAG matching, validate gate, and
+  recovery router; Modal execution backend, capability image
+  builder, and worker pool; capability registry, failure-lessons
+  store, and capability hub with triage reading it and skill recall
+  restricted to trusted skills; per-run capability acquisition
+  governor with budgets that survive stops; YouTube upload and
+  webcam capture (both approval-gated); skill lifecycle (import,
+  Tests-section format, mission harvest); optional built-in tools
+  flip (default off); centralized diagnostics
+  (`aidon diagnostics <run_id>`); operating-manual sections riding
+  in every run's system prompt; image editing tool; intent routing
+  in every mode.
+
 - Aidon fly-brain biological layer: the MaleCNS, the
   male Drosophila central nervous system connectome,
   as a biological layer, with sentient emergence and

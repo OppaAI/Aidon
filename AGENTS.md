@@ -228,7 +228,7 @@ Two-tier model routing with fast and strong model tiers.
 
 When `AIDON_FAST_MODEL` specifies a different model, Aidon routes lightweight 
 phases to the fast tier and more demanding phases to the strong tier. 
-`AIDON_ROUTER_FAST_PHASES` (default: `interpret,learn,respond`) determines 
+`AIDON_ROUTER_FAST_PHASES` (default: `interpret,learn,respond,webchat`) determines 
 which phases use the fast tier; all other phases use the strong tier.
 
 Per-tier call and token usage is available through `aidon report autonomy`. 
