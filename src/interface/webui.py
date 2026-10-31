@@ -196,8 +196,6 @@ CHAT_HTML = """<!doctype html>
 @media (prefers-reduced-motion: reduce) { #robot, #robot-head, #robot-arm-left, #robot-arm-right, .robot-eye { animation: none; } }
 #mouth-smile { opacity: 1; }
 #mouth-open { opacity: 0; }
-#avatar.speaking #mouth-smile { opacity: 0; }
-#avatar.speaking #mouth-open { animation: none; }
 #wave-bars span { display: inline-block; width: 6px; background: var(--accent); margin-right: 2px; vertical-align: bottom; height: 4px; }
 #avatar.speaking #wave-bars span { animation: robot-wave 0.3s ease-in-out infinite alternate; }
 @keyframes robot-wave { from { height: 4px; } to { height: 18px; } }
@@ -287,10 +285,32 @@ function setSpeaking(on) {
   const bars = document.querySelectorAll('#wave-bars span');
   bars.forEach((bar, i) => { bar.style.animationDelay = (i * 0.05) + 's'; });
 }
+const mouthShapes = {
+  closed: 'M90 67 Q100 73 110 67',
+  ah: 'M94 64 Q100 62 106 64 Q109 68 106 73 Q100 77 94 73 Q91 68 94 64Z',
+  ee: 'M91 66 Q100 64 109 66 Q108 70 100 72 Q92 70 91 66Z',
+  oh: 'M96 63 Q100 61 104 63 Q108 67 105 73 Q100 77 95 73 Q92 67 96 63Z',
+  oo: 'M97 64 Q100 62 103 64 Q106 67 104 72 Q100 75 96 72 Q94 67 97 64Z',
+  fv: 'M92 67 Q100 66 108 67 L106 70 Q100 71 94 70Z',
+  teeth: 'M93 65 Q100 63 107 65 L106 70 Q100 72 94 70Z',
+};
 function mouthForChar(ch) {
-  if ('aeiouAEIOU'.includes(ch)) return 1.4;
-  if (ch === ' ') return 0.4;
-  return 0.9;
+  if (/[mbp]/i.test(ch)) return 'closed';
+  if (/[fv]/i.test(ch)) return 'fv';
+  if (/[aáàâäãå]/i.test(ch)) return 'ah';
+  if (/[eéèêëiyíìîï]/i.test(ch)) return 'ee';
+  if (/[oóòôöõ]/i.test(ch)) return 'oh';
+  if (/[uúùûüw]/i.test(ch)) return 'oo';
+  return /[a-z]/i.test(ch) ? 'teeth' : 'closed';
+}
+function setMouthPose(pose) {
+  const shape = mouthShapes[pose] || mouthShapes.closed;
+  const mouth = document.getElementById('mouth-open');
+  const smile = document.getElementById('mouth-smile');
+  if (!mouth || !smile) return;
+  mouth.setAttribute('d', shape);
+  mouth.setAttribute('opacity', pose === 'closed' ? '0' : '1');
+  smile.setAttribute('opacity', pose === 'closed' ? '1' : '0');
 }
 function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -342,8 +362,7 @@ async function typewriterKaraoke(element, text) {
     const word = words[wi];
     for (let ci = 0; ci < word.length; ci++) {
       const ch = word[ci];
-      const mouth = document.getElementById('mouth-open');
-      if (mouth) { mouth.setAttribute('ry', String(3 + mouthForChar(ch) * 4)); }
+      setMouthPose(mouthForChar(ch));
       done += ch;
       element.innerHTML = '<span class="karaoke-done">' + done.slice(0, done.length - word.length) + '</span>' +
         '<span class="karaoke-word">' + word.slice(0, ci + 1) + '</span>' +
@@ -355,6 +374,7 @@ async function typewriterKaraoke(element, text) {
   // but once typing finishes the message is re-rendered as
   // markdown, so tables, bold, code, and links display properly.
   element.innerHTML = render_markdown(text);
+  setMouthPose('closed');
   setSpeaking(false);
   setAvatarStatus('Idle');
 }
@@ -362,7 +382,10 @@ function speak(text, onWord) {
   if (document.getElementById('announce').checked && 'speechSynthesis' in window) {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.onstart = () => { setSpeaking(true); setAvatarStatus('Speaking'); };
-    utterance.onend = () => { setSpeaking(false); setAvatarStatus('Idle'); };
+    utterance.onend = () => { setMouthPose('closed'); setSpeaking(false); setAvatarStatus('Idle'); };
+    utterance.onboundary = (event) => {
+      if (event.charIndex !== undefined) setMouthPose(mouthForChar(text[event.charIndex]));
+    };
     if (onWord) { utterance.onboundary = (event) => { if (event.charIndex !== undefined) { onWord(event.charIndex); } }; }
     window.speechSynthesis.speak(utterance);
   }

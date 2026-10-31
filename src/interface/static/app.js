@@ -203,11 +203,11 @@
         "%</span><span> · </span>";
     }
     if (parts.stats || routeChip) {
-      html += '<div class="run-stats">' + routeChip +
+      html += '<div class="run-stats">' +
         (parts.stats
-          ? '<span class="run-stats-icon" aria-hidden="true">◷</span>' +
+          ? '<span class="run-stats-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="9" r="5.5"/><path d="M8 6v3l2 1.2M6.5 1.5h3M8 1.5V3"/></svg></span>' +
             '<span>' + esc(parts.stats) + "</span>"
-          : "") + "</div>";
+          : "") + routeChip + "</div>";
     }
     return html;
   }
