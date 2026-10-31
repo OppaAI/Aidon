@@ -59,7 +59,9 @@ def test_approved_adoption_counts_once_then_exhausts(tmp_path):
     plug = tmp_path / "plug"
     _valid_plugin(plug)
     gov = AcquisitionGovernor(max_tools=1)
-    tools = _tools(tmp_path, _ApproveGate(), gov)
+    tools = _goal_extra_tools(SimpleNamespace(home=tmp_path), tmp_path,
+                              gate=_ApproveGate(), governor=gov,
+                              optional_tools=False)
     result = tools["adopt_tool_plugin"](str(plug))
     assert result == (
         "Adopted plugin five-plug; tools available to plans validated after "
@@ -156,13 +158,18 @@ def test_acquire_keep_client_and_reacquire(tmp_path):
 def test_mcp_connect_registers_and_reconnects(tmp_path, monkeypatch):
     monkeypatch.setattr("src.interface.mcp_client.McpClient", _FakeMcpClient)
     gov = AcquisitionGovernor()
-    tools = _tools(tmp_path, _ApproveGate(), gov)
+    tools = _goal_extra_tools(SimpleNamespace(home=tmp_path), tmp_path,
+                              gate=_ApproveGate(), governor=gov,
+                              optional_tools=False)
     result = tools["mcp_connect"]("srv", command="fake-bin")
     assert result.startswith("MCP_CONNECTED")
     assert "lookup" in result
+    assert tools["mcp_srv_lookup"]({}) == '"{}"'
     assert CapabilityRegistry(tmp_path).get("srv")["status"] == "validated"
     assert tools["mcp_connect"]("srv", command="fake-bin").startswith(
         "MCP_ALREADY_CONNECTED")
+    assert tools["mcp_disconnect"]("srv").startswith("MCP_DISCONNECTED")
+    assert "mcp_srv_lookup" not in tools
     # A later run reconnects through the lifecycle instead of
     # failing on the existing record.
     gov2 = AcquisitionGovernor()

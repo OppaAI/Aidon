@@ -1478,8 +1478,11 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         optional_tools = bool(getattr(config, "optional_tools", True))
     if not optional_tools:
         from ..agentic.kernel import CORE_LADDER_TOOLS
-        tools = {k: v for k, v in tools.items()
-                 if k in CORE_LADDER_TOOLS or k in ("read_file", "write_file")}
+        # Keep the same dictionary captured by mcp_connect and disconnect:
+        # they register and remove tools dynamically during this goal.
+        for name in list(tools):
+            if name not in CORE_LADDER_TOOLS and name not in ("read_file", "write_file"):
+                del tools[name]
     return tools
 
 
