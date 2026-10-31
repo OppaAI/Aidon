@@ -235,6 +235,8 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
 html[data-theme="light"] .msg.user { background: #eee4f3; color: #302b35; }
 .msg.aidon { align-self: flex-start; background: var(--surface);
   border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+.msg:has(> .spec-card) { width: min(720px, 96%); max-width: 96%; }
+.msg > .spec-card { width: 100%; }
 .msg.stage-line { align-self: center; background: none; border: none;
   font-size: 11.5px; color: var(--muted); padding: 2px; }
 .spec-detail {
