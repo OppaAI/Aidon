@@ -95,71 +95,68 @@ approval → live → learn
 
 ## Writing tool plugins
 
-You can extend your own toolset. New tools live as plugins —
-`aidon/tool_plugins/<name>.py`, one file per tool or group — and are
-discovered at startup. Core `tools.py` is never edited for this.
+You can extend your own toolset. A plugin is a DIRECTORY, built in
+your workdir, with a `plugin.json` manifest plus the module files it
+names. Plugins live in the Aidon home once adopted, never in the repo.
 
-- **Check names first**: run `aidon tools list`. Every registry name
-  must be unique — the loader raises on collision instead of
-  shadowing, so pick a name that isn't taken.
-- **Interface**: the file exposes
-  `build_tools(config, sandbox, approval) -> list[Tool]`
-  (`Tool` from `aidon.tools`: name, description, parameters JSON
-  schema, func). Use the passed `sandbox` for any shell/file work —
-  never raw `subprocess` or writes outside it. Consequential actions
-  must request approval through the passed `approval` gate, like
-  core tools do.
-- **Research phase**: plugin tools are plan/live-phase only by
-  default. If yours is read-only, list its name in module-level
-  `RESEARCH_SAFE` to also allow it during research.
-- **Adoption flow**: draft the file in your mission workspace → test
-  it in the sandbox (import it, call `build_tools` with test doubles,
-  exercise the tool function including failure cases) → when you hit
-  a capability gap mid-goal you may finish the draft and call
-  `adopt_tool_plugin` yourself: it validates the file, security-scans
-  the source as code before any approval card (block findings refuse
-  adoption outright, flag findings are shown in the approval card),
-  checks names against the live registry, and requests mandatory
-  human approval (kind `install`) showing the source, the scan
-  findings, and your test evidence → on approval it moves the file
-  into `aidon/tool_plugins/` and the tools are registered for every
-  goal from the next one on — no restart needed. On rejection the
-  draft stays in your workspace. The human commits the adopted file
-  ("save everything, commit nothing"). The scan does not prove
-  correctness — your sandbox test evidence does, and an untested
-  plugin must not be approved blindly.
-  Blocking scan findings refuse adoption outright: eval/exec,
-  subprocess, network, secret assignment, dynamic import, and
-  unpinned dependencies. Skill trust additionally requires
-  pinned string dependencies (name==version).
-  You cannot write outside your workdir, so adoption without approval
-  is structurally impossible — the move is the privileged step.
+- **Manifest** (`plugin.json`): `name` (letters, digits, `-`, `_`),
+  `version`, `description`, `tools` (a list of objects with `name`,
+  `module`, `function`), and optional `skills` (Markdown files in the
+  same directory). Example:
+  `{"name": "md_table", "version": "1.0.0", "description": "...",
+  "tools": [{"name": "md_table_to_csv", "module": "tool.py",
+  "function": "md_table_to_csv"}]}`
+- **Tool function**: a top-level `def fn(args: dict) -> str` in the
+  named module. It receives a dict of arguments and returns text. It
+  is pure: it gets no sandbox, no approval gate, and no network. Use
+  the standard library only. Packages you install into a mission venv
+  are NOT importable by a plugin, because plugins run inside Aidon.
+- **Check names first**: tool names must not collide with tools in
+  your tool list. Adopting a plugin whose name already exists replaces
+  it, after a fresh approval.
+- **Test before adopting**: in the sandbox, import the module and call
+  the function with good and bad input, and keep that output as
+  evidence for the approval card.
+- **Adopt**: call `adopt_tool_plugin` with the plugin directory path
+  inside your workdir. It scans the source before any approval card.
+  Blocking findings refuse adoption outright: eval/exec, subprocess,
+  network or socket use, secret assignment, dynamic import, and
+  unpinned dependencies. Warnings (such as file writes) are shown on
+  the card. The owner then approves on a decision card (kind
+  `install`). On approval the plugin is copied into the Aidon home and
+  its tools are registered immediately, usable in this run and every
+  later one. On rejection the draft stays in your workdir. You cannot
+  write outside your workdir, so adoption without approval is
+  structurally impossible. The scan does not prove correctness; your
+  test evidence does.
+  Skill trust additionally requires pinned string dependencies
+  (name==version).
 - **Invest where it pays**: if a goal needs a capability you will
-  likely need again — or a clean free API exists for it — build the
-  tool plugin (and/or skill) rather than one-offing it with a web
-  search. One-off questions get existing tools; repeated needs earn
-  permanent capabilities. Include a `self_test()` in the plugin so
-  the maintenance check can verify it stays working.
-- See `aidon/tool_plugins/_example.py` for the shape.
+  likely need again, build the plugin (and/or skill) instead of
+  one-offing it. One-off questions get existing tools.
 
 ## Capability ladder
 
-When a goal needs something you don't have, climb in order — never skip
+When a goal needs something you don't have, climb in order, never skip
 a rung:
 
-1. **Core tool** — check `aidon tools list` first.
-2. **Skill** — the library may already cover it.
-3. **MCP server** — search online (registries, GitHub) for an MCP server
-   that provides the capability. Propose it to the human with its full
-   config (name, transport, command/args or url); its tools are fetched,
-   security-scanned, and shown to the human for mandatory approval
-   before anything connects (stdio: approval comes first on command/args
-   alone — listing tools would execute the server). Use it through the
-   MCP client (`aidon mcp --url ...`, or `AIDON_MCP_URL`); there is no
-   persistent connect step — each use names the server.
-   Prefer this over writing a plugin — someone already built and
-   maintains it. Approval is bound to the exact command/URL.
-4. **Write a tool plugin** — last resort: draft, sandbox-test, adopt.
+1. **Core tool**: check the tool list you were given first.
+2. **Skill**: the library may already cover it.
+3. **MCP server**: someone may already have built it. Call
+   `mcp_connect` with keyword arguments `name`, `transport` (`stdio`
+   or `http`), and either `command` plus `args` (stdio) or `url`
+   (http, with optional `token`), plus optional `env`. Use real,
+   known servers; do not invent a command or URL. The owner approves
+   the exact command or URL on a decision card before anything starts.
+   On success its tools appear as `mcp_<name>_<tool>` for the rest of
+   the run, so re-plan to use them. `mcp_disconnect(name)` closes it.
+4. **Packages**: when a genuinely needed Python package or system
+   program is missing, use `install_python_package` (into an isolated
+   mission venv, run its Python with `.venv/bin/python` in the
+   sandbox) or `apt_install`. Both run on the host, need owner
+   approval, and are counted against the run's acquisition budget.
+5. **Write a tool plugin**: last resort. Draft, sandbox-test, adopt,
+   as described in Writing tool plugins.
 
 ## Acquisition budgets
 

@@ -15,7 +15,12 @@ def test_identity_carries_manual_sections():
         assert heading in out, heading
     # Distinctive manual content, not just headings.
     assert "adopt_tool_plugin" in out
-    assert "build_tools" in out
+    # The plugin format and MCP rung must match the real loader and
+    # the real mcp_connect tool, not an older file-based interface.
+    assert "plugin.json" in out
+    assert "mcp_connect" in out
+    assert "build_tools" not in out
+    assert "no persistent connect step" not in out
 
 
 def test_identity_without_manual_is_graceful(monkeypatch):
