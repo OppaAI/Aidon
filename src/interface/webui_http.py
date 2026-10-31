@@ -299,6 +299,13 @@ def make_handler(server):
                     self._send_json(400, {'error': str(exc)})
             elif parsed.path == '/api/conversations':
                 self._send_json(200, server.handle_conversations_list())
+            elif parsed.path == '/api/skill-source':
+                query = parse_qs(parsed.query)
+                source = server.handle_skill_source(
+                    query.get('run_id', [''])[0],
+                    query.get('conversation_id', [''])[0])
+                self._send_json(200 if source else 404,
+                                source or {'error': 'no verified successful workflow for this conversation'})
             elif parsed.path.startswith('/api/conversations/') and parsed.path.endswith('/brief'):
                 conversation_id = parsed.path[len('/api/conversations/'):-len('/brief')].strip('/')
                 data = server.handle_brief_get(conversation_id)

@@ -10,6 +10,9 @@ Reviewed against the requested chat → capability inventory → Tool Crafting L
 - The server identifies lab answers so polling timing cannot duplicate them as ordinary chat bubbles.
 - Cancellation during the interview stops without preparing another brief.
 - Sandbox execution requires isolation by default; Modal keeps its independent network policy.
+- Missing executable capability routes to Tool/MCP acquisition; a missing reusable skill does not interrupt planning. Skills are offered only after a verified successful workflow, and the Skill Lab source is bound to that run and conversation.
+- Successful WebUI workflows persist a bounded workflow record and offer a Skill Learning Lab handoff. Skill adoption is exposed only to the WebUI follow-up that validates that successful source; the owner can refine the procedure before drafting.
+- DAG editing now persists dependency edges and node layout, provides graph validation and fit-to-view controls, and exposes the existing node contract in the inspector. This delivers a capable workflow DAG editor; Aidon does not reimplement a cyclic agent runtime such as LangGraph.
 
 ## Remaining code limitations
 
@@ -93,7 +96,7 @@ This is the short manual acceptance pass for the remaining runtime-only items. U
 
    Open `http://127.0.0.1:8765/`. Confirm the home page loads, a new chat accepts a goal, and a browser refresh restores the same conversation and formatted Markdown/artifacts.
 
-3. Validate acquisition flow with a harmless test skill (for example, a short checklist for drafting a local project plan). Ask for an output that specifically benefits from that procedure. Expected sequence: Aidon explains the missing capability; the Tool Crafting Lab card asks to proceed; the discussion and interview stay inside the card; rejecting ends the task without registering anything. In a second run, proceed, answer the interview, inspect/edit the skill draft, run its isolated test, and separately approve trust. Confirm the original goal is replanned and completed using the skill without repeating the interview. Confirm the skill appears in the skill library only after its tests and trust approval pass.
+3. Validate acquisition and learning flow with harmless goals. For a missing executable action, confirm Aidon asks to proceed to Tool or MCP Lab before acquisition, and rejection stops without registering anything. For a goal that can be completed with current tools but lacks a reusable skill, confirm it proceeds without opening a skill interview. After success, open the Skill Learning Lab handoff, refine the proven procedure, and confirm a skill candidate is tested and separately approved before trust. Confirm a failed run or a run from another conversation cannot seed a skill, and that the Skill Lab cannot invoke skill adoption without a validated successful-run source.
 
 4. Verify failure boundaries with a disposable invalid skill draft: make its isolated check fail and confirm it is not trusted or visible to the planner. Cancel another interview once and confirm it stops cleanly. Refresh the browser during an interview and verify the latest saved answer and current lab state return.
 
@@ -106,7 +109,7 @@ Record date, commit, backend, browser, outcome, and any error under the checklis
 | Home-PC full test suite | Pending | |
 | WebUI chat + refresh persistence/Markdown | Pending | |
 | Tool Lab proceed/reject and in-card interview | Pending | |
-| Skill isolated test, trust approval, original-goal replan | Pending | |
+| Post-success Skill Lab handoff, source validation, isolated test and trust | Pending | |
 | Failed test and cancellation boundaries | Pending | |
 | Actual configured sandbox backend (Modal if used) | Pending | |
 | Local X11 / computer-use smoke test (if enabled) | Pending | |

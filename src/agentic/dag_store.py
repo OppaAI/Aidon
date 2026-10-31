@@ -88,7 +88,8 @@ class DagStore:
         except (json.JSONDecodeError, OSError):
             return None
 
-    def save(self, dag_id: str, goal: str, nodes: list[dict], memory=None, merge: bool = False) -> tuple[bool, list[str]]:
+    def save(self, dag_id: str, goal: str, nodes: list[dict], memory=None,
+             merge: bool = False, layout: dict | None = None) -> tuple[bool, list[str]]:
         """Save a valid DAG, or return validation failures, unsaved.
         With merge=True, nodes from an existing saved DAG are kept
         unless a new node has the same id, in which case the new
@@ -111,8 +112,24 @@ class DagStore:
         failures = dag.validate()
         if failures:
             return False, failures
+        valid_ids = set(dag.nodes)
+        positions = {}
+        if layout is not None:
+            if not isinstance(layout, dict):
+                return False, ["layout must be an object keyed by node id"]
+            for node_id, point in layout.items():
+                if node_id not in valid_ids or not isinstance(point, dict):
+                    return False, [f"invalid layout entry: {node_id}"]
+                try:
+                    x, y = float(point["x"]), float(point["y"])
+                except (KeyError, TypeError, ValueError):
+                    return False, [f"layout for {node_id} needs numeric x and y"]
+                if not (0 <= x <= 100000 and 0 <= y <= 100000):
+                    return False, [f"layout for {node_id} is outside allowed bounds"]
+                positions[node_id] = {"x": x, "y": y}
         data = {"id": _safe_id(dag_id), "goal": goal,
-                "nodes": [node.to_dict() for node in dag.topological_order()]}
+                "nodes": [node.to_dict() for node in dag.topological_order()],
+                "layout": positions}
         self._path(dag_id).write_text(json.dumps(data, indent=2))
         if memory is not None:
             try:

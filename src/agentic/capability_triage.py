@@ -53,8 +53,8 @@ BLOCK_CONFIDENCE = 0.8
 
 STATUS_CRITERIA = {
     "covered": "Every capability the goal needs is in the inventory.",
-    "need_skill": "A skill in the library, or a new skill, could cover "
-                  "a missing capability.",
+    "need_skill": "A reusable procedure might improve this work, but no "
+                  "tool, service connection, or executable action is missing.",
     "need_mcp": "An MCP server (approved or new) could cover a missing "
                 "capability.",
     "need_plugin": "A new tool plugin, built and tested in the sandbox, "
@@ -65,11 +65,10 @@ STATUS_CRITERIA = {
 
 _NOTES = {
     "need_skill": (
-        "Capability triage: this goal may need a capability not in "
-        "the current inventory. Do not draft a skill or guess the "
-        "owner's preferred workflow. Ask them to continue in the "
-        "Skill Learning Lab at [/labs](/labs), where requirements "
-        "and tests can be agreed before a draft is made."),
+        "No reusable skill is available yet. A skill is learned from a "
+        "workflow after it succeeds; continue this goal with the actual "
+        "tools and services available. Do not create or trust a skill "
+        "before successful verification."),
     "need_mcp": (
         "Capability triage: this goal may need a capability not in "
         "the current inventory. Do not guess a vendor or connect. Ask "
@@ -86,7 +85,7 @@ _NOTES = {
         "Capability check: this goal needs something Aidon does not "
         "have and cannot safely build, find, or connect, so I am "
         "stopping before planning rather than failing after attempts. "
-        "If you can name the missing piece (a tool, skill, or MCP "
+        "If you can name the missing piece (a tool or MCP "
         "server), I can look for it, or we can narrow the goal."),
 }
 

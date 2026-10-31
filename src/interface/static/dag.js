@@ -100,10 +100,16 @@ function renderList() {
 // ---------- open / close ----------------------------------------------------
 
 async function openDag(name) {
+  if (S.dirty && !confirm("Discard unsaved graph changes and open another workflow?")) return;
   try {
     const data = await api("/api/dags/" + encodeURIComponent(name));
     S.cur = name;
     S.dag = data.dag || data;
+    S.dag.nodes = (S.dag.nodes || []).map((node) => ({
+      ...node, deps: node.deps || node.depends_on || [],
+      args: node.args || {},
+    }));
+    $("#dag-goal").value = S.dag.goal || "";
     const rawLayout = data.layout || {};
     S.layout = Array.isArray(rawLayout)
       ? Object.fromEntries(rawLayout.map((p) => [p.id, p])) : rawLayout;
@@ -119,6 +125,7 @@ async function openDag(name) {
 }
 
 function closeDag() {
+  if (S.dirty && !confirm("Discard unsaved graph changes?")) return;
   S.cur = null;
   S.dag = null;
   S.layout = {};
@@ -353,8 +360,14 @@ function renderInspector() {
   panel.hidden = false;
   $("#insp-id").textContent = node.id;
   $("#f-name").value = node.name || "";
+  $("#f-deliverable").value = node.deliverable || "";
   $("#f-tool").value = node.tool || "";
   $("#f-args").value = JSON.stringify(node.args || {}, null, 2);
+  $("#f-inputs").value = (node.inputs || []).join("\n");
+  $("#f-outputs").value = (node.outputs || []).join("\n");
+  $("#f-preconditions").value = (node.preconditions || []).join("\n");
+  $("#f-expected").value = node.expected || "";
+  $("#f-assumptions").value = (node.assumptions || []).join("\n");
   $("#f-executor").value = node.executor || "tool";
   $("#insp-state").textContent = "";
 
@@ -388,6 +401,22 @@ function bindInspector() {
     n.name = e.target.value;
     markDirty();
     renderGraph();
+  });
+
+  $("#f-deliverable").addEventListener("input", (e) => {
+    const n = nodeById(S.sel); if (!n) return;
+    n.deliverable = e.target.value; markDirty(); renderGraph();
+  });
+  [["#f-inputs", "inputs"], ["#f-outputs", "outputs"],
+   ["#f-preconditions", "preconditions"], ["#f-assumptions", "assumptions"]]
+    .forEach(([selector, key]) => $(selector).addEventListener("change", (e) => {
+      const n = nodeById(S.sel); if (!n) return;
+      n[key] = e.target.value.split("\n").map(x => x.trim()).filter(Boolean);
+      markDirty();
+    }));
+  $("#f-expected").addEventListener("change", (e) => {
+    const n = nodeById(S.sel); if (!n) return;
+    n.expected = e.target.value.trim(); markDirty();
   });
 
   $("#f-tool").addEventListener("change", (e) => {
@@ -479,11 +508,19 @@ async function saveDag() {
     status("nothing to save", "warn");
     return;
   }
+  const failures = validateGraph();
+  if (failures.length) {
+    status("cannot save: " + failures[0], "err");
+    return;
+  }
   try {
     const res = await api("/api/dags", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: S.cur, goal: S.dag.goal || "", nodes: S.dag.nodes || [] }),
+      body: JSON.stringify({ id: S.cur, goal: S.dag.goal || "",
+        nodes: (S.dag.nodes || []).map(({ deps, ...n }) => ({
+          ...n, depends_on: deps || [],
+        })), layout: S.layout }),
     });
     S.dirty = false;
     status("saved " + S.cur, "ok");
@@ -501,6 +538,7 @@ async function saveDag() {
 }
 
 async function newDag() {
+  if (S.dirty && !confirm("Discard unsaved graph changes and create a workflow?")) return;
   const name = prompt("Name for the new graph:");
   if (!name) return;
   try {
@@ -547,6 +585,8 @@ function addNode() {
     tool: (S.tools[0] && S.tools[0].name) || "shell",
     args: {},
     deps: [],
+    inputs: [], outputs: [], preconditions: [], assumptions: [],
+    expected: "", deliverable: "",
   };
   S.dag.nodes.push(node);
   const maxX = Object.values(S.layout).reduce(
@@ -565,7 +605,8 @@ async function autoLayout() {
     const res = await api("/api/dags/layout", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dag: S.dag }),
+      body: JSON.stringify({ dag: { ...S.dag, nodes: S.dag.nodes.map(
+        ({ deps, ...n }) => ({ ...n, depends_on: deps || [] })) } }),
     });
     const layout = res.layout || {};
     S.layout = Array.isArray(layout)
@@ -589,6 +630,54 @@ function exportJson() {
   URL.revokeObjectURL(a.href);
 }
 
+function validateGraph() {
+  const nodes = S.dag?.nodes || [];
+  const errors = [];
+  const ids = nodes.map(n => String(n.id || "").trim());
+  if (!nodes.length) errors.push("workflow needs at least one node");
+  if (ids.some(id => !id)) errors.push("every node needs an id");
+  if (new Set(ids).size !== ids.length) errors.push("node ids must be unique");
+  const known = new Set(ids);
+  for (const node of nodes) {
+    for (const dep of node.deps || []) {
+      if (!known.has(dep)) errors.push(`${node.id} depends on missing node ${dep}`);
+      if (dep === node.id) errors.push(`${node.id} cannot depend on itself`);
+    }
+  }
+  const visiting = new Set(), visited = new Set();
+  function visit(id) {
+    if (visiting.has(id)) return false;
+    if (visited.has(id)) return true;
+    visiting.add(id);
+    const node = nodes.find(n => n.id === id);
+    for (const dep of (node?.deps || [])) if (known.has(dep) && !visit(dep)) return false;
+    visiting.delete(id); visited.add(id); return true;
+  }
+  if (ids.some(id => known.has(id) && !visit(id))) errors.push("workflow contains a dependency cycle");
+  const outputs = nodes.map(n => String(n.deliverable || "").trim()).filter(Boolean);
+  if (new Set(outputs).size !== outputs.length) errors.push("deliverable paths must be unique");
+  return [...new Set(errors)];
+}
+
+function fitGraph() {
+  const nodes = S.dag?.nodes || [];
+  if (!nodes.length) return;
+  const points = nodes.map(n => S.layout[n.id]).filter(Boolean);
+  if (!points.length) return;
+  const rect = svg.getBoundingClientRect();
+  const minX = Math.min(...points.map(p => p.x));
+  const minY = Math.min(...points.map(p => p.y));
+  const maxX = Math.max(...points.map(p => p.x + NODE_W));
+  const maxY = Math.max(...points.map(p => p.y + NODE_H));
+  const scale = Math.min(1.8, Math.max(0.25,
+    Math.min((rect.width - 80) / (maxX - minX + 40),
+             (rect.height - 80) / (maxY - minY + 40))));
+  S.view.k = scale;
+  S.view.x = (rect.width - (maxX - minX) * scale) / 2 - minX * scale;
+  S.view.y = (rect.height - (maxY - minY) * scale) / 2 - minY * scale;
+  applyView();
+}
+
 // ---------- boot ------------------------------------------------------------
 
 async function boot() {
@@ -597,9 +686,18 @@ async function boot() {
   $("#btn-new").addEventListener("click", newDag);
   $("#btn-add").addEventListener("click", addNode);
   $("#btn-layout").addEventListener("click", autoLayout);
+  $("#btn-fit").addEventListener("click", fitGraph);
+  $("#btn-validate").addEventListener("click", () => {
+    const errors = validateGraph();
+    status(errors.length ? errors.join(" · ") : "workflow is structurally valid", errors.length ? "err" : "ok");
+  });
   $("#btn-export").addEventListener("click", exportJson);
   $("#btn-delete").addEventListener("click", deleteDag);
   $("#search").addEventListener("input", renderList);
+  $("#dag-goal").addEventListener("input", (e) => {
+    if (!S.dag) return;
+    S.dag.goal = e.target.value; markDirty();
+  });
 
   try {
     S.tools = await api("/api/tools");

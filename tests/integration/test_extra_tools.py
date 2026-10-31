@@ -36,7 +36,7 @@ def _tools(tmp_path, **kw):
 
 EXPECTED = ["web_search", "fetch_url", "read_document", "search_document",
             "search_research_cache", "slack_send", "whatsapp_send",
-            "list_schedule", "cancel_schedule", "adopt_skill"]
+            "list_schedule", "cancel_schedule"]
 
 
 def test_all_nine_tools_present(tmp_path):
@@ -44,6 +44,7 @@ def test_all_nine_tools_present(tmp_path):
     for name in EXPECTED:
         assert name in tools, name
         assert callable(tools[name])
+    assert "adopt_skill" not in tools
 
 
 def test_schedule_list_and_cancel_round_trip(tmp_path):
@@ -142,7 +143,8 @@ def test_adopt_skill_tests_offline_and_requires_separate_approval(tmp_path, monk
     monkeypatch.setattr(sandbox_module, "Sandbox", FakeSandbox)
     config = _Config()
     config.home = tmp_path
-    result = _goal_extra_tools(config, workdir, gate=Approve())["adopt_skill"](
+    result = _goal_extra_tools(config, workdir, gate=Approve(),
+                               allow_skill_adoption=True)["adopt_skill"](
         "summarize.md")
     assert "Trusted skill summarize" in result
     assert SkillLibrary(tmp_path).get("summarize").state == "trusted"
@@ -166,7 +168,7 @@ def test_adopt_skill_refuses_without_isolation(tmp_path, monkeypatch):
     monkeypatch.setattr(sandbox_module, "Sandbox", HostSandbox)
     config = _Config()
     config.home = tmp_path
-    result = _goal_extra_tools(config, workdir)["adopt_skill"]("unsafe.md")
+    result = _goal_extra_tools(config, workdir, allow_skill_adoption=True)["adopt_skill"]("unsafe.md")
     assert "need working bubblewrap isolation" in result
     assert SkillLibrary(tmp_path).get("unsafe") is None
 

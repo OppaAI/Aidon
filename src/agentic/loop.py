@@ -1401,15 +1401,14 @@ class GoalRunner:
                            + "; ".join(plugin_entries[:100]) + ".")
             system += (" Capability rule: before planning a tool step, check the "
                        "built-in tools and the Toolbox tools above for a suitable "
-                       "match. If none fits, follow the capability ladder: check "
-                       "relevant skills and known MCP options, then draft a plugin "
-                       "or SKILL.md in the workdir only when needed. Plugins need "
-                       "meaningful offline acceptance tests and adopt_tool_plugin; "
-                       "skills need meaningful ## Tests and adopt_skill, which runs "
-                       "offline isolated checks and asks separately before trust. "
-                       "When a skill is trusted during this goal, the runner "
-                       "automatically replans the original goal once using the "
-                       "refreshed trusted-skill context; do not repeat acquisition. "
+                       "match. Use existing trusted skills as guidance, not as "
+                       "callable tools. If an executable action is missing, use "
+                       "the owner-approved Tool Lab for a plugin or MCP connection. "
+                       "Never create or trust a skill during the task: a skill is "
+                       "proposed only after the workflow succeeds and its outputs "
+                       "are verified, then the owner may refine it in Skill Lab. "
+                       "Plugins need meaningful offline acceptance tests and "
+                       "adopt_tool_plugin. "
                        "Use "
                        "a plugin.json acceptance_tests field containing one or more "
                        "argv arrays for meaningful offline tests that exercise the tool; "
@@ -2233,7 +2232,15 @@ class GoalRunner:
                         "failed", goal, Plan(steps=[], deliverables=[], criteria=[]),
                         False, False, error=_triage["note"][:500],
                         backend=self._backend_name()))
-                if _triage["status"] != "covered":
+                if _triage["status"] == "need_skill":
+                    # A reusable procedure is an optimization learned from
+                    # demonstrated success, not a prerequisite capability.
+                    # Continue with the tools that actually exist.
+                    self._triage_note = (
+                        "No trusted skill currently covers this workflow. "
+                        "Proceed using available tools. Only offer to distill "
+                        "a skill after successful, verified completion.")
+                elif _triage["status"] != "covered":
                     if getattr(self, "question_ask", None) is None:
                         self._triage_note = _triage["note"]
                     else:
@@ -3771,7 +3778,14 @@ class GoalRunner:
         learn_dir = self.home / "learned"
         learn_dir.mkdir(parents=True, exist_ok=True)
         record = {"status": "done", "conversation_id": self.conversation_id,
+                  "run_id": str(getattr(self, "run_id", "")),
                   "goal": goal, "deliverables": files,
+                  "workflow": [{"id": step.id, "name": step.description,
+                                "tool": step.tool,
+                                "deliverable": step.deliverable,
+                                "depends_on": list(step.depends_on or []),
+                                "expected": step.criteria}
+                               for step in current_plan.normalized_steps()],
                   "criteria": current_plan.criteria,
                   "backend": self._backend_name(),
                   "image": getattr(self.execution_backend, "image", "")
@@ -3781,6 +3795,14 @@ class GoalRunner:
                   "live": (live_record.to_dict() if live_record is not None else None)}
         (learn_dir / "last_run.json").write_text(
             json.dumps(record, indent=2), encoding="utf-8")
+        run_id = str(getattr(self, "run_id", ""))
+        if run_id and run_id.replace("-", "").isalnum() and len(run_id) <= 128:
+            run_dir = learn_dir / "runs"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            temp = run_dir / f".{run_id}.tmp"
+            target = run_dir / f"{run_id}.json"
+            temp.write_text(json.dumps(record, indent=2), encoding="utf-8")
+            temp.replace(target)
         if self.memory is not None:
             episodic = self.memory.record_episodic(
                 self.conversation_id, goal, {"deliverables": files})

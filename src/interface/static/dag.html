@@ -11,10 +11,13 @@
 <header class="dag-top">
   <a class="dag-brand" href="/">◈ Aidon</a>
   <span class="dag-title">DAG editor</span>
+  <label class="dag-goal-label">Workflow goal <input id="dag-goal" type="text" placeholder="Describe when this workflow applies"></label>
   <div class="dag-actions">
     <button id="btn-new" class="dag-btn">New DAG</button>
     <button id="btn-add" class="dag-btn">Add node</button>
     <button id="btn-layout" class="dag-btn">Auto layout</button>
+    <button id="btn-fit" class="dag-btn">Fit graph</button>
+    <button id="btn-validate" class="dag-btn">Validate</button>
     <button id="btn-export" class="dag-btn">Export JSON</button>
     <button id="btn-save" class="dag-btn dag-btn-primary">Save</button>
     <button id="btn-delete" class="dag-btn dag-btn-danger">Delete DAG</button>
@@ -80,10 +83,8 @@
           Delete</button>
       </div>
 
-      <label class="dag-field">
-        <span>Name</span>
-        <input id="f-name" type="text">
-      </label>
+      <label class="dag-field"><span>Step name</span><input id="f-name" type="text"></label>
+      <label class="dag-field"><span>Deliverable</span><input id="f-deliverable" type="text"></label>
 
       <label class="dag-field">
         <span>Tool</span>
@@ -94,6 +95,12 @@
         <span>Arguments (JSON)</span>
         <textarea id="f-args" rows="7" spellcheck="false"></textarea>
       </label>
+
+      <label class="dag-field"><span>Inputs (one per line)</span><textarea id="f-inputs" rows="3"></textarea></label>
+      <label class="dag-field"><span>Outputs (one per line)</span><textarea id="f-outputs" rows="3"></textarea></label>
+      <label class="dag-field"><span>Preconditions (one per line)</span><textarea id="f-preconditions" rows="3"></textarea></label>
+      <label class="dag-field"><span>Expected result</span><textarea id="f-expected" rows="3"></textarea></label>
+      <label class="dag-field"><span>Assumptions (one per line)</span><textarea id="f-assumptions" rows="3"></textarea></label>
 
       <label class="dag-field">
         <span>Executor</span>

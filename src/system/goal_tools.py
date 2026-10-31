@@ -53,7 +53,8 @@ def _deep_search_fns(config):
 
 
 def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None, governor=None, optional_tools=None,
-                      plugin_registry=None, gate_context=None, test_backend_factory=None) -> dict:
+                      plugin_registry=None, gate_context=None, test_backend_factory=None,
+                      allow_skill_adoption=False) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     If ``plugin_registry`` is given (a ``PluginRegistry`` instance that is
@@ -1089,7 +1090,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         except Exception as exc:
             return f"skill adoption refused: {type(exc).__name__}: {exc}"
 
-    tools["adopt_skill"] = adopt_skill
+    if allow_skill_adoption:
+        tools["adopt_skill"] = adopt_skill
 
     # Tier 3: source changes are a separate, forced install approval.
     # The proposal is prepared in the goal workdir; only the approved,

@@ -25,9 +25,9 @@ def test_chat_html_has_avatar_and_mic():
 def test_dag_html_has_editor_controls():
     assert "DAG editor" in DAG_HTML
     assert "Add node" in DAG_HTML
-    assert "Validate and save" in DAG_HTML
-    assert "Move up" in DAG_HTML
-    assert "Move down" in DAG_HTML
+    assert "Validate" in DAG_HTML
+    assert "Fit graph" in DAG_HTML
+    assert "Expected result" in DAG_HTML
 
 
 def test_dag_store_save_validate_and_list(tmp_path):
@@ -46,13 +46,30 @@ def test_dag_store_save_validate_and_list(tmp_path):
     assert store.get("bad") is None
 
 
+def test_dag_node_name_and_layout_round_trip(tmp_path):
+    store = DagStore(tmp_path)
+    ok, failures = store.save("labeled", "A named workflow", [
+        {"id": "draft", "name": "Draft source", "tool": "write",
+         "args": {"file": "draft.md"}, "deliverable": "draft.md"}],
+        layout={"draft": {"x": 250, "y": 140}})
+    assert ok and failures == []
+    saved = store.get("labeled")
+    assert saved["nodes"][0]["name"] == "Draft source"
+    assert saved["layout"]["draft"] == {"x": 250.0, "y": 140.0}
+
+
 def test_webui_dag_api(tmp_path):
     home = tmp_path
     server = WebUIServer(home, dispatcher=TriggerDispatcher())
     status, payload = server.handle_dag_save({"id": "worm", "goal": "Write a Worm game", "nodes": [
-        {"id": "logic", "tool": "write", "args": {"file": "worm.py"}, "deliverable": "worm.py", "depends_on": []}]})
+        {"id": "logic", "tool": "write", "args": {"file": "worm.py"}, "deliverable": "worm.py", "depends_on": []},
+        {"id": "tests", "tool": "read", "args": {"file": "worm.py"}, "deliverable": "tests.md", "depends_on": ["logic"]}],
+        "layout": {"logic": {"x": 120, "y": 90}, "tests": {"x": 390, "y": 90}}})
     assert status == 200 and payload["ok"] is True
     assert server.handle_dags_list()["dags"][0]["id"] == "worm"
+    saved = server.handle_dag_get("worm")
+    assert saved["nodes"][1]["depends_on"] == ["logic"]
+    assert saved["layout"]["tests"] == {"x": 390.0, "y": 90.0}
     assert server.handle_dag_delete("worm")["ok"] is True
 
 

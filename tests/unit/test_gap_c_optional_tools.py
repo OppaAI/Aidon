@@ -22,10 +22,14 @@ def _tools(tmp_path, **kwargs):
 
 def test_on_shows_full_set(tmp_path):
     tools = _tools(tmp_path, optional_tools=True)
+    # Skill adoption is a post-success Skill Lab capability, never a
+    # generally available tool in ordinary work or optional-tools mode.
+    assert "adopt_skill" not in tools
     for name in OPTIONAL:
         assert name in tools, name
     for name in CORE - CONDITIONAL:
-        assert name in tools, name
+        if name != "adopt_skill":
+            assert name in tools, name
 
 
 def test_off_shows_core_only(tmp_path):

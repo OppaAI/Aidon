@@ -1828,6 +1828,15 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 _budget_key = None
             _governor = _make_governor(config, _budget_key)
+            _skill_source_run_id = str(event.payload.get("skill_source_run_id", "") or "")
+            _allow_skill_adoption = False
+            if event.source == "webui" and _skill_source_run_id:
+                try:
+                    _skill_source = server.handle_skill_source(
+                        _skill_source_run_id, event.conversation_id)
+                    _allow_skill_adoption = bool(_skill_source)
+                except Exception:
+                    _allow_skill_adoption = False
             runner = GoalRunner(client, run_sandbox, _gate,
                                 config.home, memory=memory,
                                 conversation_id=event.conversation_id, plugins=plugins,
@@ -1838,7 +1847,7 @@ def main(argv: list[str] | None = None) -> int:
                                 clef_client=_clef_client,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins, gate_context=_gate_context, test_backend_factory=lambda: make_backend(config.execution_backend, run_sandbox, image=config.docker_image, allow_network=False, modal_app=config.modal_app, modal_cpu=config.modal_cpu, modal_memory_mb=config.modal_memory_mb)), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor, resume_interview=bool(event.payload.get("resume_interview")))
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins, gate_context=_gate_context, test_backend_factory=lambda: make_backend(config.execution_backend, run_sandbox, image=config.docker_image, allow_network=False, modal_app=config.modal_app, modal_cpu=config.modal_cpu, modal_memory_mb=config.modal_memory_mb), allow_skill_adoption=_allow_skill_adoption), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor, resume_interview=bool(event.payload.get("resume_interview")))
             def _deliver_files(files, target):
                 """Upload run deliverables as bytes to a Slack/WhatsApp target.
 
@@ -2023,6 +2032,25 @@ def main(argv: list[str] | None = None) -> int:
                     report.status, report.files, report.error, run_id,
                     "", phrase=_phrase,
                     blocked=report.blocked)
+                if (event.source == "webui" and report.status == "done"
+                        and event.payload.get("skill_source_run_id")):
+                    from urllib.parse import quote as _quote_skill
+                    _skill_url = ("/labs?lab=skill&source_run="
+                                  + _quote_skill(run_id, safe="")
+                                  + "&conversation_id="
+                                  + _quote_skill(str(event.conversation_id), safe=""))
+                    _final_text += ("\n\nThis workflow succeeded. You can refine it "
+                                    "into a reusable skill in the [Skill Learning Lab]("
+                                    + _skill_url + ").")
+                elif event.source == "webui" and report.status == "done":
+                    from urllib.parse import quote as _quote_skill
+                    _skill_url = ("/labs?lab=skill&source_run="
+                                  + _quote_skill(run_id, safe="")
+                                  + "&conversation_id="
+                                  + _quote_skill(str(event.conversation_id), safe=""))
+                    _final_text += ("\n\nThis workflow succeeded. Want to turn it into a "
+                                    "reusable skill? [Open Skill Learning Lab]("
+                                    + _skill_url + ").")
                 if event.source == "webui" and report.status == "done" and report.files:
                     from pathlib import Path as _ArtifactPath
                     _workspace = _ArtifactPath(run_sandbox.workdir).resolve()

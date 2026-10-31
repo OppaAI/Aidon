@@ -434,107 +434,7 @@ try {
 </body></html>
 """
 
-DAG_HTML = """<!doctype html>
-<html><head><meta charset="utf-8"><title>Aidon DAG editor</title></head>
-<body>
-<h1>DAG editor</h1>
-<p>Edit a saved workflow: add, remove, modify, and reorder nodes. A DAG that fails validation is not saved, the failures are shown, so a broken graph is never executed.</p>
-<div id="list"></div>
-<h2>Editor</h2>
-<p><label>DAG id <input id="dag-id"></label> <label>Goal <input id="dag-goal" size="60"></label></p>
-<div id="nodes"></div>
-<p>
-<button id="add-node" type="button">Add node</button>
-<button id="save" type="button">Validate and save</button>
-<button id="delete" type="button">Delete</button>
-</p>
-<p id="result"></p>
-<script>
-let nodes = [];
-function render() {
-  const div = document.getElementById('nodes');
-  div.innerHTML = '';
-  nodes.forEach((node, index) => {
-    const row = document.createElement('div');
-    row.innerHTML = '<h3>Node ' + (index + 1) + '</h3>' +
-      '<label>Id <input data-field="id" data-index="' + index + '" value="' + (node.id || '') + '"></label> ' +
-      '<label>Tool <input data-field="tool" data-index="' + index + '" value="' + (node.tool || 'write') + '"></label> ' +
-      '<label>Deliverable <input data-field="deliverable" data-index="' + index + '" value="' + (node.deliverable || '') + '"></label> ' +
-      '<label>Depends on, comma list <input data-field="depends_on" data-index="' + index + '" value="' + (node.depends_on || []).join(',') + '"></label> ' +
-      '<label>Expected <input data-field="expected" data-index="' + index + '" value="' + (node.expected || '') + '"></label> ' +
-      '<label>Assumptions, comma list <input data-field="assumptions" data-index="' + index + '" value="' + (node.assumptions || []).join(',') + '"></label><br>' +
-      '<label>Args, JSON <input data-field="args" data-index="' + index + '" size="80" value=\'' + JSON.stringify(node.args || {}).replace(/'/g, '') + '\'></label> ' +
-      '<button data-action="up" data-index="' + index + '">Move up</button> ' +
-      '<button data-action="down" data-index="' + index + '">Move down</button> ' +
-      '<button data-action="remove" data-index="' + index + '">Remove</button>';
-    div.appendChild(row);
-  });
-  div.querySelectorAll('input').forEach((input) => {
-    input.onchange = () => {
-      const index = parseInt(input.dataset.index, 10);
-      const field = input.dataset.field;
-      if (field === 'depends_on' || field === 'assumptions') {
-        nodes[index][field] = input.value.split(',').map((s) => s.trim()).filter(Boolean);
-      } else if (field === 'args') {
-        try { nodes[index][field] = JSON.parse(input.value); } catch (e) { nodes[index][field] = {}; }
-      } else {
-        nodes[index][field] = input.value;
-      }
-    };
-  });
-  div.querySelectorAll('button').forEach((button) => {
-    button.onclick = () => {
-      const index = parseInt(button.dataset.index, 10);
-      const action = button.dataset.action;
-      if (action === 'remove') { nodes.splice(index, 1); }
-      if (action === 'up' && index > 0) { const item = nodes.splice(index, 1)[0]; nodes.splice(index - 1, 0, item); }
-      if (action === 'down' && index < nodes.length - 1) { const item = nodes.splice(index, 1)[0]; nodes.splice(index + 1, 0, item); }
-      render();
-    };
-  });
-}
-async function loadList() {
-  const r = await fetch('/api/dags');
-  const data = await r.json();
-  const list = document.getElementById('list');
-  list.innerHTML = '<h2>Saved DAGs</h2>';
-  (data.dags || []).forEach((dag) => {
-    const button = document.createElement('button');
-    button.textContent = dag.id + ' (' + dag.nodes + ' nodes) ' + dag.goal;
-    button.onclick = async () => {
-      const rr = await fetch('/api/dags/' + encodeURIComponent(dag.id));
-      const dd = await rr.json();
-      document.getElementById('dag-id').value = dd.id || dag.id;
-      document.getElementById('dag-goal').value = dd.goal || '';
-      nodes = dd.nodes || [];
-      render();
-    };
-    list.appendChild(button);
-    list.appendChild(document.createElement('br'));
-  });
-}
-document.getElementById('add-node').onclick = () => {
-  nodes.push({id: 'node-' + (nodes.length + 1), tool: 'write', args: {}, deliverable: '', depends_on: [], expected: '', assumptions: []});
-  render();
-};
-document.getElementById('save').onclick = async () => {
-  const id = document.getElementById('dag-id').value;
-  const goal = document.getElementById('dag-goal').value;
-  const r = await fetch('/api/dags', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id, goal, nodes})});
-  const data = await r.json();
-  document.getElementById('result').textContent = data.ok ? 'Saved.' : 'Not saved: ' + (data.failures || []).join('; ');
-  await loadList();
-};
-document.getElementById('delete').onclick = async () => {
-  const id = document.getElementById('dag-id').value;
-  await fetch('/api/dags/' + encodeURIComponent(id), {method: 'DELETE'});
-  await loadList();
-};
-loadList();
-render();
-</script>
-</body></html>
-"""
+DAG_HTML = '<!DOCTYPE html>\n<html lang="en" data-theme="light">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>Aidon — DAG editor</title>\n<link rel="stylesheet" href="/static/style.css?v=__ASSET_V__">\n</head>\n<body class="dag-body">\n\n<header class="dag-top">\n  <a class="dag-brand" href="/">◈ Aidon</a>\n  <span class="dag-title">DAG editor</span>\n  <label class="dag-goal-label">Workflow goal <input id="dag-goal" type="text" placeholder="Describe when this workflow applies"></label>\n  <div class="dag-actions">\n    <button id="btn-new" class="dag-btn">New DAG</button>\n    <button id="btn-add" class="dag-btn">Add node</button>\n    <button id="btn-layout" class="dag-btn">Auto layout</button>\n    <button id="btn-fit" class="dag-btn">Fit graph</button>\n    <button id="btn-validate" class="dag-btn">Validate</button>\n    <button id="btn-export" class="dag-btn">Export JSON</button>\n    <button id="btn-save" class="dag-btn dag-btn-primary">Save</button>\n    <button id="btn-delete" class="dag-btn dag-btn-danger">Delete DAG</button>\n  </div>\n  <div class="dag-status" id="status">pick a graph on the left</div>\n</header>\n\n<main class="dag-main">\n  <!-- left: the saved graphs -->\n  <aside class="dag-side">\n    <input id="search" class="dag-search" type="text" placeholder="filter graphs…">\n    <div id="dag-list" class="dag-list"></div>\n  </aside>\n\n  <!-- center: the canvas -->\n  <section class="dag-canvas-wrap">\n    <svg id="canvas" class="dag-canvas">\n      <defs>\n        <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">\n          <path d="M 28 0 L 0 0 0 28" fill="none" stroke="var(--border)"\n                stroke-width="1" opacity="0.5"/>\n        </pattern>\n        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"\n                markerWidth="7" markerHeight="7" orient="auto-start-reverse">\n          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/>\n        </marker>\n        <marker id="arrow-dim" viewBox="0 0 10 10" refX="9" refY="5"\n                markerWidth="7" markerHeight="7" orient="auto-start-reverse">\n          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted)"/>\n        </marker>\n      </defs>\n      <rect id="grid-bg" x="0" y="0" width="100%" height="100%"\n            fill="url(#grid)"/>\n      <g id="viewport">\n        <g id="edges"></g>\n        <g id="nodes"></g>\n        <path id="linking" class="dag-linking" style="display:none"/>\n      </g>\n    </svg>\n    <div class="dag-hint">drag a node · drag from its right port to another\n      node to connect · click the background to pan · wheel to zoom</div>\n  </section>\n\n  <!-- right: the node inspector -->\n  <aside class="dag-inspector">\n    <div id="inspector-empty" class="dag-empty">\n      select a node to edit it\n      <ul class="dag-empty-list">\n        <li><b>id</b> — stable key, used by templates</li>\n        <li><b>name</b> — human title on the canvas</li>\n        <li><b>tool</b> — the tool this step calls</li>\n        <li><b>args</b> — JSON passed to the tool</li>\n        <li><b>deps</b> — nodes that must finish first</li>\n        <li><b>executor</b> — tool / fast / strong (llm nodes)</li>\n      </ul>\n    </div>\n\n    <div id="inspector" hidden>\n      <div class="dag-insp-head">\n        <span id="insp-id" class="dag-insp-id"></span>\n        <button id="btn-dup" class="dag-btn dag-btn-small">Duplicate</button>\n        <button id="btn-delnode" class="dag-btn dag-btn-small dag-btn-danger">\n          Delete</button>\n      </div>\n\n      <label class="dag-field"><span>Step name</span><input id="f-name" type="text"></label>\n      <label class="dag-field"><span>Deliverable</span><input id="f-deliverable" type="text"></label>\n\n      <label class="dag-field">\n        <span>Tool</span>\n        <select id="f-tool"></select>\n      </label>\n\n      <label class="dag-field">\n        <span>Arguments (JSON)</span>\n        <textarea id="f-args" rows="7" spellcheck="false"></textarea>\n      </label>\n\n      <label class="dag-field"><span>Inputs (one per line)</span><textarea id="f-inputs" rows="3"></textarea></label>\n      <label class="dag-field"><span>Outputs (one per line)</span><textarea id="f-outputs" rows="3"></textarea></label>\n      <label class="dag-field"><span>Preconditions (one per line)</span><textarea id="f-preconditions" rows="3"></textarea></label>\n      <label class="dag-field"><span>Expected result</span><textarea id="f-expected" rows="3"></textarea></label>\n      <label class="dag-field"><span>Assumptions (one per line)</span><textarea id="f-assumptions" rows="3"></textarea></label>\n\n      <label class="dag-field">\n        <span>Executor</span>\n        <select id="f-executor">\n          <option value="tool">tool (deterministic)</option>\n          <option value="fast">fast model</option>\n          <option value="strong">strong model</option>\n        </select>\n      </label>\n\n      <div class="dag-field">\n        <span>Depends on</span>\n        <div id="f-deps" class="dag-deps"></div>\n      </div>\n\n      <div class="dag-insp-foot">\n        <span id="insp-state" class="dag-note"></span>\n      </div>\n    </div>\n  </aside>\n</main>\n\n<script src="/static/dag.js?v=__ASSET_V__"></script>\n</body>\n</html>\n'
 
 REPLAY_HTML = """<!doctype html><html><head><meta charset="utf-8"><title>Replay</title></head><body>
 <h1>Run replay</h1><p>Replay a run from its trace file, step by step, not a live run. Pick a run, then Step to move through its trace events in order.</p>
@@ -1135,6 +1035,40 @@ class WebUIServer(WebUISettingsMixin, WebUIDataMixin, WebUICapabilityMixin):
                                               "stream_id": ""}], "trace": []}
         return {"run_id": run_id, "conversation_id": conversation_id, "goal": goal}
 
+    def handle_skill_source(self, run_id: str, conversation_id: str) -> dict | None:
+        """Expose only a successful workflow owned by this conversation."""
+        run_id = str(run_id or "")
+        if (not run_id or len(run_id) > 128
+                or not run_id.replace("-", "").isalnum()):
+            return None
+        path = self.home / "learned" / "runs" / f"{run_id}.json"
+        try:
+            if path.stat().st_size > 1024 * 1024:
+                return None
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            return None
+        if (record.get("status") != "done"
+                or str(record.get("run_id", "")) != run_id
+                or str(record.get("conversation_id", "")) != str(conversation_id)):
+            return None
+        steps = record.get("workflow")
+        if not isinstance(steps, list) or not steps:
+            return None
+        return {"run_id": run_id, "conversation_id": str(conversation_id),
+                "goal": str(record.get("goal", ""))[:4000],
+                "deliverables": [str(x)[:300] for x in
+                                 (record.get("deliverables") or [])[:100]],
+                "workflow": [{
+                    "id": str(node.get("id", ""))[:100],
+                    "name": str(node.get("name", ""))[:300],
+                    "tool": str(node.get("tool", ""))[:100],
+                    "deliverable": str(node.get("deliverable", ""))[:300],
+                    "depends_on": [str(x)[:100] for x in
+                                   (node.get("depends_on") or [])[:100]],
+                    "expected": str(node.get("expected", ""))[:1000],
+                } for node in steps[:100] if isinstance(node, dict)]}
+
     def start_goal(self, body: dict) -> dict:
         """Start the same dispatcher path used by messaging triggers."""
         from .run_control import new_run_id
@@ -1148,6 +1082,12 @@ class WebUIServer(WebUISettingsMixin, WebUIDataMixin, WebUICapabilityMixin):
         goal, delivery = extract_result_delivery(goal)
         raw_goal = goal
         conversation_id = str(body.get("conversation_id", "") or "")
+        skill_source_run_id = str(body.get("skill_source_run_id", "") or "")
+        if skill_source_run_id and not conversation_id:
+            return {"error": "a verified skill source requires its original conversation"}
+        if skill_source_run_id and not self.handle_skill_source(
+                skill_source_run_id, conversation_id):
+            return {"error": "skills can only be drafted from a verified successful run in this conversation"}
         conversation_db = None
         prior_history = []
         with self._question_lock:
@@ -1352,6 +1292,7 @@ class WebUIServer(WebUISettingsMixin, WebUIDataMixin, WebUICapabilityMixin):
                    "_trace_callback": trace_update,
                    "_question_callback": question_callback,
                    "resume_interview": resume_interview,
+                   "skill_source_run_id": skill_source_run_id,
                    "result_delivery": delivery.__dict__ if delivery else {}}
         image_paths = [str(path) for path in (body.get("image_paths") or [])
                        if str(path).strip()]
@@ -1972,7 +1913,9 @@ class WebUIServer(WebUISettingsMixin, WebUIDataMixin, WebUICapabilityMixin):
     def handle_dag_save(self, body: dict) -> tuple[int, dict]:
         ok, failures = self.dag_store().save(
             str(body.get("id", "")), str(body.get("goal", "")),
-            list(body.get("nodes", [])), memory=self.memory, merge=bool(body.get("merge", False)))
+            list(body.get("nodes", [])), memory=self.memory,
+            merge=bool(body.get("merge", False)),
+            layout=body.get("layout", {}))
         # Memory DAGs are also editable: if the editor asks for a
         # memory DAG, it is loaded via /api/memory-dags below, and
         # saved back through this same save, with merge, so the

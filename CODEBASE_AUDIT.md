@@ -13,6 +13,8 @@ The findings below describe the audited baseline; the status in this section ref
 - **Runtime validation pending:** Home-PC browser refresh/switching, Modal, real MCP servers, and X11/desktop behavior require the checks in `PRODUCTION_READINESS.md`.
 - **Residual test assurance limit:** authored test code and capability disclosures still require owner review; neither static analysis nor mutation checks can prove all behavior or safety.
 - **Current full suite:** 1,414 passed, 7 skipped on 2026-10-31; see `PRODUCTION_READINESS.md` for the home-PC procedure.
+- **Skill lifecycle refinement:** missing skills are treated as post-success optimization, while missing executable capabilities use Tool/MCP acquisition. Successful WebUI runs can open Skill Lab with conversation-bound, server-validated workflow evidence. Skill adoption is available only to that validated follow-up. Offline tests and live browser flow should be rerun for this revision.
+- **Workflow DAG editor:** the editor persists dependency edges and node positions, validates cycles and metadata, and exposes fit-to-view and node-contract controls. Its scope is user workflow editing/execution; the internal agent loop remains responsible for stateful control flow, so a separate LangGraph-compatible runtime is not duplicated.
 
 ## Coverage and limits
 
@@ -81,6 +83,7 @@ Use the matching detailed procedure in `PRODUCTION_READINESS.md` and record date
 - **X11 scrolling:** confirm actual wheel scrolling, screenshot, click, typing and focus on the intended display and Xauthority with a harmless window.
 - **Plugin acceptance:** confirm trivial no-op checks are refused; use a harmless plugin with a meaningful assertion, verify per-tool mutation checks and hash-bound approval, then owner-review test source for coverage and safety.
 - **MCP approval, Tool Lab persistence, research sources, browser restoration, Modal, SSH and live model:** follow their itemized procedures in `PRODUCTION_READINESS.md`; these need target services, browser, credentials or host access unavailable to this audit runner.
+- **Post-success Skill Lab and DAG editor:** use the revised procedure in `PRODUCTION_READINESS.md` to validate successful-run handoff, rejection of failed/cross-conversation source IDs, and edit/save/reopen behavior in a live browser.
 
 ### Intentional safety and review limits
 

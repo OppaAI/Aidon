@@ -730,6 +730,12 @@ body:has(.settings-app) { overflow: auto; }
   letter-spacing: .12em; color: var(--accent); text-decoration: none; }
 .dag-title { font-family: var(--font-display); font-size: 13px; font-weight: 700;
   letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+.dag-goal-label { display:flex; align-items:center; gap:7px; color:var(--muted);
+  font:600 10px var(--font-display); letter-spacing:.08em; text-transform:uppercase; }
+.dag-goal-label input { width:min(32vw, 360px); min-width:180px; padding:7px 9px;
+  border:1px solid var(--border); border-radius:8px; background:var(--surface2);
+  color:var(--text); font:12px var(--font-mono); }
+.dag-goal-label input:focus { outline:2px solid var(--accent-glow); border-color:var(--accent); }
 .dag-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .dag-btn {
   padding: 7px 13px; border-radius: 9px; cursor: pointer;

@@ -111,6 +111,16 @@ def test_triage_covered_and_need_states():
             assert result["note"], "non-covered triage must carry a note"
 
 
+def test_skill_gap_is_a_post_success_optimization_not_an_acquisition_gate():
+    result = triage("Do a thing", _inventory(),
+                    _StubClef("need_skill", 0.9))
+    assert result["status"] == "need_skill"
+    assert "after it succeeds" in result["note"]
+    assert "continue this goal" in result["note"]
+    assert "Tool Crafting Lab" not in result["note"]
+    assert "Skill Learning Lab" not in result["note"]
+
+
 def test_triage_low_confidence_proceeds_as_covered():
     result = triage("Do a thing", _inventory(), _StubClef("blocked", 0.4))
     assert result["status"] == "covered"

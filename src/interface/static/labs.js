@@ -40,6 +40,9 @@ function readState(kind) {
 }
 const state = Object.fromEntries(Object.keys(LABS).map(k => [k, readState(k)]));
 const revisions = { tool: 0, skill: 0, mcp: 0 };
+const skillSource = new URLSearchParams(location.search).get("source_run") || "";
+const skillSourceConversation = new URLSearchParams(location.search).get("conversation_id") || "";
+let verifiedSkillSource = null;
 
 function render(kind) {
   const box = document.getElementById("chat-" + kind);
@@ -49,7 +52,8 @@ function render(kind) {
   const marker = { tool: /TOOL SPEC/i, skill: /SKILL SPEC/i,
                    mcp: /MCP CONNECTION SPEC/i }[kind];
   const ready = state[kind].turns.some(turn => turn.role === "assistant" && marker.test(turn.text));
-  document.querySelector('[data-brief="' + kind + '"]').disabled = !ready;
+  const sourceReady = kind !== "skill" || Boolean(verifiedSkillSource);
+  document.querySelector('[data-brief="' + kind + '"]').disabled = !ready || !sourceReady;
 }
 async function save(kind) {
   localStorage.setItem(stateKey(kind), JSON.stringify(state[kind]));
@@ -115,16 +119,23 @@ function startFromBrief(kind) {
     document.getElementById("status-" + kind).textContent = "Finish the interview and review Aidon's spec before approving the brief.";
     return;
   }
+  if (kind === "skill" && !verifiedSkillSource) {
+    document.getElementById("status-skill").textContent = "A skill can only be distilled from a successful verified workflow. Open Skill Lab from a completed run.";
+    return;
+  }
   const transcript = turns.map(t => (t.role === "user" ? "Owner" : "Aidon") + ":\n" + t.text).join("\n\n");
   const instruction = {
     tool: "Use the conversation below as the owner's approved requirements brief. First summarize the agreed TOOL SPEC and identify any remaining ambiguity; if the brief is sufficient, create the proposed sandbox tool plugin in the goal workdir, test it safely, and request adoption through the existing explicit plugin approval card. Do not assume brief approval is plugin adoption approval. For image work, follow the user's chosen model/software.\n\n",
     skill: "Use the conversation below as the owner's approved requirements brief. Produce a reusable Claude-style SKILL.md with YAML front matter name and description, concise actionable instructions, and a ## Tests section with meaningful safe checks. Import it through the existing SkillLibrary path, run the skill tests if the workflow supports it, and request any required trust approvals. Do not claim it is trusted until lifecycle checks pass and owner approval is recorded.\n\n",
     mcp: "Use the conversation below as the owner's approved MCP requirements brief. Research any missing details, use only a real, cited server and exact command or URL, then request connection through the existing MCP approval lifecycle. Never invent a command or URL and never ask the owner to paste a secret into chat; use named environment variables. Do not connect before the approval card is accepted.\n\n"
   }[kind];
-  const goal = instruction + transcript;
+  const goal = kind === "skill"
+    ? instruction + "Verified successful workflow source (owner may refine this into a reusable skill):\n"
+      + JSON.stringify(verifiedSkillSource, null, 2) + "\n\nOwner-approved refinement discussion:\n" + transcript
+    : instruction + transcript;
   const status = document.getElementById("status-" + kind);
   status.textContent = "Starting the approved brief in a new workflow…";
-  fetch("/api/goals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ goal, mode: "plan", conversation_id: state[kind].id }) })
+  fetch("/api/goals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ goal, mode: "plan", conversation_id: state[kind].id, skill_source_run_id: kind === "skill" ? verifiedSkillSource.run_id : "" }) })
     .then(async response => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "HTTP " + response.status);
@@ -168,3 +179,24 @@ Object.keys(LABS).forEach(async kind => {
     if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(kind); }
   });
 });
+
+if (skillSource) {
+  fetch("/api/skill-source?run_id=" + encodeURIComponent(skillSource)
+      + "&conversation_id=" + encodeURIComponent(skillSourceConversation))
+    .then(async response => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "No verified successful workflow found");
+      verifiedSkillSource = data;
+      document.querySelector('[data-lab="skill"]').click();
+      const note = "We are distilling a skill from this successful workflow:\n\n"
+        + data.goal + "\n\n" + data.workflow.map(node => "• " + node.name
+          + " [" + node.tool + "]" + (node.expected ? " — " + node.expected : "")).join("\n")
+        + "\n\nReview this proven procedure and tell me what should be generalized, renamed, or bounded before I draft the skill.";
+      state.skill = { id: newConversationId(), created: false, started: false,
+        turns: [{ role: "assistant", text: note }], source_run_id: data.run_id };
+      await save("skill");
+      render("skill");
+      document.getElementById("status-skill").textContent = "Verified successful workflow loaded. Refine the procedure, then review the skill spec.";
+    })
+    .catch(error => { document.getElementById("status-skill").textContent = error.message; });
+}

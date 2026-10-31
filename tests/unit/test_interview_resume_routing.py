@@ -45,3 +45,26 @@ def test_resuming_interview_bypasses_chat_route(tmp_path):
                         use_semantic_router_skip=True, resume_interview=True,
                         mode="plan", question_ask=lambda question: "reject")
     assert runner.run("Make a video").status == "rejected"
+
+
+def test_successful_run_record_is_conversation_scoped_skill_source(tmp_path):
+    import json
+    from src.interface.triggers import TriggerDispatcher
+
+    server = WebUIServer(tmp_path, dispatcher=TriggerDispatcher(), memory=None)
+    run_dir = tmp_path / "learned" / "runs"
+    run_dir.mkdir(parents=True)
+    record = {"status": "done", "run_id": "successful-123",
+              "conversation_id": "chat-one", "goal": "Draft release notes",
+              "deliverables": ["release.md"],
+              "workflow": [{"id": "draft", "name": "Draft notes",
+                            "tool": "write", "deliverable": "release.md",
+                            "depends_on": [], "expected": "Verified facts"}]}
+    (run_dir / "successful-123.json").write_text(json.dumps(record))
+
+    source = server.handle_skill_source("successful-123", "chat-one")
+    assert source and source["workflow"][0]["name"] == "Draft notes"
+    assert server.handle_skill_source("successful-123", "other-chat") is None
+    record["status"] = "failed"
+    (run_dir / "successful-123.json").write_text(json.dumps(record))
+    assert server.handle_skill_source("successful-123", "chat-one") is None
