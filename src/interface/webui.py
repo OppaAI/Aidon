@@ -242,7 +242,7 @@ CHAT_HTML = """<!doctype html>
 <circle class="robot-eye" id="eye-left" cx="85" cy="50" r="7.5" fill="none" stroke="#7de9ff" stroke-width="3"/>
 <circle class="robot-eye" id="eye-right" cx="115" cy="50" r="7.5" fill="none" stroke="#7de9ff" stroke-width="3"/>
 <path id="mouth-smile" d="M 90 67 Q 100 73 110 67" fill="none" stroke="#7de9ff" stroke-width="3" stroke-linecap="round"/>
-<path id="mouth-open" d="M94 64 Q100 62 106 64 Q109 68 106 73 Q100 77 94 73 Q91 68 94 64Z" fill="#050913" stroke="#7de9ff" stroke-width="1.8" opacity="0"/>
+<path id="mouth-open" d="M94 64 Q100 62 106 64 Q109 68 106 73 Q100 77 94 73 Q91 68 94 64Z" fill="#7de9ff" opacity="0"/>
 </g>
 </g>
 <rect x="89" y="88" width="22" height="14" rx="6" fill="#1a2a4a"/>

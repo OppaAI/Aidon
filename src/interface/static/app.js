@@ -198,9 +198,9 @@
                        agentic: "Agentic", artifact: "Artifact" };
       const confidence = Math.round(
         Math.max(0, Math.min(1, Number(route.confidence) || 0)) * 100);
-      routeChip = '<span>' + (icons[route.group] || "◆") + " " +
-        esc(labels[route.group] || route.group) + " · " + confidence +
-        "%</span><span> · </span>";
+      routeChip = '<span>' + confidence + "% · " +
+        (icons[route.group] || "◆") + " " +
+        esc(labels[route.group] || route.group) + "</span><span> · </span>";
     }
     if (parts.stats || routeChip) {
       html += '<div class="run-stats">' +
