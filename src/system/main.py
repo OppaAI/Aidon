@@ -3201,9 +3201,14 @@ def main(argv: list[str] | None = None) -> int:
                         else:
                             result = _swm(msg, recipient, resolved)
                         if not result.get("ok"):
+                            error = str(result.get("error", "unknown error"))
+                            if kind == "slack" and "missing_scope" in error:
+                                error = ("Slack app is missing the files:write scope; "
+                                         "add it in OAuth & Permissions, then reinstall "
+                                         "the app to the workspace")
                             event.send_reply(
                                 f"File delivery failed for {resolved.name}: "
-                                f"{result.get('error', 'unknown error')}")
+                                f"{error}")
                     except Exception as exc:
                         event.send_reply(
                             f"File delivery failed for {resolved.name}: {exc}")
@@ -3339,9 +3344,10 @@ def main(argv: list[str] | None = None) -> int:
                 _phrase = (_pwm("report-" + report.status, _say)
                            if report.status in ("done", "failed", "rejected",
                                                 "cancelled") else None)
+                _stats_line = format_run_stats(report)
                 _final_text = _report_text(
                     report.status, report.files, report.error, run_id,
-                    format_run_stats(report), phrase=_phrase,
+                    "", phrase=_phrase,
                     blocked=report.blocked)
                 if event.source == "webui" and report.status == "done" and report.files:
                     from pathlib import Path as _ArtifactPath
@@ -3367,6 +3373,12 @@ def main(argv: list[str] | None = None) -> int:
                             continue
                     if _links:
                         _final_text += "\n\nFiles in this run's workspace:\n" + "\n".join(_links)
+                # The WebUI recognizes the stopwatch line as the start of
+                # compact message metadata. Keep all body content (including
+                # deliverable links) before it so links remain visible and
+                # clickable instead of being escaped into the tiny stats row.
+                if _stats_line:
+                    _final_text += "\n" + _stats_line
                 _surface_reply(_final_text, files=report.files)
             # A run that started on Slack or WhatsApp gets its
             # deliverables as uploads on that same surface, after
