@@ -54,6 +54,7 @@ from ..capabilities.tools import ToolRegistry
 from .verify import verify_plan
 from .capability_interview import CapabilityInterviewMixin
 from .plan_execution import PlanExecutionMixin
+from .plan_run import PlanRunMixin
 from .tool_dispatch import ToolDispatchMixin, _normalize_shell_args
 from .run_finalization import RunFinalizationMixin
 from .planning import PlanningMixin, MAX_REPLANS, _SKILL_FULL_CHARS
@@ -159,7 +160,7 @@ def run_react(client, messages: list, tools, *, max_rounds: int | None = None,
 
 
 
-class GoalRunner(ToolDispatchMixin, PlanExecutionMixin, PlanningMixin, RunFinalizationMixin, CapabilityInterviewMixin):
+class GoalRunner(ToolDispatchMixin, PlanExecutionMixin, PlanRunMixin, PlanningMixin, RunFinalizationMixin, CapabilityInterviewMixin):
     def __init__(self, client: ModelClient, sandbox: Sandbox,
                  gate: ApprovalGate, home: Path, memory=None,
                  conversation_id: str = "",
