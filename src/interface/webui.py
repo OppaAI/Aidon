@@ -185,9 +185,15 @@ CHAT_HTML = """<!doctype html>
 #robot-head { transform-origin: 100px 54px; }
 #robot-arm-left { transform-origin: 52px 111px; }
 #robot-arm-right { transform-origin: 148px 111px; }
+#robot { animation: robot-bob 5s ease-in-out infinite; }
+#robot-head { animation: robot-head-sway 7s ease-in-out infinite; }
+#robot-arm-left, #robot-arm-right { animation: robot-arm-sway 4.8s ease-in-out infinite; }
+@keyframes robot-bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+@keyframes robot-head-sway { 0%,100% { transform: rotate(0); } 35% { transform: rotate(-2deg); } 70% { transform: rotate(1.5deg); } }
+@keyframes robot-arm-sway { 0%,100% { transform: rotate(0); } 50% { transform: rotate(2.5deg); } }
 .robot-eye { animation: robot-blink 4.2s infinite; transform-origin: center; transform-box: fill-box; }
 @keyframes robot-blink { 0%,92%,98%,100% { transform: scaleY(1); } 94%,96% { transform: scaleY(0.1); } }
-@media (prefers-reduced-motion: reduce) { .robot-eye { animation: none; } }
+@media (prefers-reduced-motion: reduce) { #robot, #robot-head, #robot-arm-left, #robot-arm-right, .robot-eye { animation: none; } }
 #mouth-smile { opacity: 1; }
 #mouth-open { opacity: 0; }
 #avatar.speaking #mouth-smile { opacity: 0; }
@@ -229,13 +235,15 @@ CHAT_HTML = """<!doctype html>
 <rect x="152" y="40" width="12" height="32" rx="6" fill="url(#robot-ear)" stroke="#7894b5" stroke-width="1"/>
 <path d="M38 48 Q39 43 42 44 M154 48 Q155 43 158 44" fill="none" stroke="#e5f4ff" stroke-width="1.5" stroke-linecap="round" opacity=".58"/>
 <rect x="48" y="18" width="104" height="72" rx="21" fill="url(#robot-head-shell)" stroke="#c4cedb" stroke-width="1.5"/>
+<path d="M100 18 L100 9" fill="none" stroke="#1a2a4a" stroke-width="2" stroke-linecap="round"/>
+<circle cx="100" cy="6.5" r="3.2" fill="#7de9ff" stroke="#1a2a4a" stroke-width="1.2"/>
 <path d="M55 39 Q58 29 71 28 H129 Q142 29 145 40" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".68"/>
 <rect x="59" y="28" width="82" height="52" rx="14" fill="url(#robot-face)" stroke="#15223b" stroke-width="1"/>
 <path d="M68 33 Q74 30 84 30 H128 Q135 31 137 36" fill="none" stroke="#6680a5" stroke-width="1.5" stroke-linecap="round" opacity=".4"/>
 <path d="M70 38 Q76 31 88 31 H121 Q130 31 134 36 Q114 33 96 42 Q82 49 71 47 Z" fill="#d9f2ff" opacity=".2"/>
 <path d="M71 39 Q78 33 89 33 H112 Q95 36 82 43 Q75 46 71 45 Z" fill="#fff" opacity=".16"/>
-<circle class="robot-eye" id="eye-left" cx="85" cy="50" r="9" fill="#7de9ff"/>
-<circle class="robot-eye" id="eye-right" cx="115" cy="50" r="9" fill="#7de9ff"/>
+<circle class="robot-eye" id="eye-left" cx="85" cy="50" r="7.5" fill="none" stroke="#7de9ff" stroke-width="3"/>
+<circle class="robot-eye" id="eye-right" cx="115" cy="50" r="7.5" fill="none" stroke="#7de9ff" stroke-width="3"/>
 <path id="mouth-smile" d="M 90 67 Q 100 73 110 67" fill="none" stroke="#7de9ff" stroke-width="3" stroke-linecap="round"/>
 <ellipse id="mouth-open" cx="100" cy="69" rx="2" ry="1" fill="#7de9ff" opacity="0"/>
 </g>
