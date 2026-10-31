@@ -18,6 +18,7 @@ import os
 import subprocess
 import threading
 import queue
+import select
 import time
 
 # Re-exported here so callers of the stdio client use the same
@@ -102,24 +103,38 @@ class McpClient:
             encoded = json.dumps(request) + "\n"
             if len(encoded.encode("utf-8")) > 1048576:
                 raise ValueError("MCP request exceeds size limit")
-            write_result = queue.Queue(maxsize=1)
             proc = self.proc
-            def write_request():
-                try:
-                    proc.stdin.write(encoded)
-                    proc.stdin.flush()
-                    write_result.put(None)
-                except (OSError, ValueError) as exc:
-                    write_result.put(exc)
-            threading.Thread(target=write_request, daemon=True).start()
+            if proc is None or proc.stdin is None:
+                raise ValueError("MCP server is not running")
+            # A worker thread around buffered TextIO.write only bounds the
+            # caller: it can remain blocked forever while holding a reference
+            # to the pipe. Use nonblocking writes on the pipe descriptor so
+            # backpressure is governed by the same request deadline.
+            payload = encoded.encode("utf-8")
+            fd = proc.stdin.fileno()
             try:
-                write_error = write_result.get(timeout=max(0, deadline - time.monotonic()))
-            except queue.Empty:
-                proc.kill()
+                os.set_blocking(fd, False)
+                view = memoryview(payload)
+                while view:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError
+                    try:
+                        written = os.write(fd, view)
+                    except BlockingIOError:
+                        _, writable, _ = select.select([], [fd], [], remaining)
+                        if not writable:
+                            raise TimeoutError
+                        continue
+                    if written <= 0:
+                        raise BrokenPipeError("MCP server closed its input")
+                    view = view[written:]
+            except TimeoutError:
                 self.close()
                 raise TimeoutError(f"MCP {method} write timed out") from None
-            if write_error is not None:
-                raise ValueError("MCP server closed its input") from write_error
+            except (OSError, ValueError) as exc:
+                self.close()
+                raise ValueError("MCP server closed its input") from exc
             while True:
                 try:
                     line = self._responses.get(timeout=max(0, deadline - time.monotonic()))

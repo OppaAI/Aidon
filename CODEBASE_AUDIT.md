@@ -57,7 +57,7 @@ Green offline tests do not satisfy the host-access, crash-recovery, functional-a
 
 ## Subsequent repair progress
 
-- MCP child environments now contain only runtime variables and explicitly configured bindings. Stdio reads have deadlines and ID checks; this is not filesystem isolation, and writes to a non-reading child still need a deadline.
+- MCP child environments now contain only runtime variables and explicitly configured bindings. Stdio reads and nonblocking writes share request deadlines, with response-ID checks. This is not filesystem isolation; approved MCP children still have the host account's filesystem access.
 - File serving is limited to workspace, library files and images, with private names and database/key extensions excluded. Existing links to files elsewhere in the Aidon home must be migrated to artifact locations.
 - POST and PUT body parsing rejects invalid framing and payloads above 80 MiB and uses a socket read deadline.
 - Local sandbox output is capped at 1 MiB per stream and its process group is killed at the end of a run or on timeout. Process groups are not a substitute for OS isolation: escaped sessions and other backends need separate verification.
