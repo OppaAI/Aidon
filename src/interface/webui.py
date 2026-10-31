@@ -220,14 +220,14 @@ CHAT_HTML = """<!doctype html>
 <linearGradient id="robot-ear" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7899bc"/><stop offset=".38" stop-color="#a9c8df"/><stop offset=".68" stop-color="#7095bc"/><stop offset="1" stop-color="#486b96"/></linearGradient>
 </defs>
 <g id="robot-arm-left">
-<path d="M 68 103 Q 53 103 47 117 Q 41 134 35 150 Q 33 160 40 164 Q 47 167 53 157 Q 64 140 72 124 Z" fill="url(#robot-arm-shell)" stroke="#c6d0df" stroke-width="1.5"/>
+<path d="M 68 103 Q 53 103 47 117 Q 41 134 35 150 Q 33 159 37 163 Q 40 167 45 165 Q 50 162 53 156 Q 64 140 72 124 Z" fill="url(#robot-arm-shell)" stroke="#c6d0df" stroke-width="1.5"/>
 <path d="M 54 117 Q 49 135 41 153 Q 39 158 42 159 Q 46 157 49 150 L 64 127 Z" fill="#fff" opacity=".62"/>
-<path d="M40 162 L39 166 M45 163 L45 167 M50 161 L51 165" fill="none" stroke="#1a2a4a" stroke-width="2.5" stroke-linecap="round"/>
+<path d="M39 162 L39 164 M44 163 L44 165 M49 161 L50 163" fill="none" stroke="#1a2a4a" stroke-width="2.2" stroke-linecap="round"/>
 </g>
 <g id="robot-arm-right">
-<path d="M 132 103 Q 147 103 153 117 Q 159 134 165 150 Q 167 160 160 164 Q 153 167 147 157 Q 136 140 128 124 Z" fill="url(#robot-arm-shell)" stroke="#c6d0df" stroke-width="1.5"/>
+<path d="M 132 103 Q 147 103 153 117 Q 159 134 165 150 Q 167 159 163 163 Q 160 167 155 165 Q 150 162 147 156 Q 136 140 128 124 Z" fill="url(#robot-arm-shell)" stroke="#c6d0df" stroke-width="1.5"/>
 <path d="M 146 117 Q 151 135 159 153 Q 161 158 158 159 Q 154 157 151 150 L 136 127 Z" fill="#fff" opacity=".62"/>
-<path d="M160 162 L161 166 M155 163 L155 167 M150 161 L149 165" fill="none" stroke="#1a2a4a" stroke-width="2.5" stroke-linecap="round"/>
+<path d="M161 162 L161 164 M156 163 L156 165 M151 161 L150 163" fill="none" stroke="#1a2a4a" stroke-width="2.2" stroke-linecap="round"/>
 </g>
 <g id="robot-head">
 <g transform="translate(6 0) scale(.94 1)">

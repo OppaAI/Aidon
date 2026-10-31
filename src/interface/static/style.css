@@ -15,6 +15,7 @@
   --text: #f2f1f4; --muted: #938f9b; --border: #352f3d;
   --accent: #b080ff; --accent2: #7138cc;
   --accent-glow: rgba(176, 128, 255, .28);
+  --moss: #a3b58a; --moss-glow: rgba(163, 181, 138, .24);
   --green: #80ffb5; --cyan: #80f4ff; --toggle-off: #625b69; --amber: #ffcf99; --red: #ff8080;
   --font-display: "Avenir Next", Avenir, "Trebuchet MS", system-ui, sans-serif;
   --font-serif: Georgia, "Times New Roman", serif;
@@ -27,6 +28,7 @@ html[data-theme="light"] {
   --text: #343a2e; --muted: #62695a; --border: #b8bbaa;
   --accent: #b96e35; --accent2: #65734f;
   --accent-glow: rgba(185, 110, 53, .18);
+  --moss: #65734f; --moss-glow: rgba(101, 115, 79, .20);
   --green: #53725e; --cyan: #64877d; --toggle-off: #929584; --amber: #a96a43; --red: #a85e53;
   --font-display: "Avenir Next", Avenir, "Trebuchet MS", system-ui, sans-serif;
   --font-serif: Georgia, "Times New Roman", serif;
@@ -67,12 +69,14 @@ html[data-theme="light"] .card { border-color: color-mix(in srgb, var(--text) 60
 #brand { display: flex; align-items: center; gap: 10px; padding: 14px 14px 10px; }
 #brand-mark { width: 32px; height: 32px; border-radius: 9px; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
-  color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent2));
-  box-shadow: 0 0 12px var(--accent-glow); }
+  color: #fff; background: var(--moss);
+  box-shadow: 0 0 12px var(--moss-glow); }
 #brand-mark svg { width: 25px; height: 25px; display: block; }
-#brand-mark path { fill: #fff; }
+#brand-mark text { fill: #fff; }
 #brand-name { font-family: var(--font-display); font-size: 19px; font-weight: 700;
   letter-spacing: .18em; text-transform: uppercase; flex: 1; }
+.brand-a { color: var(--moss); font-family: var(--font-serif); font-style: italic;
+  font-size: 1.12em; font-weight: 400; letter-spacing: .02em; }
 #brand-subtitle { margin: -7px 14px 9px 56px; color: var(--muted); font-size: 14px;
   letter-spacing: .04em; }
 #main-nav { display: flex; flex-direction: column; gap: 2px; padding: 4px 10px 10px; }
@@ -171,8 +175,8 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
 .center-brand { display: flex; align-items: center; gap: 9px; font-family: var(--font-display);
   font-size: 19px; font-weight: 600; letter-spacing: .03em; }
 .center-mark { display: inline-flex; width: 25px; height: 25px; align-items: center;
-  justify-content: center; border-radius: 8px; background: linear-gradient(135deg, var(--accent), var(--accent2));
-  color: #fff; font-weight: 700; }
+  justify-content: center; border-radius: 8px; background: var(--moss);
+  color: #fff; font-family: var(--font-serif); font-size: 21px; font-style: italic; font-weight: 400; }
 .online-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green);
   box-shadow: 0 0 8px var(--green); margin-left: 2px; }
 .online-label, .version-label { color: var(--muted); font-size: 11px; font-family: var(--font-mono);
@@ -356,11 +360,11 @@ html[data-theme="light"] #guidance-input::placeholder { color: var(--muted); }
   letter-spacing: .14em; text-transform: uppercase; cursor: pointer; }
 #steer-send:hover { box-shadow: 0 0 12px var(--accent-glow); }
 #send { padding: 0; border-radius: 10px; border: none;
-  background: linear-gradient(92deg, var(--accent), var(--accent2));
+  background: var(--moss);
   color: #fff; font-family: system-ui, sans-serif; font-size: 25px; font-weight: 700;
   cursor: pointer; line-height: 1;
-  box-shadow: 0 0 16px var(--accent-glow); transition: all .15s; }
-#send:hover { filter: brightness(1.12); box-shadow: 0 0 24px var(--accent-glow); }
+  box-shadow: 0 0 16px var(--moss-glow); transition: all .15s; }
+#send:hover { filter: brightness(1.12); box-shadow: 0 0 24px var(--moss-glow); }
 #send:disabled { opacity: .5; cursor: default; box-shadow: none; }
 #mic { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 10px;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
