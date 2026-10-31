@@ -181,12 +181,12 @@ CHAT_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Aidon</title>
 <style>
 #avatar { width: 220px; }
-#robot { animation: robot-bob 4s ease-in-out infinite; transform-origin: 100px 190px; }
+#robot { animation: robot-bob 4s ease-in-out infinite; transform-origin: 100px 170px; }
 @keyframes robot-bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-#robot-head { animation: robot-head-sway 6s ease-in-out infinite; transform-origin: 100px 60px; }
+#robot-head { animation: robot-head-sway 6s ease-in-out infinite; transform-origin: 100px 58px; }
 @keyframes robot-head-sway { 0%,100% { transform: rotate(0deg); } 25% { transform: rotate(1.5deg); } 75% { transform: rotate(-1.5deg); } }
-#robot-arm-left { animation: robot-arm-sway 5s ease-in-out infinite; transform-origin: 35px 120px; }
-#robot-arm-right { animation: robot-arm-sway 5s ease-in-out infinite reverse; transform-origin: 165px 120px; }
+#robot-arm-left { animation: robot-arm-sway 5s ease-in-out infinite; transform-origin: 52px 111px; }
+#robot-arm-right { animation: robot-arm-sway 5s ease-in-out infinite reverse; transform-origin: 148px 111px; }
 @keyframes robot-arm-sway { 0%,100% { transform: rotate(0deg); } 50% { transform: rotate(3deg); } }
 .robot-eye { animation: robot-blink 4.2s infinite; transform-origin: center; transform-box: fill-box; }
 @keyframes robot-blink { 0%,92%,98%,100% { transform: scaleY(1); } 94%,96% { transform: scaleY(0.1); } }
@@ -208,25 +208,35 @@ CHAT_HTML = """<!doctype html>
 <div id="avatar" aria-label="Aidon robot avatar, default; VRM is available separately">
 <svg id="robot-avatar" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="Aidon robot">
 <g id="robot">
+<g id="robot-arm-left">
+<path d="M 68 99 Q 53 100 45 113 Q 36 130 28 150 Q 24 160 31 165 Q 38 169 46 160 L 65 139 Z" fill="#eef2e4" stroke="#d7dbea" stroke-width="2"/>
+<path d="M 45 116 Q 39 137 30 153 Q 28 158 32 161 Q 37 163 42 155 L 59 135 Z" fill="#c2c8d9"/>
+<path d="M 29 159 Q 24 165 22 172 M 37 163 Q 34 171 33 176 M 44 162 Q 44 170 46 175" fill="none" stroke="#1a2a4a" stroke-width="5" stroke-linecap="round"/>
+</g>
+<g id="robot-arm-right">
+<path d="M 132 99 Q 147 100 155 113 Q 164 130 172 150 Q 176 160 169 165 Q 162 169 154 160 L 135 139 Z" fill="#eef2e4" stroke="#d7dbea" stroke-width="2"/>
+<path d="M 155 116 Q 161 137 170 153 Q 172 158 168 161 Q 163 163 158 155 L 141 135 Z" fill="#c2c8d9"/>
+<path d="M 171 159 Q 176 165 178 172 M 163 163 Q 166 171 167 176 M 156 162 Q 156 170 154 175" fill="none" stroke="#1a2a4a" stroke-width="5" stroke-linecap="round"/>
+</g>
 <g id="robot-head">
-<rect x="28" y="35" width="16" height="42" rx="8" fill="#1a2a4a"/>
-<rect x="156" y="35" width="16" height="42" rx="8" fill="#1a2a4a"/>
-<rect x="40" y="18" width="120" height="72" rx="22" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
-<rect x="55" y="28" width="90" height="52" rx="14" fill="#1a2a4a"/>
-<rect x="62" y="34" width="76" height="40" rx="10" fill="#22355e"/>
-<ellipse class="robot-eye" id="eye-left" cx="82" cy="54" rx="10" ry="16" fill="#7de9ff"/>
-<ellipse class="robot-eye" id="eye-right" cx="118" cy="54" rx="10" ry="16" fill="#7de9ff"/>
-<path id="mouth-smile" d="M 88 72 Q 100 78 112 72" fill="none" stroke="#7de9ff" stroke-width="3" stroke-linecap="round"/>
-<ellipse id="mouth-open" cx="100" cy="73" rx="12" ry="6" fill="#7de9ff"/>
+<rect x="18" y="37" width="23" height="61" rx="12" fill="#1a2a4a"/>
+<rect x="159" y="37" width="23" height="61" rx="12" fill="#1a2a4a"/>
+<path d="M 54 17 Q 61 11 75 11 L 125 11 Q 139 11 146 17 Q 164 33 164 57 L 164 73 Q 164 103 143 108 L 57 108 Q 36 103 36 73 L 36 57 Q 36 33 54 17 Z" fill="#eef2e4" stroke="#d7dbea" stroke-width="2"/>
+<path d="M 48 43 Q 51 28 68 27 L 132 27 Q 149 28 152 43 L 152 73 Q 150 91 137 94 L 63 94 Q 50 91 48 73 Z" fill="#1a2a4a"/>
+<path d="M 55 43 Q 58 34 69 34 L 131 34 Q 142 34 145 43 L 145 69 Q 144 84 133 86 L 67 86 Q 56 84 55 69 Z" fill="#223b70"/>
+<path d="M 58 47 Q 62 39 72 39 L 128 39 Q 138 39 142 47 L 142 60 Q 104 78 58 65 Z" fill="#29477e" opacity=".72"/>
+<rect class="robot-eye" id="eye-left" x="65" y="43" width="17" height="34" rx="8" fill="#32c5ec"/>
+<rect class="robot-eye" id="eye-right" x="118" y="43" width="17" height="34" rx="8" fill="#32c5ec"/>
+<path id="mouth-smile" d="M 87 79 Q 100 85 113 79" fill="none" stroke="#32c5ec" stroke-width="3" stroke-linecap="round"/>
+<ellipse id="mouth-open" cx="100" cy="80" rx="11" ry="6" fill="#32c5ec"/>
 </g>
-<rect x="92" y="90" width="16" height="12" fill="#c2c2b8"/>
+<path d="M 84 99 Q 100 108 116 99 L 115 111 Q 100 118 85 111 Z" fill="#c2c8d9"/>
 <g id="robot-body">
-<path d="M 62 102 Q 100 92 138 102 L 138 140 Q 100 155 62 140 Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
-<path d="M 62 125 Q 100 140 138 125 L 138 140 Q 100 155 62 140 Z" fill="#c2c8d9"/>
+<path d="M 67 103 Q 74 111 100 111 Q 126 111 133 103 L 137 141 Q 134 160 117 168 Q 100 176 83 168 Q 66 160 63 141 Z" fill="#eef2e4" stroke="#d7dbea" stroke-width="2"/>
+<path d="M 66 122 Q 81 140 100 141 Q 119 140 134 122 L 137 142 Q 133 158 117 165 Q 100 170 83 165 Q 67 158 63 142 Z" fill="#c2c8d9"/>
+<path d="M 74 151 Q 100 161 126 151" fill="none" stroke="#1a2a4a" stroke-width="1.5"/>
 </g>
-<g id="robot-arm-left"><path d="M 58 108 Q 35 120 32 145 Q 32 160 45 160 L 58 150 Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/><circle cx="38" cy="162" r="4" fill="#1a2a4a"/><circle cx="48" cy="162" r="4" fill="#1a2a4a"/></g>
-<g id="robot-arm-right"><path d="M 142 108 Q 165 120 168 145 Q 168 160 155 160 L 142 150 Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/><circle cx="152" cy="162" r="4" fill="#1a2a4a"/><circle cx="162" cy="162" r="4" fill="#1a2a4a"/></g>
-<path d="M 75 155 Q 100 170 125 155 Q 100 165 75 155 Z" fill="#1a2a4a"/>
+<path d="M 81 165 Q 100 180 119 165 Q 115 184 100 185 Q 85 184 81 165 Z" fill="#1a2a4a"/>
 </svg>
 <p id="avatar-status">Idle</p>
 <div id="wave-bars"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
