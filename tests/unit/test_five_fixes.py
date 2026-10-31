@@ -48,6 +48,21 @@ def test_failed_replacement_preserves_installed_plugin(tmp_path, monkeypatch):
     assert installed.read_bytes() == original
 
 
+def test_registry_restores_approved_backup_after_interruption(tmp_path):
+    source = tmp_path / "draft"
+    _valid_plugin(source)
+    registry = PluginRegistry(tmp_path / "home")
+    assert commit_plugin(registry, source, preflight_plugin(source))[0]
+    target = registry.toolbox_dir / "five-plug"
+    backup = registry.toolbox_dir / ".backup-interrupted"
+    target.rename(backup)
+    restored = PluginRegistry(tmp_path / "home")
+    restored.load_all()
+    assert target.is_dir()
+    assert "five-plug" in restored.plugins
+    assert restored.tool_names() == ["echo"]
+
+
 class _ApproveGate:
     def ask(self, kind, title, body, action_class=None, force_ask=False):
         return SimpleNamespace(verdict="approved")

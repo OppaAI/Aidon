@@ -631,7 +631,7 @@ def ask_plugin_approval(gate, approve, preflight: Preflight) -> bool:
     return approved
 
 
-def commit_plugin(registry, source_dir: Path, preflight: Preflight,
+def _commit_plugin_locked(registry, source_dir: Path, preflight: Preflight,
                   memory=None, conversation_id: str = "") -> tuple[bool, list, str]:
     """Copy a preflighted, approved plugin into place. The
     re-hash immediately before the copy is the binding: if
@@ -698,6 +698,27 @@ def commit_plugin(registry, source_dir: Path, preflight: Preflight,
     return True, findings, f"Adopted plugin {plugin.name}"
 
 
+def _toolbox_lock(registry):
+    from contextlib import contextmanager
+    import fcntl
+    @contextmanager
+    def locked():
+        registry.toolbox_dir.mkdir(parents=True, exist_ok=True)
+        with (registry.home / ".toolbox.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+    return locked()
+
+
+def commit_plugin(registry, source_dir: Path, preflight: Preflight,
+                  memory=None, conversation_id: str = ""):
+    with _toolbox_lock(registry):
+        return _commit_plugin_locked(registry, source_dir, preflight, memory, conversation_id)
+
+
 class PluginRegistry:
     def __init__(self, home: Path):
         self.home = Path(home)
@@ -707,9 +728,23 @@ class PluginRegistry:
 
     def load_all(self) -> list[Plugin]:
         """Load every valid plugin in <home>/toolbox/, skip invalid ones."""
+        with _toolbox_lock(self):
+            return self._load_all_locked()
+
+    def _load_all_locked(self):
         self.plugins = {}
         if not self.toolbox_dir.exists():
             return []
+        # A crash after renaming the old plugin can leave only a backup.
+        # Restore only an approved, intact backup; never overwrite a target.
+        for backup in sorted(self.toolbox_dir.glob(".backup-*")):
+            try:
+                plugin = load_plugin(backup, execute=False)
+                target = self.toolbox_dir / plugin.name
+                if plugin_is_adopted(plugin) and not target.exists():
+                    backup.rename(target)
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
         for path in sorted(self.toolbox_dir.iterdir()):
             if path.name.startswith(".") or not path.is_dir():
                 continue
