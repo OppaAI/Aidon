@@ -1,0 +1,17 @@
+{
+  "name": "example_sandbox",
+  "version": "1.0.0",
+  "description": "An isolated-process example: a tool that may use subprocess/network inside the sandbox.",
+  "capabilities": ["network"],
+  "tools": [
+    {
+      "name": "example_sandbox",
+      "description": "Report the sandbox process id and run a subprocess inside the isolation boundary.",
+      "module": "tool.py",
+      "function": "example_sandbox",
+      "mode": "sandbox",
+      "timeout": 30
+    }
+  ],
+  "skills": ["skill.md"]
+}

@@ -21,6 +21,7 @@ it to the command.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -62,8 +63,16 @@ class Sandbox:
     def isolated(self) -> bool:
         return self.bwrap is not None
 
-    def run(self, command: list[str]) -> SandboxResult:
-        """Run command inside the workdir. command is a list, never a shell string."""
+    def run(self, command: list[str], env: dict | None = None,
+            input_text: str | None = None) -> SandboxResult:
+        """Run command inside the workdir. command is a list, never a shell string.
+
+        ``env`` adds named variables to the child environment (used by
+        capability tools to receive approved secrets without putting
+        them on the host command line). ``input_text`` becomes the
+        child's stdin, so a JSON payload can travel without a temp
+        file or an argv leak.
+        """
         if not command:
             raise ValueError("command must not be empty")
         if self.require_isolation and not self.bwrap:
@@ -76,15 +85,20 @@ class Sandbox:
             # /lib, /lib64 symlinks, /proc, and the interpreter tree)
             # sat unused below it. The inline version is gone; the
             # one builder is the live path, so the two cannot drift.
-            full = self._bwrap_argv(command)
+            full = self._bwrap_argv(command, env=env)
             isolated = True
         else:
             full = list(command)
             isolated = False
+        run_env = None
+        if env:
+            run_env = dict(os.environ)
+            run_env.update({str(k): str(v) for k, v in env.items()})
         try:
             proc = subprocess.run(
                 full, cwd=self.workdir, capture_output=True, text=True,
-                timeout=self.timeout_seconds,
+                timeout=self.timeout_seconds, input=input_text,
+                env=run_env,
                 preexec_fn=self._apply_resource_limits)
             return SandboxResult(proc.returncode, proc.stdout, proc.stderr,
                                  isolated)
@@ -126,7 +140,8 @@ class Sandbox:
             # and isolation boundary remain active if a platform refuses one.
             return
 
-    def _bwrap_argv(self, command: list[str]) -> list[str]:
+    def _bwrap_argv(self, command: list[str],
+                    env: dict | None = None) -> list[str]:
         """Build the bubblewrap invocation for one command.
 
         Mounts are applied in order. The system directories are
@@ -153,6 +168,8 @@ class Sandbox:
             "--setenv", "TERM", "dumb",
             "--ro-bind-try", "/usr", "/usr",
         ]
+        for key, value in (env or {}).items():
+            argv += ["--setenv", str(key), str(value)]
         if not self.allow_network:
             argv.insert(1, "--unshare-net")
         # Recreate symlinked system dirs as symlinks (merged-usr),

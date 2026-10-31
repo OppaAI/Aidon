@@ -1121,7 +1121,10 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                 return f"adoption refused: {preflight.message}"
             allowed, reason = adoption_gate(
                 posture, getattr(config, "kernel_mode", False),
-                preflight.plugin.capabilities)
+                preflight.plugin.capabilities,
+                sandboxed=any(
+                    str(t.get("mode", "")).lower() == "sandbox"
+                    for t in preflight.plugin.tools))
             if not allowed:
                 return f"adoption refused: {reason}"
             if not ask_plugin_approval(gate, None, preflight):

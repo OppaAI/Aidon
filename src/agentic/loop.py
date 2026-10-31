@@ -1156,8 +1156,10 @@ class GoalRunner:
                     return self.plugins.call(
                         name, args,
                         context_factory=lambda plugin: self.plugins.context_for(
-                            name, self.home, sandbox=self.sandbox,
-                            network_available=self.network_available))
+                            name, self.home,
+                            sandbox=getattr(self, "sandbox", None),
+                            network_available=self.network_available),
+                        sandbox=getattr(self, "sandbox", None))
                 except ValueError as plugin_exc:
                     if str(plugin_exc).startswith("unknown plugin tool:"):
                         pass

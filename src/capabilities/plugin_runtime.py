@@ -25,8 +25,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import sys
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,9 +38,10 @@ CAPABILITY_HTTP = "http"
 CAPABILITY_FS = "fs"
 CAPABILITY_RUN = "run"
 CAPABILITY_SECRET = "secret"
+CAPABILITY_NETWORK = "network"
 
 KNOWN_CAPABILITIES = (CAPABILITY_HTTP, CAPABILITY_FS, CAPABILITY_RUN,
-                      CAPABILITY_SECRET)
+                      CAPABILITY_SECRET, CAPABILITY_NETWORK)
 
 
 @dataclass
@@ -48,19 +52,21 @@ class CapabilityPolicy:
     allowed_hosts: tuple[str, ...] = ()
     fs: bool = False
     run: bool = False
+    network: bool = False
     secrets: tuple[str, ...] = ()
 
     @classmethod
     def from_capabilities(cls, capabilities) -> "CapabilityPolicy":
         """Parse manifest capability strings, rejecting unknown ones.
 
-        IVALID input is a hard error: a plugin that asks for
+        Invalid input is a hard error: a plugin that asks for
         ``"netwrok"`` must not silently get nothing, because the
         owner would then approve a card that understates the tool.
         """
         http = False
         fs = False
         run = False
+        network = False
         hosts: list[str] = []
         secrets: list[str] = []
         for raw in capabilities or ():
@@ -79,6 +85,8 @@ class CapabilityPolicy:
                 fs = True
             elif name == CAPABILITY_RUN:
                 run = True
+            elif name == CAPABILITY_NETWORK:
+                network = True
             elif name == CAPABILITY_SECRET:
                 if not arg:
                     raise ValueError(
@@ -87,7 +95,7 @@ class CapabilityPolicy:
             else:
                 raise ValueError(f"unknown plugin capability: {cap}")
         return cls(http=http, allowed_hosts=tuple(hosts), fs=fs,
-                   run=run, secrets=tuple(secrets))
+                   run=run, network=network, secrets=tuple(secrets))
 
     def describe(self) -> str:
         parts: list[str] = []
@@ -99,6 +107,8 @@ class CapabilityPolicy:
             parts.append("fs (plugin data dir)")
         if self.run:
             parts.append("run (sandboxed)")
+        if self.network:
+            parts.append("network (sandbox only)")
         for secret in self.secrets:
             parts.append(f"secret:{secret}")
         return ", ".join(parts) or "none (pure tool)"
@@ -210,3 +220,134 @@ def build_context(plugin_name: str, home: Path, capabilities,
     policy = CapabilityPolicy.from_capabilities(capabilities)
     return PluginContext(plugin_name, home, policy, sandbox=sandbox,
                          network_available=network_available)
+
+
+# --- Tier 2: sandboxed process tools ---------------------------------
+
+_SANDBOX_RUNNER = r'''
+"""Sandbox tool runner: JSON in on stdin, JSON out in result.json.
+
+This process is the isolation boundary. The plugin module is imported
+here, never in Aidon's process, so subprocess/network/eval in tool code
+stay inside the sandbox. The result goes to a file so a plugin's own
+prints cannot corrupt the protocol.
+"""
+import importlib.util
+import json
+import os
+import sys
+
+
+def main():
+    payload = json.load(sys.stdin)
+    args = payload.get("args") or {}
+    env = payload.get("env") or {}
+    os.environ.update({str(k): str(v) for k, v in env.items()})
+    module_path, func_name = sys.argv[1], sys.argv[2]
+    sys.path.insert(0, os.path.dirname(os.path.abspath(module_path)))
+    try:
+        spec = importlib.util.spec_from_file_location("plugin_tool", module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        func = getattr(module, func_name)
+        result = func(args)
+        data = {"result": "" if result is None else str(result)}
+    except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+        data = {"error": f"{type(exc).__name__}: {exc}"}
+    with open("result.json", "w", encoding="utf-8") as handle:
+        json.dump(data, handle)
+    if "error" in data:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+_MAX_KEPT_RUNS = 20
+
+
+def _prune_runs(runs_root: Path, keep: int = _MAX_KEPT_RUNS) -> None:
+    """Keep the newest ``keep`` run dirs; drop the rest. Best effort."""
+    try:
+        dirs = sorted((p for p in runs_root.iterdir() if p.is_dir()),
+                      key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in dirs[keep:]:
+            shutil.rmtree(old, ignore_errors=True)
+    except OSError:
+        return
+
+
+def run_sandbox_tool(plugin, spec: dict, args: dict, sandbox, home: Path,
+                     network_available: bool | None = None) -> str:
+    """Run a ``"mode": "sandbox"`` tool as an isolated subprocess.
+
+    The plugin module is copied into a fresh run directory and imported
+    there by ``runner.py``; Aidon's process never imports it. Args and
+    approved secrets travel on stdin as JSON, so they never appear on
+    the host command line. Network is off unless the manifest declares
+    ``network`` and the owner approved the plugin.
+    """
+    from .sandbox import Sandbox
+
+    plugin_dir = getattr(plugin, "directory", None)
+    if plugin_dir is None:
+        raise ValueError("sandbox tool has no plugin directory")
+    # Defense in depth: the registry already refuses an unadopted
+    # sandbox tool, but the runner repeats the check so no caller can
+    # reach process execution without an approval marker.
+    if not (Path(plugin_dir) / ".adopted").is_file():
+        raise ValueError("sandbox tool plugin is not adopted")
+    module_name = str(spec.get("module", ""))
+    func_name = str(spec.get("function", ""))
+    if not module_name or not func_name:
+        raise ValueError("sandbox tool needs module and function")
+    timeout = int(spec.get("timeout", 120) or 120)
+    policy = CapabilityPolicy.from_capabilities(
+        getattr(plugin, "capabilities", []))
+    secrets = {name: os.environ.get(name, "") for name in policy.secrets}
+
+    plugin_name = str(getattr(plugin, "name", "plugin"))
+    runs_root = Path(home) / "plugin_runs" / plugin_name
+    runs_root.mkdir(parents=True, exist_ok=True)
+    run_dir = runs_root / uuid.uuid4().hex
+    run_dir.mkdir()
+    code_dir = run_dir / "code"
+    shutil.copytree(
+        plugin_dir, code_dir,
+        ignore=shutil.ignore_patterns(".adopted", "__pycache__", "*.pyc"))
+    (run_dir / "runner.py").write_text(_SANDBOX_RUNNER, encoding="utf-8")
+
+    # Reuse the run sandbox's isolation posture, but give this tool its
+    # own workdir and its own network policy.
+    backend = "auto"
+    require_isolation = False
+    if sandbox is not None:
+        backend = ("bubblewrap" if getattr(sandbox, "bwrap", None)
+                   else "subprocess")
+        require_isolation = bool(getattr(sandbox, "require_isolation", False))
+    box = Sandbox(run_dir, timeout_seconds=timeout, backend=backend,
+                  allow_network=policy.network,
+                  require_isolation=require_isolation)
+
+    payload = json.dumps({"args": args, "env": secrets})
+    result = box.run(
+        [sys.executable, "runner.py",
+         str(Path("code") / module_name), func_name],
+        input_text=payload)
+    out_path = run_dir / "result.json"
+    data = None
+    if out_path.is_file():
+        try:
+            data = json.loads(out_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            data = None
+    if data is not None:
+        _prune_runs(runs_root)
+        if "error" in data:
+            raise RuntimeError(str(data["error"]))
+        return str(data.get("result", ""))
+    detail = (result.stderr or result.stdout or "").strip()[:300]
+    _prune_runs(runs_root)
+    raise RuntimeError(
+        f"sandbox tool {func_name} failed: {detail or 'no output'}")

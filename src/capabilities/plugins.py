@@ -120,25 +120,70 @@ def _capability_policy(capabilities):
     return CapabilityPolicy.from_capabilities(capabilities)
 
 
+def plugin_is_adopted(plugin) -> bool:
+    """True only for a plugin the owner approved.
+
+    ``commit_plugin`` writes a ``.adopted`` marker into the installed
+    copy after approval. A directory hand-placed in ``<home>/plugins/``
+    has no marker, so it never gets capabilities and never runs a
+    sandbox tool: no approval, no power.
+    """
+    directory = getattr(plugin, "directory", None)
+    if directory is None:
+        return False
+    return (Path(directory) / ".adopted").is_file()
+
+
 def adoption_gate(posture: str, kernel_mode: bool,
-                  capabilities) -> tuple[bool, str]:
+                  capabilities, sandboxed: bool = False) -> tuple[bool, str]:
     """Decide whether the current tool posture allows an adoption.
 
     Returns ``(allowed, reason)``. ``locked`` (and kernel mode, which
     is the same posture by another name) refuses every adoption.
-    ``standard`` refuses capability plugins but allows pure tools.
-    ``developer`` and ``selfmod`` allow both; the owner's approval
-    card still lists every capability, so the posture widens what can
-    be *asked for*, never what is granted without a decision.
+    ``standard`` refuses capability and sandbox plugins but allows
+    pure tools. ``developer`` and ``selfmod`` allow both; the owner's
+    approval card still lists every capability, so the posture widens
+    what can be *asked for*, never what is granted without a decision.
     """
     posture = str(posture or "standard").lower()
     if kernel_mode or posture == "locked":
         return False, "tool posture is locked; plugin adoption is disabled"
-    if posture == "standard" and list(capabilities or ()):
+    if posture == "standard" and (list(capabilities or ()) or sandboxed):
         return False, ("posture 'standard' allows pure tools only; a "
-                       "capability plugin needs AIDON_TOOL_POSTURE=developer "
-                       "or selfmod")
+                       "capability or sandbox plugin needs "
+                       "AIDON_TOOL_POSTURE=developer or selfmod")
     return True, ""
+
+
+def sandbox_module_paths(directory) -> set[str]:
+    """Relative module paths that are tool code for sandbox-mode tools.
+
+    A module is treated as sandbox code only when every tool that
+    names it is ``"mode": "sandbox"``. A module shared with an inline
+    tool stays fully scanned, because that inline tool would import it
+    into Aidon's process.
+    """
+    from pathlib import Path
+    manifest_path = Path(directory) / "plugin.json"
+    if not manifest_path.is_file():
+        return set()
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    sandboxed: set[str] = set()
+    inline: set[str] = set()
+    for tool in manifest.get("tools", []) or []:
+        if not isinstance(tool, dict):
+            continue
+        module = str(tool.get("module", ""))
+        if not module:
+            continue
+        if str(tool.get("mode", "")).lower() == "sandbox":
+            sandboxed.add(module)
+        else:
+            inline.add(module)
+    return sandboxed - inline
 
 
 def scan_plugin(directory: Path) -> list[ScanFinding]:
@@ -235,6 +280,19 @@ def scan_plugin(directory: Path) -> list[ScanFinding]:
                 if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and "w" in str(node.args[1].value):
                     findings.append(ScanFinding(rel, node.lineno, "file_write",
                                                 "File write in plugin code"))
+    # Sandbox-mode modules run isolated, so the execution-side patterns
+    # (subprocess, network, eval/exec, dynamic import) are expected
+    # there. Downgrade them to non-blocking names so the card reports
+    # them without refusing adoption. Secret literals still block: a
+    # key baked into plugin source leaks no matter where it runs.
+    sandboxed = sandbox_module_paths(directory)
+    if sandboxed:
+        for finding in findings:
+            if (str(finding.path).replace("\\", "/") in sandboxed
+                    and finding.type in ("subprocess", "network",
+                                         "eval_exec", "dynamic_import")):
+                finding.type = "sandbox_" + finding.type
+                finding.message = "sandboxed tool code: " + finding.message
     return findings
 
 
@@ -278,8 +336,12 @@ def load_plugin(directory: Path, execute: bool = True) -> Plugin:
         module_path = directory / module_name
         if not module_path.exists():
             raise ValueError(f"plugin module missing: {module_name}")
-        if not execute:
+        sandboxed = str(tool.get("mode", "")).lower() == "sandbox"
+        if not execute or sandboxed:
             # Static check only: no import, no top-level code runs.
+            # Sandbox tools keep this path even after approval: their
+            # module must never be imported into Aidon's process, only
+            # into the isolated runner.
             try:
                 tree = ast.parse(module_path.read_text(encoding="utf-8"))
             except (SyntaxError, UnicodeDecodeError) as exc:
@@ -388,15 +450,32 @@ def preflight_plugin(source_dir: Path) -> Preflight:
     # pattern scan above passed; review verdicts go on the
     # approval card below.
     gate_findings = []
+    sandboxed = sandbox_module_paths(source_dir)
     try:
         from .security_gate import gate_text
         for py_path in sorted(source_dir.rglob("*.py")):
+            rel = str(py_path.relative_to(source_dir)).replace("\\", "/")
             try:
                 result = gate_text(str(py_path), py_path.read_text(encoding="utf-8"))
             except OSError:
                 continue
             gate_findings.extend(result.findings)
             if result.verdict == "fail":
+                if rel in sandboxed:
+                    # Execution-side patterns are expected inside a
+                    # sandboxed tool. A secret literal still blocks:
+                    # it leaks wherever the code runs.
+                    secret_block = any(
+                        finding.severity == "block"
+                        and "secret-like" in finding.message
+                        for finding in result.findings)
+                    if secret_block:
+                        return Preflight(
+                            False, findings=findings,
+                            gate_findings=gate_findings,
+                            message=("Adoption rejected: security gate fail "
+                                     f"(secret literal in {rel})"))
+                    continue
                 return Preflight(False, findings=findings,
                                  gate_findings=gate_findings,
                                  message="Adoption rejected: security gate fail")
@@ -422,6 +501,12 @@ def preflight_plugin(source_dir: Path) -> Preflight:
                   f"Skills: {', '.join(plugin.skills) or 'none'}"]
     policy = _capability_policy(plugin.capabilities)
     body_lines.append(f"Capabilities: {policy.describe()}")
+    sandbox_tools = [str(t.get("name", "")) for t in plugin.tools
+                     if str(t.get("mode", "")).lower() == "sandbox"]
+    if sandbox_tools:
+        body_lines.append(
+            "Sandbox tools (run isolated; subprocess/network/eval allowed "
+            f"inside): {', '.join(sandbox_tools)}")
     body_lines.append(f"Approved source hash: {approved_hash}")
     if findings:
         body_lines.append("Scan warnings:")
@@ -591,19 +676,36 @@ class PluginRegistry:
             return set()
 
     def call(self, name: str, args: dict, ctx=None,
-             context_factory=None) -> str:
+             context_factory=None, sandbox=None) -> str:
         """Dispatch a plugin tool.
 
-        Pure tools keep ``fn(args)``. A tool declared with
-        ``"context": true`` gets ``fn(args, ctx)``; when no broker is
-        passed, ``context_factory(plugin)`` builds one from the
-        plugin's declared capabilities. Without either, the call fails
-        loudly instead of silently dropping the tool's capabilities.
+        Three shapes, in order:
+        - ``"mode": "sandbox"`` -> run the module in an isolated
+          subprocess (Tier 2); ``sandbox`` must be provided.
+        - ``"context": true`` -> ``fn(args, ctx)`` with the broker.
+        - otherwise -> the original pure ``fn(args)``.
+
+        A tool that needs a broker or a sandbox but gets neither fails
+        loudly instead of silently dropping its capabilities.
         """
         for plugin in self.plugins.values():
-            if name not in plugin.functions:
+            spec = getattr(plugin, "tool_spec", lambda _n: None)(name)
+            if spec is not None and str(spec.get("mode", "")).lower() == "sandbox":
+                if not plugin_is_adopted(plugin):
+                    raise ValueError(
+                        f"plugin tool {name} is not adopted; a sandbox "
+                        "tool runs only after owner approval")
+                if sandbox is None:
+                    raise ValueError(
+                        f"plugin tool {name} is a sandbox tool but no "
+                        "sandbox was provided")
+                from .plugin_runtime import run_sandbox_tool
+                return run_sandbox_tool(plugin, spec, dict(args),
+                                        sandbox=sandbox, home=self.home)
+            functions = getattr(plugin, "functions", {})
+            if name not in functions:
                 continue
-            func = plugin.functions[name]
+            func = functions[name]
             needs_context = getattr(plugin, "needs_context", None)
             if callable(needs_context) and needs_context(name):
                 broker = ctx
@@ -628,10 +730,10 @@ class PluginRegistry:
         """
         from .plugin_runtime import build_context
         for plugin in self.plugins.values():
-            if name not in plugin.functions:
+            spec = getattr(plugin, "tool_spec", lambda _n: None)(name)
+            if spec is None and name not in getattr(plugin, "functions", {}):
                 continue
-            adopted = (getattr(plugin, "directory", None) is not None
-                       and (Path(plugin.directory) / ".adopted").is_file())
+            adopted = plugin_is_adopted(plugin)
             capabilities = getattr(plugin, "capabilities", []) if adopted else []
             return build_context(getattr(plugin, "name", ""), home,
                                  capabilities, sandbox=sandbox,
