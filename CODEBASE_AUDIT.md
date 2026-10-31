@@ -2,6 +2,15 @@
 
 Reviewed repair commit `88f91af`. Verdict: **not production-ready for unrestricted autonomous host access**.
 
+## Status after subsequent repairs
+
+The findings below describe the audited baseline; the status in this section reflects later fixes on `dev`.
+
+- **Code mitigations implemented:** MCP child credential inheritance and blocking I/O, WebUI file/body bounds, local sandbox output/process-tree bounds, X11 wheel scrolling, staged plugin replacement, and filtered/validated remote archive extraction.
+- **Additional hardening implemented:** MCP connection approvals now bind a SHA-256 fingerprint to the exact config and optional functional test; secrets are not printed or stored in test evidence. Lab transcripts are durable per conversation, with migration from the previous global-per-kind table.
+- **Still open:** durable acquisition completion and automatic workflow restoration after process restart. Home-PC browser refresh/switching, Modal, real MCP servers, and X11/desktop behavior require runtime validation and are not proven by offline tests.
+- **Current full suite:** 1,401 passed, 7 skipped on 2026-10-31; see `PRODUCTION_READINESS.md` for the home-PC procedure.
+
 ## Coverage and limits
 
 - Executed the full repository pytest suite: **1,348 passed, 7 skipped**. The skipped tests require working bubblewrap namespaces, unavailable on this runner.
@@ -53,7 +62,7 @@ Interview steps persist and replay for the same goal/conversation; automatic wai
 
 ## Release decision
 
-Green offline tests do not satisfy the host-access, crash-recovery, functional-acquisition or real integration requirements. Keep deployments restricted while the P1 findings and workflow blockers remain open. Required PC access, accounts and credentials must be supplied through secure configuration; never put passwords in chat, commits or audit reports.
+Green offline tests do not satisfy crash-recovery, functional-acquisition or real integration requirements. Keep unrestricted autonomous host access disabled until runtime and remaining workflow checks pass. Required PC access, accounts and credentials must be supplied through secure configuration; never put passwords in chat, commits or audit reports.
 
 ## Subsequent repair progress
 
@@ -64,3 +73,5 @@ Green offline tests do not satisfy the host-access, crash-recovery, functional-a
 - X11 scrolling emits wheel button events; verification on a real desktop is still outstanding.
 - Plugin registry, goal-tool, and low-level commit paths now fail closed without successful isolated, network-disabled acceptance evidence bound to candidate bytes. Bubblewrap, Docker, and Modal are accepted only when the test run reports isolation and networking is disabled. Approval identifies the backend, test count and hash without exposing arbitrary test arguments or output. Test quality still requires review.
 - Durable end-to-end acquisition state and automatic interruption recovery remain unresolved.
+- MCP connection approval now shows the exact target, selected environment-variable names, a config/test-call fingerprint, and any optional one-shot functional test's tool and redacted arguments. The test runs only after that approval; result text is not stored in evidence.
+- Standalone Tool, Skill, and MCP lab sessions are now keyed by conversation ID, migrate legacy records, and share a stable ID with their associated chat conversation. Browser-level restore and multi-browser conflict behavior still need a home-PC check.

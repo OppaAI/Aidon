@@ -169,3 +169,43 @@ def test_adopt_skill_refuses_without_isolation(tmp_path, monkeypatch):
     result = _goal_extra_tools(config, workdir)["adopt_skill"]("unsafe.md")
     assert "need working bubblewrap isolation" in result
     assert SkillLibrary(tmp_path).get("unsafe") is None
+
+
+def test_mcp_connect_forwards_owner_requested_functional_probe(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from src.capabilities import mcp_acquisition
+    from src.interface.approval import Decision
+
+    seen = {}
+    client = SimpleNamespace(close=lambda: None)
+
+    def acquire(home, name, config, approve, **kwargs):
+        seen["test_call"] = kwargs.get("test_call")
+        seen["keep_client"] = kwargs.get("keep_client")
+        return {"client": client, "tools": ["search_papers"],
+                "scan_findings": []}
+
+    class Approve:
+        def ask(self, *args, **kwargs):
+            return Decision("approved")
+
+    monkeypatch.setattr(mcp_acquisition, "acquire_mcp_server", acquire)
+    config = _Config()
+    config.home = tmp_path
+    tools = _goal_extra_tools(config, tmp_path / "work", gate=Approve())
+    result = tools["mcp_connect"](
+        "papers", transport="stdio", command="papers-mcp",
+        test_tool="search_papers", test_args={"query": "example"})
+
+    assert result.startswith("MCP_CONNECTED")
+    assert seen == {"test_call": {
+        "tool": "search_papers", "args": {"query": "example"}},
+        "keep_client": True}
+
+
+def test_mcp_connect_rejects_test_args_without_named_tool(tmp_path):
+    config = _Config()
+    config.home = tmp_path
+    result = _goal_extra_tools(config, tmp_path / "work")["mcp_connect"](
+        "papers", command="papers-mcp", test_args={"query": "example"})
+    assert result == "MCP_REFUSED: test_args requires test_tool"

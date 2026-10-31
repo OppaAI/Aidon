@@ -28,6 +28,7 @@ class _FakeClient:
         self.fail = fail
         self.calls = []
         self.closed = False
+        self.result = {"ok": True}
 
     def list_tools(self):
         if self.fail:
@@ -36,7 +37,7 @@ class _FakeClient:
 
     def call_tool(self, name, args):
         self.calls.append((name, args))
-        return {"ok": True}
+        return self.result
 
     def close(self):
         self.closed = True
@@ -129,6 +130,78 @@ def test_acquire_test_call_is_explicit_only(tmp_path):
             {"transport": "stdio", "command": "papers-mcp"},
             _approve, client_factory=_factory_for(fake),
             test_call={"tool": "nope", "args": {}})
+
+
+def test_mcp_approval_binds_target_env_and_explicit_test_without_secrets(tmp_path):
+    fake = _FakeClient([("search_papers", "Search.")])
+    approvals = []
+    seen = []
+    config = {"transport": "stdio", "command": "papers-mcp",
+              "args": ["--region", "eu"],
+              "env": {"TOKEN": "$PAPERS_TOKEN", "LEGACY": "do-not-show-this"}}
+
+    def approve(kind, title, body):
+        approvals.append((kind, title, body))
+        config["args"][1] = "attacker-region"
+        return SimpleNamespace(verdict="approved")
+
+    result = acquire_mcp_server(
+        tmp_path, "papers", config,
+        approve, client_factory=_factory_for(fake, seen),
+        test_call={"tool": "search_papers", "args": {"query": "test"}})
+
+    assert approvals and approvals[0][0] == "install"
+    body = approvals[0][2]
+    assert '"--region", "eu"' in body
+    assert "TOKEN <- $PAPERS_TOKEN" in body
+    assert "search_papers" in body and '"query": "test"' in body
+    assert "Config fingerprint (SHA-256):" in body
+    assert "do-not-show-this" not in body
+    assert "Functional test: call exactly one tool once" in body
+    assert seen[0]["args"] == ["--region", "eu"]
+    evidence = result["evidence"][-1]
+    assert evidence["test"] == "call_tool"
+    assert "result" not in evidence
+
+
+def test_mcp_functional_test_error_does_not_register(tmp_path):
+    fake = _FakeClient([("search_papers", "Search.")])
+    fake.result = {"isError": True, "content": [{"text": "rejected"}]}
+    with pytest.raises(RuntimeError, match="functional test failed"):
+        acquire_mcp_server(
+            tmp_path, "papers",
+            {"transport": "stdio", "command": "papers-mcp"},
+            _approve, client_factory=_factory_for(fake),
+            test_call={"tool": "search_papers", "args": {}})
+    assert CapabilityRegistry(tmp_path).get("papers") is None
+    assert fake.closed
+
+
+def test_mcp_approval_redacts_url_and_command_credentials(tmp_path):
+    fake = _FakeClient([("search_papers", "Search.")])
+    bodies = []
+
+    def approve(kind, title, body):
+        bodies.append(body)
+        return SimpleNamespace(verdict="approved")
+
+    acquire_mcp_server(
+        tmp_path, "remote",
+        {"transport": "http",
+         "url": "https://owner:pw123@example.invalid/mcp?access_token=secret123&region=eu"},
+        approve, client_factory=_factory_for(fake))
+    body = bodies[-1]
+    assert "owner" not in body and "pw123" not in body and "secret123" not in body
+    assert "example.invalid/mcp" in body and "region=eu" in body
+
+    bodies.clear()
+    acquire_mcp_server(
+        tmp_path, "local",
+        {"transport": "stdio", "command": "server",
+         "args": ["--api-key", "do-not-print"]},
+        approve, client_factory=_factory_for(fake))
+    assert "do-not-print" not in bodies[-1]
+    assert "[redacted]" in bodies[-1]
 
 
 def _acquired(tmp_path, name="papers", tools=(("search_papers", "S."),

@@ -54,15 +54,49 @@ def test_unfinished_interview_lookup_is_scoped_and_unambiguous(tmp_path):
 
 def test_standalone_lab_persists_and_rejects_stale_writes(tmp_path):
     store = InterviewStore(tmp_path)
-    state = {"id": "chat", "turns": [{"role": "user", "text": "Edit a video"}]}
-    assert store.save_lab("tool", state, 0) == 1
-    restored = InterviewStore(tmp_path).load_lab("tool")
+    state = {"id": "chat", "created": True,
+             "turns": [{"role": "user", "text": "Edit a video"}]}
+    assert store.save_lab("tool", state, 0, "chat") == 1
+    restored = InterviewStore(tmp_path).load_lab("tool", "chat")
     assert restored == {"revision": 1, "state": state}
     with pytest.raises(ValueError, match="another browser"):
-        store.save_lab("tool", {"turns": []}, 0)
-    assert store.load_lab("tool")["state"] == state
+        store.save_lab("tool", state, 0, "chat")
+    assert store.load_lab("tool", "chat")["state"] == state
     with pytest.raises(ValueError, match="invalid lab"):
         store.load_lab("../../secret")
+
+
+def test_lab_sessions_are_isolated_by_conversation(tmp_path):
+    store = InterviewStore(tmp_path)
+    first = {"id": "chat-a", "turns": [{"role": "user", "text": "first"}]}
+    second = {"id": "chat-b", "turns": [{"role": "user", "text": "second"}]}
+    assert store.save_lab("tool", first, 0, "chat-a") == 1
+    assert store.save_lab("tool", second, 0, "chat-b") == 1
+    assert store.load_lab("tool", "chat-a")["state"] == first
+    assert store.load_lab("tool", "chat-b")["state"] == second
+    assert store.load_lab("tool", "unknown") == {"revision": 0, "state": None}
+    with pytest.raises(ValueError, match="matching conversation ID"):
+        store.save_lab("tool", first, 1, "chat-b")
+
+
+def test_legacy_lab_session_migrates_to_its_stable_conversation_id(tmp_path):
+    import json
+    import sqlite3
+    path = tmp_path / "interviews.sqlite3"
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE lab_sessions (kind TEXT PRIMARY KEY, revision INTEGER NOT NULL, document TEXT NOT NULL)")
+    state = {"id": "legacy-chat", "created": True,
+             "turns": [{"role": "user", "text": "saved"}]}
+    db.execute("INSERT INTO lab_sessions VALUES (?,?,?)",
+               ("tool", 3, json.dumps(state)))
+    db.commit()
+    db.close()
+
+    store = InterviewStore(tmp_path)
+    assert store.load_lab("tool", "legacy-chat") == {
+        "revision": 3, "state": state}
+    assert store.load_lab("tool", "another-chat") == {
+        "revision": 0, "state": None}
 
 
 def test_saved_lab_turns_restore_only_to_their_conversation(tmp_path):
@@ -77,6 +111,20 @@ def test_saved_lab_turns_restore_only_to_their_conversation(tmp_path):
     assert server.handle_conversation_get(first)["lab_turns"] == [
         {"id": turn, "run_id": "run", "question": "Which format?", "answer": "MP4"}]
     assert server.handle_conversation_get(second)["lab_turns"] == []
+
+
+def test_lab_conversation_id_is_stable_when_created_or_retried(tmp_path):
+    from src.interface.webui import WebUIServer
+    server = WebUIServer(tmp_path)
+    conversation_id = "0123456789abcdef0123456789abcdef"
+    first = server.handle_conversation_create({"id": conversation_id,
+        "turns": [{"role": "user", "text": "saved once"}]})
+    retry = server.handle_conversation_create({"id": conversation_id,
+        "turns": [{"role": "user", "text": "must not be appended"}]})
+    assert first["id"] == retry["id"] == conversation_id
+    restored = server.handle_conversation_get(conversation_id)
+    assert restored["id"] == conversation_id
+    assert [turn["text"] for turn in restored["turns"]] == ["saved once"]
 
 
 def test_reopened_conversation_offers_saved_interview_recovery(tmp_path):

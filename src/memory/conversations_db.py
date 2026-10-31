@@ -110,14 +110,19 @@ class ConversationStoreDB:
 
     # -- conversations -------------------------------------------------
 
-    def create_conversation(self) -> dict:
-        conversation_id = _new_id()
+    def create_conversation(self, conversation_id: str | None = None,
+                            return_created: bool = False) -> dict:
+        conversation_id = str(conversation_id or _new_id())
+        if (len(conversation_id) > 128 or not conversation_id
+                or any(ch not in "0123456789abcdef-" for ch in conversation_id.lower())):
+            raise ValueError("invalid conversation ID")
         with self._lock:
-            self._conn.execute(
-                "INSERT INTO conversations (id, project_id, created_at)"
+            cursor = self._conn.execute(
+                "INSERT OR IGNORE INTO conversations (id, project_id, created_at)"
                 " VALUES (?, ?, ?)", (conversation_id, "", _now()))
             self._conn.commit()
-        return {"id": conversation_id}
+        record = {"id": conversation_id}
+        return (record, cursor.rowcount == 1) if return_created else record
 
     def list_all_conversations(self) -> list[dict]:
         with self._lock:

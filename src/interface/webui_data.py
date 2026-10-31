@@ -149,13 +149,16 @@ class WebUIDataMixin:
     def handle_conversation_create(self, body: dict) -> dict:
         try:
             db = self._conversations_db()
-            record = db.create_conversation()
-            for turn in body.get("turns", []):
-                if isinstance(turn, dict):
-                    db.record_exchange(record["id"], str(turn.get("role", "user")),
-                                       str(turn.get("text", "")))
-                else:
-                    db.record_exchange(record["id"], "user", str(turn))
+            requested_id = str(body.get("id", "") or "")
+            record, created = db.create_conversation(
+                requested_id or None, return_created=True)
+            if created:
+                for turn in body.get("turns", []):
+                    if isinstance(turn, dict):
+                        db.record_exchange(record["id"], str(turn.get("role", "user")),
+                                           str(turn.get("text", "")))
+                    else:
+                        db.record_exchange(record["id"], "user", str(turn))
             record["turns"] = db.history(record["id"])
             return record
         except Exception:

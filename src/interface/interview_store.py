@@ -2,6 +2,7 @@
 from pathlib import Path
 import sqlite3
 import json
+import uuid
 from contextlib import contextmanager
 
 
@@ -18,7 +19,30 @@ class InterviewStore:
                 answered_at TEXT)""")
             db.execute("CREATE TABLE IF NOT EXISTS sessions (session_key TEXT PRIMARY KEY, document TEXT NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS turn_links (turn_id INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE)")
-            db.execute("CREATE TABLE IF NOT EXISTS lab_sessions (kind TEXT PRIMARY KEY, revision INTEGER NOT NULL, document TEXT NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS lab_sessions (kind TEXT NOT NULL, conversation_id TEXT NOT NULL, revision INTEGER NOT NULL, document TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(kind, conversation_id))")
+            lab_columns = {row[1] for row in db.execute(
+                "PRAGMA table_info(lab_sessions)").fetchall()}
+            if "conversation_id" not in lab_columns:
+                db.execute("ALTER TABLE lab_sessions RENAME TO lab_sessions_legacy")
+                db.execute("CREATE TABLE lab_sessions (kind TEXT NOT NULL, conversation_id TEXT NOT NULL, revision INTEGER NOT NULL, document TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(kind, conversation_id))")
+                for kind, revision, document in db.execute(
+                        "SELECT kind, revision, document FROM lab_sessions_legacy").fetchall():
+                    try:
+                        state = json.loads(document)
+                    except (TypeError, ValueError):
+                        continue
+                    if not isinstance(state, dict):
+                        continue
+                    conversation_id = str(state.get("id") or uuid.uuid4().hex)
+                    state["id"] = conversation_id
+                    state.setdefault("created", False)
+                    db.execute(
+                        "INSERT OR REPLACE INTO lab_sessions "
+                        "(kind, conversation_id, revision, document) "
+                        "VALUES (?,?,?,?)",
+                        (kind, conversation_id, revision,
+                         json.dumps(state, ensure_ascii=False)))
+                db.execute("DROP TABLE lab_sessions_legacy")
         self.path.chmod(0o600)
 
     def save_session(self, key, document):
@@ -45,16 +69,33 @@ class InterviewStore:
             db.execute("UPDATE sessions SET document=? WHERE session_key=?", (json.dumps(state, ensure_ascii=False), key))
             return True
 
-    def load_lab(self, kind):
+    def load_lab(self, kind, conversation_id=""):
         if kind not in ("tool", "skill", "mcp"):
             raise ValueError("invalid lab")
         with self.connect() as db:
-            row = db.execute("SELECT revision, document FROM lab_sessions WHERE kind=?", (kind,)).fetchone()
+            if conversation_id:
+                row = db.execute(
+                    "SELECT revision, document FROM lab_sessions "
+                    "WHERE kind=? AND conversation_id=?",
+                    (kind, str(conversation_id))).fetchone()
+            else:
+                # First visit in a browser can discover the latest saved
+                # session; its stable ID is then sent on every later request.
+                row = db.execute(
+                    "SELECT revision, document FROM lab_sessions "
+                    "WHERE kind=? ORDER BY updated_at DESC LIMIT 1",
+                    (kind,)).fetchone()
             return {"revision": row[0], "state": json.loads(row[1])} if row else {"revision": 0, "state": None}
 
-    def save_lab(self, kind, state, revision):
+    def save_lab(self, kind, state, revision, conversation_id=None):
         if kind not in ("tool", "skill", "mcp") or not isinstance(state, dict):
             raise ValueError("invalid lab state")
+        conversation_id = str(conversation_id or state.get("id") or "")
+        if (not conversation_id or len(conversation_id) > 128
+                or (state.get("id") and str(state["id"]) != conversation_id)):
+            raise ValueError("lab session needs a matching conversation ID")
+        state = dict(state)
+        state["id"] = conversation_id
         turns = state.get("turns")
         if not isinstance(turns, list) or len(turns) > 500 or any(
             not isinstance(t, dict) or t.get("role") not in ("user", "assistant") or
@@ -66,12 +107,14 @@ class InterviewStore:
             raise ValueError("lab state too large")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            current = db.execute("SELECT revision FROM lab_sessions WHERE kind=?", (kind,)).fetchone()
+            current = db.execute(
+                "SELECT revision FROM lab_sessions WHERE kind=? AND conversation_id=?",
+                (kind, conversation_id)).fetchone()
             actual = current[0] if current else 0
             if actual != revision:
                 raise ValueError("lab session changed in another browser")
-            db.execute("INSERT INTO lab_sessions VALUES (?,?,?) ON CONFLICT(kind) DO UPDATE SET revision=excluded.revision, document=excluded.document",
-                       (kind, actual + 1, document))
+            db.execute("INSERT INTO lab_sessions (kind,conversation_id,revision,document) VALUES (?,?,?,?) ON CONFLICT(kind,conversation_id) DO UPDATE SET revision=excluded.revision, document=excluded.document, updated_at=CURRENT_TIMESTAMP",
+                       (kind, conversation_id, actual + 1, document))
             return actual + 1
 
     def unfinished_for_conversation(self, conversation_id, goal=None):

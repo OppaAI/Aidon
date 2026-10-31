@@ -291,7 +291,10 @@ def make_handler(server):
                 from .interview_store import InterviewStore
                 try:
                     kind = parse_qs(parsed.query).get('kind', [''])[0]
-                    self._send_json(200, InterviewStore(server.home).load_lab(kind))
+                    conversation_id = parse_qs(parsed.query).get(
+                        'conversation_id', [''])[0]
+                    self._send_json(200, InterviewStore(server.home).load_lab(
+                        kind, conversation_id))
                 except ValueError as exc:
                     self._send_json(400, {'error': str(exc)})
             elif parsed.path == '/api/conversations':
@@ -571,7 +574,10 @@ def make_handler(server):
             elif parsed.path == '/api/lab-session':
                 from .interview_store import InterviewStore
                 try:
-                    revision = InterviewStore(server.home).save_lab(body.get('kind'), body.get('state'), int(body.get('revision', 0)))
+                    revision = InterviewStore(server.home).save_lab(
+                        body.get('kind'), body.get('state'),
+                        int(body.get('revision', 0)),
+                        body.get('conversation_id'))
                     self._send_json(200, {'revision': revision})
                 except (ValueError, TypeError) as exc:
                     self._send_json(409, {'error': str(exc)})

@@ -23,6 +23,13 @@ function esc(value) {
   return String(value == null ? "" : value).replace(/[&<>"']/g, ch =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
 }
+function newConversationId() {
+  if (window.crypto && window.crypto.randomUUID) {
+    return window.crypto.randomUUID().replace(/-/g, "");
+  }
+  return Array.from({ length: 32 }, () =>
+    Math.floor(Math.random() * 16).toString(16)).join("");
+}
 function stateKey(kind) { return "aidon-lab-" + kind; }
 function readState(kind) {
   try {
@@ -48,7 +55,8 @@ async function save(kind) {
   localStorage.setItem(stateKey(kind), JSON.stringify(state[kind]));
   const response = await fetch("/api/lab-session", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind, state: state[kind], revision: revisions[kind] })
+    body: JSON.stringify({ kind, conversation_id: state[kind].id,
+      state: state[kind], revision: revisions[kind] })
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Could not save the lab session");
@@ -63,6 +71,7 @@ async function send(kind) {
   if (!text) return;
   const research = document.getElementById("research-" + kind).checked;
   state[kind].turns.push({ role: "user", text });
+  if (!state[kind].id) state[kind].id = newConversationId();
   render(kind); input.value = ""; button.disabled = true;
   status.textContent = "Aidon is thinking…";
   const message = (state[kind].started ? "" : "[" + LABS[kind].title + "] " + LABS[kind].intro + "\n\n") + text;
@@ -71,7 +80,7 @@ async function send(kind) {
     if (!state[kind].created) {
       const created = await fetch("/api/conversations", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({})
+        body: JSON.stringify({ id: state[kind].id })
       });
       const record = await created.json();
       if (!created.ok || !record.id) throw new Error(record.error || "Could not create lab conversation");
@@ -132,7 +141,9 @@ document.querySelectorAll("[data-send]").forEach(btn => btn.addEventListener("cl
 document.querySelectorAll("[data-brief]").forEach(btn => btn.addEventListener("click", () => startFromBrief(btn.dataset.brief)));
 document.querySelectorAll("[data-reset]").forEach(btn => btn.addEventListener("click", async () => {
   const kind = btn.dataset.reset;
-  state[kind] = { id: "", created: false, started: false, turns: [] };
+  state[kind] = { id: newConversationId(), created: false,
+    started: false, turns: [] };
+  revisions[kind] = 0;
   try {
     await save(kind); render(kind); document.getElementById("status-" + kind).textContent = "New interview started.";
   } catch (error) { document.getElementById("status-" + kind).textContent = error.message; }
@@ -141,7 +152,8 @@ Object.keys(LABS).forEach(async kind => {
   const sendButton = document.querySelector('[data-send="' + kind + '"]');
   sendButton.disabled = true;
   try {
-    const response = await fetch("/api/lab-session?kind=" + encodeURIComponent(kind));
+    const response = await fetch("/api/lab-session?kind=" + encodeURIComponent(kind)
+      + "&conversation_id=" + encodeURIComponent(state[kind].id || ""));
     if (!response.ok) throw new Error("Could not load saved lab session");
     const saved = await response.json();
     revisions[kind] = saved.revision;

@@ -824,7 +824,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     mcp_connections = {}
 
     def mcp_connect(name, transport="stdio", command="", args=None,
-                    env=None, url="", token=""):
+                    env=None, url="", token="", test_tool="",
+                    test_args=None):
         import shlex
         server_name = str(name).strip()
         if not server_name:
@@ -880,9 +881,17 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         from ..capabilities.acquisition_governor import AcquisitionBudgetExceeded
         from ..capabilities.mcp_acquisition import acquire_mcp_server
         try:
+            if test_args is not None and not str(test_tool or "").strip():
+                return "MCP_REFUSED: test_args requires test_tool"
+            if test_args is not None and not isinstance(test_args, dict):
+                return "MCP_REFUSED: test_args must be an object"
+            test_call = ({"tool": str(test_tool),
+                          "args": dict(test_args or {})}
+                         if str(test_tool or "").strip() else None)
             result = acquire_mcp_server(
                 config.home, server_name, mcp_config, _acquire_approve,
-                client_factory=_factory, governor=governor, keep_client=True)
+                client_factory=_factory, governor=governor, keep_client=True,
+                test_call=test_call)
         except AcquisitionBudgetExceeded:
             raise
         except Exception as exc:
