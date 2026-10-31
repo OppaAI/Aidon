@@ -13,11 +13,11 @@ Reviewed against the requested chat → capability inventory → Tool Crafting L
 
 ## Release blockers
 
-1. **Acquisition orchestration — open:** plugin and skill adoption now require separate approvals and test evidence, but there is no durable state machine proving the whole acquisition, registration and original-goal resumption. Newly trusted skills enter future plans; the current run does not automatically replan to use them.
+1. **Acquisition orchestration — open:** plugin and skill adoption require separate approvals and test evidence, and newly trusted skills now trigger a bounded, validated replan of the original goal. A durable state machine still does not prove the full acquisition, registration and recovery workflow across process restart.
 2. **Functional validation — open:** plugin and skill tests run in isolated, network-disabled backends and bind evidence to candidate bytes. Plugin registry, goal-tool, and commit APIs now refuse adoption without this evidence, and the owner approval card identifies the backend and candidate hash. Test quality is not proven, and MCP connection/list checks do not validate each tool's behavior.
 3. **Recovery — open:** interview steps persist, live runs reconnect, and reopened chats show an explicit recovery action. Process restart still requires user action; automatic workflow restoration, idempotent acquisition retries, and browser refresh/switching tests remain incomplete.
 4. **Recommendations — in progress:** uncertain-choice interviews can call web search and now retain source URLs for model citations. Actual model responses have not been checked for accurate citations; verify before claiming current prices, compatibility or MCP endpoints.
-5. **Regression failures — closed for current revision:** full suite passed 1,391 tests with 7 environment-dependent skips on 2026-10-31. Re-run after subsequent code changes and in CI.
+5. **Regression failures — closed for current revision:** full suite passed 1,393 tests with 7 environment-dependent skips on 2026-10-31. Re-run after subsequent code changes and in CI.
 6. **PC execution — in progress:** SSH remains a separately selected remote execution backend, not a scoped PC capability alongside Modal; real PC targeting, permissions, credentials and X11 control are unvalidated. SSH is now explicitly treated as unsandboxed, cannot trigger unattended shell auto-approval, and cleanup is confined to a unique per-run child directory.
 7. **Deployment validation:** real model, Modal authentication/networking, browser interactions and PC/X11 control have not been validated end to end in this session.
 
@@ -34,6 +34,9 @@ Covered goal; reject lab; uncertain user compares options; approve and revise br
 
 ## Repair validation update
 
+- Trusted skill adoption now signals the goal runner to replan the original goal against the refreshed trusted-skill registry. It performs at most one skill-triggered replan per attempt, validates the new plan against the current tools and skills, keeps completed reversible draft files, and refuses to continue after failed or irreversible earlier work. Focused tests cover successful replan and fail-closed handling. This closes the “current plan never uses newly trusted skill” subfinding; durable end-to-end acquisition/resume state remains open.
+- A DAG plan containing `adopt_skill` is forced to sequential execution, so work planned against the old capability inventory cannot race the adoption/replan boundary.
+
 - Baseline regression run: 1,346 passed, 7 skipped. Namespace-dependent tests now explicitly probe the runner and skip when isolation is unavailable; execution still fails closed by default. Subsequent focused checks cover durable replay and plugin replacement rollback.
 - Interview steps (including model output, original goal, questions and answers) persist in SQLite with FULL synchronization. Retrying the same goal in the same conversation replays committed steps and refuses changed prompts. Reopened chats show a recovery action; automatic process restart orchestration remains open.
 - Research is available during uncertain-choice interviews through the configured researcher. Source URLs are retained for citations; unavailable research is labeled unverified. The current test verifies URL retention, not live-model citation accuracy.
@@ -46,3 +49,43 @@ Covered goal; reject lab; uncertain user compares options; approve and revise br
 - Actual model, Modal and PC integration checks remain unrun without the required configured endpoints, authentication and reachable PC. These cannot be established by offline tests.
 
 Items marked open or in progress remain release blockers. Green offline tests do not establish production readiness or validate real model, Modal, browser, PC or X11 integration.
+
+## Fast home-PC validation (after pulling `dev`)
+
+This is the short manual acceptance pass for the remaining runtime-only items. Use a test Aidon home/workspace and a harmless goal; do not use a real email, purchase, account or host-changing goal.
+
+1. Update and run the offline regression suite from the repository root:
+
+   ```sh
+   git switch dev
+   git pull --ff-only
+   python3 -m pytest tests/ -q
+   ```
+
+   Expected: all tests pass; environment-dependent skips are reported. If pytest is missing, activate the project environment or install the test dependency there before proceeding.
+
+2. Start the WebUI with the same local environment/configuration you normally use:
+
+   ```sh
+   ./launch.sh
+   ```
+
+   Open `http://127.0.0.1:8765/`. Confirm the home page loads, a new chat accepts a goal, and a browser refresh restores the same conversation and formatted Markdown/artifacts.
+
+3. Validate acquisition flow with a harmless test skill (for example, a short checklist for drafting a local project plan). Ask for an output that specifically benefits from that procedure. Expected sequence: Aidon explains the missing capability; the Tool Crafting Lab card asks to proceed; the discussion and interview stay inside the card; rejecting ends the task without registering anything. In a second run, proceed, answer the interview, inspect/edit the skill draft, run its isolated test, and separately approve trust. Confirm the original goal is replanned and completed using the skill without repeating the interview. Confirm the skill appears in the skill library only after its tests and trust approval pass.
+
+4. Verify failure boundaries with a disposable invalid skill draft: make its isolated check fail and confirm it is not trusted or visible to the planner. Cancel another interview once and confirm it stops cleanly. Refresh the browser during an interview and verify the latest saved answer and current lab state return.
+
+5. If configured, run one harmless sandbox smoke test for the actual execution backend (`bubblewrap`, Docker, or Modal) and confirm the run card reports the expected backend and network state. Do not infer Modal readiness from local bubblewrap success. If using desktop automation, explicitly test only the configured local X11 display and an innocuous window; record display/Xauthority errors. Aidon on the same PC does not need SSH to control that PC. SSH is only a separate remote backend and needs an independently reachable target.
+
+Record date, commit, backend, browser, outcome, and any error under the checklist below. Never paste credentials, API keys, cookies, or SSH passwords into this document.
+
+| Runtime check | Status | Evidence / notes |
+| --- | --- | --- |
+| Home-PC full test suite | Pending | |
+| WebUI chat + refresh persistence/Markdown | Pending | |
+| Tool Lab proceed/reject and in-card interview | Pending | |
+| Skill isolated test, trust approval, original-goal replan | Pending | |
+| Failed test and cancellation boundaries | Pending | |
+| Actual configured sandbox backend (Modal if used) | Pending | |
+| Local X11 / computer-use smoke test (if enabled) | Pending | |

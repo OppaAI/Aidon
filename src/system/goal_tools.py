@@ -1064,8 +1064,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             if governor is not None:
                 governor.acquire("skill")
             library.trust(skill.name, approved=True)
-            return (f"Trusted skill {skill.name}; its tested procedure is available to future plans. "
-                    "The current plan is unchanged and needs an explicit replan to use it.")
+            return (f"Trusted skill {skill.name}; its tested procedure is available to the current goal. "
+                    "Replan the original goal using it where useful.")
         except Exception as exc:
             return f"skill adoption refused: {type(exc).__name__}: {exc}"
 

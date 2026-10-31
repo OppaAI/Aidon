@@ -103,6 +103,78 @@ def test_loop_executes_real_steps_and_verifies(tmp_path):
     assert (tmp_path / "home" / "work" / "out.md").read_text() == "done"
 
 
+def test_trusted_skill_replans_original_goal_and_keeps_completed_draft(
+        tmp_path, monkeypatch):
+    replanned = {
+        "steps": [
+            {"tool": "write", "args": {"file": "draft.md", "text": "kept"},
+             "deliverable": "draft.md"},
+            {"tool": "write", "args": {"file": "final.md", "text": "skill-informed"},
+             "deliverable": "final.md"},
+        ],
+        "deliverables": ["draft.md", "final.md"],
+        "criteria": ["final.md contains skill-informed"],
+    }
+    runner = _runner(tmp_path, FakeClient(json.dumps(replanned)))
+    runner.extra_tools = {"adopt_skill": lambda: "not called directly"}
+    initial = Plan(
+        steps=[
+            Step(tool="write", args={"file": "draft.md", "text": "kept"},
+                 deliverable="draft.md"),
+            Step(tool="adopt_skill", args={"name": "video-editing"}),
+        ],
+        deliverables=["draft.md"],
+        parallel_ok=True,
+    )
+
+    class Plugins:
+        def tool_names(self):
+            return []
+
+        def skill_texts(self):
+            return {"video-editing": "Trusted, tested video editing procedure."}
+
+    runner.plugins = Plugins()
+    original_call_tool = runner._call_tool
+    calls = []
+
+    def call_tool(name, args):
+        calls.append(name)
+        if name == "adopt_skill":
+            return "Trusted skill video-editing; its tested procedure is available."
+        return original_call_tool(name, args)
+
+    monkeypatch.setattr(runner, "_call_tool", call_tool)
+    report = runner._execute_plan("Create a launch video", initial)
+
+    assert report.status == "done"
+    assert calls.count("adopt_skill") == 1
+    assert calls.count("write") == 2  # draft once; only the new final is rerun
+    assert (tmp_path / "home" / "work" / "draft.md").read_text() == "kept"
+    assert (tmp_path / "home" / "work" / "final.md").read_text() == "skill-informed"
+
+
+def test_skill_replan_fails_closed_after_irreversible_step(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIDON_MAX_ATTEMPTS", "1")
+    runner = _runner(tmp_path, FakeClient("{}"))
+    runner.extra_tools = {"send_email": lambda: "sent",
+                          "adopt_skill": lambda: "not called directly"}
+    initial = Plan(
+        steps=[
+            Step(tool="send_email", args={}, deliverable="sent"),
+            Step(tool="adopt_skill", args={"name": "video-editing"}),
+        ],
+        deliverables=["sent"],
+    )
+    monkeypatch.setattr(
+        runner, "_call_tool",
+        lambda name, args: ("Trusted skill video-editing" if name == "adopt_skill"
+                            else "sent"))
+    report = runner._execute_plan("Send the launch email", initial)
+    assert report.status == "failed"
+    assert "cannot be safely resumed" in report.error
+
+
 def test_generated_file_path_replaces_prose_deliverable(tmp_path):
     plan = {"steps": [{
         "tool": "generate_document",

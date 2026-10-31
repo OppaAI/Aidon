@@ -2758,6 +2758,7 @@ class GoalRunner:
         if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
             return "cancelled"
         try:
+            skill_trusted = False
             if self.budget is not None:
                 self.budget.add_step()
             if not hasattr(self, "_step_lines"):
@@ -2783,6 +2784,9 @@ class GoalRunner:
                     self._call_tool("write", {"file": step.deliverable, "text": _reply})
             else:
                 tool_result = self._call_tool(step.tool, step.args)
+                skill_trusted = (
+                    step.tool == "adopt_skill"
+                    and str(tool_result).startswith("Trusted skill "))
                 if (step.tool == "self_modify"
                         and str(tool_result).startswith((
                             "self-modification refused:",
@@ -2840,7 +2844,7 @@ class GoalRunner:
                 self._save_checkpoint(
                     "sandbox", goal, current_plan, passed,
                     verified=verified, attempt=attempt)
-            return None
+            return "replan_skill" if skill_trusted else None
         except Exception as exc:
             msg = f"step {step.tool} failed: {exc}"
             try:
@@ -3245,6 +3249,15 @@ class GoalRunner:
             self._trace("checkpoint", "resumed",
                         f"phase={resume.phase} passed={len(passed)}")
         current_plan = plan
+        if (current_plan.parallel_ok
+                and any(step.tool == "adopt_skill"
+                        for step in current_plan.normalized_steps())):
+            # Skill adoption changes planner context; it is a sequencing
+            # boundary and must never run alongside steps based on the old
+            # capability inventory.
+            current_plan.parallel_ok = False
+            self._trace("plan", "serialized",
+                        "skill adoption is a replanning boundary")
         max_attempts = _resolve_count("AIDON_MAX_ATTEMPTS", MAX_ATTEMPTS, 1)
         for attempt in range(1, max_attempts + 1):
             failures: list[str] = []
@@ -3280,20 +3293,102 @@ class GoalRunner:
                                      backend=self._backend_name())
                 failures.extend(level_failures)
             else:
-                for step in current_plan.normalized_steps():
-                    if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
-                        return RunReport("cancelled", goal, current_plan, False, False,
-                                         files=sorted(passed), attempts=attempt,
-                                         backend=self._backend_name())
-                    if step.deliverable and step.deliverable in passed:
+                skill_replan_used = False
+                while True:
+                    completed_steps = []
+                    replan_after_skill = False
+                    steps = current_plan.normalized_steps()
+                    # Skill trust can change the planner's available procedure
+                    # context. Keep this path sequential so the next step cannot
+                    # race ahead using a stale plan.
+                    for step in steps:
+                        if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
+                            return RunReport("cancelled", goal, current_plan, False, False,
+                                             files=sorted(passed), attempts=attempt,
+                                             backend=self._backend_name())
+                        if step.deliverable and step.deliverable in passed:
+                            completed_steps.append(step)
+                            continue
+                        if self._deadline_exceeded():
+                            self._timeboxed = True
+                            break
+                        error = self._run_plan_step(
+                            step, goal, current_plan, passed, verified, attempt)
+                        if error == "replan_skill":
+                            if (failures or skill_replan_used
+                                    or not plan_is_reversible(Plan(steps=completed_steps))):
+                                return RunReport(
+                                    "failed", goal, current_plan, False, False,
+                                    files=sorted(passed),
+                                    error=("trusted skill is available, but the original "
+                                           "plan cannot be safely resumed after failed, "
+                                           "irreversible, or repeated capability-acquisition "
+                                           "work"),
+                                    attempts=attempt, backend=self._backend_name())
+                            try:
+                                current_plan = self._plan(
+                                    goal,
+                                    failure_context=(
+                                        "A skill was just tested and separately trusted. "
+                                        "Replan the original goal using its tested procedure "
+                                        "where useful. Preserve completed draft files and "
+                                        "do not repeat capability acquisition."),
+                                    spec=getattr(self, "_current_spec", None),
+                                    research_context=getattr(
+                                        self, "_deep_research_context", ""),
+                                    triage_note=getattr(self, "_triage_note", ""))
+                                _allowed = set(ALLOWED_TOOLS) | {"llm"}
+                                _allowed.update(self.extra_tools or {})
+                                if self.plugins is not None:
+                                    _allowed.update(self.plugins.tool_names())
+                                    _texts = self.plugins.skill_texts()
+                                    _skill_names = set(_texts) | {
+                                        name.rsplit("/", 1)[-1] for name in _texts}
+                                plan_failures = validate_plan(
+                                    current_plan, allowed_tools=_allowed,
+                                    skill_names=_skill_names)
+                                if plan_failures or not current_plan.deliverables:
+                                    raise ValueError("; ".join(plan_failures) or
+                                                     "replanned goal has no deliverables")
+                            except Exception as exc:
+                                return RunReport(
+                                    "failed", goal, current_plan, False, False,
+                                    files=sorted(passed),
+                                    error=f"skill-triggered replan failed: {exc}"[:500],
+                                    attempts=attempt, backend=self._backend_name())
+                            skill_replan_used = True
+                            replan_after_skill = True
+                            self._trace("plan", "replanned",
+                                        "trusted skill added to original-goal plan")
+                            self._save_checkpoint(
+                                "sandbox", goal, current_plan, passed,
+                                verified=verified, attempt=attempt)
+                            if getattr(self, "mode", None) == "plan":
+                                from .checkpoint import plan_to_dict
+                                from ..interface.mode_stops import save_mode_stop
+                                stop_id = save_mode_stop(
+                                    self.home, mode="plan", goal=goal,
+                                    plan=plan_to_dict(current_plan),
+                                    conversation_key=getattr(self, "conversation_key", ""),
+                                    conversation_id=self.conversation_id,
+                                    budget_key=getattr(
+                                        getattr(self, "acquisition_governor", None),
+                                        "budget_key", None) or "")
+                                return RunReport(
+                                    "stopped", goal, current_plan, False, False,
+                                    files=sorted(passed),
+                                    mode_stop={"stop_id": stop_id, "mode": "plan",
+                                               "goal": goal,
+                                               "deliverables": list(current_plan.deliverables)},
+                                    attempts=attempt, backend=self._backend_name())
+                            break
+                        if error is not None:
+                            failures.append(error)
+                        else:
+                            completed_steps.append(step)
+                    if replan_after_skill:
                         continue
-                    if self._deadline_exceeded():
-                        self._timeboxed = True
-                        break
-                    error = self._run_plan_step(
-                        step, goal, current_plan, passed, verified, attempt)
-                    if error is not None:
-                        failures.append(error)
+                    break
             # Time box: stop here, before verification. Verifying
             # a partial plan would fail on the missing
             # deliverables and misreport a clean cut as a failure.
