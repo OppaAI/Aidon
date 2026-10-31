@@ -1403,6 +1403,8 @@ class GoalRunner:
                        "match. If none fits, follow the capability ladder: check "
                        "relevant skills and known MCP options, then draft a plugin "
                        "in the workdir only when needed, sandbox-test it, and use "
+                       "a plugin.json acceptance_tests field containing one or more "
+                       "argv arrays for meaningful offline tests that exercise the tool; "
                        "adopt_tool_plugin. Adoption requires the owner's approval. "
                        "After approval, the new tool is added to this run's live "
                        "registry. A newly authored tool may appear later in the "

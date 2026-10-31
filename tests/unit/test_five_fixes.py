@@ -121,6 +121,33 @@ def test_adopted_tool_is_live_in_the_same_workflow(tmp_path):
     assert registry.call("echo", {}) == "hi"
 
 
+def test_web_adoption_requires_successful_acceptance_tests(tmp_path):
+    plug = tmp_path / "plug"
+    _valid_plugin(plug)
+    class Backend:
+        name = "modal"
+        allow_network = False
+        def run(self, command, workspace, timeout_seconds):
+            return SimpleNamespace(isolated=True, ok=True, returncode=0)
+        def cleanup(self):
+            pass
+    tools = _goal_extra_tools(SimpleNamespace(home=tmp_path), tmp_path,
+                              gate=_ApproveGate(), test_backend_factory=Backend)
+    assert "acceptance tests failed" in tools["adopt_tool_plugin"]("plug")
+    manifest = json.loads((plug / "plugin.json").read_text())
+    manifest["acceptance_tests"] = [["python3", "test_tool.py"]]
+    (plug / "plugin.json").write_text(json.dumps(manifest))
+    (plug / "test_tool.py").write_text("assert True\n")
+    class Failing(Backend):
+        def run(self, command, workspace, timeout_seconds):
+            return SimpleNamespace(isolated=True, ok=False, returncode=1)
+    failing_tools = _goal_extra_tools(SimpleNamespace(home=tmp_path), tmp_path,
+                                      gate=_ApproveGate(), test_backend_factory=Failing)
+    assert "acceptance tests failed" in failing_tools["adopt_tool_plugin"]("plug")
+    assert not (tmp_path / "toolbox" / "five-plug").exists()
+    assert tools["adopt_tool_plugin"]("plug").startswith("Adopted plugin")
+
+
 def test_commit_rejects_changed_source(tmp_path):
     home = tmp_path / "home"
     plug = tmp_path / "plug"

@@ -259,7 +259,7 @@ def _make_governor(config, budget_key=None):
 
 
 def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None, governor=None, optional_tools=None,
-                      plugin_registry=None, gate_context=None) -> dict:
+                      plugin_registry=None, gate_context=None, test_backend_factory=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     If ``plugin_registry`` is given (a ``PluginRegistry`` instance that is
@@ -1157,6 +1157,19 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                     for t in preflight.plugin.tools))
             if not allowed:
                 return f"adoption refused: {reason}"
+            if test_backend_factory is not None:
+                backend = None
+                try:
+                    from ..capabilities.plugin_acceptance import test_candidate
+                    backend = test_backend_factory()
+                    evidence = test_candidate(source, backend)
+                    if evidence["source_hash"] != preflight.approved_hash:
+                        return "adoption refused: candidate changed after preflight"
+                except Exception as exc:
+                    return f"adoption refused: acceptance tests failed: {type(exc).__name__}: {exc}"
+                finally:
+                    if backend is not None:
+                        backend.cleanup()
             if not ask_plugin_approval(gate, None, preflight):
                 return "adoption refused: Adoption rejected by owner"
             if governor is not None:
@@ -3167,7 +3180,7 @@ def main(argv: list[str] | None = None) -> int:
                                 clef_client=_clef_client,
                                 use_semantic_router_skip=True,
                                 run_id=run_id, run_control=run_control,
-                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins, gate_context=_gate_context), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor)
+                                researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins, gate_context=_gate_context, test_backend_factory=lambda: make_backend(config.execution_backend, run_sandbox, image=config.docker_image, allow_network=False, modal_app=config.modal_app, modal_cpu=config.modal_cpu, modal_memory_mb=config.modal_memory_mb)), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor)
             def _deliver_files(files, target):
                 """Upload run deliverables as bytes to a Slack/WhatsApp target.
 
