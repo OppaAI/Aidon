@@ -32,3 +32,5 @@ def test_unfinished_interview_lookup_is_scoped_and_unambiguous(tmp_path):
     store.save_session("two", {"goal": "second", "conversation_id": "a", "finished": False})
     with pytest.raises(ValueError, match="Multiple"):
         store.unfinished_for_conversation("a")
+    assert store.unfinished_for_conversation("a", goal="edit video")["goal"] == "edit video"
+    assert store.unfinished_for_conversation("a", goal="new goal") is None

@@ -2131,7 +2131,7 @@ class GoalRunner:
                     except Exception:
                         _spec_text = ""
                 from ..interface.interview_store import InterviewStore
-                _saved = InterviewStore(self.home).unfinished_for_conversation(getattr(self, "conversation_id", ""))
+                _saved = InterviewStore(self.home).unfinished_for_conversation(getattr(self, "conversation_id", ""), goal=goal)
                 _clef = getattr(self, "clef_client", None)
                 if _saved and _saved.get("goal") == goal and _saved.get("kind") in ("need_plugin", "need_skill", "need_mcp"):
                     _triage = {"status": _saved["kind"], "confidence": 1.0, "note": "Resume saved interview"}

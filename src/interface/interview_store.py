@@ -29,7 +29,7 @@ class InterviewStore:
             row = db.execute("SELECT document FROM sessions WHERE session_key=?", (key,)).fetchone()
             return json.loads(row[0]) if row else None
 
-    def unfinished_for_conversation(self, conversation_id):
+    def unfinished_for_conversation(self, conversation_id, goal=None):
         """Find a single recoverable interview; refuse ambiguous selections."""
         if not conversation_id:
             return None
@@ -38,6 +38,8 @@ class InterviewStore:
             for (document,) in db.execute("SELECT document FROM sessions"):
                 state = json.loads(document)
                 if state.get("finished") or not state.get("goal"):
+                    continue
+                if goal is not None and state.get("goal") != goal:
                     continue
                 owner = state.get("conversation_id")
                 if owner is None:
