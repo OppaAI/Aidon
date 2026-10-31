@@ -216,10 +216,12 @@ CHAT_HTML = """<!doctype html>
 <g id="robot-arm-left">
 <path d="M 68 103 Q 53 103 47 117 Q 41 134 35 150 Q 33 160 40 164 Q 47 167 53 157 Q 64 140 72 124 Z" fill="url(#robot-arm-shell)" stroke="#c6d0df" stroke-width="1.5"/>
 <path d="M 54 117 Q 49 135 41 153 Q 39 158 42 159 Q 46 157 49 150 L 64 127 Z" fill="#fff" opacity=".62"/>
+<path d="M40 162 L39 166 M45 163 L45 167 M50 161 L51 165" fill="none" stroke="#1a2a4a" stroke-width="2.5" stroke-linecap="round"/>
 </g>
 <g id="robot-arm-right">
 <path d="M 132 103 Q 147 103 153 117 Q 159 134 165 150 Q 167 160 160 164 Q 153 167 147 157 Q 136 140 128 124 Z" fill="url(#robot-arm-shell)" stroke="#c6d0df" stroke-width="1.5"/>
 <path d="M 146 117 Q 151 135 159 153 Q 161 158 158 159 Q 154 157 151 150 L 136 127 Z" fill="#fff" opacity=".62"/>
+<path d="M160 162 L161 166 M155 163 L155 167 M150 161 L149 165" fill="none" stroke="#1a2a4a" stroke-width="2.5" stroke-linecap="round"/>
 </g>
 <g id="robot-head">
 <rect x="36" y="40" width="12" height="32" rx="6" fill="url(#robot-ear)" stroke="#7894b5" stroke-width="1"/>
@@ -236,7 +238,7 @@ CHAT_HTML = """<!doctype html>
 <path id="mouth-smile" d="M 90 67 Q 100 73 110 67" fill="none" stroke="#7de9ff" stroke-width="3" stroke-linecap="round"/>
 <ellipse id="mouth-open" cx="100" cy="69" rx="2" ry="1" fill="#7de9ff" opacity="0"/>
 </g>
-<rect x="92" y="90" width="16" height="12" fill="#c2c2b8"/>
+<rect x="89" y="88" width="22" height="18" rx="6" fill="#1a2a4a"/>
 <g id="robot-body">
 <path d="M74 104 C82 96 118 96 126 104 C140 119 139 153 127 173 C119 185 108 190 100 190 C92 190 81 185 73 173 C61 153 60 119 74 104 Z" fill="url(#robot-shell)" stroke="#c6d0df" stroke-width="1.5"/>
 <ellipse cx="81" cy="119" rx="13" ry="6" fill="#fff" opacity=".72"/>
