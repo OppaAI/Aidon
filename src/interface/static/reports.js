@@ -35,6 +35,8 @@
       if (!r.ok) throw new Error("tts " + r.status);
       const url = URL.createObjectURL(await r.blob());
       const audio = new Audio(url);
+      audio.playbackRate = 0.84;
+      audio.preservesPitch = true;
       currentAudio = audio;
       currentBtn = btn;
       btn.textContent = "⏹";

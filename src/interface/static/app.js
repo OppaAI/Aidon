@@ -430,6 +430,7 @@
   const micWaveLevels = new Array(WAVE_BARS).fill(0);
   const avatarWaveLevels = new Array(WAVE_BARS).fill(0);
   let waveFreq = null;
+  const TTS_PLAYBACK_RATE = 0.84;
 
   function getTtsAnalyser() {
     if (!ttsCtx) {
@@ -624,6 +625,8 @@
         return;
       }
       const audio = progressive.audio;
+      audio.playbackRate = TTS_PLAYBACK_RATE;
+      audio.preservesPitch = true;
       currentAudio = audio;
       currentAudioUrl = progressive.url;
       currentAudioCancel = progressive.cancel;
@@ -815,6 +818,8 @@
       }
       // Route through the analyser for lip sync + waveform (no-op if
       // Web Audio is unavailable — falls back to plain playback).
+      audio.playbackRate = TTS_PLAYBACK_RATE;
+      audio.preservesPitch = true;
       try {
         const analyser = getTtsAnalyser();
         const src = ttsCtx.createMediaElementSource(audio);
