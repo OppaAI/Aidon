@@ -57,9 +57,11 @@ def test_outbox_drain_keeps_failed():
 
 def test_webui_tabs_and_cli_commands():
     assert "/capabilities" in CHAT_HTML and "/memory" in CHAT_HTML and "/knowledge" in CHAT_HTML and "/reports" in CHAT_HTML
-    main_text = (Path(__file__).resolve().parents[2] / "src" / "system" / "main.py").read_text()
+    system_dir = Path(__file__).resolve().parents[2] / "src" / "system"
+    main_text = (system_dir / "main.py").read_text()
+    cli_text = main_text + (system_dir / "cli_inspect.py").read_text()
     for cmd in ['"memory"', '"skills"', '"tools"', '"dag"', '"mission"', '"outbox"', '"export"', '"schedule"', '"sandbox"', '"chain"', '"chat"', '"computer"']:
-        assert cmd in main_text, cmd
+        assert cmd in cli_text, cmd
     roadmap = (Path(__file__).resolve().parents[2] / "docs" / "ROADMAP.md").read_text()
     assert "Screenshot" in roadmap and "Computer use" in roadmap
     # Fly brain is still last entry
