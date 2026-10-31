@@ -535,8 +535,8 @@ body:has(.settings-app) { overflow: auto; }
 .switch span::before { content: ""; position: absolute; width: 17px; height: 17px;
   left: 3px; top: 3px; border-radius: 50%; background: var(--muted);
   transition: all .15s; }
-.switch input:checked + span { background: var(--accent);
-  border-color: var(--accent); box-shadow: 0 0 10px var(--accent-glow); }
+.switch input:checked + span { background: var(--moss);
+  border-color: var(--moss); box-shadow: 0 0 10px var(--moss-glow); }
 .switch input:checked + span::before { transform: translateX(21px);
   background: #fff; }
 #settings-footer { display: flex; align-items: center; gap: 14px;
@@ -544,10 +544,10 @@ body:has(.settings-app) { overflow: auto; }
 #settings-note { flex: 1; min-width: 260px; font-size: 12px; color: var(--muted); }
 #settings-note code { font-family: var(--font-mono); color: var(--text); }
 #settings-save { padding: 11px 26px; border-radius: 10px; border: none;
-  background: linear-gradient(92deg, var(--accent), var(--accent2));
+  background: var(--moss);
   color: #fff; font-family: var(--font-display); font-size: 15px; font-weight: 700;
   letter-spacing: .16em; text-transform: uppercase; cursor: pointer;
-  box-shadow: 0 0 16px var(--accent-glow); }
+  box-shadow: 0 0 16px var(--moss-glow); }
 #settings-save:disabled { opacity: .5; box-shadow: none; }
 #settings-status { font-size: 13px; }
 #settings-status.ok { color: var(--green); }
@@ -556,7 +556,7 @@ body:has(.settings-app) { overflow: auto; }
 .set-tab { padding: 8px 14px; border-radius: 10px 10px 0 0;
   border: 1px solid var(--border); border-bottom: none;
   background: none; color: var(--text); cursor: pointer; font-size: 14px; }
-.set-tab.active { background: var(--surface2); border-color: var(--accent);
+.set-tab.active { background: var(--surface2); border-color: var(--moss); color: var(--moss);
   font-weight: 600; }
 .set-group[hidden] { display: none; }
 @media (max-width: 700px) {
