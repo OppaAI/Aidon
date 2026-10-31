@@ -1,4 +1,4 @@
-/* Aidon procedural 3D robot with an optional owner-provided VRM avatar.
+/* Aidon illustrated robot with an optional owner-provided VRM avatar.
  *
  * The user makes the male VRM himself. Zero-code-change contract:
  *   1. drop the file at aidon/webui/avatar.vrm   (or set AIDON_VRM_PATH)
@@ -7,18 +7,16 @@
  * The chat loads the VRM when one is present, as old Aidon did; without
  * one, the robot placeholder stays.
  *
- * The built-in mascot is made from Three.js primitives, so it can turn as
- * a real 3D figure. A supplied VRM takes precedence when one is available.
+ * The illustrated robot is the default. A supplied VRM replaces it when
+ * one is available.
  */
 (function () {
   "use strict";
 
   const wrap = document.getElementById("avatar-wrap");
-  let canvas = document.getElementById("avatar");
+  const canvas = document.getElementById("avatar");
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let fallbackMood = "idle";
-  let currentMouthLevel = 0;
-  let proceduralMouth = null;
   window.aidonSetMood = function (name) { fallbackMood = name === "working" ? "working" : "idle"; };
 
   // The SVG fallback gets short arm waves, side steps, and hops. Keyframes are eased
@@ -89,7 +87,6 @@
   // mouth. A loaded model replaces this hook with its morph-target driver.
   window.aidonSetMouthOpen = function (level) {
     const amount = Math.max(0, Math.min(1, Number(level) || 0));
-    currentMouthLevel = amount;
     const smile = document.getElementById("fallback-mouth-smile");
     const opening = document.getElementById("fallback-mouth-open");
     if (smile) smile.setAttribute("opacity", String(1 - Math.min(1, amount * 5)));
@@ -114,210 +111,18 @@
   async function boot() {
     let status;
     try {
-      const r = await fetch("/api/avatar/status");
-      status = await r.json();
-    } catch (_) { /* the built-in robot can render without the API */ }
-    if (status && status.present) {
-      try {
-        await loadModel();
-        if (wrap) wrap.classList.add("has-model");
-        return;
-      } catch (e) {
-        console.warn("[avatar] VRM load failed, using the built-in robot:", e);
-        const replacement = document.createElement("canvas");
-        replacement.id = "avatar";
-        replacement.width = replacement.height = 224;
-        canvas.replaceWith(replacement);
-        canvas = replacement;
-      }
+      const response = await fetch("/api/avatar/status");
+      status = await response.json();
+    } catch (_) {
+      return; // The illustrated robot remains available without the API.
     }
+    if (!status || !status.present) return;
     try {
-      await loadRobot3D();
+      await loadModel();
       if (wrap) wrap.classList.add("has-model");
-    } catch (e) {
-      console.warn("[avatar] 3D robot unavailable, keeping the illustrated fallback:", e);
+    } catch (error) {
+      console.warn("[avatar] VRM load failed, keeping the illustrated robot:", error);
     }
-  }
-
-  async function loadRobot3D() {
-    const THREE = await import("three");
-    const cssSize = canvas.clientWidth || 168;
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.setSize(cssSize, cssSize, false);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.setClearColor(0x000000, 0);
-
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 20);
-    camera.position.set(0, 1.42, 5.35);
-    camera.lookAt(0, 1.42, 0);
-    scene.add(new THREE.HemisphereLight(0xf2f7ff, 0x5b6684, 1.65));
-    const key = new THREE.DirectionalLight(0xffffff, 2.0);
-    key.position.set(-2.4, 3.5, 4);
-    scene.add(key);
-    const fill = new THREE.DirectionalLight(0x8fcaff, 1.1);
-    fill.position.set(3, 1.6, 2.5);
-    scene.add(fill);
-    const rim = new THREE.DirectionalLight(0x657cc1, 1.0);
-    rim.position.set(0.5, 2.2, -3);
-    scene.add(rim);
-
-    const shell = new THREE.MeshPhysicalMaterial({ color: 0xf0f2e7, roughness: 0.24, metalness: 0.02, clearcoat: 0.9, clearcoatRoughness: 0.18 });
-    const blueShell = new THREE.MeshPhysicalMaterial({ color: 0x7197c4, roughness: 0.22, metalness: 0.08, clearcoat: 0.95, clearcoatRoughness: 0.16 });
-    const navy = new THREE.MeshPhysicalMaterial({ color: 0x17294a, roughness: 0.28, metalness: 0.08, clearcoat: 0.65 });
-    const screenMat = new THREE.MeshPhysicalMaterial({ color: 0x101d36, roughness: 0.12, metalness: 0.12, clearcoat: 1, clearcoatRoughness: 0.08 });
-    const cyan = new THREE.MeshStandardMaterial({ color: 0x54e4ff, emissive: 0x13bce4, emissiveIntensity: 1.25, roughness: 0.22 });
-
-    const sphereGeo = new THREE.SphereGeometry(1, 32, 24);
-    function orb(parent, material, position, scale) {
-      const mesh = new THREE.Mesh(sphereGeo, material);
-      mesh.position.set(...position);
-      mesh.scale.set(...scale);
-      parent.add(mesh);
-      return mesh;
-    }
-    function capsule(parent, material, radius, length, position, rotation = [0, 0, 0]) {
-      const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius, length, 5, 16), material);
-      mesh.position.set(...position);
-      mesh.rotation.set(...rotation);
-      parent.add(mesh);
-      return mesh;
-    }
-
-    const robot = new THREE.Group();
-    scene.add(robot);
-    // Rounded shell and blue side pods.
-    const head = new THREE.Group();
-    head.position.y = 2.12;
-    robot.add(head);
-    orb(head, shell, [0, 0, 0], [0.78, 0.56, 0.42]);
-    orb(head, blueShell, [-0.76, -0.02, 0], [0.22, 0.29, 0.31]);
-    orb(head, blueShell, [0.76, -0.02, 0], [0.22, 0.29, 0.31]);
-    // Glossy dark face panel, slightly forward of the casing.
-    orb(head, screenMat, [0, -0.015, 0.365], [0.61, 0.365, 0.09]);
-    const eyes = [];
-    for (const x of [-0.22, 0.22]) eyes.push(orb(head, cyan, [x, 0.055, 0.448], [0.085, 0.112, 0.042]));
-    const smileCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(-0.15, -0.13, 0.45), new THREE.Vector3(-0.08, -0.18, 0.465),
-      new THREE.Vector3(0, -0.195, 0.47), new THREE.Vector3(0.08, -0.18, 0.465),
-      new THREE.Vector3(0.15, -0.13, 0.45),
-    ]);
-    const proceduralSmile = new THREE.Mesh(new THREE.TubeGeometry(smileCurve, 20, 0.018, 8, false), cyan);
-    head.add(proceduralSmile);
-    proceduralMouth = orb(head, cyan, [0, -0.16, 0.46], [0.105, 0.025, 0.025]);
-    proceduralMouth.visible = false;
-    // A short aerial gives the silhouette the same friendly gadget feel.
-    capsule(head, blueShell, 0.025, 0.14, [0, 0.62, 0]);
-    orb(head, blueShell, [0, 0.76, 0], [0.065, 0.065, 0.065]);
-
-    // A substantial navy neck and soft pearly torso.
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.21, 0.30, 24), navy);
-    neck.position.y = 1.55;
-    robot.add(neck);
-    orb(robot, shell, [0, 0.91, 0], [0.59, 0.66, 0.43]);
-    orb(robot, navy, [0, 0.34, 0.285], [0.31, 0.105, 0.12]);
-
-    // Shoulder caps sit at the armpit/shoulder joint, with short limbs and
-    // small palms. The three dark fingertips are deliberately stubby.
-    const arms = [];
-    for (const side of [-1, 1]) {
-      const shoulder = new THREE.Group();
-      shoulder.position.set(side * 0.53, 1.28, 0);
-      robot.add(shoulder);
-      orb(shoulder, navy, [0, 0, 0], [0.19, 0.21, 0.21]);
-      capsule(shoulder, shell, 0.14, 0.36, [side * 0.035, -0.30, 0], [0, 0, side * -0.22]);
-      const hand = new THREE.Group();
-      hand.position.set(side * 0.07, -0.55, 0.02);
-      shoulder.add(hand);
-      orb(hand, blueShell, [0, 0, 0], [0.13, 0.14, 0.12]);
-      for (const fingerX of [-0.075, 0, 0.075])
-        capsule(hand, navy, 0.025, 0.065, [fingerX, -0.125, 0.015], [0, 0, side * fingerX * 2]);
-      arms.push(shoulder);
-    }
-    // Short rounded legs make the body read as a complete 3D character.
-    for (const side of [-1, 1]) {
-      capsule(robot, shell, 0.16, 0.30, [side * 0.23, 0.18, 0], [0, 0, side * -0.08]);
-      orb(robot, navy, [side * 0.23, 0.015, 0.035], [0.17, 0.07, 0.20]);
-    }
-
-    const sizeObserver = window.ResizeObserver ? new ResizeObserver(() => {
-      const size = canvas.clientWidth || 168;
-      renderer.setSize(size, size, false);
-    }) : null;
-    if (sizeObserver && wrap) sizeObserver.observe(wrap);
-
-    const actions = [
-      { duration: 2200, frames: [[0, 0, 0, 0, 0, 0], [.18, 0, 0, -.04, -0.8, .04], [.36, 0, 0, -.04, -2.35, .04], [.52, 0, 0, -.04, -1.0, .04], [.68, 0, 0, -.04, -2.35, .04], [1, 0, 0, 0, 0, 0]] },
-      { duration: 2100, frames: [[0, 0, 0, 0, 0, 0], [.2, -.13, -.04, 0, .25, -.22], [.42, .13, -.07, 0, -.22, .25], [.65, -.1, -.04, 0, .22, -.2], [.82, .08, -.02, 0, -.15, .16], [1, 0, 0, 0, 0, 0]] },
-      { duration: 2800, frames: [[0, 0, 0, 0, 0, 0], [.12, 0, 0, 0, -.15, .15], [.38, 0, 0, Math.PI, -.15, .15], [.55, 0, 0, Math.PI, .15, -.15], [.9, 0, 0, Math.PI * 2, .15, -.15], [1, 0, 0, Math.PI * 2, 0, 0]] },
-      { duration: 1850, frames: [[0, 0, 0, 0, 0, 0], [.18, 0, .22, 0, -1.7, 1.7], [.4, 0, .30, 0, -2.3, 2.3], [.65, 0, .16, 0, -0.8, 0.8], [1, 0, 0, 0, 0, 0]] },
-    ];
-    let action = null;
-    let nextAction = performance.now() + 1500;
-    let blinkAt = performance.now() + 2400;
-    let blinkStarted = 0;
-    let previous = performance.now();
-    let nextHeadMove = performance.now() + 900;
-    const headMotion = { x: 0, y: 0, z: 0 };
-    const headTarget = { x: 0, y: 0, z: 0 };
-    function readFrames(frames, p) {
-      let i = 0;
-      while (i < frames.length - 2 && p > frames[i + 1][0]) i++;
-      const a = frames[i], b = frames[i + 1];
-      const u = Math.max(0, Math.min(1, (p - a[0]) / (b[0] - a[0])));
-      const e = u * u * (3 - 2 * u);
-      return a.slice(1).map((v, j) => v + (b[j + 1] - v) * e);
-    }
-    function frame(now) {
-      requestAnimationFrame(frame);
-      const dt = Math.min(0.05, (now - previous) / 1000);
-      previous = now;
-      if (!reduceMotion) {
-        if (now >= nextHeadMove) {
-          headTarget.x = (Math.random() * 2 - 1) * 0.055; // nod
-          headTarget.y = (Math.random() * 2 - 1) * 0.13;  // glance left/right
-          headTarget.z = (Math.random() * 2 - 1) * 0.09;  // tilt
-          nextHeadMove = now + 1100 + Math.random() * 2300;
-        }
-        const headEase = 1 - Math.exp(-dt * 1.8);
-        headMotion.x += (headTarget.x - headMotion.x) * headEase;
-        headMotion.y += (headTarget.y - headMotion.y) * headEase;
-        headMotion.z += (headTarget.z - headMotion.z) * headEase;
-        if (!action && now >= nextAction) action = { ...actions[Math.floor(Math.random() * actions.length)], started: now };
-        if (action) {
-          const p = Math.min(1, (now - action.started) / action.duration);
-          const [x, y, yaw, leftAngle, rightAngle] = readFrames(action.frames, p);
-          robot.position.set(x, y, 0);
-          robot.rotation.y = yaw;
-          arms[0].rotation.z = leftAngle;
-          arms[1].rotation.z = rightAngle;
-          if (p >= 1) {
-            action = null;
-            nextAction = now + (fallbackMood === "working" ? 6500 : 3000) + Math.random() * 6500;
-          }
-        }
-        head.rotation.set(headMotion.x, headMotion.y, headMotion.z + (action ? 0.025 : 0));
-        if (now >= blinkAt && !blinkStarted) blinkStarted = now;
-        if (blinkStarted) {
-          const bp = (now - blinkStarted) / 130;
-          const close = bp < 1 ? Math.sin(bp * Math.PI) : 0;
-          for (const eye of eyes) eye.scale.y = 0.112 * (1 - close * 0.88);
-          if (bp >= 1) {
-            blinkStarted = 0;
-            blinkAt = now + 2300 + Math.random() * 4300;
-            for (const eye of eyes) eye.scale.y = 0.112;
-          }
-        }
-      }
-      if (proceduralMouth) {
-        proceduralMouth.visible = currentMouthLevel > 0.06;
-        proceduralMouth.scale.y = Math.max(0.012, currentMouthLevel * 0.12);
-        proceduralSmile.visible = currentMouthLevel < 0.18;
-      }
-      renderer.render(scene, camera);
-    }
-    requestAnimationFrame(frame);
   }
 
   async function loadModel() {

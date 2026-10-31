@@ -224,6 +224,7 @@ CHAT_HTML = """<!doctype html>
 <path d="M160 162 L161 166 M155 163 L155 167 M150 161 L149 165" fill="none" stroke="#1a2a4a" stroke-width="2.5" stroke-linecap="round"/>
 </g>
 <g id="robot-head">
+<g transform="translate(6 0) scale(.94 1)">
 <rect x="36" y="40" width="12" height="32" rx="6" fill="url(#robot-ear)" stroke="#7894b5" stroke-width="1"/>
 <rect x="152" y="40" width="12" height="32" rx="6" fill="url(#robot-ear)" stroke="#7894b5" stroke-width="1"/>
 <path d="M38 48 Q39 43 42 44 M154 48 Q155 43 158 44" fill="none" stroke="#e5f4ff" stroke-width="1.5" stroke-linecap="round" opacity=".58"/>
@@ -238,14 +239,15 @@ CHAT_HTML = """<!doctype html>
 <path id="mouth-smile" d="M 90 67 Q 100 73 110 67" fill="none" stroke="#7de9ff" stroke-width="3" stroke-linecap="round"/>
 <ellipse id="mouth-open" cx="100" cy="69" rx="2" ry="1" fill="#7de9ff" opacity="0"/>
 </g>
+</g>
 <rect x="89" y="88" width="22" height="18" rx="6" fill="#1a2a4a"/>
 <g id="robot-body">
 <path d="M74 104 C82 101 118 101 126 104 C140 119 139 153 127 173 C119 185 108 190 100 190 C92 190 81 185 73 173 C61 153 60 119 74 104 Z" fill="url(#robot-shell)" stroke="#c6d0df" stroke-width="1.5"/>
 <ellipse cx="81" cy="119" rx="13" ry="6" fill="#fff" opacity=".72"/>
 <path d="M71 151 C82 164 118 164 129 151 Q124 173 109 181 Q100 186 91 181 Q76 173 71 151 Z" fill="#aebbd4" opacity=".24"/>
 <path d="M81 177 Q100 188 119 177 Q114 187 100 188 Q86 187 81 177Z" fill="#1a2a4a" opacity=".92"/>
-<path d="M70 99 Q64 101 64 108 Q65 114 71 120 Q75 114 77 106 L75 101Z" fill="#1a2a4a"/>
-<path d="M130 99 Q136 101 136 108 Q135 114 129 120 Q125 114 123 106 L125 101Z" fill="#1a2a4a"/>
+<path d="M70 103 Q66 105 67 111 Q68 117 73 121 Q76 116 77 109 L74 104Z" fill="#1a2a4a"/>
+<path d="M130 103 Q134 105 133 111 Q132 117 127 121 Q124 116 123 109 L126 104Z" fill="#1a2a4a"/>
 </g>
 </g>
 </svg>
