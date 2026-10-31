@@ -1333,7 +1333,8 @@ class WebUIServer:
         if answered_run is not None:
             return {"run_id": answered_run, "conversation_id": conversation_id,
                     "goal": goal, "lab_answer": answering_lab}
-        if goal.strip().lower() == "/resume-interview":
+        resume_interview = goal.strip().lower() == "/resume-interview"
+        if resume_interview:
             from .interview_store import InterviewStore
             try:
                 saved = InterviewStore(self.home).unfinished_for_conversation(conversation_id)
@@ -1343,7 +1344,8 @@ class WebUIServer:
                 return self._simple_command_response(conversation_id, raw_goal, "There is no unfinished interview in this conversation.")
             goal = saved["goal"]
             raw_goal = goal
-        goal = self._merge_correction_followup(raw_goal, prior_history)
+        if not resume_interview:
+            goal = self._merge_correction_followup(raw_goal, prior_history)
         mirror_response = self._mirror_command(conversation_id, goal)
         if mirror_response is not None:
             return mirror_response
@@ -1381,7 +1383,7 @@ class WebUIServer:
         # Modes: a typed one-shot wins, then the composer's chooser
         # (payload "mode"), then the sticky flag for the conversation.
         # /proceed resumes a stopped run instead of starting a goal.
-        mode = None
+        mode = "plan" if resume_interview else None
         resume_stop_id = ""
         resume_spec = None
         resume_plan = None
@@ -1500,6 +1502,7 @@ class WebUIServer:
                    "_route_callback": route_update,
                    "_trace_callback": trace_update,
                    "_question_callback": question_callback,
+                   "resume_interview": resume_interview,
                    "result_delivery": delivery.__dict__ if delivery else {}}
         image_paths = [str(path) for path in (body.get("image_paths") or [])
                        if str(path).strip()]

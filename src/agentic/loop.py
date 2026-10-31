@@ -496,7 +496,7 @@ class GoalRunner:
                  deep_researcher=None, deadline_seconds: float | None = None,
                  mode: str | None = None, question_ask=None,
                  conversation_key: str = "", resume_plan=None,
-                 clef_client=None, acquisition_governor=None):
+                 clef_client=None, acquisition_governor=None, resume_interview=False):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -547,6 +547,7 @@ class GoalRunner:
         # the semantic_router argument instead (ClefRouter).
         self.clef_client = clef_client
         self.acquisition_governor = acquisition_governor
+        self.resume_interview = bool(resume_interview)
         self.kernel_mode = kernel_mode
         self.semantic_router = semantic_router
         self.use_semantic_router_skip = use_semantic_router_skip
@@ -1990,7 +1991,7 @@ class GoalRunner:
         # and force_web keep their existing paths below, so
         # they are excluded here.
         _route = getattr(self, "last_route", None)
-        if (getattr(self, "use_semantic_router_skip", False) and _route
+        if (not getattr(self, "resume_interview", False) and getattr(self, "use_semantic_router_skip", False) and _route
                 and _route[0] == "chat" and spec is None and not _write_intent
                 and not getattr(self, "research_mode", False)
                 and not getattr(self, "force_web", False)):
@@ -1998,7 +1999,7 @@ class GoalRunner:
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
-        if (getattr(self, "use_semantic_router_skip", False) and _route
+        if (not getattr(self, "resume_interview", False) and getattr(self, "use_semantic_router_skip", False) and _route
                 and _route[0] == "webchat" and spec is None and not _write_intent
                 and self.researcher is not None
                 and not getattr(self, "research_mode", False)
@@ -2086,7 +2087,7 @@ class GoalRunner:
                                 f"deep research: {len(sources)} source(s)")
                 except Exception as exc:
                     self._trace("research", "failed", str(exc)[:100])
-        if self.force_web and self.researcher is not None and spec is None and not _write_intent:
+        if not getattr(self, "resume_interview", False) and self.force_web and self.researcher is not None and spec is None and not _write_intent:
             from ..capabilities.webchat import webchat_reply
             reply = webchat_reply(goal, self.researcher, self.client,
                                   on_token=self.stream_callback,
@@ -2094,12 +2095,12 @@ class GoalRunner:
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
-        if self.use_semantic_router_skip and self.last_route and self.last_route[0] == "chat" and spec is None and not _write_intent:
+        if not getattr(self, "resume_interview", False) and self.use_semantic_router_skip and self.last_route and self.last_route[0] == "chat" and spec is None and not _write_intent:
             reply = self._chat("respond", [self._attachment_message(goal)])
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
-        if self.use_semantic_router_skip and self.last_route and self.last_route[0] == "webchat" and spec is None and not _write_intent and self.researcher is not None:
+        if not getattr(self, "resume_interview", False) and self.use_semantic_router_skip and self.last_route and self.last_route[0] == "webchat" and spec is None and not _write_intent and self.researcher is not None:
             from ..capabilities.webchat import webchat_reply
             reply = webchat_reply(goal, self.researcher, self.client,
                                   on_token=self.stream_callback,
