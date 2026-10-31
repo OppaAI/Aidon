@@ -47,10 +47,7 @@
   `AIDON_SLACK_OUTBOUND_CHANNEL` when no Slack conversation
   is linked.
 - With optional tools enabled (`AIDON_OPTIONAL_TOOLS=1`),
-  Aidon can use the full built-in toolset, including Muse Image
-  editing. Image edits require attached reference
-  images and a fresh approval before sending them to Muse Image; the
-  API may spend image credits. Every camera activation also requires
+  Aidon can use the full built-in toolset. Every camera activation also requires
   a fresh `record` approval card; declining it leaves the camera
   untouched. Captures are saved in the run workspace and included
   with completed deliverables.
@@ -238,6 +235,20 @@ use the tool; re-plan if the current plan needs it.
   client. File and network work stays with the sandbox
   tools and with later, explicitly approved capability
   plugins.
+- Sandbox plugins can declare `"mode": "sandbox"` and
+  capabilities such as `network` and `secret:AIDON_API_KEY`.
+  They run in the configured Modal backend, or bubblewrap locally, never
+  in Aidon's process. Every
+  call that can use network or secrets gets a fresh approval.
+  A tool may declare `"accepts_attachments": true` to receive
+  the current goal's attached images as `args["_attachments"]`
+  (relative paths inside its isolated run directory). To return
+  files to the goal workspace, return a dict such as
+  `{"text": "Edited image", "files": ["edited.png"]}`.
+  Only listed relative files are copied out. A plan may use a
+  newly authored tool after its adoption step when the tool step
+  depends on adoption; the live registry checks that adoption
+  succeeded before dispatch.
 - Tier 3 core-source editing is available when
   `AIDON_TOOL_POSTURE=selfmod` and kernel mode is off
   (`AIDON_KERNEL=0`); use it only when a goal

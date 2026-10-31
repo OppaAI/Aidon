@@ -2226,7 +2226,7 @@ class WebUIServer:
             {"key": "AIDON_SANDBOX_REQUIRE_ISOLATION", "label": "Require isolation", "type": "bool", "default": "0", "desc": "Refuse sandbox commands when bubblewrap isolation is unavailable.", "secret": False},
             {"key": "AIDON_KERNEL", "label": "Kernel mode", "type": "bool", "default": "0", "desc": "Kernel mode: write/read/list/shell only, no calculate, no plugins.", "secret": False},
             {"key": "AIDON_TOOL_POSTURE", "label": "Tool posture", "type": "enum", "default": "selfmod", "desc": "How far the self-development ladder is open: locked (seed only, no adoption), standard (pure plugins only), developer (capability plugins: http, fs, run, secrets), selfmod (developer plus source changes shown in full and gated by explicit owner approval). Source changes are limited to existing Python files under src/ and backed up before replacement.", "secret": False, "options": ["locked", "standard", "developer", "selfmod"]},
-            {"key": "AIDON_OPTIONAL_TOOLS", "label": "Optional tools", "type": "bool", "default": "0", "desc": "Show the full built-in toolset, including Muse Image editing, web search, documents, social, media, email, and YouTube. Webcam photo/video and system-audio recording remain available when this is off, but each capture still requires a fresh record approval. Adopted plugins and trusted skills are never gated. Default: off (0).", "secret": False},
+            {"key": "AIDON_OPTIONAL_TOOLS", "label": "Optional tools", "type": "bool", "default": "0", "desc": "Show optional built-in tools such as web search, documents, social, media, email, and YouTube. Webcam photo/video and system-audio recording remain available when this is off, but each capture still requires a fresh record approval. Adopted plugins and trusted skills are never gated. Default: off (0).", "secret": False},
             {"key": "AIDON_COMPUTER_DRIVER", "label": "Computer driver", "type": "enum", "default": "", "desc": "Opt-in desktop driver; requires a graphical session and kernel mode off.", "secret": False, "options": ["", "x11"]},
             {"key": "AIDON_COMPUTER_SECRETS", "label": "Computer secrets", "type": "string", "default": "", "desc": "Comma-separated env names the owner authorizes for computer use. Only listed names resolve; the model names a handle, never a value.", "secret": True},
             {"key": "AIDON_SLACK_AUTOSTART", "label": "Slack polling autostart", "type": "bool", "default": "0", "desc": "Start Slack polling automatically with the WebUI.", "secret": False},
@@ -3221,8 +3221,8 @@ class WebUIServer:
         if video_paths:
             goal += "\n\nAttached video paths (use the video workflow when needed):\n" + "\n".join(video_paths)
         if image_paths:
-            goal += ("\n\nAttached image paths (pass one to edit_image when a "
-                     "style change or edit is requested):\n" + "\n".join(image_paths))
+            goal += ("\n\nAttached image paths (available to image-aware "
+                     "sandbox plugins after approval):\n" + "\n".join(image_paths))
         result = self.start_goal({**body, "goal": goal, "image_paths": image_paths})
         result.update({"images": [Path(path).name for path in image_paths],
                       "documents": [Path(path).name for path in document_paths],

@@ -24,6 +24,7 @@ the exact power surface before any of it exists.
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import shutil
 import sys
@@ -266,7 +267,16 @@ import sys
 
 
 def main():
-    payload = json.load(sys.stdin)
+    if len(sys.argv) > 3:
+        payload_path = sys.argv[3]
+        with open(payload_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        try:
+            os.remove(payload_path)
+        except OSError:
+            pass
+    else:
+        payload = json.load(sys.stdin)
     args = payload.get("args") or {}
     env = payload.get("env") or {}
     os.environ.update({str(k): str(v) for k, v in env.items()})
@@ -278,7 +288,14 @@ def main():
         spec.loader.exec_module(module)
         func = getattr(module, func_name)
         result = func(args)
-        data = {"result": "" if result is None else str(result)}
+        if isinstance(result, dict) and ("files" in result or "text" in result):
+            files = result.get("files") or []
+            if not isinstance(files, list):
+                raise TypeError("plugin result files must be a list")
+            data = {"result": str(result.get("text", "")),
+                    "files": [str(path) for path in files]}
+        else:
+            data = {"result": "" if result is None else str(result)}
     except Exception as exc:  # noqa: BLE001 - reported, not swallowed
         data = {"error": f"{type(exc).__name__}: {exc}"}
     with open("result.json", "w", encoding="utf-8") as handle:
@@ -314,14 +331,17 @@ def _prune_runs(runs_root: Path, keep: int = _MAX_KEPT_RUNS) -> None:
 
 
 def run_sandbox_tool(plugin, spec: dict, args: dict, sandbox, home: Path,
-                     network_available: bool | None = None) -> str:
+                     network_available: bool | None = None,
+                     attachments=None, execution_backend=None,
+                     invocation_approved: bool = False) -> str:
     """Run a ``"mode": "sandbox"`` tool as an isolated subprocess.
 
     The plugin module is copied into a fresh run directory and imported
-    there by ``runner.py``; Aidon's process never imports it. Args and
-    approved secrets travel on stdin as JSON, so they never appear on
-    the host command line. Network is off unless the manifest declares
-    ``network`` and the owner approved the plugin.
+    there by ``runner.py``; Aidon's process never imports it. With local
+    execution, args and approved secrets travel on stdin as JSON. Modal
+    receives a short-lived mode-0600 payload file, never command-line
+    values. Network is off unless the manifest declares ``network`` and
+    the owner approves this invocation.
     """
     from .sandbox import Sandbox
 
@@ -345,6 +365,9 @@ def run_sandbox_tool(plugin, spec: dict, args: dict, sandbox, home: Path,
     timeout = int(spec.get("timeout", 120) or 120)
     policy = CapabilityPolicy.from_capabilities(
         getattr(plugin, "capabilities", []))
+    if (policy.network or policy.secrets) and not invocation_approved:
+        raise PermissionError(
+            "network or secret sandbox tools require a fresh live approval")
     secrets = {name: os.environ.get(name, "") for name in policy.secrets}
 
     plugin_name = str(getattr(plugin, "name", "plugin"))
@@ -352,6 +375,11 @@ def run_sandbox_tool(plugin, spec: dict, args: dict, sandbox, home: Path,
     runs_root.mkdir(parents=True, exist_ok=True)
     run_dir = runs_root / uuid.uuid4().hex
     run_key = run_dir.resolve()
+    selected_attachments = []
+    if spec.get("accepts_attachments"):
+        selected_attachments = list(attachments or [])
+        if len(selected_attachments) > 10:
+            raise ValueError("a sandbox plugin can receive at most 10 attachments")
     with _ACTIVE_RUNS_LOCK:
         _ACTIVE_RUNS.add(run_key)
     try:
@@ -359,8 +387,11 @@ def run_sandbox_tool(plugin, spec: dict, args: dict, sandbox, home: Path,
         return _run_sandbox_plugin(plugin, spec, args, sandbox, home,
                                    network_available, run_dir, runs_root,
                                    policy, secrets, module_name, func_name,
-                                   timeout)
+                                   timeout, selected_attachments,
+                                   execution_backend)
     finally:
+        # User attachments are transient inputs, not plugin-run history.
+        shutil.rmtree(run_dir / "inputs", ignore_errors=True)
         with _ACTIVE_RUNS_LOCK:
             _ACTIVE_RUNS.discard(run_key)
         _prune_runs(runs_root)
@@ -368,7 +399,8 @@ def run_sandbox_tool(plugin, spec: dict, args: dict, sandbox, home: Path,
 
 def _run_sandbox_plugin(plugin, spec, args, sandbox, home,
                         network_available, run_dir, runs_root, policy,
-                        secrets, module_name, func_name, timeout):
+                        secrets, module_name, func_name, timeout,
+                        attachments=None, execution_backend=None):
     from .sandbox import Sandbox
 
     plugin_dir = Path(getattr(plugin, "directory"))
@@ -378,17 +410,70 @@ def _run_sandbox_plugin(plugin, spec, args, sandbox, home,
         ignore=shutil.ignore_patterns(".adopted", "__pycache__", "*.pyc"))
     (run_dir / "runner.py").write_text(_SANDBOX_RUNNER, encoding="utf-8")
 
-    # Reuse the run sandbox's isolation posture, but give this tool its
-    # own workdir and its own network policy.
-    box = Sandbox(run_dir, timeout_seconds=timeout, backend="bubblewrap",
-                  allow_network=policy.network,
-                  require_isolation=True)
-
-    payload = json.dumps({"args": args, "env": secrets})
-    result = box.run(
-        [sys.executable, "runner.py",
-         str(Path("code") / module_name), func_name],
-        input_text=payload)
+    # Give this plugin its own workdir and network policy. Modal gets a
+    # fresh remote sandbox with exactly the manifest's network setting;
+    # local execution requires bubblewrap isolation.
+    call_args = dict(args or {})
+    if attachments:
+        input_dir = run_dir / "inputs"
+        input_dir.mkdir()
+        descriptors = []
+        total_bytes = 0
+        for index, raw_path in enumerate(attachments, 1):
+            source = Path(raw_path).resolve(strict=True)
+            if not source.is_file():
+                raise ValueError("plugin attachment is not a regular file")
+            upload_root = (Path(home) / "library" / "uploads").resolve()
+            if not source.is_relative_to(upload_root):
+                raise ValueError("plugin attachments must come from WebUI uploads")
+            size = source.stat().st_size
+            total_bytes += size
+            if size > 20 * 1024 * 1024 or total_bytes > 30 * 1024 * 1024:
+                raise ValueError("plugin attachments exceed the transfer limit")
+            safe_name = "".join(
+                ch if ch.isalnum() or ch in "._-" else "_"
+                for ch in source.name)[:100] or "attachment"
+            staged_name = f"{index:02d}-{safe_name}"
+            shutil.copyfile(source, input_dir / staged_name)
+            descriptors.append({
+                "name": source.name,
+                "path": str(Path("inputs") / staged_name),
+                "mime": mimetypes.guess_type(source.name)[0]
+                        or "application/octet-stream",
+            })
+        call_args["_attachments"] = descriptors
+    payload = json.dumps({"args": call_args, "env": secrets})
+    backend_name = str(getattr(execution_backend, "name", "") or "").lower()
+    if backend_name == "modal":
+        from .execution import ModalBackend
+        payload_path = run_dir / "payload.json"
+        payload_path.write_text(payload, encoding="utf-8")
+        payload_path.chmod(0o600)
+        modal_box = ModalBackend(
+            app_name=getattr(execution_backend, "app_name", "aidon-sandbox"),
+            allow_network=policy.network,
+            timeout_seconds=timeout,
+            sandbox_factory=getattr(execution_backend,
+                                   "_sandbox_factory", None),
+            image=getattr(execution_backend, "_image_obj", None),
+            cpu=getattr(execution_backend, "cpu", 1.0),
+            memory_mb=getattr(execution_backend, "memory_mb", 1024))
+        try:
+            result = modal_box.run(
+                ["python3", "runner.py",
+                 str(Path("code") / module_name), func_name,
+                 "payload.json"], run_dir, timeout_seconds=timeout)
+        finally:
+            modal_box.cleanup()
+            payload_path.unlink(missing_ok=True)
+    else:
+        box = Sandbox(run_dir, timeout_seconds=timeout, backend="bubblewrap",
+                      allow_network=policy.network,
+                      require_isolation=True)
+        result = box.run(
+            [sys.executable, "runner.py",
+             str(Path("code") / module_name), func_name],
+            input_text=payload)
     out_path = run_dir / "result.json"
     data = None
     if out_path.is_file():
@@ -402,7 +487,42 @@ def _run_sandbox_plugin(plugin, spec, args, sandbox, home,
         if not result.ok:
             raise RuntimeError(
                 f"sandbox tool {func_name} exited {result.returncode}")
-        return str(data.get("result", ""))
+        text = str(data.get("result", ""))
+        outputs = data.get("files") or []
+        if outputs:
+            if not isinstance(outputs, list) or len(outputs) > 20:
+                raise ValueError("plugin may publish at most 20 output files")
+            output_root = Path(sandbox.workdir).resolve()
+            pending = []
+            seen_destinations = set()
+            total_bytes = 0
+            for raw in outputs:
+                rel = Path(str(raw))
+                if rel.is_absolute() or ".." in rel.parts:
+                    raise ValueError("plugin output path must stay in its run directory")
+                source = (run_dir / rel).resolve(strict=True)
+                if not source.is_file() or not source.is_relative_to(run_dir.resolve()):
+                    raise ValueError("plugin output must be a regular file in its run directory")
+                size = source.stat().st_size
+                total_bytes += size
+                if size > 30 * 1024 * 1024 or total_bytes > 50 * 1024 * 1024:
+                    raise ValueError("plugin outputs exceed the transfer limit")
+                destination = (output_root / rel).resolve()
+                if not destination.is_relative_to(output_root):
+                    raise ValueError("plugin output path escapes the goal workspace")
+                if destination.exists():
+                    raise FileExistsError(f"plugin output already exists: {rel}")
+                if destination in seen_destinations:
+                    raise ValueError(f"plugin output is listed more than once: {rel}")
+                seen_destinations.add(destination)
+                pending.append((source, destination))
+            published = []
+            for source, destination in pending:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+                published.append(str(destination.relative_to(output_root)))
+            text = (text + "\n" if text else "") + "PLUGIN_OUTPUTS: " + ", ".join(published)
+        return text
     detail = (result.stderr or result.stdout or "").strip()[:300]
     raise RuntimeError(
         f"sandbox tool {func_name} failed: {detail or 'no output'}")

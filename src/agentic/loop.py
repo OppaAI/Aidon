@@ -1166,13 +1166,58 @@ class GoalRunner:
         except ValueError as exc:
             if str(exc).startswith("unknown tool:") and self.plugins is not None:
                 try:
+                    def _approve_plugin_call(plugin, spec, call_args,
+                                             attachments):
+                        import json as _json
+
+                        def _redact(value, key=""):
+                            if re.search(
+                                    r"(?:api[_-]?key|token|password|secret|authorization)",
+                                    key, re.IGNORECASE):
+                                return "[redacted]"
+                            if isinstance(value, dict):
+                                return {str(k): _redact(v, str(k))
+                                        for k, v in value.items()}
+                            if isinstance(value, (list, tuple)):
+                                return [_redact(item) for item in value]
+                            return value
+                        try:
+                            shown_args = _json.dumps(
+                                _redact(call_args), ensure_ascii=False,
+                                sort_keys=True)
+                        except (TypeError, ValueError):
+                            shown_args = str(call_args)
+                        capabilities = [str(c) for c in
+                                        getattr(plugin, "capabilities", [])]
+                        attached = [Path(p).name for p in attachments
+                                    if Path(p).is_file()]
+                        body = (
+                            f"Plugin: {plugin.name} {plugin.version}\n"
+                            f"Tool: {name}\n"
+                            f"Capabilities: {', '.join(capabilities) or 'none'}\n"
+                            f"Arguments: {shown_args[:2400]}\n"
+                            f"Attached images passed to the sandbox: "
+                            f"{', '.join(attached) if attached else 'none'}\n\n"
+                            "The isolated plugin process can access its "
+                            "approved secrets and network capability for "
+                            "this call. Network services may receive the "
+                            "listed arguments and images and may incur charges. "
+                            "Approve this specific invocation?")
+                        decision = self._ask_for_approval(
+                            "live", f"Run sandbox plugin {name}",
+                            self._approval_body(body), force_ask=True)
+                        return decision.verdict in (
+                            "approved", "auto_approved")
                     return self.plugins.call(
                         name, args,
                         context_factory=lambda plugin: self.plugins.context_for(
                             name, self.home,
                             sandbox=getattr(self, "sandbox", None),
                             network_available=self.network_available),
-                        sandbox=getattr(self, "sandbox", None))
+                        sandbox=getattr(self, "sandbox", None),
+                        attachments=self.image_paths,
+                        approval_callback=_approve_plugin_call,
+                        execution_backend=self.execution_backend)
                 except ValueError as plugin_exc:
                     if str(plugin_exc).startswith("unknown plugin tool:"):
                         pass
@@ -1360,8 +1405,35 @@ class GoalRunner:
                        "in the workdir only when needed, sandbox-test it, and use "
                        "adopt_tool_plugin. Adoption requires the owner's approval. "
                        "After approval, the new tool is added to this run's live "
-                       "registry. It can be used by a plan validated after adoption; "
-                       "replan if the current plan needs that new tool.")
+                       "registry. A newly authored tool may appear later in the "
+                       "same plan only when its step appears after and depends on "
+                       "the adopt_tool_plugin step; dispatch still checks that adoption "
+                       "succeeded. Otherwise re-plan after adoption.")
+            system += (" Sandbox plugin input/output contract: a sandbox tool "
+                       "manifest may set accepts_attachments=true to receive the "
+                       "current goal's attached images as args['_attachments'], a "
+                       "list of {name, path, mime} objects whose paths are relative "
+                       "to the sandbox run directory. The owner sees these filenames "
+                       "on each network/secret approval card. A sandbox tool that "
+                       "creates deliverables may return {'text': '...', 'files': "
+                       "['relative/output.png']}; only those files are copied into "
+                       "the goal workspace. Keep paths relative and create outputs "
+                       "inside the sandbox run directory.")
+            if self.image_paths:
+                system += (" For an image-editing goal with attached images, no "
+                           "built-in image editor is available: if the Toolbox has "
+                           "no suitable adopted tool, author the reusable image "
+                           "editor plugin yourself. Its tool must use mode=sandbox, "
+                           "accepts_attachments=true, network capability, and only "
+                           "the configured API environment names it needs "
+                           "(AIDON_API_KEY, AIDON_API_ENDPOINT, and optionally "
+                           "AIDON_IMAGE_MODEL, declared as secret:NAME). Research "
+                           "the configured image API format instead of guessing. "
+                           "Write and sandbox-test the plugin, adopt it, then make "
+                           "its image-edit step depend on the adoption step. The "
+                           "live approval card will show the prompt and attached "
+                           "filenames; the API may spend image credits. Return the "
+                           "edited image through the sandbox plugin files contract.")
             skill_texts = self.plugins.skill_texts()
             if skill_texts:
                 system += " Skills, follow them when relevant: " + " ".join(
@@ -1442,13 +1514,6 @@ class GoalRunner:
                            "isolated mission venv. Never install packages "
                            "through shell, pip, or sudo; installation is "
                            "approval-gated.")
-            if "edit_image" in self.extra_tools:
-                system += (" For an image restyle or edit, call edit_image "
-                           "with prompt, image (the attached image path), and "
-                           "output such as images/result.png. It sends the "
-                           "image to Muse Image, spends credits, and is "
-                           "approval-gated. Never use shell to re-encode or "
-                           "style an image.")
         system += (" Discover before building: the tools listed above are "
                    "what you can call. If a listed tool does the job, use "
                    "it; do not write a replacement script, plugin, or tool "
@@ -2800,6 +2865,43 @@ class GoalRunner:
                 _allowed.update(self.plugins.tool_names())
             except Exception:
                 pass
+        # A plan may author and adopt a plugin before using one of its
+        # tools. Permit otherwise-unknown tool names only when the same
+        # DAG contains an adoption step and the call depends on that
+        # step. Dispatch still requires the live adopted registry, so a
+        # rejected adoption cannot execute the draft.
+        try:
+            _steps_for_acquisition = plan.normalized_steps()
+            _adoptions = {s.id for s in _steps_for_acquisition
+                          if s.tool == "adopt_tool_plugin"}
+            _by_id = {s.id: s for s in _steps_for_acquisition}
+
+            _step_order = {s.id: i for i, s in
+                           enumerate(_steps_for_acquisition)}
+
+            def _adoption_ancestors(step_id, seen=None):
+                seen = set() if seen is None else seen
+                if step_id in seen:
+                    return set()
+                seen.add(step_id)
+                found = set()
+                for dependency in _by_id[step_id].depends_on:
+                    if dependency in _adoptions:
+                        found.add(dependency)
+                    if dependency in _by_id:
+                        found.update(_adoption_ancestors(dependency, seen))
+                return found
+
+            for candidate in _steps_for_acquisition:
+                if (candidate.tool not in _allowed
+                        and _adoptions
+                        and any(_step_order.get(adopt_id, -1)
+                                < _step_order.get(candidate.id, -1)
+                                for adopt_id in _adoption_ancestors(
+                                    candidate.id))):
+                    _allowed.add(candidate.tool)
+        except Exception:
+            pass
         # Skill names for grounding: plugin skills ("plugin/skill")
         # plus bare names, so a model writing either form in the
         # tool slot gets the skill-not-tool rejection, not a

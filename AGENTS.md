@@ -85,9 +85,11 @@ approval → live → learn
     publishing (publishing always approval-gated).
   - `adopt_tool_plugin` — adopt a tested tool plugin from the workdir
     into `<AIDON_HOME>/toolbox/` (mandatory human approval, kind
-    `install`). Adopted tools register immediately. Plans validated
-    after adoption can use them; re-plan when the current plan needs a
-    newly adopted tool. Every later goal also sees the adopted tools.
+    `install`). Adopted tools register immediately. A plan can use a
+    newly adopted tool later in the same DAG when that step depends on
+    the adoption step; dispatch still checks that adoption succeeded.
+    Re-plan when the current plan cannot express that dependency. Every
+    later goal also sees the adopted tools.
 - **Meta**: `ask_user` (questions), `declare_blocked` (true dead-ends),
   `steer` (mid-run redirection, via the WebUI).
 - **Inbound chat**: `aidon slack listen` watches a Slack DM/channel
@@ -112,6 +114,19 @@ names. Plugins live in the Aidon home once adopted, never in the repo.
   is pure: it gets no sandbox, no approval gate, and no network. Use
   the standard library only. Packages you install into a mission venv
   are NOT importable by a plugin, because plugins run inside Aidon.
+- **Sandbox tools**: to use network or secret capabilities, declare
+  `"mode": "sandbox"` on the tool and the required capabilities in the
+  manifest. Aidon never imports this module in its own process; it runs
+  under the configured Modal backend, or bubblewrap when running locally.
+  Network or secret access triggers a
+  fresh `live` approval for every tool call, even after adoption. A
+  sandbox tool may set `"accepts_attachments": true` to receive the
+  current goal's attached images in `args["_attachments"]`; each file
+  is copied into the isolated run directory and removed after the call.
+  Return `{"text": "...", "files": ["relative/output.png"]}` to
+  publish explicitly named files into the goal workspace. Paths must be
+  relative to the isolated run directory. The owner sees attached image
+  names and tool arguments on the per-call approval card.
 - **Check names first**: tool names must not collide with tools in
   your tool list. Adopting a plugin whose name already exists replaces
   it, after a fresh approval.

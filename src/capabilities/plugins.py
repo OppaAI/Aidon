@@ -375,12 +375,18 @@ def load_plugin(directory: Path, execute: bool = True) -> Plugin:
         module_name = str(tool.get("module", ""))
         func_name = str(tool.get("function", ""))
         tool_name = str(tool.get("name", ""))
+        if "accepts_attachments" in tool and not isinstance(
+                tool.get("accepts_attachments"), bool):
+            raise ValueError("accepts_attachments must be true or false")
         if not module_name or not func_name or not tool_name:
             raise ValueError("plugin tool needs name, module, and function")
         module_path = _module_path(directory, module_name)
         if not module_path.exists():
             raise ValueError(f"plugin module missing: {module_name}")
         sandboxed = str(tool.get("mode", "")).lower() == "sandbox"
+        if tool.get("accepts_attachments") and not sandboxed:
+            raise ValueError(
+                "accepts_attachments is only allowed for sandbox tools")
         if not execute or sandboxed:
             # Static check only: no import, no top-level code runs.
             # Sandbox tools keep this path even after approval: their
@@ -563,6 +569,14 @@ def preflight_plugin(source_dir: Path) -> Preflight:
         body_lines.append(
             "Sandbox tools (run isolated; subprocess/network/eval allowed "
             f"inside): {', '.join(sandbox_tools)}")
+    attachment_tools = [str(t.get("name", "")) for t in plugin.tools
+                        if str(t.get("mode", "")).lower() == "sandbox"
+                        and t.get("accepts_attachments")]
+    if attachment_tools:
+        body_lines.append(
+            "These tools receive copies of the current goal's attached "
+            "images inside their isolated run directory: "
+            + ", ".join(attachment_tools))
     body_lines.append(f"Approved source hash: {approved_hash}")
     if findings:
         body_lines.append("Scan warnings:")
@@ -715,6 +729,16 @@ class PluginRegistry:
             names.extend(plugin.tool_names())
         return sorted(names)
 
+    def tool_owner(self, name: str):
+        """Return the adopted plugin and manifest entry owning a tool."""
+        for plugin in list(self.plugins.values()):
+            if not plugin_is_adopted(plugin):
+                continue
+            spec = getattr(plugin, "tool_spec", lambda _n: None)(name)
+            if spec is not None:
+                return plugin, spec
+        return None, None
+
     def skill_texts(self) -> dict[str, str]:
         """Skill texts for run context: plugin skills plus
         standalone skills the library trusts.
@@ -759,7 +783,8 @@ class PluginRegistry:
             return set()
 
     def call(self, name: str, args: dict, ctx=None,
-             context_factory=None, sandbox=None) -> str:
+             context_factory=None, sandbox=None, attachments=None,
+             approval_callback=None, execution_backend=None) -> str:
         """Dispatch a plugin tool.
 
         Three shapes, in order:
@@ -784,9 +809,27 @@ class PluginRegistry:
                     raise ValueError(
                         f"plugin tool {name} is a sandbox tool but no "
                         "sandbox was provided")
+                policy = _capability_policy(
+                    getattr(plugin, "capabilities", []))
+                invocation_approved = False
+                if policy.network or policy.secrets:
+                    if approval_callback is None:
+                        raise PermissionError(
+                            f"sandbox plugin {name} needs a fresh live "
+                            "approval before network or secret access")
+                    if not approval_callback(
+                            plugin, spec, dict(args),
+                            list(attachments or []) if spec.get(
+                                "accepts_attachments") else []):
+                        raise PermissionError(
+                            f"sandbox plugin {name} invocation was rejected")
+                    invocation_approved = True
                 from .plugin_runtime import run_sandbox_tool
                 return run_sandbox_tool(plugin, spec, dict(args),
-                                        sandbox=sandbox, home=self.home)
+                                        sandbox=sandbox, home=self.home,
+                                        attachments=attachments,
+                                        execution_backend=execution_backend,
+                                        invocation_approved=invocation_approved)
             functions = getattr(plugin, "functions", {})
             if name not in functions:
                 continue
