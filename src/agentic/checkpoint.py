@@ -146,6 +146,8 @@ def plan_to_dict(plan: Any) -> dict:
             "steps": list(plan.get("steps") or []),
             "deliverables": list(plan.get("deliverables") or []),
             "criteria": list(plan.get("criteria") or []),
+            "summary": str(plan.get("summary") or ""),
+            "deliverable_descriptions": dict(plan.get("deliverable_descriptions") or {}),
         }
     steps_out = []
     for step in getattr(plan, "steps", []) or []:
@@ -166,6 +168,9 @@ def plan_to_dict(plan: Any) -> dict:
         "steps": steps_out,
         "deliverables": list(getattr(plan, "deliverables", []) or []),
         "criteria": list(getattr(plan, "criteria", []) or []),
+        "summary": str(getattr(plan, "summary", "") or ""),
+        "deliverable_descriptions": dict(
+            getattr(plan, "deliverable_descriptions", {}) or {}),
     }
 
 

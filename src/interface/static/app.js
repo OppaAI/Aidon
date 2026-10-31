@@ -1107,7 +1107,20 @@
       if (s.budget_cents != null) lines.push("<strong>Budget (cents)</strong><br>" + esc(String(s.budget_cents)));
     } else if (stop.plan) {
       const p = stop.plan;
-      pushList("Deliverables", p.deliverables);
+      if (p.summary) lines.push("<strong>In short</strong><br>" + esc(String(p.summary)));
+      const descriptions = p.deliverable_descriptions &&
+        typeof p.deliverable_descriptions === "object"
+        ? p.deliverable_descriptions : {};
+      const deliverables = Array.isArray(p.deliverables) ? p.deliverables : [];
+      if (deliverables.length) {
+        lines.push("<strong>Files Aidon will create</strong>");
+        deliverables.forEach((file) => {
+          const name = String(file);
+          const description = descriptions[name];
+          lines.push("• <strong>" + esc(name) + "</strong>" +
+            (description ? " — " + esc(String(description)) : ""));
+        });
+      }
       pushList("Criteria", p.criteria);
       const steps = Array.isArray(p.steps) ? p.steps : [];
       if (steps.length) {

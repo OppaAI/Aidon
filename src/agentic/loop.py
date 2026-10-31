@@ -223,6 +223,8 @@ class Plan:
     steps: list = field(default_factory=list)
     deliverables: list[str] = field(default_factory=list)
     criteria: list[str] = field(default_factory=list)
+    summary: str = ""
+    deliverable_descriptions: dict = field(default_factory=dict)
     needs_research: list[str] = field(default_factory=list)
     # True only for plans built from a DAG, where every
     # dependency is declared and undeclared means
@@ -1231,15 +1233,26 @@ class GoalRunner:
               spec=None, research_context: str = "",
               skill_full: dict | None = None, triage_note: str = "") -> Plan:
         if self.kernel_mode:
-            system = ("Propose a short plan as JSON with keys steps, "
-                      "deliverables, criteria. Each step is an object "
+            system = ("Propose a short plan as JSON with keys summary, "
+                      "deliverable_descriptions, steps, deliverables, criteria. "
+                      "summary is a one-sentence plain-language description "
+                      "of what the user will get. deliverable_descriptions is "
+                      "an object mapping every deliverable filename to a short, "
+                      "human-readable explanation of what that file contains "
+                      "and how it is used. Each step is an object "
                       "with tool, args, deliverable. Tools: write, read, "
                       "list, shell only, kernel mode, no calculate, "
                       "no plugin tools. Keep every file inside "
                       "the workdir.")
         else:
-            system = ("Propose a short plan as JSON with keys steps, "
-                      "deliverables, criteria, skills. Each step is an object "
+            system = ("Propose a short plan as JSON with keys summary, "
+                      "deliverable_descriptions, steps, deliverables, "
+                      "criteria, skills. summary is a one-sentence "
+                      "plain-language description of what the user will get. "
+                      "deliverable_descriptions is an object mapping every "
+                      "deliverable filename to a short, human-readable "
+                      "explanation of what that file contains and how it is "
+                      "used. Each step is an object "
                       "with tool, args, deliverable. Tools: write, read, "
                       "list, shell, calculate. Keep every file inside "
                       "the workdir.")
@@ -1520,6 +1533,11 @@ class GoalRunner:
                 raw_skills = [raw_skills]
             plan = Plan(steps=steps, deliverables=deliverables,
                         criteria=[str(c) for c in data.get("criteria", [])],
+                        summary=str(data.get("summary", "") or ""),
+                        deliverable_descriptions={
+                            str(k): str(v) for k, v in
+                            (data.get("deliverable_descriptions", {}) or {}).items()
+                        } if isinstance(data.get("deliverable_descriptions", {}), dict) else {},
                         needs_research=[str(x) for x in data.get("needs_research", []) or []],
                         skills=[str(s) for s in raw_skills])
         except (json.JSONDecodeError, AttributeError):
