@@ -2944,11 +2944,21 @@ class WebUIServer:
                                    "question": waiter["question"], "lab": waiter.get("lab", False)}
                                   if waiter and record else None)
                 from .interview_store import InterviewStore
+                recovery = None
                 try:
-                    lab_turns = InterviewStore(self.home).lab_transcript(conversation_id)
+                    journal = InterviewStore(self.home)
+                    lab_turns = journal.lab_transcript(conversation_id)
+                    saved = journal.unfinished_for_conversation(conversation_id)
+                    if saved:
+                        pending = saved.get("pending") or {}
+                        recovery = {
+                            "goal": str(saved.get("goal", "")),
+                            "stage": str(pending.get("kind") or saved.get("outcome") or "interview"),
+                        }
                 except (OSError, ValueError):
                     lab_turns = []
-                return {"id": conversation_id, "turns": history, "lab_turns": lab_turns, "active_run": active_run}
+                    recovery = None
+                return {"id": conversation_id, "turns": history, "lab_turns": lab_turns, "active_run": active_run, "recovery": recovery}
         except Exception:
             pass
         return self._read_json_file(

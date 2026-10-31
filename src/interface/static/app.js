@@ -208,6 +208,24 @@
       if (turn.answer != null) addLabTurn("user", turn.answer, turn.id);
     });
   };
+  window.aidonRestoreInterviewRecovery = (recovery) => {
+    if (!recovery || !recovery.goal) return;
+    const card = document.createElement("section");
+    card.className = "interview-recovery-card";
+    const note = document.createElement("p");
+    note.textContent = "An interview for this goal was interrupted. Your saved answers are preserved.";
+    const goal = document.createElement("p");
+    goal.textContent = recovery.goal;
+    const resume = document.createElement("button");
+    resume.type = "button";
+    resume.textContent = "Continue saved interview";
+    resume.addEventListener("click", () => {
+      resume.disabled = true;
+      if (window.aidonStartRun) window.aidonStartRun("/resume-interview");
+    });
+    card.append(note, goal, resume);
+    thread.appendChild(card);
+  };
 
   function finalMessageParts(text) {
     const value = String(text || "");
@@ -2694,6 +2712,8 @@
       });
     }
     if (window.aidonRestoreLabTurns) window.aidonRestoreLabTurns(conv.lab_turns || []);
+    if (!conv.active_run && window.aidonRestoreInterviewRecovery)
+      window.aidonRestoreInterviewRecovery(conv.recovery);
     if (window.aidonReconnectInterview && conv.active_run) window.aidonReconnectInterview(conv.active_run);
     if (window.aidonScrollThread) window.aidonScrollThread();
     if (window.aidonRenderStopCardForConversation)

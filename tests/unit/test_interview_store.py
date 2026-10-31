@@ -79,6 +79,21 @@ def test_saved_lab_turns_restore_only_to_their_conversation(tmp_path):
     assert server.handle_conversation_get(second)["lab_turns"] == []
 
 
+def test_reopened_conversation_offers_saved_interview_recovery(tmp_path):
+    from src.interface.webui import WebUIServer
+    server = WebUIServer(tmp_path)
+    conversation = server.handle_conversation_create({})["id"]
+    InterviewStore(tmp_path).save_session("unfinished", {
+        "goal": "Edit the attached video", "kind": "need_plugin",
+        "conversation_id": conversation, "finished": False,
+        "outcome": "approved",
+    })
+    restored = server.handle_conversation_get(conversation)
+    assert restored["recovery"] == {
+        "goal": "Edit the attached video", "stage": "approved",
+    }
+
+
 def test_reopened_conversation_exposes_its_live_question(tmp_path):
     import threading
     import time
