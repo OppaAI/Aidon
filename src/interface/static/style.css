@@ -15,7 +15,7 @@
   --text: #f2f1f4; --muted: #938f9b; --border: #352f3d;
   --accent: #b080ff; --accent2: #7138cc;
   --accent-glow: rgba(176, 128, 255, .28);
-  --moss: #a3b58a; --moss-glow: rgba(163, 181, 138, .24);
+  --moss: #a3b58a; --moss-glow: rgba(163, 181, 138, .24); --olive: #b3bd80;
   --green: #80ffb5; --cyan: #80f4ff; --toggle-off: #625b69; --amber: #ffcf99; --red: #ff8080;
   --font-display: "Avenir Next", Avenir, "Trebuchet MS", system-ui, sans-serif;
   --font-serif: Georgia, "Times New Roman", serif;
@@ -28,7 +28,7 @@ html[data-theme="light"] {
   --text: #343a2e; --muted: #62695a; --border: #b8bbaa;
   --accent: #b96e35; --accent2: #65734f;
   --accent-glow: rgba(185, 110, 53, .18);
-  --moss: #65734f; --moss-glow: rgba(101, 115, 79, .20);
+  --moss: #65734f; --moss-glow: rgba(101, 115, 79, .20); --olive: #747a46;
   --green: #53725e; --cyan: #64877d; --toggle-off: #929584; --amber: #a96a43; --red: #a85e53;
   --font-display: "Avenir Next", Avenir, "Trebuchet MS", system-ui, sans-serif;
   --font-serif: Georgia, "Times New Roman", serif;
