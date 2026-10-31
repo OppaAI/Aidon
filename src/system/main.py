@@ -1557,39 +1557,36 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
 
 def _make_memory(config: Config):
     """Memory with the real embedder if available, else Hash, with warning."""
+    from ..memory.embedder import HashEmbedder, make_embedder_cached
+    from ..memory.entity_graph import EntityGraph
+    from ..memory.memory import Memory, SQLiteStore
+
     try:
-        from ..memory.embedder import make_embedder_cached
-        from ..memory.entity_graph import EntityGraph
-        from ..memory.memory import Memory
         embedder = make_embedder_cached()
-        mem = Memory(config.home, embedder=embedder, entity_graph=EntityGraph(config.home))
-        if type(mem.store).__name__ == "SQLiteStore":
-            print("warning: Qdrant client not installed, using persistent "
-                  "SQLite memory fallback (run ./setup.sh --with-qdrant "
-                  "for a Qdrant server)", file=sys.stderr)
-        return mem
     except Exception as exc:
-        print(f"warning: real embedder unavailable ({exc}), "
-              "using HashEmbedder for this run", file=sys.stderr)
+        print(f"warning: real embedder initialization failed "
+              f"({type(exc).__name__}: {exc}); using HashEmbedder for this run",
+              file=sys.stderr)
+        embedder = HashEmbedder()
+
+    entity_graph = EntityGraph(config.home)
     try:
-        from ..memory.embedder import HashEmbedder
-        from ..memory.memory import Memory
-        mem = Memory(config.home, embedder=HashEmbedder())
+        mem = Memory(config.home, embedder=embedder,
+                     entity_graph=entity_graph)
         if type(mem.store).__name__ == "SQLiteStore":
             print("warning: Qdrant client not installed, using persistent "
                   "SQLite memory fallback (run ./setup.sh --with-qdrant "
                   "for a Qdrant server)", file=sys.stderr)
         return mem
     except Exception as exc:
-        # A broken vector-store install must not make every command fail.
-        # SQLite keeps memory durable without pretending it is a vector
-        # database; Qdrant can still be installed later for larger stores.
-        print(f"warning: Qdrant unavailable ({exc}), using persistent "
-              "SQLite memory fallback", file=sys.stderr)
-        from ..memory.embedder import HashEmbedder
-        from ..memory.memory import Memory, SQLiteStore
-        return Memory(config.home, embedder=HashEmbedder(),
-                      store=SQLiteStore(config.home))
+        # A broken/unreachable Qdrant must not discard an already loaded
+        # semantic embedder. SQLite keeps memory durable until Qdrant returns.
+        print(f"warning: vector store initialization failed "
+              f"({type(exc).__name__}: {exc}); using persistent SQLite "
+              "memory fallback", file=sys.stderr)
+        return Memory(config.home, embedder=embedder,
+                      store=SQLiteStore(config.home),
+                      entity_graph=entity_graph)
 
 
 class _LazyMemory:
