@@ -1165,6 +1165,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                     for t in preflight.plugin.tools))
             if not allowed:
                 return f"adoption refused: {reason}"
+            evidence = None
             if test_backend_factory is not None:
                 backend = None
                 try:
@@ -1183,7 +1184,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             if governor is not None:
                 governor.acquire("tool")
             approved, _findings, message = commit_plugin(
-                registry, source, preflight)
+                registry, source, preflight, test_evidence=evidence)
             # commit_plugin installs the validated plugin into this registry
             # after copying it. Plans already validated cannot name it; a
             # replan after adoption can use the new tool.

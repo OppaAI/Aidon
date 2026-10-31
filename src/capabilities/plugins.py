@@ -632,7 +632,7 @@ def ask_plugin_approval(gate, approve, preflight: Preflight) -> bool:
 
 
 def _commit_plugin_locked(registry, source_dir: Path, preflight: Preflight,
-                  memory=None, conversation_id: str = "") -> tuple[bool, list, str]:
+                  memory=None, conversation_id: str = "", test_evidence=None) -> tuple[bool, list, str]:
     """Copy a preflighted, approved plugin into place. The
     re-hash immediately before the copy is the binding: if
     the source changed after approval, the approval no
@@ -650,6 +650,8 @@ def _commit_plugin_locked(registry, source_dir: Path, preflight: Preflight,
             "Adoption aborted: plugin source changed after approval "
             f"(approved hash {preflight.approved_hash}, current hash {current_hash}); "
             "approve the new source to adopt it")
+    if test_evidence is not None and test_evidence.get("source_hash") != current_hash:
+        return False, findings, "Adoption aborted: test evidence does not match candidate"
     target = registry.toolbox_dir / plugin.name
     registry.toolbox_dir.mkdir(parents=True, exist_ok=True)
     import tempfile
@@ -662,8 +664,10 @@ def _commit_plugin_locked(registry, source_dir: Path, preflight: Preflight,
         shutil.copytree(source_dir, stage, dirs_exist_ok=True)
         if plugin_tree_hash(stage) != preflight.approved_hash:
             return False, findings, "Adoption aborted: staged plugin differs from approved source"
-        (stage / ".adopted").write_text(
-            json.dumps({"approved_hash": preflight.approved_hash}), encoding="utf-8")
+        marker = {"approved_hash": preflight.approved_hash}
+        if test_evidence is not None:
+            marker["acceptance_evidence"] = test_evidence
+        (stage / ".adopted").write_text(json.dumps(marker), encoding="utf-8")
         if target.exists():
             target.rename(backup)
             replaced = True
@@ -714,9 +718,9 @@ def _toolbox_lock(registry):
 
 
 def commit_plugin(registry, source_dir: Path, preflight: Preflight,
-                  memory=None, conversation_id: str = ""):
+                  memory=None, conversation_id: str = "", test_evidence=None):
     with _toolbox_lock(registry):
-        return _commit_plugin_locked(registry, source_dir, preflight, memory, conversation_id)
+        return _commit_plugin_locked(registry, source_dir, preflight, memory, conversation_id, test_evidence)
 
 
 class PluginRegistry:

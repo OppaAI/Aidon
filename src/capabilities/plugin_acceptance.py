@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import shutil
 import tempfile
+from datetime import datetime, timezone
 
 from .plugins import plugin_tree_hash
 
@@ -42,4 +43,5 @@ def test_candidate(source, backend):
                 raise ValueError("acceptance test modified the candidate")
     if plugin_tree_hash(source) != original_hash:
         raise ValueError("candidate changed during acceptance testing")
-    return {"source_hash": original_hash, "backend": backend.name, "tests": results}
+    return {"source_hash": original_hash, "backend": backend.name,
+            "tested_at": datetime.now(timezone.utc).isoformat(), "tests": results}

@@ -146,6 +146,20 @@ def test_web_adoption_requires_successful_acceptance_tests(tmp_path):
     assert "acceptance tests failed" in failing_tools["adopt_tool_plugin"]("plug")
     assert not (tmp_path / "toolbox" / "five-plug").exists()
     assert tools["adopt_tool_plugin"]("plug").startswith("Adopted plugin")
+    marker = json.loads((tmp_path / "toolbox" / "five-plug" / ".adopted").read_text())
+    assert marker["acceptance_evidence"]["source_hash"] == marker["approved_hash"]
+    assert marker["acceptance_evidence"]["backend"] == "modal"
+
+
+def test_adoption_rejects_evidence_for_different_bytes(tmp_path):
+    source = tmp_path / "plug"
+    _valid_plugin(source)
+    preflight = preflight_plugin(source)
+    registry = PluginRegistry(tmp_path / "home")
+    result = commit_plugin(registry, source, preflight, test_evidence={"source_hash": "wrong"})
+    assert not result[0]
+    assert "does not match" in result[2]
+    assert not (registry.toolbox_dir / "five-plug").exists()
 
 
 def test_configured_cli_adoption_fails_closed_without_isolated_backend(tmp_path):
