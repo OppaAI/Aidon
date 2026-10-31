@@ -1611,7 +1611,11 @@ class GoalRunner:
         return plan
 
     def _attachment_message(self, text: str) -> Message:
-        """Preserve the user text and attach WebUI images when present."""
+        """Attach recent chat context and WebUI images when present."""
+        if self.conversation_context.strip():
+            text = ("Recent conversation context:\n"
+                    + self.conversation_context.strip()
+                    + "\n\nCurrent user message:\n" + str(text))
         if not self.image_paths:
             return Message("user", text)
         from ..system.model_client import image_file_message

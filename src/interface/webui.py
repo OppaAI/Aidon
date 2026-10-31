@@ -1038,6 +1038,29 @@ class WebUIServer:
             return stripped[5:].strip(), True
         return stripped, False
 
+    @staticmethod
+    def _merge_correction_followup(text: str, history: list[dict]) -> str:
+        """Attach a terse "I meant ..." correction to its prior question."""
+        import re
+
+        correction = re.match(
+            r"^(?:sorry[,\s]+)?(?:i meant|i mean|i was referring to|"
+            r"correction(?:\s+to that)?\s*:)\s*(.+)$",
+            str(text or "").strip(), re.IGNORECASE | re.DOTALL)
+        if correction is None:
+            return str(text or "")
+        previous = next((str(item.get("text", "")).strip()
+                          for item in reversed(history or [])
+                          if item.get("role") == "user"
+                          and str(item.get("text", "")).strip()
+                          and not str(item.get("text", "")).lstrip().startswith("/")), "")
+        if not previous:
+            return str(text or "")
+        return (f"{previous}\n\nCorrection to the previous question: "
+                f"{correction.group(1).strip()}. Apply this correction to "
+                "the previous question and answer that corrected question; "
+                "do not treat the correction fragment as a separate topic.")
+
     def handle_preapprovals(self) -> dict:
         """Active grants, the kind menu, and the help text, for the UI."""
         from .preapproval import HELP_TEXT, KINDS
@@ -1261,13 +1284,16 @@ class WebUIServer:
             return {"error": "a web question is required"}
         force_web = force_web or bool(body.get("force_web", False))
         goal, delivery = extract_result_delivery(goal)
+        raw_goal = goal
         conversation_id = str(body.get("conversation_id", "") or "")
         conversation_db = None
+        prior_history = []
         try:
             conversation_db = self._conversations_db()
             if not conversation_id:
                 conversation_id = conversation_db.create_conversation()["id"]
-            conversation_db.record_exchange(conversation_id, "user", goal)
+            prior_history = conversation_db.history(conversation_id, limit=8)
+            conversation_db.record_exchange(conversation_id, "user", raw_goal)
         except Exception:
             # A run must still work if the optional conversation store is
             # unavailable; the durable run record remains authoritative.
@@ -1290,6 +1316,7 @@ class WebUIServer:
         if answered_run is not None:
             return {"run_id": answered_run, "conversation_id": conversation_id,
                     "goal": goal}
+        goal = self._merge_correction_followup(raw_goal, prior_history)
         mirror_response = self._mirror_command(conversation_id, goal)
         if mirror_response is not None:
             return mirror_response

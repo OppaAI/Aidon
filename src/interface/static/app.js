@@ -200,16 +200,17 @@
                        agentic: "Agentic", artifact: "Artifact" };
       const confidence = Math.round(
         Math.max(0, Math.min(1, Number(route.confidence) || 0)) * 100);
-      routeChip = '<span>' + confidence + "% · " +
-        (icons[route.group] || "◆") + " " +
-        esc(labels[route.group] || route.group) + "</span><span> · </span>";
+      routeChip = '<span>' + (icons[route.group] || "◆") + " " +
+        esc(labels[route.group] || route.group) + " · " +
+        confidence + "%</span><span> · </span>";
     }
     if (parts.stats || routeChip) {
       html += '<div class="run-stats">' +
+        routeChip +
         (parts.stats
           ? '<span class="run-stats-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="9" r="5.5"/><path d="M8 6v3l2 1.2M6.5 1.5h3M8 1.5V3"/></svg></span>' +
             '<span>' + esc(parts.stats) + "</span>"
-          : "") + routeChip + "</div>";
+          : "") + "</div>";
     }
     return html;
   }
