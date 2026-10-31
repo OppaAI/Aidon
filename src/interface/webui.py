@@ -248,7 +248,7 @@ CHAT_HTML = """<!doctype html>
 <ellipse id="mouth-open" cx="100" cy="69" rx="2" ry="1" fill="#7de9ff" opacity="0"/>
 </g>
 </g>
-<rect x="89" y="88" width="22" height="18" rx="6" fill="#1a2a4a"/>
+<rect x="89" y="88" width="22" height="14" rx="6" fill="#1a2a4a"/>
 <g id="robot-body">
 <ellipse cx="69" cy="108" rx="6" ry="7" fill="#1a2a4a"/>
 <ellipse cx="131" cy="108" rx="6" ry="7" fill="#1a2a4a"/>
