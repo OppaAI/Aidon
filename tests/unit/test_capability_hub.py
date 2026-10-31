@@ -187,7 +187,7 @@ def test_adopt_replaces_and_resets_health(tmp_path):
         "tools": [{"name": "upper", "module": "tool.py",
                    "function": "upper"}],
         "skills": ["skill.md"],
-        "acceptance_tests": [["python3", "-c", "from pathlib import Path; assert Path('plugin.json').is_file()"]]}))
+        "acceptance_tests": [["python3", "-c", "from tool import upper; assert upper({}) == 'HI'"]]}))
     (src / "tool.py").write_text(
         "def upper(args):\n    return 'HI'\n")
     (src / "skill.md").write_text("# Skill\n")
@@ -197,6 +197,7 @@ def test_adopt_replaces_and_resets_health(tmp_path):
     hub = CapabilityHub(home)
     hub.record_health("plugin:upper", "degraded")
     hub.record_health("skill:upper/skill.md", "degraded")
+    (src / "tool.py").write_text("def upper(args):\n    return 'UPDATED'\n")
     ok, _, _ = registry.adopt(src, approve=lambda p, f: True, test_backend_factory=passing_backend_factory)
     assert ok is True
     assert hub.get("plugin:upper")["health"] == "unknown"

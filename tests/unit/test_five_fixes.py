@@ -28,7 +28,7 @@ def _valid_plugin(plug):
         "tools": [{"name": "echo", "module": "tool.py",
                    "function": "echo"}],
         "skills": [],
-        "acceptance_tests": [["python3", "-c", "from pathlib import Path; assert Path('plugin.json').is_file()"]]}))
+        "acceptance_tests": [["python3", "-c", "from tool import echo; assert echo({}) == 'hi'"]]}))
     (plug / "tool.py").write_text("def echo(args):\n    return 'hi'\n")
 
 
@@ -157,8 +157,9 @@ def test_approved_adoption_counts_once_then_exhausts(tmp_path):
         "Adopted plugin five-plug; tools available after this adoption step "
         "succeeds: echo")
     assert gov.tools == 1
-    with pytest.raises(AcquisitionBudgetExceeded, match="tool"):
-        tools["adopt_tool_plugin"](str(plug))
+    retry = tools["adopt_tool_plugin"](str(plug))
+    assert "already adopted at these approved bytes" in retry
+    assert gov.tools == 1
 
 
 def test_adopted_tool_is_live_in_the_same_workflow(tmp_path):
@@ -198,6 +199,7 @@ def test_web_adoption_requires_successful_acceptance_tests(tmp_path):
     class Backend:
         name = "modal"
         allow_network = False
+        test_double = True
         def run(self, command, workspace, timeout_seconds):
             return SimpleNamespace(isolated=True, ok=True, returncode=0)
         def cleanup(self):
@@ -207,7 +209,7 @@ def test_web_adoption_requires_successful_acceptance_tests(tmp_path):
     assert "acceptance tests failed" in tools["adopt_tool_plugin"]("plug")
     manifest["acceptance_tests"] = [["python3", "test_tool.py"]]
     (plug / "plugin.json").write_text(json.dumps(manifest))
-    (plug / "test_tool.py").write_text("from pathlib import Path\nassert Path('plugin.json').is_file()\n")
+    (plug / "test_tool.py").write_text("from tool import echo\nassert echo({}) == 'hi'\n")
     class Failing(Backend):
         def run(self, command, workspace, timeout_seconds):
             return SimpleNamespace(isolated=True, ok=False, returncode=1)
@@ -244,6 +246,7 @@ def test_direct_registry_adoption_checks_acceptance_when_configured(tmp_path):
     class Backend:
         name = "modal"
         allow_network = False
+        test_double = True
         def run(self, command, workspace, timeout_seconds):
             return SimpleNamespace(isolated=True, ok=True, returncode=0)
         def cleanup(self):
@@ -253,10 +256,31 @@ def test_direct_registry_adoption_checks_acceptance_when_configured(tmp_path):
     assert not result[0] and "acceptance tests failed" in result[2]
     manifest["acceptance_tests"] = [["python3", "test_tool.py"]]
     (source / "plugin.json").write_text(json.dumps(manifest))
-    (source / "test_tool.py").write_text("from pathlib import Path\nassert Path('plugin.json').is_file()\n")
+    (source / "test_tool.py").write_text("from tool import echo\nassert echo({}) == 'hi'\n")
     assert registry.adopt(source, approve=approve, test_backend_factory=Backend)[0]
     marker = json.loads((registry.toolbox_dir / "five-plug" / ".adopted").read_text())
     assert marker["acceptance_evidence"]["source_hash"] == marker["approved_hash"]
+
+
+def test_plugin_adoption_retry_is_idempotent_for_same_approved_bytes(tmp_path):
+    source = tmp_path / "plug"
+    _valid_plugin(source)
+    registry = PluginRegistry(tmp_path / "home")
+    approvals = []
+    first = registry.adopt(
+        source, approve=lambda *_: approvals.append("approved") or True,
+        test_backend_factory=passing_backend_factory)
+    assert first[0]
+
+    def must_not_build_backend():
+        raise AssertionError("an exact approved retry needs no retest")
+
+    retried = registry.adopt(
+        source, approve=lambda *_: approvals.append("duplicate approval") or True,
+        test_backend_factory=must_not_build_backend)
+    assert retried[0]
+    assert "already adopted" in retried[2]
+    assert approvals == ["approved"]
 
 
 def test_configured_cli_adoption_fails_closed_without_isolated_backend(tmp_path):
@@ -266,7 +290,7 @@ def test_configured_cli_adoption_fails_closed_without_isolated_backend(tmp_path)
     manifest = json.loads((plug / "plugin.json").read_text())
     manifest["acceptance_tests"] = [["python3", "test_tool.py"]]
     (plug / "plugin.json").write_text(json.dumps(manifest))
-    (plug / "test_tool.py").write_text("from pathlib import Path\nassert Path('plugin.json').is_file()\n")
+    (plug / "test_tool.py").write_text("from tool import echo\nassert echo({}) == 'hi'\n")
     config = Config(home=tmp_path, execution_backend="bubblewrap")
     tools = _goal_extra_tools(config, tmp_path, gate=_ApproveGate())
     assert "acceptance tests failed" in tools["adopt_tool_plugin"]("plug")

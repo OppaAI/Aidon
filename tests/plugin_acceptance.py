@@ -7,6 +7,7 @@ def passing_backend_factory():
     class Backend:
         name = "docker"
         allow_network = False
+        test_double = True
 
         def run(self, command, workspace, timeout_seconds):
             return SimpleNamespace(isolated=True, ok=True, returncode=0)

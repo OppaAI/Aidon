@@ -33,7 +33,7 @@ def _plugin_dir(tmp_path, name="gadget", capabilities=None, code="",
     manifest = {
         "name": name, "version": "1.0.0", "description": "capability test",
         "tools": [tool], "skills": [],
-        "acceptance_tests": [["python3", "-c", "from pathlib import Path; assert Path('plugin.json').is_file()"]],
+        "acceptance_tests": [["python3", "-c", "from tool import gadget_tool; assert gadget_tool({}, None) == 'ok'"]],
     }
     if capabilities is not None:
         manifest["capabilities"] = capabilities

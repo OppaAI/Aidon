@@ -35,7 +35,7 @@ def _plugin_dir(tmp_path, name="upper"):
         "def upper(args):\n    return str(args.get('text', '')).upper()\n",
         encoding="utf-8")
     (directory / "test_plugin.py").write_text(
-        "from pathlib import Path\nassert Path('plugin.json').is_file()\n",
+        "from tool import upper\nassert upper({'text':'aidon'}) == 'AIDON'\n",
                                               encoding="utf-8")
     return directory
 
@@ -136,6 +136,7 @@ def test_plugin_adopt_needs_configured_acceptance_tests_and_approval(tmp_path, m
     class Backend:
         name = "docker"
         allow_network = False
+        test_double = True
         def run(self, command, workspace, timeout_seconds):
             assert (workspace / "test_plugin.py").is_file()
             return SimpleNamespace(isolated=True, ok=True, returncode=0)

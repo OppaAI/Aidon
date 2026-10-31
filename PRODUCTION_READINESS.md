@@ -11,20 +11,17 @@ Reviewed against the requested chat → capability inventory → Tool Crafting L
 - Cancellation during the interview stops without preparing another brief.
 - Sandbox execution requires isolation by default; Modal keeps its independent network policy.
 
-## Code-level work still open
+## Remaining code limitations
 
-These items need implementation before the release can be called complete; live checks below do not close them.
-
-1. **Durable end-to-end acquisition state:** the interview is persisted and approved skills trigger a bounded original-goal replan, but there is no durable state machine that automatically resumes acquisition, registration, and replanning after a process restart. The current recovery action is owner initiated.
-2. **Acquisition retry semantics:** test interrupted adoption at each side-effect boundary and make retries explicitly idempotent across plugins, skills, and MCP. Current skill adoption rejects changed bytes and recognizes an already-trusted identical skill; plugin replacement reconciles staged filesystem changes, but that is not a complete workflow transaction.
-3. **Acceptance-test quality:** obvious plugin no-ops are rejected and approval warns that static checks cannot prove coverage or safety. A stronger review/evaluation of authored tests is still needed; passing isolated commands alone is not proof of useful behavior.
+- **Recovery is owner initiated:** interview/approval state is durable and the recovery card resumes the original goal after restart. Aidon does not automatically execute a recovered goal at startup, because a saved plan may contain side effects that need fresh owner intent. This is a deliberate safety boundary; use the recovery card to continue.
+- **Acceptance evidence still needs owner review:** tests must call every declared tool in a result comparison, and isolated validation mutates each implementation to confirm the tests detect a broken function. These checks cannot establish full coverage or prove the test itself is safe; review test source and disclosed capabilities before approval.
 
 ## Implemented in code; validate live before release
 
 The code changes and offline tests are complete for these items. This cloud workspace lacks the user's live browser, credentials, home PC, and configured services, so run the procedures below on the target setup and record evidence in the checklist.
 
 1. **Tool Lab acquisition and recovery UI:** code persists interview turns and lab state per conversation, renders questions in the lab card, and offers explicit recovery. Follow home-PC procedure 3 and 4 below; also open two conversations, save an answer in each, switch between them, and verify neither transcript overwrites the other. Force-close/restart Aidon mid-interview and verify the saved answer is offered by the recovery action, then continue without answering it twice.
-2. **Plugin test gate and approval:** using a disposable plugin, try `true` or `python -c 'assert True'` as its acceptance test and confirm adoption is refused. Replace it with a real assertion against a harmless plugin output, confirm the approval shows isolated backend, test count and candidate hash plus the quality caveat, then approve and verify the tool is registered. Do not use a plugin with external side effects.
+2. **Plugin test gate and approval:** using a disposable plugin, try `true`, `python -c 'assert True'`, and a check that never calls the declared tool; confirm adoption is refused. Replace it with a comparison assertion against a harmless tool output, confirm isolated baseline and mutation checks plus the candidate hash appear on approval, then approve and verify the tool is registered. Do not use a plugin with external side effects.
 3. **MCP approval and functional probe:** configure a harmless local/test MCP server. Connect and confirm approval identifies the exact target and selected environment-variable names without values. Request an optional read-only test call; verify the approval shows its tool and redacted arguments before invocation, and that evidence stores only result type/hash. Confirm connect/list by itself is reported only as connectivity validation.
 4. **Research citation handling:** run a capability interview with configured search/research and compare the brief with returned search URLs. Confirm unsupported URLs are removed, returned URLs appear as references, and no-source research is labeled unverified. Manually verify each remaining URL supports the nearby claim; automated checks establish URL provenance only.
 5. **Browser persistence and rendering:** use procedure 2 below. Refresh while a conversation has Markdown, a code block, and a generated artifact; confirm the same conversation and content return. Repeat with the Tool Lab open, then switch conversations and return.
@@ -35,8 +32,8 @@ The code changes and offline tests are complete for these items. This cloud work
 
 ## Release blockers
 
-- Regression failures are **closed for this revision**: 1,410 passed, 7 environment-dependent skips on 2026-10-31. Re-run after later code changes and in CI.
-- The code-level items above remain open. Runtime-only checks above remain pending until run on the target deployment. Green offline tests do not certify production readiness.
+- Regression failures are **closed for this revision**: 1,414 passed, 7 environment-dependent skips on 2026-10-31. Re-run after later code changes and in CI.
+- Runtime-only checks above remain pending until run on the target deployment. The owner-initiated recovery and acceptance-test review limits above should be treated as explicit safety/assurance boundaries. Green offline tests do not certify production readiness.
 
 ## Additional hardening — code fixes implemented
 
@@ -64,7 +61,7 @@ Covered goal; reject lab; uncertain user compares options; approve and revise br
 - Remote archive sync-back pre-scans for traversal and escaping links, then extracts with Python's data filter; hostile archive regression tests cover traversal rejection.
 - MCP approval now binds a canonical SHA-256 fingerprint of the exact connection config and optional test call, names environment-variable bindings without revealing values, and shows any requested test tool and redacted arguments before it can run. Functional test results record only type and output hash, not returned text. Connect/list alone is clearly recorded as connectivity evidence, not per-tool behavior proof.
 - Standalone lab state is keyed by kind and conversation ID, with a migration for previous global rows. API saves require the matching ID, and the lab page uses the same stable ID for saved lab state and its associated chat conversation.
-- Full regression suite on 2026-10-31 after this repair set: 1,410 passed, 7 skipped. JavaScript syntax check passed for `labs.js`; browser-level restore/switching remains a home-PC check.
+- Full regression suite on 2026-10-31 after this repair set: 1,414 passed, 7 skipped. JavaScript syntax check passed for `labs.js`; browser-level restore/switching remains a home-PC check.
 - The WebUI, CLI, goal tool, registry and low-level commit path refuse plugin adoption without successful isolated acceptance evidence bound to the candidate hash. Bubblewrap, Docker, and Modal are accepted only when the run reports isolation and networking is disabled. The approval card reports the backend and test count, while suppressing arbitrary test arguments and output that could contain secrets. Test quality still needs review.
 - Skills cannot be trusted until isolated, offline tests pass for the current metadata and Markdown bytes. Changed skill files leave planner context until retested and separately approved; legacy trusted skills without evidence need revalidation.
 - SSH execution is marked unsandboxed, so practice and scheduled approval paths no longer treat it as a disposable container. Remote workspaces are unique child directories; configured parent paths, `..`, and `~` are not removed or accepted as cleanup targets.
@@ -72,7 +69,7 @@ Covered goal; reject lab; uncertain user compares options; approve and revise br
 - Workflow fixtures now supply executable model plans. Empty/invalid real model plans remain rejected. Updated assertions reflect the current lab and tool contracts.
 - Actual model, Modal and PC integration checks remain unrun without the required configured endpoints, authentication and reachable PC. These cannot be established by offline tests.
 
-Only the code-level items under “Code-level work still open” are unimplemented. Items under “Implemented in code; validate live before release” have offline coverage but remain unverified against the target runtime until their procedures are completed.
+Items under “Implemented in code; validate live before release” have offline coverage but remain unverified against the target runtime until their procedures are completed.
 
 ## Fast home-PC validation (after pulling `dev`)
 

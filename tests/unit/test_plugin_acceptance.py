@@ -9,15 +9,17 @@ from src.capabilities.plugin_acceptance import test_candidate as verify_candidat
 def candidate(tmp_path):
     root = tmp_path / "plugin"
     root.mkdir()
-    (root / "plugin.json").write_text(json.dumps({"name": "sample", "acceptance_tests": [["python3", "test_tool.py"]]}))
+    (root / "plugin.json").write_text(json.dumps({"name": "sample", "tools": [{"name": "upper", "module": "tool.py", "function": "upper"}], "acceptance_tests": [["python3", "test_tool.py"]]}))
     (root / "test_tool.py").write_text(
-        "from pathlib import Path\nassert Path('plugin.json').is_file()\n")
+        "from tool import upper\nassert upper({'text':'aidon'}) == 'AIDON'\n")
+    (root / "tool.py").write_text("def upper(args):\n    return str(args.get('text', '')).upper()\n")
     return root
 
 
 class Backend:
     name = "modal"
     allow_network = False
+    test_double = True
     def run(self, command, workspace, timeout_seconds):
         assert (workspace / "test_tool.py").is_file()
         return SimpleNamespace(isolated=True, ok=True, returncode=0)
@@ -27,6 +29,27 @@ def test_evidence_binds_candidate_hash(tmp_path):
     evidence = verify_candidate(candidate(tmp_path), Backend())
     assert len(evidence["source_hash"]) == 64
     assert evidence["tests"][0]["command"] == ["python3", "test_tool.py"]
+
+
+def test_acceptance_must_detect_each_tool_mutation(tmp_path):
+    class MutationAwareBackend(Backend):
+        test_double = False
+
+        def run(self, command, workspace, timeout_seconds):
+            if "acceptance mutation" in (workspace / "tool.py").read_text():
+                return SimpleNamespace(isolated=True, ok=False, returncode=1)
+            return SimpleNamespace(isolated=True, ok=True, returncode=0)
+
+    evidence = verify_candidate(candidate(tmp_path), MutationAwareBackend())
+    assert evidence["mutation_checks"] == [{"tool": "upper", "detected": True}]
+
+
+def test_acceptance_that_does_not_reference_tool_is_refused(tmp_path):
+    root = candidate(tmp_path)
+    (root / "test_tool.py").write_text(
+        "from pathlib import Path\nassert Path('plugin.json').is_file()\n")
+    with pytest.raises(ValueError, match="every declared tool"):
+        verify_candidate(root, Backend())
 
 
 def test_isolated_network_disabled_bubblewrap_is_accepted(tmp_path):

@@ -172,6 +172,26 @@ def plugin_is_adopted(plugin) -> bool:
         return False
 
 
+def _existing_approved_plugin(registry, name: str, approved_hash: str):
+    """Return the already-installed exact approved artifact, if intact."""
+    target = Path(registry.toolbox_dir) / str(name)
+    try:
+        static = load_plugin(target, execute=False)
+        if static.name != name or not plugin_is_adopted(static):
+            return None
+        marker = json.loads((target / ".adopted").read_text(encoding="utf-8"))
+        evidence = marker.get("acceptance_evidence") or {}
+        if (marker.get("approved_hash") != approved_hash
+                or evidence.get("source_hash") != approved_hash
+                or not evidence.get("tests")
+                or any(item.get("returncode") != 0
+                       for item in evidence["tests"])):
+            return None
+        return load_plugin(target)
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return None
+
+
 def adoption_gate(posture: str, kernel_mode: bool,
                   capabilities, sandboxed: bool = False) -> tuple[bool, str]:
     """Decide whether the current tool posture allows an adoption.
@@ -661,6 +681,10 @@ def _commit_plugin_locked(registry, source_dir: Path, preflight: Preflight,
             "Adoption refused: verified isolated acceptance-test evidence is required")
     if test_evidence.get("source_hash") != current_hash:
         return False, findings, "Adoption aborted: test evidence does not match candidate"
+    already = _existing_approved_plugin(registry, plugin.name, current_hash)
+    if already is not None:
+        registry.plugins[plugin.name] = already
+        return True, findings, f"Plugin {plugin.name} is already adopted at these approved bytes"
     target = registry.toolbox_dir / plugin.name
     registry.toolbox_dir.mkdir(parents=True, exist_ok=True)
     import tempfile
@@ -955,6 +979,12 @@ class PluginRegistry:
                           for tool in preflight.plugin.tools))
         if not allowed:
             return False, preflight.findings, f"Adoption refused: {reason}"
+        existing = _existing_approved_plugin(
+            self, preflight.plugin.name, preflight.approved_hash)
+        if existing is not None:
+            self.plugins[existing.name] = existing
+            return True, preflight.findings, (
+                f"Plugin {existing.name} is already adopted at these approved bytes")
         if test_backend_factory is None:
             return False, preflight.findings, (
                 "Adoption refused: an isolated, network-disabled acceptance-test "
@@ -971,12 +1001,14 @@ class PluginRegistry:
             # secrets supplied by the plugin author.
             preflight.body += (
                 "\nAcceptance validation: "
-                f"{len(evidence['tests'])} test command(s) passed in isolated "
-                f"{evidence['backend']} with network disabled. Evidence is bound "
+                f"{len(evidence['tests'])} test command(s) and "
+                f"{len(evidence.get('mutation_checks', []))} tool mutation check(s) "
+                f"passed in isolated {evidence['backend']} with network disabled. "
+                "Evidence is bound "
                 f"to candidate hash {evidence['source_hash']}.\n"
-                "Test quality: known no-op commands are rejected, but static "
-                "checks cannot prove behavioral coverage or that a test is safe; "
-                "review the candidate test source before approving adoption."
+                "Test quality: each declared tool must be called inside a result "
+                "assertion and pass a mutation check. This does not prove complete "
+                "coverage or safety; review the candidate test source before approval."
             )
         except Exception as exc:
             return False, preflight.findings, f"Adoption refused: acceptance tests failed: {type(exc).__name__}: {exc}"

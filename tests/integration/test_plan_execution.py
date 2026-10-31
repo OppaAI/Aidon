@@ -319,6 +319,37 @@ def test_capability_interview_recovers_durable_answer_after_restart(tmp_path):
     assert state["outcome"] == "approved" and state["finished"] is False
 
 
+def test_recovering_approved_acquisition_does_not_repeat_consent(tmp_path):
+    from src.interface.interview_store import InterviewStore
+
+    home = tmp_path / "home"
+    home.mkdir()
+    first_store = InterviewStore(home)
+    first = GoalRunner(
+        FakeClient('{"brief":"Use an MP4 editing checklist."}'),
+        Sandbox(home / "work-first"),
+        ApprovalGate(lambda *args, **kwargs: Decision("approved")),
+        home, conversation_id="approved-recovery", run_id="before-restart")
+    first.question_ask = lambda prompt: "proceed"
+    outcome, _ = first._capability_interview("Prepare video", "need_skill")
+    assert outcome == "approved"
+
+    recovered = GoalRunner(
+        FakeClient('{"brief":"A different brief must not replace consent."}'),
+        Sandbox(home / "work-after-restart"),
+        ApprovalGate(lambda *args, **kwargs: Decision("rejected")),
+        home, conversation_id="approved-recovery", run_id="after-restart")
+    recovered.question_ask = lambda prompt: (_ for _ in ()).throw(
+        AssertionError("saved interview must replay without another question"))
+    resumed, brief = recovered._capability_interview("Prepare video", "need_skill")
+    assert resumed == "approved"
+    assert brief == "Use an MP4 editing checklist."
+    state = first_store.unfinished_for_conversation(
+        "approved-recovery", goal="Prepare video")
+    assert state["finished"] is False
+    assert state["outcome"] == "approved"
+
+
 def test_kb_parser_needed_detection(tmp_path):
     assert parser_needed_for(tmp_path / "model.dwg") == "cad-parser"
     assert parser_needed_for(tmp_path / "paper.tex") == "latex-parser"

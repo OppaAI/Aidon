@@ -45,7 +45,7 @@ def _plugin_dir(tmp_path, name="upper", code=None):
         "tools": [{"name": "upper", "description": "Uppercase text",
                    "module": "tool.py", "function": "upper"}],
         "skills": [],
-        "acceptance_tests": [["python3", "-c", "from pathlib import Path; assert Path('plugin.json').is_file()"]]}), encoding="utf-8")
+        "acceptance_tests": [["python3", "-c", "from tool import upper; assert upper({'text':'aidon'}) == 'AIDON'"]]}), encoding="utf-8")
     (directory / "tool.py").write_text(
         code or "def upper(args):\n    return str(args.get('text', '')).upper()\n",
         encoding="utf-8")
@@ -98,6 +98,8 @@ def test_source_changed_during_approval_aborts_and_keeps_old_install(tmp_path):
     ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: True, test_backend_factory=passing_backend_factory)
     assert ok is True
     installed = (home / "toolbox" / "upper" / "tool.py").read_text(encoding="utf-8")
+    (directory / "tool.py").write_text(
+        "def upper(args):\n    return 'UPDATED'\n", encoding="utf-8")
 
     def approve_and_mutate(plugin, findings):
         # The owner approves, but the source changes before the copy.
@@ -970,7 +972,7 @@ def _plugin_dir(tmp_path, name="upper"):
         "tools": [{"name": "upper", "description": "Uppercase text",
                    "module": "tool.py", "function": "upper"}],
         "skills": [],
-        "acceptance_tests": [["python3", "-c", "from pathlib import Path; assert Path('plugin.json').is_file()"]]}), encoding="utf-8")
+        "acceptance_tests": [["python3", "-c", "from tool import upper; assert upper({'text':'aidon'}) == 'AIDON'"]]}), encoding="utf-8")
     (directory / "tool.py").write_text(
         "def upper(args):\n    return str(args.get('text', '')).upper()\n",
         encoding="utf-8")

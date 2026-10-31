@@ -101,7 +101,7 @@ def test_adopt_and_install_wiring_caps(tmp_path):
         "tools": [{"name": "echo", "module": "tool.py",
                    "function": "echo"}],
         "skills": [],
-        "acceptance_tests": [["python3", "-c", "from pathlib import Path; assert Path('plugin.json').is_file()"]]}))
+        "acceptance_tests": [["python3", "-c", "from tool import echo; assert echo({}) == 'hi'"]]}))
     (plugin_dir / "tool.py").write_text("def echo(args):\n    return 'hi'\n")
     with pytest.raises(AcquisitionBudgetExceeded, match="tool"):
         tools["adopt_tool_plugin"](str(plugin_dir))

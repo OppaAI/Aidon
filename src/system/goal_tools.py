@@ -937,7 +937,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
 
     try:
         from ..capabilities.plugins import (
-            PluginRegistry, adoption_gate, ask_plugin_approval,
+            PluginRegistry, _existing_approved_plugin, adoption_gate, ask_plugin_approval,
             commit_plugin, preflight_plugin)
 
         def adopt_tool_plugin(path):
@@ -968,6 +968,12 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                     for t in preflight.plugin.tools))
             if not allowed:
                 return f"adoption refused: {reason}"
+            existing = _existing_approved_plugin(
+                registry, preflight.plugin.name, preflight.approved_hash)
+            if existing is not None:
+                registry.plugins[existing.name] = existing
+                return (f"Plugin {existing.name} is already adopted at these "
+                        "approved bytes; continue the original goal")
             if test_backend_factory is None:
                 return ("adoption refused: an isolated, network-disabled "
                         "acceptance-test backend is required")
@@ -980,12 +986,14 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                     return "adoption refused: candidate changed after preflight"
                 preflight.body += (
                     "\nAcceptance validation: "
-                    f"{len(evidence['tests'])} test command(s) passed in isolated "
-                    f"{evidence['backend']} with network disabled. Evidence is "
+                    f"{len(evidence['tests'])} test command(s) and "
+                    f"{len(evidence.get('mutation_checks', []))} tool mutation check(s) "
+                    f"passed in isolated {evidence['backend']} with network disabled. "
+                    "Evidence is "
                     f"bound to candidate hash {evidence['source_hash']}.\n"
-                    "Test quality: known no-op commands are rejected, but static "
-                    "checks cannot prove behavioral coverage or that a test is "
-                    "safe; review the candidate test source before approval."
+                    "Test quality: each declared tool must be called inside a result "
+                    "assertion and pass a mutation check. This does not prove complete "
+                    "coverage or safety; review the candidate test source before approval."
                 )
             except Exception as exc:
                 return f"adoption refused: acceptance tests failed: {type(exc).__name__}: {exc}"
