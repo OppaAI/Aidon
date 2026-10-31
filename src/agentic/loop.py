@@ -1734,11 +1734,11 @@ class GoalRunner:
             else:
                 pending = state.get("pending") or {}
                 result = None
-                if kind == "question" and pending.get("kind") == kind and pending.get("prompt") == prompt and pending.get("run_id"):
-                    question = prompt.removeprefix("[AIDON_LAB] ")
-                    result = store.last_answer(pending["run_id"], getattr(self, "conversation_id", ""), question)
+                if kind == "question" and pending.get("kind") == kind and pending.get("prompt") == prompt:
+                    result = store.answer_for_token(pending.get("token"), getattr(self, "conversation_id", ""))
                 if result is None:
-                    state["pending"] = {"kind": kind, "prompt": prompt, "run_id": getattr(self, "run_id", None)}
+                    import uuid
+                    state["pending"] = {"kind": kind, "prompt": prompt, "run_id": getattr(self, "run_id", None), "token": uuid.uuid4().hex}
                     store.save_session(key, state)
                     result = action()
                 state["steps"].append({"kind": kind, "prompt": prompt, "result": result})

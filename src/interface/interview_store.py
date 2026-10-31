@@ -17,6 +17,7 @@ class InterviewStore:
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 answered_at TEXT)""")
             db.execute("CREATE TABLE IF NOT EXISTS sessions (session_key TEXT PRIMARY KEY, document TEXT NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS turn_links (turn_id INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE)")
             db.execute("CREATE TABLE IF NOT EXISTS lab_sessions (kind TEXT PRIMARY KEY, revision INTEGER NOT NULL, document TEXT NOT NULL)")
         self.path.chmod(0o600)
 
@@ -108,8 +109,22 @@ class InterviewStore:
 
     def question(self, run_id, conversation_id, question, lab):
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute("INSERT INTO turns(run_id,conversation_id,question,lab) VALUES(?,?,?,?)",
                              (run_id, conversation_id, question, int(lab)))
+            # Link only the exact pending interview step, never an older
+            # question with identical wording in the same run.
+            tokens = []
+            for (document,) in db.execute("SELECT document FROM sessions"):
+                state = json.loads(document)
+                pending = state.get("pending") or {}
+                if (not state.get("finished") and state.get("conversation_id") == conversation_id
+                        and pending.get("run_id") == run_id and pending.get("kind") == "question"
+                        and str(pending.get("prompt", "")).removeprefix("[AIDON_LAB] ") == question
+                        and pending.get("token")):
+                    tokens.append(pending["token"])
+            if len(tokens) == 1:
+                db.execute("INSERT INTO turn_links(turn_id,token) VALUES (?,?)", (row.lastrowid, tokens[0]))
             return row.lastrowid
 
     def answer(self, turn_id, answer):
@@ -130,4 +145,11 @@ class InterviewStore:
             row = db.execute(
                 "SELECT answer FROM turns WHERE run_id=? AND conversation_id=? AND question=? ORDER BY id DESC LIMIT 1",
                 (run_id, conversation_id, question)).fetchone()
+            return row[0] if row else None
+
+    def answer_for_token(self, token, conversation_id):
+        if not token:
+            return None
+        with self.connect() as db:
+            row = db.execute("SELECT turns.answer FROM turns JOIN turn_links ON turns.id=turn_links.turn_id WHERE turn_links.token=? AND turns.conversation_id=?", (token, conversation_id)).fetchone()
             return row[0] if row else None

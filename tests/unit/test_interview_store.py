@@ -23,6 +23,22 @@ def test_answer_cannot_be_overwritten(tmp_path):
     assert InterviewStore(tmp_path).transcript("run")[0]["answer"] == "reject"
 
 
+def test_identical_questions_do_not_replay_an_earlier_answer(tmp_path):
+    store = InterviewStore(tmp_path)
+    store.save_session("session", {"conversation_id": "chat", "finished": False,
+        "pending": {"kind": "question", "prompt": "Approve?", "run_id": "run", "token": "first"}})
+    first = store.question("run", "chat", "Approve?", False)
+    store.answer(first, "yes")
+    store.save_session("session", {"conversation_id": "chat", "finished": False,
+        "pending": {"kind": "question", "prompt": "Approve?", "run_id": "run", "token": "second"}})
+    assert store.answer_for_token("second", "chat") is None
+    second = store.question("run", "chat", "Approve?", False)
+    store.answer(second, "no")
+    assert store.answer_for_token("first", "chat") == "yes"
+    assert store.answer_for_token("second", "chat") == "no"
+    assert store.answer_for_token("second", "other-chat") is None
+
+
 def test_unfinished_interview_lookup_is_scoped_and_unambiguous(tmp_path):
     store = InterviewStore(tmp_path)
     store.save_session("one", {"goal": "edit video", "kind": "need_plugin", "conversation_id": "a", "finished": False})
