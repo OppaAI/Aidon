@@ -28,6 +28,23 @@ def test_evidence_binds_candidate_hash(tmp_path):
     assert evidence["tests"][0]["command"] == ["python3", "test_tool.py"]
 
 
+def test_isolated_network_disabled_bubblewrap_is_accepted(tmp_path):
+    class Bubblewrap(Backend):
+        name = "bubblewrap"
+
+    evidence = verify_candidate(candidate(tmp_path), Bubblewrap())
+    assert evidence["backend"] == "bubblewrap"
+
+
+def test_bubblewrap_with_network_enabled_is_rejected(tmp_path):
+    class NetworkedBubblewrap(Backend):
+        name = "bubblewrap"
+        allow_network = True
+
+    with pytest.raises(ValueError, match="network-disabled"):
+        verify_candidate(candidate(tmp_path), NetworkedBubblewrap())
+
+
 def test_rejects_failed_unisolated_and_modified_tests(tmp_path):
     root = candidate(tmp_path)
     class Bad(Backend):

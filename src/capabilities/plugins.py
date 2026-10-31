@@ -651,7 +651,7 @@ def _commit_plugin_locked(registry, source_dir: Path, preflight: Preflight,
             f"(approved hash {preflight.approved_hash}, current hash {current_hash}); "
             "approve the new source to adopt it")
     if (not isinstance(test_evidence, dict)
-            or test_evidence.get("backend") not in ("modal", "docker")
+            or test_evidence.get("backend") not in ("modal", "docker", "bubblewrap")
             or not isinstance(test_evidence.get("tests"), list)
             or not test_evidence["tests"]
             or any(not isinstance(result, dict)

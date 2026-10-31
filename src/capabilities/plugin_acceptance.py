@@ -33,8 +33,8 @@ def test_candidate(source, backend):
                    or any(not isinstance(arg, str) or not arg or "\x00" in arg for arg in c)
                    for c in commands)):
         raise ValueError("acceptance_tests must contain 1–10 nonempty argv arrays")
-    if getattr(backend, "name", "") not in ("modal", "docker"):
-        raise ValueError("acceptance tests require an isolated Modal or Docker backend")
+    if getattr(backend, "name", "") not in ("modal", "docker", "bubblewrap"):
+        raise ValueError("acceptance tests require an isolated Bubblewrap, Modal, or Docker backend")
     if getattr(backend, "allow_network", True):
         raise ValueError("acceptance tests require a network-disabled backend")
     original_hash = plugin_tree_hash(source)

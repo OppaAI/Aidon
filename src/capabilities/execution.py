@@ -140,6 +140,7 @@ class BubblewrapBackend(ExecutionBackend):
 
     def __init__(self, sandbox: Sandbox):
         self.sandbox = sandbox
+        self.allow_network = bool(sandbox.allow_network)
 
     def run(self, command: list[str], workspace: Path,
             timeout_seconds: int = 120) -> ExecutionResult:
