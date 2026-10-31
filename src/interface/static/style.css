@@ -292,6 +292,8 @@ html[data-theme="light"] .msg.user { background: #eee4f3; color: #302b35; }
 .card button { flex: 1; padding: 9px; border-radius: 9px; border: 1px solid var(--border);
   background: var(--surface2); color: var(--text); font-size: 13.5px; cursor: pointer; }
 .card button.approve { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
+.spec-card button.approve[data-d="proceed"] { color: #183126; }
+html[data-theme="light"] .spec-card button.approve[data-d="proceed"] { color: #fff; }
 .card button.reject { background: none; color: var(--red); border-color: var(--red); }
 .card textarea { width: 100%; min-height: 70px; margin-top: 8px; border-radius: 8px;
   border: 1px solid var(--border); background: var(--surface2); color: var(--text);

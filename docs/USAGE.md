@@ -47,11 +47,13 @@
   `AIDON_SLACK_OUTBOUND_CHANNEL` when no Slack conversation
   is linked.
 - With optional tools enabled (`AIDON_OPTIONAL_TOOLS=1`),
-  Aidon can capture a webcam photo or short video. Every
-  camera activation requires a fresh `record` approval card;
-  declining it leaves the camera untouched. The capture is
-  saved in the run workspace and included with completed
-  deliverables.
+  Aidon can use the full built-in toolset, including Muse Image
+  editing and webcam capture. Image edits require attached reference
+  images and a fresh approval before sending them to Muse Image; the
+  API may spend image credits. Every camera activation also requires
+  a fresh `record` approval card; declining it leaves the camera
+  untouched. Captures are saved in the run workspace and included
+  with completed deliverables.
 
 ## ✅ Pre-approvals, the same on every surface
 

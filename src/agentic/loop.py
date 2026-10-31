@@ -1275,6 +1275,13 @@ class GoalRunner:
                    "one step; never return deliverables with an empty or "
                    "missing steps array. For GUI requests, use the "
                    "computer_use tool when it is listed as available.")
+        system += (" Produce only the outputs the user requested. Do not add "
+                   "deliverable.md, README files, reports, prompt documents, "
+                   "or HTML previews unless the user explicitly asked for "
+                   "those artifacts. Never substitute documentation or a "
+                   "mockup for the requested operation. If the required tool "
+                   "or input files are unavailable, say what is missing and "
+                   "ask for it; do not create filler files.")
         system += (" For an HTML page or web app, include a step to launch "
                    "and exercise it in a browser after writing it. Use an "
                    "already available browser automation or computer_use "
