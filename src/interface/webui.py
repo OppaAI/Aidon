@@ -181,15 +181,13 @@ CHAT_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Aidon</title>
 <style>
 #avatar { width: 220px; }
-#robot { animation: robot-bob 4s ease-in-out infinite; transform-origin: 100px 170px; }
-@keyframes robot-bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-#robot-head { animation: robot-head-sway 6s ease-in-out infinite; transform-origin: 100px 58px; }
-@keyframes robot-head-sway { 0%,100% { transform: rotate(0deg); } 25% { transform: rotate(1.5deg); } 75% { transform: rotate(-1.5deg); } }
-#robot-arm-left { animation: robot-arm-sway 5s ease-in-out infinite; transform-origin: 52px 111px; }
-#robot-arm-right { animation: robot-arm-sway 5s ease-in-out infinite reverse; transform-origin: 148px 111px; }
-@keyframes robot-arm-sway { 0%,100% { transform: rotate(0deg); } 50% { transform: rotate(3deg); } }
+#robot { transform-origin: 100px 190px; }
+#robot-head { transform-origin: 100px 54px; }
+#robot-arm-left { transform-origin: 52px 111px; }
+#robot-arm-right { transform-origin: 148px 111px; }
 .robot-eye { animation: robot-blink 4.2s infinite; transform-origin: center; transform-box: fill-box; }
 @keyframes robot-blink { 0%,92%,98%,100% { transform: scaleY(1); } 94%,96% { transform: scaleY(0.1); } }
+@media (prefers-reduced-motion: reduce) { .robot-eye { animation: none; } }
 #mouth-smile { opacity: 1; }
 #mouth-open { opacity: 0; }
 #avatar.speaking #mouth-smile { opacity: 0; }

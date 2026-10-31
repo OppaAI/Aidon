@@ -15,6 +15,44 @@
 
   const wrap = document.getElementById("avatar-wrap");
   const canvas = document.getElementById("avatar");
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Soft, irregular idle gestures for the illustrated avatar. The random
+  // targets are eased so movement stays calm instead of twitchy.
+  function animateFallbackIdle() {
+    if (reduceMotion) return;
+    const root = document.querySelector(".robot-body-anim") || document.getElementById("robot");
+    if (!root) return;
+    const nodes = [
+      { el: root, kind: "bob", now: 0, target: 0 },
+      { el: document.querySelector(".robot-head-anim") || document.getElementById("robot-head"), kind: "angle", now: 0, target: 0 },
+      { el: document.querySelector(".robot-arm-left") || document.getElementById("robot-arm-left"), kind: "angle", now: 0, target: 0 },
+      { el: document.querySelector(".robot-arm-right") || document.getElementById("robot-arm-right"), kind: "angle", now: 0, target: 0 },
+    ].filter((item) => item.el);
+    let nextGesture = 0;
+    let previous = performance.now();
+    function tick(now) {
+      const dt = Math.min(0.05, (now - previous) / 1000);
+      previous = now;
+      if (now >= nextGesture) {
+        for (const item of nodes) {
+          const range = item.kind === "bob" ? 2.2 : (item.el === nodes[1]?.el ? 1.7 : 3.5);
+          item.target = (Math.random() * 2 - 1) * range;
+        }
+        nextGesture = now + 1300 + Math.random() * 2300;
+      }
+      const ease = 1 - Math.exp(-dt * 1.5);
+      for (const item of nodes) {
+        item.now += (item.target - item.now) * ease;
+        item.el.style.transform = item.kind === "bob"
+          ? `translateY(${item.now.toFixed(2)}px)`
+          : `rotate(${item.now.toFixed(2)}deg)`;
+      }
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+  animateFallbackIdle();
 
   // The CSS/SVG fallback avatar uses the same audio level as the VRM
   // mouth. A loaded model replaces this hook with its morph-target driver.
@@ -209,6 +247,9 @@
       mouthLevel = Math.max(0, Math.min(1, level));
     };
     let blinkAt = 2.5, blinkT = -1, t = 0;
+    let idleNext = 0;
+    const idle = { x: 0, y: 0, z: 0 };
+    const idleTarget = { x: 0, y: 0, z: 0 };
     const clock = new THREE.Clock();
     const baseRX = head ? head.rotation.x : 0;
     const baseRY = head ? head.rotation.y : 0;
@@ -219,10 +260,25 @@
       t += dt;
       // subtle sway (incommensurate freqs so it never looks looped)
       if (head) {
-        const bounce = mood.mouth * 0.6;   // a happier face moves a little more
-        head.rotation.y = baseRY + (0.07 + bounce * 0.03) * Math.sin(t * 0.45);
-        head.rotation.x = baseRX + 0.035 * Math.sin(t * 0.62 + 1.3);
-        head.rotation.z = 0.02 * Math.sin(t * 0.3 + 0.5);
+        if (reduceMotion) {
+          head.rotation.x = baseRX;
+          head.rotation.y = baseRY;
+          head.rotation.z = 0;
+        } else {
+          if (t >= idleNext) {
+            idleTarget.x = (Math.random() * 2 - 1) * 0.025;
+            idleTarget.y = (Math.random() * 2 - 1) * 0.065;
+            idleTarget.z = (Math.random() * 2 - 1) * 0.018;
+            idleNext = t + 1.4 + Math.random() * 2.4;
+          }
+          const idleEase = 1 - Math.exp(-dt * 1.3);
+          idle.x += (idleTarget.x - idle.x) * idleEase;
+          idle.y += (idleTarget.y - idle.y) * idleEase;
+          idle.z += (idleTarget.z - idle.z) * idleEase;
+          head.rotation.x = baseRX + idle.x;
+          head.rotation.y = baseRY + idle.y;
+          head.rotation.z = idle.z;
+        }
       }
       // mood: ease toward the target so the smile arrives softly
       const k = Math.min(1, dt * 3);
