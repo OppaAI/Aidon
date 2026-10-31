@@ -75,5 +75,30 @@ def test_saved_lab_turns_restore_only_to_their_conversation(tmp_path):
     journal.answer(turn, "MP4")
     journal.question("run", first, "Ordinary question", False)
     assert server.handle_conversation_get(first)["lab_turns"] == [
-        {"run_id": "run", "question": "Which format?", "answer": "MP4"}]
+        {"id": turn, "run_id": "run", "question": "Which format?", "answer": "MP4"}]
     assert server.handle_conversation_get(second)["lab_turns"] == []
+
+
+def test_reopened_conversation_exposes_its_live_question(tmp_path):
+    import threading
+    import time
+    from src.interface.webui import WebUIServer
+    server = WebUIServer(tmp_path)
+    conversation = server.handle_conversation_create({})["id"]
+    other = server.handle_conversation_create({})["id"]
+    server._web_runs["run"] = {"run_id": "run", "events": [], "trace": [], "status": "running"}
+    thread = threading.Thread(target=server.ask_question,
+                              args=("run", conversation, "[AIDON_LAB] Which format?"), daemon=True)
+    thread.start()
+    for _ in range(100):
+        if server.waiting_question("run"):
+            break
+        time.sleep(0.01)
+    restored = server.handle_conversation_get(conversation)
+    assert restored["active_run"]["run_id"] == "run"
+    assert restored["active_run"]["lab"] is True
+    assert restored["lab_turns"][0]["question"] == "Which format?"
+    assert server.handle_conversation_get(other)["active_run"] is None
+    server.answer_question(conversation, "MP4")
+    thread.join(timeout=2)
+    assert not thread.is_alive()

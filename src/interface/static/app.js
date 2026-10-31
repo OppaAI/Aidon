@@ -181,7 +181,11 @@
 
   let labCard = null;
   let waitingForLab = false;
-  function addLabTurn(kind, text) {
+  const labTurnsSeen = new Set();
+  function addLabTurn(kind, text, turnId) {
+    const key = turnId == null ? "" : String(turnId) + ":" + kind;
+    if (key && labTurnsSeen.has(key)) return;
+    if (key) labTurnsSeen.add(key);
     if (!labCard || !labCard.isConnected) {
       labCard = document.createElement("section");
       labCard.className = "capability-lab-card";
@@ -198,9 +202,10 @@
   }
   window.aidonRestoreLabTurns = (turns) => {
     labCard = null;
+    labTurnsSeen.clear();
     (turns || []).forEach(turn => {
-      addLabTurn("aidon", turn.question || "");
-      if (turn.answer != null) addLabTurn("user", turn.answer);
+      addLabTurn("aidon", turn.question || "", turn.id);
+      if (turn.answer != null) addLabTurn("user", turn.answer, turn.id);
     });
   };
 
@@ -1429,7 +1434,7 @@
       let sawDecision = false;
       run.events.forEach((e) => {
         if (e.kind === "lab-question" || e.kind === "lab-answer") {
-          addLabTurn(e.kind === "lab-answer" ? "user" : "aidon", e.text);
+          addLabTurn(e.kind === "lab-answer" ? "user" : "aidon", e.text, e.turn_id);
         }
         else if (e.kind === "user") {
           if (!renderMaybeImage("user", e.text, e.t))
@@ -1973,6 +1978,18 @@
     return Promise.resolve(startRun(...args)).finally(() => {
       window.aidonSendInProgress = false;
     });
+  };
+  window.aidonReconnectInterview = (active) => {
+    if (!active || !active.run_id) return;
+    currentRun = active.run_id;
+    lastEventCount = active.event_total || 0;
+    lastTraceCount = active.trace_total || 0;
+    waitingForLab = !!active.lab;
+    if (!active.lab && active.question) addMsg("aidon", active.question);
+    if (pollTimer) clearInterval(pollTimer);
+    steerRow.hidden = false;
+    pollTimer = setInterval(poll, 2000);
+    poll();
   };
 
   async function sendSteer() {
@@ -2677,6 +2694,7 @@
       });
     }
     if (window.aidonRestoreLabTurns) window.aidonRestoreLabTurns(conv.lab_turns || []);
+    if (window.aidonReconnectInterview && conv.active_run) window.aidonReconnectInterview(conv.active_run);
     if (window.aidonScrollThread) window.aidonScrollThread();
     if (window.aidonRenderStopCardForConversation)
       window.aidonRenderStopCardForConversation(conv.id);

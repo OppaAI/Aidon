@@ -1206,7 +1206,7 @@ class WebUIServer:
                 self._question_by_conversation[key] = waiter
         record = self._web_runs.get(run_id)
         if record is not None:
-            record["events"].append({"kind": "lab-question" if lab_question else "aidon", "text": str(question)})
+            record["events"].append({"kind": "lab-question" if lab_question else "aidon", "text": str(question), "turn_id": turn_id})
         try:
             while not event.wait(1.0):
                 if (self.run_control is not None
@@ -1233,7 +1233,7 @@ class WebUIServer:
             if waiter.get("lab"):
                 record = self._web_runs.get(waiter["run_id"])
                 if record is not None:
-                    record["events"].append({"kind": "lab-answer", "text": str(answer)})
+                    record["events"].append({"kind": "lab-answer", "text": str(answer), "turn_id": waiter["turn_id"]})
             waiter["answer"] = str(answer)
             waiter["event"].set()
             return waiter["run_id"]
@@ -2935,12 +2935,20 @@ class WebUIServer:
             history = db.history(conversation_id)
             ids = {r["id"] for r in db.list_all_conversations()}
             if conversation_id in ids:
+                with self._question_lock:
+                    waiter = self._question_by_conversation.get(conversation_id)
+                    record = self._web_runs.get(waiter["run_id"]) if waiter else None
+                    active_run = ({"run_id": waiter["run_id"],
+                                   "event_total": len(record.get("events", [])),
+                                   "trace_total": len(record.get("trace", [])),
+                                   "question": waiter["question"], "lab": waiter.get("lab", False)}
+                                  if waiter and record else None)
                 from .interview_store import InterviewStore
                 try:
                     lab_turns = InterviewStore(self.home).lab_transcript(conversation_id)
                 except (OSError, ValueError):
                     lab_turns = []
-                return {"id": conversation_id, "turns": history, "lab_turns": lab_turns}
+                return {"id": conversation_id, "turns": history, "lab_turns": lab_turns, "active_run": active_run}
         except Exception:
             pass
         return self._read_json_file(

@@ -145,7 +145,7 @@ class InterviewStore:
         with self.connect() as db:
             db.row_factory = sqlite3.Row
             return [dict(row) for row in db.execute(
-                "SELECT run_id, question, answer FROM turns WHERE conversation_id=? AND lab=1 ORDER BY id",
+                "SELECT id, run_id, question, answer FROM turns WHERE conversation_id=? AND lab=1 ORDER BY id",
                 (conversation_id,))]
 
     def last_answer(self, run_id, conversation_id, question):
