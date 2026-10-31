@@ -311,7 +311,7 @@ def test_slack_handler_plain_text_unchanged(tmp_path):
     assert status == 200
     assert seen[0].goal == "hello"
     assert seen[0].payload == {"force_web": False, "think_max": False,
-                               "research_mode": False, "mode": "ask",
+                               "research_mode": False, "mode": "plan",
                                "channel": "C1",
                                "thread_ts": None}
 
