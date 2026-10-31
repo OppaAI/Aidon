@@ -106,7 +106,7 @@ def _app_version() -> str:
 # No external assets: everything here is inline, so pages work offline.
 BASE_CSS = """
 :root{--bg:#d3d1c5;--surface:#f0ede3;--surface2:#e4e1d6;--text:#343a2e;--muted:#62695a;--border:#b8bbaa;--accent:#b96e35;--accent2:#65734f;--green:#53725e;--amber:#a96a43;--red:#a85e53}
-body.dark{--bg:#030b1c;--surface:#07152d;--surface2:#0c2040;--text:#e9eef8;--muted:#8b96b3;--border:#1e2a45;--accent:#0082fb;--accent2:#7c5cff;--green:#3ecf8e;--amber:#f5a623;--red:#f0564f}
+body.dark{--bg:#19161d;--surface:#211d25;--surface2:#28242e;--text:#f2f1f4;--muted:#938f9b;--border:#352f3d;--accent:#b080ff;--accent2:#7138cc;--green:#80ffb5;--amber:#ffcf99;--red:#ff8080}
 body{font-family:"Avenir Next",Avenir,"Trebuchet MS",system-ui,sans-serif;background:var(--bg);color:var(--text);margin:0 auto;padding:24px;max-width:980px;line-height:1.5}
 body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:56px 56px;opacity:.14}body:not(.dark)::before{display:none}
 h1{font-family:Georgia,"Times New Roman",serif;font-size:1.8em;color:var(--text);margin:0 0 0.5em;letter-spacing:-.025em}
@@ -195,7 +195,7 @@ CHAT_HTML = """<!doctype html>
 #avatar.speaking #mouth-smile { opacity: 0; }
 #avatar.speaking #mouth-open { opacity: 1; animation: robot-mouth-wave 0.28s ease-in-out infinite alternate; transform-origin: center; transform-box: fill-box; }
 @keyframes robot-mouth-wave { from { transform: scaleY(0.4); } to { transform: scaleY(1.4); } }
-#wave-bars span { display: inline-block; width: 6px; background: #0082fb; margin-right: 2px; vertical-align: bottom; height: 4px; }
+#wave-bars span { display: inline-block; width: 6px; background: var(--accent); margin-right: 2px; vertical-align: bottom; height: 4px; }
 #avatar.speaking #wave-bars span { animation: robot-wave 0.3s ease-in-out infinite alternate; }
 @keyframes robot-wave { from { height: 4px; } to { height: 18px; } }
 .karaoke-word { background: #ffeb3b; }

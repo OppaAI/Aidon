@@ -21,8 +21,8 @@ from src.interface.webui import (
 
 
 def test_theme_variables_and_toggle():
-    assert "--bg:#030b1c" in BASE_CSS  # deep blue dark default
-    assert "--accent:#0082fb" in BASE_CSS
+    assert "body.dark{--bg:#19161d" in BASE_CSS  # Kiro Dark inspired
+    assert "--accent:#b080ff" in BASE_CSS
     assert ":root{--bg:#d3d1c5;--surface:#f0ede3" in BASE_CSS  # light theme
     assert 'id="theme-toggle"' in CHAT_HTML
     assert "aidon-theme" in CHAT_HTML

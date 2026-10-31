@@ -10,11 +10,12 @@
   src: url("/static/fonts/JetBrainsMono-600-latin.woff2") format("woff2"); }
 
 :root, html[data-theme="dark"] {
-  --bg: #030b1c; --surface: #07152d; --surface2: #0c2040;
-  --text: #e9eef8; --muted: #8b96b3; --border: #1e2a45;
-  --accent: #0082fb; --accent2: #7c5cff;
-  --accent-glow: rgba(0, 130, 251, .35);
-  --green: #3ecf8e; --cyan: #67e8f9; --toggle-off: #52617b; --amber: #f5a623; --red: #f0564f;
+  /* Kiro Dark inspired: plum-charcoal surfaces and vivid violet accents. */
+  --bg: #19161d; --surface: #211d25; --surface2: #28242e;
+  --text: #f2f1f4; --muted: #938f9b; --border: #352f3d;
+  --accent: #b080ff; --accent2: #7138cc;
+  --accent-glow: rgba(176, 128, 255, .28);
+  --green: #80ffb5; --cyan: #80f4ff; --toggle-off: #625b69; --amber: #ffcf99; --red: #ff8080;
   --font-display: "Avenir Next", Avenir, "Trebuchet MS", system-ui, sans-serif;
   --font-serif: Georgia, "Times New Roman", serif;
   --font-body: "Avenir Next", Avenir, "Trebuchet MS", system-ui, sans-serif;

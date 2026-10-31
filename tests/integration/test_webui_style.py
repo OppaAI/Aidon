@@ -17,8 +17,8 @@ from src.interface.webui import (
 
 def test_base_css_has_page_rules():
     # Dark theme and the low-glare olive/terracotta light theme.
-    assert "--bg:#030b1c" in BASE_CSS
-    assert "--accent:#0082fb" in BASE_CSS
+    assert "body.dark{--bg:#19161d" in BASE_CSS
+    assert "--accent:#b080ff" in BASE_CSS
     assert ":root{--bg:#d3d1c5;--surface:#f0ede3" in BASE_CSS
     assert "button{" in BASE_CSS
     assert "#messages p{" in BASE_CSS
@@ -27,14 +27,14 @@ def test_base_css_has_page_rules():
 def test_full_page_constants_include_base_style():
     for page in (CHAT_HTML, DAG_HTML, REPLAY_HTML, VRM_HTML, FACTORY_HTML):
         assert "<style>" in page
-        assert "--bg:#030b1c" in page, page[:80]
+        assert "body.dark{--bg:#19161d" in page, page[:80]
 
 
 def test_page_html_wraps_fragment():
     html = _page_html("Settings", "<h1>Settings</h1>")
     assert html.startswith("<!doctype html>")
     assert "<title>Settings</title>" in html
-    assert "--bg:#030b1c" in html
+    assert "body.dark{--bg:#19161d" in html
     assert "<h1>Settings</h1>" in html
     assert html.endswith("</body></html>")
 
