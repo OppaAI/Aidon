@@ -23,6 +23,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import signal
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -96,16 +98,52 @@ class Sandbox:
         if env:
             run_env = dict(os.environ)
             run_env.update({str(k): str(v) for k, v in env.items()})
+        proc = subprocess.Popen(
+            full, cwd=self.workdir, stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=run_env,
+            start_new_session=True, preexec_fn=self._apply_resource_limits)
+        limit = 1024 * 1024
+        outputs = [bytearray(), bytearray()]
+        truncated = [False, False]
+        def drain(stream, index):
+            try:
+                while chunk := stream.read(65536):
+                    remaining = limit - len(outputs[index])
+                    outputs[index].extend(chunk[:max(0, remaining)])
+                    if len(chunk) > remaining:
+                        truncated[index] = True
+            finally:
+                stream.close()
+        readers = [threading.Thread(target=drain, args=(stream, i), daemon=True)
+                   for i, stream in enumerate((proc.stdout, proc.stderr))]
+        for reader in readers:
+            reader.start()
+        if input_text is not None:
+            def send_input():
+                try:
+                    proc.stdin.write(input_text.encode())
+                    proc.stdin.close()
+                except (OSError, ValueError):
+                    pass
+            threading.Thread(target=send_input, daemon=True).start()
+        timed_out = False
         try:
-            proc = subprocess.run(
-                full, cwd=self.workdir, capture_output=True, text=True,
-                timeout=self.timeout_seconds, input=input_text,
-                env=run_env,
-                preexec_fn=self._apply_resource_limits)
-            return SandboxResult(proc.returncode, proc.stdout, proc.stderr,
-                                 isolated)
-        except subprocess.TimeoutExpired as exc:
-            return SandboxResult(124, exc.stdout or "", "timeout", isolated)
+            proc.wait(timeout=self.timeout_seconds)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+        # Terminate descendants even if the leader exited while they held pipes.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait()
+        for reader in readers:
+            reader.join(timeout=2)
+        values = [bytes(value).decode("utf-8", errors="replace") +
+                  ("\n[output truncated]" if truncated[i] else "")
+                  for i, value in enumerate(outputs)]
+        return SandboxResult(124 if timed_out else proc.returncode, values[0],
+                             "timeout" if timed_out else values[1], isolated)
 
     def _apply_resource_limits(self) -> None:
         """Apply Aidon's optional POSIX limits to the child process.

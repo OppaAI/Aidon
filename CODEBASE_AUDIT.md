@@ -54,3 +54,12 @@ Interview steps persist and replay for the same goal/conversation; automatic wai
 ## Release decision
 
 Green offline tests do not satisfy the host-access, crash-recovery, functional-acquisition or real integration requirements. Keep deployments restricted while the P1 findings and workflow blockers remain open. Required PC access, accounts and credentials must be supplied through secure configuration; never put passwords in chat, commits or audit reports.
+
+## Subsequent repair progress
+
+- MCP child environments now contain only runtime variables and explicitly configured bindings. Stdio reads have deadlines and ID checks; this is not filesystem isolation, and writes to a non-reading child still need a deadline.
+- File serving is limited to workspace, library files and images, with private names and database/key extensions excluded. Existing links to files elsewhere in the Aidon home must be migrated to artifact locations.
+- POST and PUT body parsing rejects invalid framing and payloads above 80 MiB and uses a socket read deadline.
+- Local sandbox output is capped at 1 MiB per stream and its process group is killed at the end of a run or on timeout. Process groups are not a substitute for OS isolation: escaped sessions and other backends need separate verification.
+- X11 scrolling emits wheel button events; verification on a real desktop is still outstanding.
+- Durable acquisition states, verified acceptance-test evidence, and automatic interruption recovery remain unresolved.

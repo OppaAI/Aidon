@@ -131,6 +131,21 @@ def test_file_route_rejects_private_home_files(live_server):
     assert _get(base, "registry.db")[0] == 403
 
 
+@pytest.mark.parametrize("length,expected", [("-1", 400), ("not-a-number", 400), (str(81 * 1024 * 1024), 413)])
+def test_request_body_length_is_bounded(live_server, length, expected):
+    import http.client
+    base, _ = live_server
+    parsed = urllib.parse.urlparse(base)
+    conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=3)
+    try:
+        conn.putrequest("POST", "/api/chat")
+        conn.putheader("Content-Length", length)
+        conn.endheaders()
+        assert conn.getresponse().status == expected
+    finally:
+        conn.close()
+
+
 def test_file_route_refuses_symlink_escaping_home(live_server, tmp_path):
     base, home = live_server
     secret = tmp_path / "secret.txt"

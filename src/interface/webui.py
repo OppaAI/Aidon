@@ -3674,8 +3674,31 @@ class WebUIServer:
                 self._send_bytes(200, content_type, data)
 
             def _read_body(self) -> bytes:
-                length = int(self.headers.get("Content-Length", 0) or 0)
-                return self.rfile.read(length) if length else b""
+                lengths = self.headers.get_all("Content-Length", [])
+                if len(lengths) > 1 or self.headers.get("Transfer-Encoding"):
+                    raise ValueError("invalid request framing")
+                raw_length = lengths[0] if lengths else "0"
+                if not raw_length.isascii() or not raw_length.isdecimal():
+                    raise ValueError("invalid content length")
+                length = int(raw_length)
+                if length > 80 * 1024 * 1024:
+                    raise OverflowError("request body too large")
+                self.connection.settimeout(30)
+                body = self.rfile.read(length) if length else b""
+                if len(body) != length:
+                    raise ValueError("incomplete request body")
+                return body
+
+            def _bounded_body(self):
+                try:
+                    return self._read_body()
+                except OverflowError:
+                    self.close_connection = True
+                    self._send_json(413, {"error": "request body too large"})
+                except (ValueError, TimeoutError, OSError):
+                    self.close_connection = True
+                    self._send_json(400, {"error": "invalid or incomplete request body"})
+                return None
 
             def do_GET(self):
                 parsed = urlparse(self.path)
@@ -4129,7 +4152,9 @@ loadSettings();
                         "/webhook/slack", "/webhooks/slack"):
                     self._send_json(404, {"error": "webhook only"})
                     return
-                raw = self._read_body()
+                raw = self._bounded_body()
+                if raw is None:
+                    return
                 content_type = self.headers.get("Content-Type", "").lower()
                 if content_type.startswith("audio/"):
                     # Audio uploads are binary and must reach /api/transcribe
@@ -4549,7 +4574,9 @@ loadSettings();
                     if not is_allowed_host(self.headers.get("Host", ""), server.webui_allowed_hosts):
                         self._send_json(403, {"error": "foreign host"})
                         return
-                raw = self._read_body()
+                raw = self._bounded_body()
+                if raw is None:
+                    return
                 try:
                     body = json.loads(raw) if raw else {}
                 except json.JSONDecodeError:
