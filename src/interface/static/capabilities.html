@@ -89,9 +89,12 @@
 
   <section class="cap-sec">
     <h2>Tools <span id="tools-count" class="cap-note"></span></h2>
-    <p class="cap-note">The live registry. “Acts on the world” tools are
-    stubbed during sandbox testing and only run for real after the approval
-    gate.</p>
+    <p class="cap-note">This catalog includes optional built-in tools even
+    when they are disabled for runs. With <code>AIDON_OPTIONAL_TOOLS=0</code>
+    (the default), those tools are hidden from the agent; sandbox basics,
+    core ladder tools, and approved plugins remain available unless kernel
+    mode further restricts them. “Acts on the world” tools are
+    approval-gated before live use.</p>
     <div class="cap-cards" id="tools"></div>
   </section>
 
