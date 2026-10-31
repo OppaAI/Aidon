@@ -57,3 +57,10 @@ class InterviewStore:
             db.row_factory = sqlite3.Row
             return [dict(row) for row in db.execute(
                 "SELECT * FROM turns WHERE run_id=? ORDER BY id", (run_id,))]
+
+    def last_answer(self, run_id, conversation_id, question):
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT answer FROM turns WHERE run_id=? AND conversation_id=? AND question=? ORDER BY id DESC LIMIT 1",
+                (run_id, conversation_id, question)).fetchone()
+            return row[0] if row else None

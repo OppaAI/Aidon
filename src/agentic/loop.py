@@ -1729,9 +1729,15 @@ class GoalRunner:
                     raise ValueError("Interview changed; saved consent cannot be replayed")
                 result = saved["result"]
             else:
-                state["pending"] = {"kind": kind, "prompt": prompt}
-                store.save_session(key, state)
-                result = action()
+                pending = state.get("pending") or {}
+                result = None
+                if kind == "question" and pending.get("kind") == kind and pending.get("prompt") == prompt and pending.get("run_id"):
+                    question = prompt.removeprefix("[AIDON_LAB] ")
+                    result = store.last_answer(pending["run_id"], getattr(self, "conversation_id", ""), question)
+                if result is None:
+                    state["pending"] = {"kind": kind, "prompt": prompt, "run_id": getattr(self, "run_id", None)}
+                    store.save_session(key, state)
+                    result = action()
                 state["steps"].append({"kind": kind, "prompt": prompt, "result": result})
                 state.pop("pending", None)
                 store.save_session(key, state)

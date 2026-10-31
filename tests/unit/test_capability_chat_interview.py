@@ -57,3 +57,21 @@ def test_interrupted_interview_replays_saved_answers(tmp_path):
     resumed.conversation_id = "chat"
     assert resumed._capability_interview("Edit a video", "need_plugin") == (
         "approved", "MP4, 30 seconds.")
+
+
+def test_answer_committed_before_interruption_is_replayed(tmp_path):
+    from src.interface.interview_store import InterviewStore
+    runner = _runner([], [])
+    runner.home, runner.conversation_id, runner.run_id = tmp_path, "chat", "old-run"
+    journal = InterviewStore(tmp_path)
+    def answer_then_crash(question):
+        turn = journal.question("old-run", "chat", question, False)
+        journal.answer(turn, "reject")
+        raise RuntimeError("interrupted after answer was saved")
+    runner.question_ask = answer_then_crash
+    import pytest
+    with pytest.raises(RuntimeError):
+        runner._capability_interview("Edit video", "need_plugin")
+    resumed = _runner([], [])
+    resumed.home, resumed.conversation_id, resumed.run_id = tmp_path, "chat", "new-run"
+    assert resumed._capability_interview("Edit video", "need_plugin")[0] == "rejected"
