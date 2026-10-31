@@ -1153,7 +1153,11 @@ class GoalRunner:
         except ValueError as exc:
             if str(exc).startswith("unknown tool:") and self.plugins is not None:
                 try:
-                    return self.plugins.call(name, args)
+                    return self.plugins.call(
+                        name, args,
+                        context_factory=lambda plugin: self.plugins.context_for(
+                            name, self.home, sandbox=self.sandbox,
+                            network_available=self.network_available))
                 except ValueError as plugin_exc:
                     if str(plugin_exc).startswith("unknown plugin tool:"):
                         pass

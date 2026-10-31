@@ -48,6 +48,26 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+TOOL_POSTURES = ("locked", "standard", "developer", "selfmod")
+
+
+def _tool_posture() -> str:
+    """Read AIDON_TOOL_POSTURE, defaulting to selfmod.
+
+    The posture decides how far the self-development ladder is open:
+    locked (seed tools only, no adoption), standard (pure plugins
+    only), developer (capability plugins allowed), selfmod (developer
+    plus self-modification of Aidon's own source). An unknown value
+    falls back to standard so a typo never silently opens the gate.
+    """
+    raw = os.environ.get("AIDON_TOOL_POSTURE", "selfmod").strip().lower()
+    if raw in TOOL_POSTURES:
+        return raw
+    print(f"warning: AIDON_TOOL_POSTURE={raw!r} is not one of "
+          f"{', '.join(TOOL_POSTURES)}, using standard", file=sys.stderr)
+    return "standard"
+
+
 def default_home() -> Path:
     env_home = os.environ.get("AIDON_HOME", "").strip()
     if env_home:
@@ -206,6 +226,7 @@ class Config:
     router_fast_phases: str = "interpret,learn,respond"
     kernel_mode: bool = False
     optional_tools: bool = False
+    tool_posture: str = "selfmod"
     computer_driver: str = ""
     # Clef decision tier: AIDON_ROUTER=clef selects the Clef intent
     # router (else semantic); AIDON_CLEF_URL enables Clef at all
@@ -345,6 +366,7 @@ class Config:
             clef_secret=os.environ.get("AIDON_CLEF_SECRET", ""),
             kernel_mode=os.environ.get("AIDON_KERNEL", "0") not in ("0", "false", "no"),
             optional_tools=os.environ.get("AIDON_OPTIONAL_TOOLS", "0") not in ("0", "false", "no", "off", ""),
+            tool_posture=_tool_posture(),
             computer_driver=os.environ.get("AIDON_COMPUTER_DRIVER", "").strip().lower(),
         )
 

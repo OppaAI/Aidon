@@ -1099,14 +1099,19 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
 
     try:
         from ..capabilities.plugins import (
-            PluginRegistry, ask_plugin_approval, commit_plugin,
-            preflight_plugin)
+            PluginRegistry, adoption_gate, ask_plugin_approval,
+            commit_plugin, preflight_plugin)
 
         def adopt_tool_plugin(path):
             # Order matters: preflight and approval cost nothing.
             # The governor counts only the commit, after the
             # owner has said yes — a rejection, whether by the
             # scanner or by the owner, consumes no budget.
+            posture = str(getattr(config, "tool_posture", "standard")
+                          or "standard").lower()
+            if posture == "locked" or getattr(config, "kernel_mode", False):
+                return ("adoption refused: tool posture is locked; "
+                        "plugin adoption is disabled")
             source = _confined(path)
             if not source.is_dir():
                 return f"adoption refused: plugin directory not found: {path}"
@@ -1114,6 +1119,11 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             preflight = preflight_plugin(source)
             if not preflight.ok:
                 return f"adoption refused: {preflight.message}"
+            allowed, reason = adoption_gate(
+                posture, getattr(config, "kernel_mode", False),
+                preflight.plugin.capabilities)
+            if not allowed:
+                return f"adoption refused: {reason}"
             if not ask_plugin_approval(gate, None, preflight):
                 return "adoption refused: Adoption rejected by owner"
             if governor is not None:

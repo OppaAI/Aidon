@@ -97,9 +97,48 @@ class Plugin:
     tools: list[dict] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     functions: dict = field(default_factory=dict)
+    capabilities: list[str] = field(default_factory=list)
 
     def tool_names(self) -> list[str]:
         return [str(t.get("name", "")) for t in self.tools if t.get("name")]
+
+    def tool_spec(self, name: str) -> dict | None:
+        for tool in self.tools:
+            if str(tool.get("name", "")) == str(name):
+                return tool
+        return None
+
+    def needs_context(self, name: str) -> bool:
+        spec = self.tool_spec(name)
+        return bool(spec and spec.get("context"))
+
+
+def _capability_policy(capabilities):
+    """Parse and validate capabilities, importing lazily so the
+    runtime module stays optional for callers that never use it."""
+    from .plugin_runtime import CapabilityPolicy
+    return CapabilityPolicy.from_capabilities(capabilities)
+
+
+def adoption_gate(posture: str, kernel_mode: bool,
+                  capabilities) -> tuple[bool, str]:
+    """Decide whether the current tool posture allows an adoption.
+
+    Returns ``(allowed, reason)``. ``locked`` (and kernel mode, which
+    is the same posture by another name) refuses every adoption.
+    ``standard`` refuses capability plugins but allows pure tools.
+    ``developer`` and ``selfmod`` allow both; the owner's approval
+    card still lists every capability, so the posture widens what can
+    be *asked for*, never what is granted without a decision.
+    """
+    posture = str(posture or "standard").lower()
+    if kernel_mode or posture == "locked":
+        return False, "tool posture is locked; plugin adoption is disabled"
+    if posture == "standard" and list(capabilities or ()):
+        return False, ("posture 'standard' allows pure tools only; a "
+                       "capability plugin needs AIDON_TOOL_POSTURE=developer "
+                       "or selfmod")
+    return True, ""
 
 
 def scan_plugin(directory: Path) -> list[ScanFinding]:
@@ -224,7 +263,12 @@ def load_plugin(directory: Path, execute: bool = True) -> Plugin:
                     description=str(manifest.get("description", "")),
                     directory=directory,
                     tools=list(manifest.get("tools", [])),
-                    skills=list(manifest.get("skills", [])))
+                    skills=list(manifest.get("skills", [])),
+                    capabilities=[str(c) for c in
+                                  manifest.get("capabilities", []) or []])
+    # Validate capabilities now, before any approval card: an unknown
+    # capability is a hard error, never a silent no-op.
+    _capability_policy(plugin.capabilities)
     for tool in plugin.tools:
         module_name = str(tool.get("module", ""))
         func_name = str(tool.get("function", ""))
@@ -375,8 +419,10 @@ def preflight_plugin(source_dir: Path) -> Preflight:
     body_lines = [f"Plugin: {plugin.name} {plugin.version}",
                   f"Description: {plugin.description}",
                   f"Tools: {', '.join(plugin.tool_names()) or 'none'}",
-                  f"Skills: {', '.join(plugin.skills) or 'none'}",
-                  f"Approved source hash: {approved_hash}"]
+                  f"Skills: {', '.join(plugin.skills) or 'none'}"]
+    policy = _capability_policy(plugin.capabilities)
+    body_lines.append(f"Capabilities: {policy.describe()}")
+    body_lines.append(f"Approved source hash: {approved_hash}")
     if findings:
         body_lines.append("Scan warnings:")
         body_lines.extend(f"  {f.path}:{f.line} {f.type}" for f in findings)
@@ -447,6 +493,15 @@ def commit_plugin(registry, source_dir: Path, preflight: Preflight,
     if target.exists():
         shutil.rmtree(target)
     shutil.copytree(source_dir, target)
+    # Adoption marker: the broker only grants a plugin's declared
+    # capabilities when this marker exists. A directory hand-placed in
+    # <home>/plugins/ (never adopted, never approved) still loads as a
+    # pure tool, but its capability methods refuse. The marker holds
+    # the approved tree hash for audit; it is written after the copy,
+    # so it never perturbs the hash the owner approved.
+    (target / ".adopted").write_text(
+        json.dumps({"approved_hash": preflight.approved_hash}),
+        encoding="utf-8")
     registry.plugins[plugin.name] = load_plugin(target)
     # Replacement invalidates cached health: the old verdict
     # judged the previous bytes, not these.
@@ -535,12 +590,53 @@ class PluginRegistry:
         except Exception:
             return set()
 
-    def call(self, name: str, args: dict) -> str:
+    def call(self, name: str, args: dict, ctx=None,
+             context_factory=None) -> str:
+        """Dispatch a plugin tool.
+
+        Pure tools keep ``fn(args)``. A tool declared with
+        ``"context": true`` gets ``fn(args, ctx)``; when no broker is
+        passed, ``context_factory(plugin)`` builds one from the
+        plugin's declared capabilities. Without either, the call fails
+        loudly instead of silently dropping the tool's capabilities.
+        """
         for plugin in self.plugins.values():
-            if name in plugin.functions:
-                result = plugin.functions[name](dict(args))
-                return str(result)
+            if name not in plugin.functions:
+                continue
+            func = plugin.functions[name]
+            needs_context = getattr(plugin, "needs_context", None)
+            if callable(needs_context) and needs_context(name):
+                broker = ctx
+                if broker is None and context_factory is not None:
+                    broker = context_factory(plugin)
+                if broker is None:
+                    raise ValueError(
+                        f"plugin tool {name} requires a runtime context "
+                        "but none was provided")
+                return str(func(dict(args), broker))
+            return str(func(dict(args)))
         raise ValueError(f"unknown plugin tool: {name}")
+
+    def context_for(self, name: str, home: Path, sandbox=None,
+                    network_available: bool | None = None):
+        """Build the broker for the plugin that owns ``name``.
+
+        Capabilities are granted only to an adopted plugin (one with
+        the ``.adopted`` marker commit_plugin writes after approval).
+        A hand-placed plugin still runs as a pure tool, but every
+        broker method refuses, because no owner approved its powers.
+        """
+        from .plugin_runtime import build_context
+        for plugin in self.plugins.values():
+            if name not in plugin.functions:
+                continue
+            adopted = (getattr(plugin, "directory", None) is not None
+                       and (Path(plugin.directory) / ".adopted").is_file())
+            capabilities = getattr(plugin, "capabilities", []) if adopted else []
+            return build_context(getattr(plugin, "name", ""), home,
+                                 capabilities, sandbox=sandbox,
+                                 network_available=network_available)
+        return None
 
     def adopt(self, source_dir: Path, gate=None, approve=None, memory=None,
               conversation_id: str = "") -> tuple[bool, list[ScanFinding], str]:
