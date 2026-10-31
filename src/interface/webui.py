@@ -2304,7 +2304,7 @@ class WebUIServer:
             {"key": "AIDON_CRITIC_MAX_ISSUES", "label": "Critic issues per round", "type": "int", "default": "5", "desc": "Most issues the critic returns per review round; repairs address them in order.", "secret": False},
             {"key": "AIDON_CRITIC_MODE", "label": "Critic mode", "type": "enum", "default": "risk", "desc": "Plan critic scope: risk (review only fresh large plans and plans with live steps; adapted and small plans skip it) or always (review every valid plan). Flip to always if risk-based review misses real plan flaws. Default: risk.", "secret": False, "options": ["risk", "always"]},
             {"key": "AIDON_CRITIC_RISK_MAX_STEPS", "label": "Critic risk small-plan steps", "type": "int", "default": "3", "desc": "A plan with at most this many steps counts as small for risk-based critic mode and skips review when it has no live steps; 0 means only adapted plans skip. Default: 3.", "secret": False},
-            {"key": "AIDON_MODEL_VERIFIER", "label": "Model verifier mode", "type": "enum", "default": "off", "desc": "Model second opinion after code verification passes: off (code decides alone, fewest tokens), selective (runs unless every deliverable is structured data such as JSON or CSV, where code checks are complete), or always (runs on every passing run). Flip up if code-only verification misses quality flaws. Default: off.", "secret": False, "options": ["off", "selective", "always"]},
+            {"key": "AIDON_MODEL_VERIFIER", "label": "Model verifier mode", "type": "enum", "default": "off", "desc": "Model second opinion after code verification passes: off, selective (includes HTML and prose files), or always. It reviews file content; it does not execute code or prove browser behavior. Default: off.", "secret": False, "options": ["off", "selective", "always"]},
             {"key": "AIDON_CHOICE_POLICY", "label": "Choice policy", "type": "enum", "default": "auto", "desc": "Choice policy when research finds real alternatives: auto (reason and pick) or ask (present ranked candidates at a choice gate). Default: auto.", "secret": False, "options": ["auto", "ask"]},
         ]},
         {"group": "Social", "settings": [
@@ -3568,9 +3568,12 @@ class WebUIServer:
                 except (BrokenPipeError, ConnectionResetError):
                     return
 
-            def _send_bytes(self, status: int, content_type: str, data: bytes):
+            def _send_bytes(self, status: int, content_type: str, data: bytes,
+                            extra_headers: dict | None = None):
                 self.send_response(status)
                 self.send_header("Content-Type", content_type)
+                for name, value in (extra_headers or {}).items():
+                    self.send_header(name, value)
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
@@ -3934,7 +3937,16 @@ loadSettings();
                     from urllib.parse import unquote
                     requested = unquote(parsed.path[len("/api/files/"):])
                     status, content_type, data = server.handle_file(requested)
-                    self._send_bytes(status, content_type, data)
+                    headers = {}
+                    if status == 200 and requested.lower().endswith(".html"):
+                        from urllib.parse import quote
+                        _filename = Path(requested).name
+                        headers = {
+                            "Content-Disposition": "attachment; filename*=UTF-8''" +
+                            quote(_filename, safe=""),
+                            "X-Content-Type-Options": "nosniff",
+                        }
+                    self._send_bytes(status, content_type, data, headers)
                 elif parsed.path == "/api/files":
                     # Same-origin file serving: the auth check at the
                     # top of do_GET already ran (is_authorized), so
@@ -3942,7 +3954,16 @@ loadSettings();
                     query = parse_qs(parsed.query)
                     requested = query.get("path", [""])[0]
                     status, content_type, data = server.handle_file(requested)
-                    self._send_bytes(status, content_type, data)
+                    headers = {}
+                    if status == 200 and requested.lower().endswith(".html"):
+                        from urllib.parse import quote
+                        _filename = Path(requested).name
+                        headers = {
+                            "Content-Disposition": "attachment; filename*=UTF-8''" +
+                            quote(_filename, safe=""),
+                            "X-Content-Type-Options": "nosniff",
+                        }
+                    self._send_bytes(status, content_type, data, headers)
                 elif parsed.path == "/api/voice":
                     self._send_json(200, server.handle_voice())
                 elif parsed.path == "/api/status":

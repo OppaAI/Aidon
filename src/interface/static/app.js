@@ -112,9 +112,11 @@
     // A file:// link is not clickable from an http page in Chrome, so
     // the WebUI serves the file itself: same-origin, always clickable.
     t = t.replace(/href="file:\/\/([^"]+)"/g,
-        (m, p) => 'href="/api/files/' +
-          p.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/") +
-          '"');
+        (m, p) => 'href="/api/files/' + p.replace(/^\/+/, "").split("/")
+          .map((part) => {
+            try { return encodeURIComponent(decodeURIComponent(part)); }
+            catch (_) { return encodeURIComponent(part); }
+          }).join("/") + '"');
     // Markdown tables: a header row, a |---|---| separator, then body
     // rows. Without this they render as raw pipe text - the model
     // writes proper tables, the renderer just did not know them.
@@ -950,7 +952,9 @@
       const failed = String(e.status || "").toLowerCase() === "failed";
       item.className = "think-item " + (e.kind || "note") +
         (failed ? " think-failed" : "");
-      const hasTokenFields = ("tokens_in" in e) || ("tokens_out" in e);
+      const tokensIn = Number(e.tokens_in || 0);
+      const tokensOut = Number(e.tokens_out || 0);
+      const hasTokenUsage = tokensIn > 0 || tokensOut > 0;
       // Thinking is internal and encrypted on Meta, but its token
       // count arrives in usage. Per Meta's docs, reasoning tokens
       // are output tokens and already inside completion_tokens,
@@ -958,28 +962,25 @@
       // an addition on top of it.
       const thinkSuffix = ((e.thinking_tokens || 0) > 0)
         ? (" (" + e.thinking_tokens + " think)") : "";
-      const meta = hasTokenFields
-        ? ((e.seconds || 0) + "s · " + (e.tokens_in || 0) + "→" + (e.tokens_out || 0) + " tok" + thinkSuffix)
-        : ((e.tokens_in || e.tokens_out)
-          ? ((e.tokens_in || 0) + " in · " + (e.tokens_out || 0) + " out")
-          : (e.status || ((e.seconds || 0) + "s")));
-      const detail = e.detail || e.title || e.error || "";
-      const usefulDetail = detail && detail !== (e.title || "");
-      // Expandable when the step carries thinking to show: thinking
-      // text (Ollama) or a thinking-token count (Meta usage). The
-      // body stays collapsed until the row is clicked.
-      const hasThinkingText = !!(e.thinking && String(e.thinking).trim());
+      const meta = (e.seconds || 0) + "s" + (hasTokenUsage
+        ? " · " + tokensIn + "→" + tokensOut + " tok" + thinkSuffix : "");
+      let detail = e.detail || e.title || e.error || "";
+      if (phase === "plan" && detail === "plan proposed") {
+        detail = "Aidon drafted the plan shown in the plan card. This model reports reasoning-token usage, but does not provide a user-facing reasoning transcript.";
+      }
+      // Show an auditable stage summary and usage metadata. Hidden model
+      // reasoning is never displayed: some providers redact it, and where
+      // a backend returns it, it is still not the user-facing explanation.
       const hasThinkingTokens = (e.thinking_tokens || 0) > 0;
-      const expandable = hasThinkingText || hasThinkingTokens;
+      const expandable = !failed && (!!detail || hasThinkingTokens);
       const detailMarkup = failed
-        ? (usefulDetail ? '<div class="think-error-detail">' + esc(detail) + "</div>" : "")
-        : (expandable && (usefulDetail || hasThinkingText || hasThinkingTokens)
-          ? '<div class="think-body"><div class="think-detail">' + esc(detail) +
-            (hasThinkingTokens ? '</div><div class="think-detail">thinking tokens: ' +
-              esc(e.thinking_tokens) + '</div>' : '</div>') +
-            (hasThinkingText ? '<pre class="think-thinking">' + esc(e.thinking) + "</pre>" : "") +
-            "</div>"
-          : "");
+        ? (detail ? '<div class="think-error-detail">' + esc(detail) + "</div>" : "")
+        : (expandable
+          ? '<div class="think-body">' +
+            (detail ? '<div class="think-detail">' + esc(detail) + "</div>" : "") +
+            (hasThinkingTokens ? '<div class="think-detail">Reasoning tokens: ' +
+              esc(e.thinking_tokens) + '. Private reasoning text is not available here; this row shows the stage summary.</div>' : "") +
+            "</div>" : "");
       item.innerHTML =
         '<div class="think-head-row"' + (expandable ? ' title="click to expand' +
           (hasThinkingTokens ? ' thinking tokens"' : ' details"') : '') + '>' +

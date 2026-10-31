@@ -1260,6 +1260,14 @@ class GoalRunner:
                    "one step; never return deliverables with an empty or "
                    "missing steps array. For GUI requests, use the "
                    "computer_use tool when it is listed as available.")
+        system += (" For an HTML page or web app, include a step to launch "
+                   "and exercise it in a browser after writing it. Use an "
+                   "already available browser automation or computer_use "
+                   "tool; do not install a browser or claim runtime success "
+                   "from checking source text alone. For camera or other "
+                   "permission-gated features, test the page up to the "
+                   "permission boundary and state clearly if a human grant "
+                   "is still needed.")
         system += (" Terminology: the user calls the workdir the 'workspace "
                    "folder'. They are the same folder — this run's "
                    "timestamped folder. When the user says 'workspace "
@@ -1519,7 +1527,6 @@ class GoalRunner:
         reply = self._chat(_phase, [Message("system", system), user_message])
         if self.budget is not None:
             self.budget.add_tokens(reply)
-        self._trace("plan", "done", "plan proposed")
         try:
             data = json.loads(reply)
             steps = data.get("steps", [])
@@ -1541,12 +1548,18 @@ class GoalRunner:
                         needs_research=[str(x) for x in data.get("needs_research", []) or []],
                         skills=[str(s) for s in raw_skills])
         except (json.JSONDecodeError, AttributeError):
-            return Plan(
+            fallback = Plan(
                 steps=[Step(tool="write", args={"file": "deliverable.md",
                                                 "text": f"Goal: {goal}\n"},
                             deliverable="deliverable.md")],
                 deliverables=["deliverable.md"],
                 criteria=["deliverable.md exists"])
+            self._trace("plan", "done", "Prepared a basic file-writing plan.")
+            return fallback
+        plan_note = plan.summary or (
+            f"Prepared a plan with {len(plan.steps)} step(s) and "
+            f"{len(plan.deliverables)} deliverable(s).")
+        self._trace("plan", "done", plan_note[:300])
         # Level 2, one expansion pass at most: the planner asked
         # for full skill texts by name. Unknown names are
         # ignored, never a failure; the expanded plan's own

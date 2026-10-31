@@ -3323,10 +3323,35 @@ def main(argv: list[str] | None = None) -> int:
                 _phrase = (_pwm("report-" + report.status, _say)
                            if report.status in ("done", "failed", "rejected",
                                                 "cancelled") else None)
-                _surface_reply(_report_text(
+                _final_text = _report_text(
                     report.status, report.files, report.error, run_id,
                     format_run_stats(report), phrase=_phrase,
-                    blocked=report.blocked), files=report.files)
+                    blocked=report.blocked)
+                if event.source == "webui" and report.status == "done" and report.files:
+                    from pathlib import Path as _ArtifactPath
+                    _workspace = _ArtifactPath(run_sandbox.workdir).resolve()
+                    _home = _ArtifactPath(config.home).resolve()
+                    _links = []
+                    for _name in report.files:
+                        _candidate = (_ArtifactPath(_name) if _ArtifactPath(_name).is_absolute()
+                                      else _workspace / str(_name))
+                        try:
+                            _resolved = _candidate.resolve()
+                            if (_resolved.is_file()
+                                    and _resolved.is_relative_to(_workspace)
+                                    and _resolved.is_relative_to(_home)):
+                                _home_relative = _resolved.relative_to(_home).as_posix()
+                                from urllib.parse import quote as _quote_url
+                                _url_path = _quote_url(_home_relative, safe="/")
+                                _label = _resolved.name
+                                if _resolved.suffix.lower() == ".html":
+                                    _label += " (download)"
+                                _links.append(f"- [{_label}](file://{_url_path})")
+                        except (OSError, ValueError):
+                            continue
+                    if _links:
+                        _final_text += "\n\nFiles in this run's workspace:\n" + "\n".join(_links)
+                _surface_reply(_final_text, files=report.files)
             # A run that started on Slack or WhatsApp gets its
             # deliverables as uploads on that same surface, after
             # the text report above — localhost links are dead
