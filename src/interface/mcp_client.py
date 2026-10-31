@@ -98,9 +98,28 @@ class McpClient:
         with self._lock:
             self._counter += 1
             request = {"jsonrpc": "2.0", "id": self._counter, "method": method, "params": params}
-            self.proc.stdin.write(json.dumps(request) + "\n")
-            self.proc.stdin.flush()
             deadline = time.monotonic() + self.timeout
+            encoded = json.dumps(request) + "\n"
+            if len(encoded.encode("utf-8")) > 1048576:
+                raise ValueError("MCP request exceeds size limit")
+            write_result = queue.Queue(maxsize=1)
+            proc = self.proc
+            def write_request():
+                try:
+                    proc.stdin.write(encoded)
+                    proc.stdin.flush()
+                    write_result.put(None)
+                except (OSError, ValueError) as exc:
+                    write_result.put(exc)
+            threading.Thread(target=write_request, daemon=True).start()
+            try:
+                write_error = write_result.get(timeout=max(0, deadline - time.monotonic()))
+            except queue.Empty:
+                proc.kill()
+                self.close()
+                raise TimeoutError(f"MCP {method} write timed out") from None
+            if write_error is not None:
+                raise ValueError("MCP server closed its input") from write_error
             while True:
                 try:
                     line = self._responses.get(timeout=max(0, deadline - time.monotonic()))

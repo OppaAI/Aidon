@@ -195,3 +195,18 @@ def test_stdio_notification_and_wrong_id(tmp_path):
             client.list_tools()
     finally:
         client.close()
+
+
+def test_stdio_write_to_nonreading_server_times_out(tmp_path):
+    import sys
+    script = tmp_path / "stalled.py"
+    script.write_text(
+        "import json,sys,time\n"
+        "request=json.loads(sys.stdin.readline())\n"
+        "print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':{}}),flush=True)\n"
+        "time.sleep(30)\n")
+    client = McpClient([sys.executable, str(script)], timeout=0.2)
+    client.start()
+    with pytest.raises(TimeoutError, match="write timed out"):
+        client.call_tool("test", {"data": "x" * 500000})
+    assert client.proc is None
