@@ -16,7 +16,7 @@ from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
 
 
-def test_sandbox_runs_in_workdir(tmp_path):
+def test_sandbox_runs_in_workdir(tmp_path, require_bubblewrap):
     sandbox = Sandbox(tmp_path / "work")
     result = sandbox.run(["sh", "-c", "echo hello > out.txt"])
     assert result.ok
@@ -44,7 +44,7 @@ def test_goal_loop_requires_approval_before_learn(tmp_path):
     home.mkdir()
     sandbox = Sandbox(home / "work")
     gate = ApprovalGate(lambda kind, title, body: Decision("rejected"))
-    runner = GoalRunner(FakeClient(""), sandbox, gate, home)
+    runner = GoalRunner(FakeClient('{"steps": [{"tool": "write", "args": {"file": "deliverable.md", "text": "Verified test deliverable.\\n"}, "deliverable": "deliverable.md"}], "deliverables": ["deliverable.md"], "criteria": []}'), sandbox, gate, home)
     report = runner.run("Write a note", live_actions=[
         {"kind": "notify", "recipient": "owner",
          "subject": "t", "body": "b"}])
@@ -59,7 +59,7 @@ def test_goal_loop_records_after_approval(tmp_path):
     home.mkdir()
     sandbox = Sandbox(home / "work")
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
-    runner = GoalRunner(FakeClient(""), sandbox, gate, home)
+    runner = GoalRunner(FakeClient('{"steps": [{"tool": "write", "args": {"file": "deliverable.md", "text": "Verified test deliverable.\\n"}, "deliverable": "deliverable.md"}], "deliverables": ["deliverable.md"], "criteria": []}'), sandbox, gate, home)
     report = runner.run("Write a note")
     assert report.status == "done"
     assert report.approved is True

@@ -170,6 +170,33 @@
     return d;
   }
 
+  // Stored and live messages must share escaping and Markdown rendering.
+  window.aidonRenderStoredMessage = (role, text) => {
+    const node = document.createElement("div");
+    node.className = "msg " + (role === "assistant" ? "aidon" : "user");
+    node.innerHTML = role === "assistant"
+      ? renderFinalMessage(String(text || ""), null) : md(String(text || ""));
+    return node;
+  };
+
+  let labCard = null;
+  let waitingForLab = false;
+  function addLabTurn(kind, text) {
+    if (!labCard || !labCard.isConnected) {
+      labCard = document.createElement("section");
+      labCard.className = "capability-lab-card";
+      const heading = document.createElement("strong");
+      heading.textContent = "Tool Crafting Lab";
+      labCard.appendChild(heading);
+      thread.appendChild(labCard);
+    }
+    const turn = document.createElement("div");
+    turn.className = "capability-lab-turn " + kind;
+    turn.textContent = (kind === "user" ? "You: " : "Aidon: ") + text;
+    labCard.appendChild(turn);
+    scrollThreadToLatest();
+  }
+
   function finalMessageParts(text) {
     const value = String(text || "");
     const lines = value.split("\n");
@@ -1394,7 +1421,10 @@
       // append new events (the server returns only the unseen tail)
       let sawDecision = false;
       run.events.forEach((e) => {
-        if (e.kind === "user") {
+        if (e.kind === "lab-question" || e.kind === "lab-answer") {
+          addLabTurn(e.kind === "lab-answer" ? "user" : "aidon", e.text);
+        }
+        else if (e.kind === "user") {
           if (!renderMaybeImage("user", e.text, e.t))
             addMsg("user", e.text, e.t);
         }
@@ -1510,6 +1540,7 @@
         // while answering: an answer is a chat message, not a new
         // goal with guidance.
         const waiting = !!run.waiting_question;
+        waitingForLab = !!run.waiting_lab;
         sendBtn.disabled = !waiting;
         input.disabled = !waiting;
         guidanceInput.disabled = true;
@@ -1518,6 +1549,7 @@
           : defaultGoalPlaceholder;
       }
       if (run.status !== "running") {
+        waitingForLab = false;
         try {
           const key = currentConversationId
             ? "aidon-run-state-" + currentConversationId : "";
@@ -1889,7 +1921,7 @@
     // Show the user's message immediately; the server may not emit an
     // event until the runner has begun, which otherwise leaves the chat
     // visually empty after the composer clears.
-    addMsg("user", goal);
+    if (!data.lab_answer) addMsg("user", goal);
     if (data.conversation_id && window.aidonSetConversation)
       window.aidonSetConversation(data.conversation_id);
     refreshThinkBtn();
@@ -1906,6 +1938,7 @@
       return;
     }
     lastEventCount = 0;
+    labCard = null;
     lastTraceCount = 0;
     lastTracePhase = null;
     runTraceHistory = [];
@@ -2618,31 +2651,20 @@
       turns.forEach((turn) => {
         const role = turn.role || "user";
         if (role === "user") {
-        const u = document.createElement("div");
-        u.className = "msg user";
-          u.textContent = turn.text || "";
-          thread.appendChild(u);
+          thread.appendChild(window.aidonRenderStoredMessage("user", turn.text));
         } else if (role === "assistant") {
-          const a = document.createElement("div");
-          a.className = "msg aidon";
-          a.textContent = turn.text || "";
-          thread.appendChild(a);
+          thread.appendChild(window.aidonRenderStoredMessage("assistant", turn.text));
         }
       });
+      atts.forEach(renderAtt);
     } else {
       (conv.exchanges || []).forEach((ex) => {
         if (ex.user_text) {
-          const u = document.createElement("div");
-          u.className = "msg user";
-          u.textContent = ex.user_text;
-          thread.appendChild(u);
+          thread.appendChild(window.aidonRenderStoredMessage("user", ex.user_text));
         }
         (byImport[ex.exchange_no] || []).forEach(renderAtt);
         if (ex.assistant_text) {
-          const a = document.createElement("div");
-          a.className = "msg aidon";
-          a.textContent = ex.assistant_text;
-          thread.appendChild(a);
+          thread.appendChild(window.aidonRenderStoredMessage("assistant", ex.assistant_text));
         }
         (outputsByRun[ex.run_id] || []).forEach(renderAtt);
       });

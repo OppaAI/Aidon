@@ -652,28 +652,34 @@ def commit_plugin(registry, source_dir: Path, preflight: Preflight,
             "approve the new source to adopt it")
     target = registry.toolbox_dir / plugin.name
     registry.toolbox_dir.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        shutil.rmtree(target)
-    shutil.copytree(source_dir, target)
+    import tempfile
+    import uuid
+    stage = Path(tempfile.mkdtemp(prefix=".adoption-", dir=registry.toolbox_dir))
+    backup = registry.toolbox_dir / (".backup-" + uuid.uuid4().hex)
+    replaced = False
+    installed = False
     try:
-        installed_hash = plugin_tree_hash(target)
-    except OSError as exc:
-        shutil.rmtree(target, ignore_errors=True)
-        return False, findings, f"Adoption aborted: cannot verify installed copy: {exc}"
-    if installed_hash != preflight.approved_hash:
-        shutil.rmtree(target, ignore_errors=True)
-        return False, findings, (
-            "Adoption aborted: installed plugin differs from the approved source")
-    # Adoption marker: the broker only grants a plugin's declared
-    # capabilities when this marker exists. A directory hand-placed in
-    # <home>/toolbox/ (never adopted, never approved) still loads as a
-    # pure tool, but its capability methods refuse. The marker holds
-    # the approved tree hash for audit; it is written after the copy,
-    # so it never perturbs the hash the owner approved.
-    (target / ".adopted").write_text(
-        json.dumps({"approved_hash": preflight.approved_hash}),
-        encoding="utf-8")
-    registry.plugins[plugin.name] = load_plugin(target)
+        shutil.copytree(source_dir, stage, dirs_exist_ok=True)
+        if plugin_tree_hash(stage) != preflight.approved_hash:
+            return False, findings, "Adoption aborted: staged plugin differs from approved source"
+        (stage / ".adopted").write_text(
+            json.dumps({"approved_hash": preflight.approved_hash}), encoding="utf-8")
+        if target.exists():
+            target.rename(backup)
+            replaced = True
+        stage.rename(target)
+        installed = True
+        loaded = load_plugin(target)
+        registry.plugins[plugin.name] = loaded
+    except Exception as exc:
+        if installed:
+            shutil.rmtree(target, ignore_errors=True)
+        if replaced:
+            backup.rename(target)
+        return False, findings, f"Adoption aborted; previous version preserved: {type(exc).__name__}"
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+    shutil.rmtree(backup, ignore_errors=True)
     # Replacement invalidates cached health: the old verdict
     # judged the previous bytes, not these.
     from .capability_hub import invalidate_health
@@ -705,7 +711,7 @@ class PluginRegistry:
         if not self.toolbox_dir.exists():
             return []
         for path in sorted(self.toolbox_dir.iterdir()):
-            if not path.is_dir():
+            if path.name.startswith(".") or not path.is_dir():
                 continue
             try:
                 # Unadopted directories are untrusted data. Validate their

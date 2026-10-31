@@ -14,9 +14,8 @@ Backends, in order of strength:
   every result from it is labeled as such. Never present a fallback
   run as an isolated run.
 
-A sandbox run never writes outside its workdir. The loop checks
-that by running in the workdir and by never passing a path outside
-it to the command.
+Only the isolated backend restricts filesystem access. The optional
+subprocess fallback is not a security boundary.
 """
 
 from __future__ import annotations
@@ -45,7 +44,7 @@ class Sandbox:
                  mem_mb: int = 1024, nproc: int = 256,
                  fsize_mb: int = 512, cpu_seconds: int = 0,
                  backend: str = "auto", allow_network: bool = False,
-                 require_isolation: bool = False):
+                 require_isolation: bool = True):
         self.workdir = Path(workdir)
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.timeout_seconds = timeout_seconds

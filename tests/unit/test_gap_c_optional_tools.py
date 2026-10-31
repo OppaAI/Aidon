@@ -10,8 +10,9 @@ from src.system.config import Config
 from src.system.main import _goal_extra_tools
 
 CORE = set(CORE_LADDER_TOOLS) | {"read_file", "write_file"}
-OPTIONAL = {"youtube_upload", "record_webcam", "threads_publish",
-            "generate_document", "web_search"}
+OPTIONAL = {"youtube_upload", "threads_publish",
+            "generate_document"}
+CONDITIONAL = {"computer_use", "computer_use_task"}
 
 
 def _tools(tmp_path, **kwargs):
@@ -23,7 +24,7 @@ def test_on_shows_full_set(tmp_path):
     tools = _tools(tmp_path, optional_tools=True)
     for name in OPTIONAL:
         assert name in tools, name
-    for name in CORE:
+    for name in CORE - CONDITIONAL:
         assert name in tools, name
 
 

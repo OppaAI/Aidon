@@ -163,7 +163,7 @@ def _run(tmp_path, gate):
 
     home = tmp_path / "home"
     home.mkdir()
-    runner = GoalRunner(FakeClient(""), Sandbox(home / "work"), gate, home,
+    runner = GoalRunner(FakeClient('{"steps": [{"tool": "write", "args": {"file": "deliverable.md", "text": "Verified test deliverable.\\n"}, "deliverable": "deliverable.md"}], "deliverables": ["deliverable.md"], "criteria": []}'), Sandbox(home / "work"), gate, home,
                         conversation_id="dinner")
     return runner.run("Write a note", live_actions=[
         {"kind": "notify", "recipient": "owner",

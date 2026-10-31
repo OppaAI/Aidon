@@ -92,7 +92,7 @@ def test_harvest_with_zero_budget_promotes_nothing(tmp_path):
     assert library.get("echoer").state == "candidate"
 
 
-def test_real_sandbox_runs_string_test_commands(tmp_path):
+def test_real_sandbox_runs_string_test_commands(tmp_path, require_bubblewrap):
     library = SkillLibrary(tmp_path)
     library.add(_skill("echoer", ["python3 --version"]))
     sandbox = Sandbox(tmp_path / "work")

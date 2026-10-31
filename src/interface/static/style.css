@@ -886,3 +886,6 @@ body:has(.settings-app) { overflow: auto; }
   gap: 12px; padding: 8px 0; border-top: 1px solid var(--line, #2b2b33); }
 #pre-list li.pre-empty { color: var(--muted, #9a9aa5); }
 #pre-list button { padding: 4px 10px; border-radius: 6px; cursor: pointer; }
+.capability-lab-card { margin: 12px 0; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.capability-lab-turn { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: var(--surface2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.capability-lab-turn.user { margin-left: 12%; }

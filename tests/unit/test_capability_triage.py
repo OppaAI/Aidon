@@ -112,7 +112,7 @@ def test_triage_low_confidence_proceeds_as_covered():
 def test_triage_uncertain_block_downgrades_to_plugin():
     result = triage("Do a thing", _inventory(), _StubClef("blocked", 0.7))
     assert result["status"] == "need_plugin"
-    assert "plugin" in result["note"]
+    assert "Tool Crafting Lab" in result["note"]
 
 
 def test_triage_high_confidence_block_stops():

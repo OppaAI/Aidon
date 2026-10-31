@@ -23,7 +23,7 @@ class _StubClef:
 
 def _runner(work, tmp_path, clef):
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
-    return GoalRunner(FakeClient("hi"), Sandbox(work), gate, tmp_path,
+    return GoalRunner(FakeClient('{"steps": [{"tool": "write", "args": {"file": "deliverable.md", "text": "Verified test deliverable.\\n"}, "deliverable": "deliverable.md"}], "deliverables": ["deliverable.md"], "criteria": []}'), Sandbox(work), gate, tmp_path,
                       clef_client=clef)
 
 
@@ -44,7 +44,7 @@ def test_need_triage_plans_with_note_and_completes(tmp_path):
     work.mkdir(parents=True)
     runner = _runner(work, tmp_path, _StubClef("need_mcp", 0.9))
     traces = []
-    runner._trace = lambda kind, status, detail="": traces.append(
+    runner._trace = lambda kind, status, detail="", **kwargs: traces.append(
         (kind, status, detail))
     report = runner.run("Write hello.txt with hello")
     assert report.status == "done"
@@ -62,7 +62,7 @@ def test_failed_triage_never_blocks(tmp_path):
 
     runner = _runner(work, tmp_path, _Broken())
     traces = []
-    runner._trace = lambda kind, status, detail="": traces.append(
+    runner._trace = lambda kind, status, detail="", **kwargs: traces.append(
         (kind, status, detail))
     report = runner.run("Write hello.txt with hello")
     assert report.status == "done"

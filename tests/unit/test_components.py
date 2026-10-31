@@ -351,10 +351,9 @@ def test_recovery_note_with_matches():
 def test_recovery_note_without_matches():
     note = recovery_note("no_such_tool", [])
     assert "Never call it again" in note
-    assert "research how to do it" in note
-    assert "draft a tool plugin" in note
-    assert "sandbox" in note
-    assert "human approval is mandatory" in note
+    assert "Lab" in note
+    assert "approved" in note
+
 
 
 def test_capabilities_overview_assembly():

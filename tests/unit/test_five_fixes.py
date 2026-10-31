@@ -30,6 +30,24 @@ def _valid_plugin(plug):
     (plug / "tool.py").write_text("def echo(args):\n    return 'hi'\n")
 
 
+def test_failed_replacement_preserves_installed_plugin(tmp_path, monkeypatch):
+    import src.capabilities.plugins as module
+    source = tmp_path / "draft"
+    _valid_plugin(source)
+    registry = PluginRegistry(tmp_path / "home")
+    preflight = preflight_plugin(source)
+    assert commit_plugin(registry, source, preflight)[0]
+    installed = registry.toolbox_dir / "five-plug" / "tool.py"
+    original = installed.read_bytes()
+    (source / "tool.py").write_text("def echo(args):\n    return 'new'\n")
+    preflight = preflight_plugin(source)
+    def fail_copy(*args, **kwargs):
+        raise OSError("simulated disk failure")
+    monkeypatch.setattr(module.shutil, "copytree", fail_copy)
+    assert not commit_plugin(registry, source, preflight)[0]
+    assert installed.read_bytes() == original
+
+
 class _ApproveGate:
     def ask(self, kind, title, body, action_class=None, force_ask=False):
         return SimpleNamespace(verdict="approved")
@@ -64,8 +82,8 @@ def test_approved_adoption_counts_once_then_exhausts(tmp_path):
                               optional_tools=False)
     result = tools["adopt_tool_plugin"](str(plug))
     assert result == (
-        "Adopted plugin five-plug; tools available to plans validated after "
-        "adoption: echo")
+        "Adopted plugin five-plug; tools available after this adoption step "
+        "succeeds: echo")
     assert gov.tools == 1
     with pytest.raises(AcquisitionBudgetExceeded, match="tool"):
         tools["adopt_tool_plugin"](str(plug))
@@ -82,8 +100,8 @@ def test_adopted_tool_is_live_in_the_same_workflow(tmp_path):
         plugin_registry=registry)
 
     assert tools["adopt_tool_plugin"](str(plug)) == (
-        "Adopted plugin five-plug; tools available to plans validated after "
-        "adoption: echo")
+        "Adopted plugin five-plug; tools available after this adoption step "
+        "succeeds: echo")
     assert "echo" in registry.tool_names()
     assert registry.call("echo", {}) == "hi"
 

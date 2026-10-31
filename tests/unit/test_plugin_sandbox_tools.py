@@ -120,7 +120,7 @@ def test_registry_call_requires_sandbox(tmp_path):
 
 @pytest.mark.skipif(shutil.which("bwrap") is None,
                     reason="bubblewrap is required for sandbox plugin tests")
-def test_run_sandbox_tool_end_to_end(tmp_path, monkeypatch):
+def test_run_sandbox_tool_end_to_end(tmp_path, monkeypatch, require_bubblewrap):
     monkeypatch.setenv("AIDON_T2_SECRET", "tier2-secret")
     code = (
         "import os\n"
@@ -143,7 +143,7 @@ def test_run_sandbox_tool_end_to_end(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(shutil.which("bwrap") is None,
                     reason="bubblewrap is required for sandbox plugin tests")
-def test_run_sandbox_tool_reports_plugin_error(tmp_path):
+def test_run_sandbox_tool_reports_plugin_error(tmp_path, require_bubblewrap):
     code = "def heavy(args):\n    raise RuntimeError('boom')\n"
     directory = _sandbox_plugin(tmp_path, code)
     registry = PluginRegistry(tmp_path / "home")
@@ -156,7 +156,7 @@ def test_run_sandbox_tool_reports_plugin_error(tmp_path):
 
 @pytest.mark.skipif(shutil.which("bwrap") is None,
                     reason="bubblewrap is required for sandbox plugin tests")
-def test_run_sandbox_tool_writes_no_result_outside_run_dir(tmp_path):
+def test_run_sandbox_tool_writes_no_result_outside_run_dir(tmp_path, require_bubblewrap):
     """The runner's result file lives in the run dir, not the caller's
     cwd, and args never appear on the host command line."""
     code = "def heavy(args):\n    return args['payload']\n"
@@ -173,7 +173,7 @@ def test_run_sandbox_tool_writes_no_result_outside_run_dir(tmp_path):
 
 @pytest.mark.skipif(shutil.which("bwrap") is None,
                     reason="bubblewrap is required for sandbox isolation")
-def test_sandbox_plugin_cannot_write_outside_its_run_dir(tmp_path):
+def test_sandbox_plugin_cannot_write_outside_its_run_dir(tmp_path, require_bubblewrap):
     code = (
         "from pathlib import Path\n"
         "def heavy(args):\n"

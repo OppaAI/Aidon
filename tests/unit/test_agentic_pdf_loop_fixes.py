@@ -123,3 +123,24 @@ def test_question_waiter_blocks_until_answered(tmp_path):
     assert answers == ["about me, in detail"]
     assert server.waiting_question("run-1") is None
     assert server.answer_question("conv-1", "late") is None
+
+
+def test_lab_questions_and_answers_have_separate_events(tmp_path):
+    import time
+    server = WebUIServer(tmp_path)
+    server._web_runs["run-1"] = {"run_id": "run-1", "events": [], "trace": []}
+    answers = []
+    thread = threading.Thread(target=lambda: answers.append(
+        server.ask_question("run-1", "conv-1", "[AIDON_LAB] Which format?")), daemon=True)
+    thread.start()
+    for _ in range(100):
+        if server.waiting_question("run-1"):
+            break
+        time.sleep(0.01)
+    assert server.waiting_question("run-1") == "Which format?"
+    assert server.run_snapshot("run-1")["waiting_lab"] is True
+    assert server.answer_question("conv-1", "MP4") == "run-1"
+    thread.join(timeout=5)
+    assert answers == ["MP4"]
+    assert [(e["kind"], e["text"]) for e in server._web_runs["run-1"]["events"]] == [
+        ("lab-question", "Which format?"), ("lab-answer", "MP4")]

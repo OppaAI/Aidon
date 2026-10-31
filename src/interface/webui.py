@@ -1189,18 +1189,24 @@ class WebUIServer:
         Slack or WhatsApp resolves a WebUI run's question and
         vice versa (see surfaces.waiter_keys_*).
         """
+        lab_question = str(question).startswith("[AIDON_LAB] ")
+        if lab_question:
+            question = str(question)[len("[AIDON_LAB] "):]
+        from .interview_store import InterviewStore
+        journal = InterviewStore(self.home)
+        turn_id = journal.question(run_id, conversation_id, str(question), lab_question)
         event = threading.Event()
         keys = [conversation_id] + [key for key in also_keys if key and key != conversation_id]
         waiter = {"run_id": run_id, "conversation_id": conversation_id,
                   "question": str(question), "event": event, "answer": None,
-                  "keys": keys}
+                  "keys": keys, "lab": lab_question, "turn_id": turn_id}
         with self._question_lock:
             self._question_waiters[run_id] = waiter
             for key in keys:
                 self._question_by_conversation[key] = waiter
         record = self._web_runs.get(run_id)
         if record is not None:
-            record["events"].append({"kind": "aidon", "text": str(question)})
+            record["events"].append({"kind": "lab-question" if lab_question else "aidon", "text": str(question)})
         try:
             while not event.wait(1.0):
                 if (self.run_control is not None
@@ -1222,6 +1228,12 @@ class WebUIServer:
             waiter = self._question_by_conversation.get(conversation_id)
             if waiter is None:
                 return None
+            from .interview_store import InterviewStore
+            InterviewStore(self.home).answer(waiter["turn_id"], str(answer))
+            if waiter.get("lab"):
+                record = self._web_runs.get(waiter["run_id"])
+                if record is not None:
+                    record["events"].append({"kind": "lab-answer", "text": str(answer)})
             waiter["answer"] = str(answer)
             waiter["event"].set()
             return waiter["run_id"]
@@ -1289,12 +1301,16 @@ class WebUIServer:
         conversation_id = str(body.get("conversation_id", "") or "")
         conversation_db = None
         prior_history = []
+        with self._question_lock:
+            pending_waiter = self._question_by_conversation.get(conversation_id)
+            answering_lab = bool(pending_waiter and pending_waiter.get("lab"))
         try:
             conversation_db = self._conversations_db()
             if not conversation_id:
                 conversation_id = conversation_db.create_conversation()["id"]
             prior_history = conversation_db.history(conversation_id, limit=8)
-            conversation_db.record_exchange(conversation_id, "user", raw_goal)
+            if not answering_lab:
+                conversation_db.record_exchange(conversation_id, "user", raw_goal)
         except Exception:
             # A run must still work if the optional conversation store is
             # unavailable; the durable run record remains authoritative.
@@ -1316,7 +1332,7 @@ class WebUIServer:
         answered_run = self.answer_question(conversation_id, goal)
         if answered_run is not None:
             return {"run_id": answered_run, "conversation_id": conversation_id,
-                    "goal": goal}
+                    "goal": goal, "lab_answer": answering_lab}
         goal = self._merge_correction_followup(raw_goal, prior_history)
         mirror_response = self._mirror_command(conversation_id, goal)
         if mirror_response is not None:
@@ -1520,6 +1536,20 @@ class WebUIServer:
                                    control.get("stage", out.get("stage", "interpret")))})
         out.setdefault("events", [])
         out.setdefault("trace", [])
+        if record is None and control is not None:
+            from .interview_store import InterviewStore
+            saved_turns = InterviewStore(self.home).transcript(run_id)
+            if saved_turns:
+                out["status"] = "interrupted"
+                out["events"] = []
+                for turn in saved_turns:
+                    out["events"].append({"kind": "lab-question" if turn["lab"] else "aidon",
+                                          "text": turn["question"]})
+                    if turn["answer"] is not None:
+                        out["events"].append({"kind": "lab-answer" if turn["lab"] else "user",
+                                              "text": turn["answer"]})
+                out["events"].append({"kind": "aidon-final", "text":
+                    "This interview was interrupted. Your saved answers are preserved. Execution has not resumed."})
         # The browser polls incrementally. Returning the complete history on
         # every poll caused each old assistant event to be rendered again,
         # which looked like an infinite model loop.
@@ -1530,6 +1560,9 @@ class WebUIServer:
         out["events"] = all_events[max(0, int(since)):]
         out["trace"] = all_trace[max(0, int(trace_since)):]
         out["waiting_question"] = self.waiting_question(run_id)
+        with self._question_lock:
+            waiter = self._question_waiters.get(run_id)
+            out["waiting_lab"] = bool(waiter and waiter.get("lab"))
         pending = self.webui_gate.pending_cards()
         out["pending"] = pending[0] if pending else None
         return out

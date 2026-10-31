@@ -139,7 +139,7 @@ def test_handler_wires_guided_task_only_with_model_chat(tmp_path, monkeypatch):
                              kernel_mode=False,
                              owner_email="owner@example.com")
     tools = _goal_extra_tools(config, tmp_path,
-                              model_chat=lambda messages: "{}")
+                              model_chat=lambda messages: "{}", optional_tools=False)
     assert "computer_use" in tools
     assert "computer_use_task" in tools
     tools_no_chat = _goal_extra_tools(config, tmp_path)

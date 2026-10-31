@@ -22,6 +22,7 @@ Rules, fail closed:
 from __future__ import annotations
 
 from urllib.parse import urlparse
+import hmac
 
 _LOCALHOSTS = {"127.0.0.1", "::1", "[::1]", "localhost"}
 
@@ -53,7 +54,8 @@ def is_authorized(headers: dict, token: str | None, remote_addr: str = "127.0.0.
     if token is None or not str(token).strip():
         return _is_localhost(remote_addr)
     expected = f"Bearer {token}"
-    return _authorization(headers) == expected
+    supplied = _authorization(headers)
+    return supplied is not None and hmac.compare_digest(supplied.encode(), expected.encode())
 
 
 def _host_name(host: str) -> str:

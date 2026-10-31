@@ -266,7 +266,10 @@ class VMBackend(ExecutionBackend):
             stdout=subprocess.PIPE)
         try:
             proc = subprocess.run(
-                ["tar", "-xf", "-", "-C", str(workspace)],
+                [__import__("sys").executable, "-c",
+                 "import sys, tarfile; "
+                 "t=tarfile.open(fileobj=sys.stdin.buffer, mode='r|'); "
+                 "t.extractall(sys.argv[1], filter='data')", str(workspace)],
                 stdin=ssh.stdout, capture_output=True, text=True,
                 timeout=timeout_seconds)
             return proc.returncode == 0 and ssh.wait() == 0

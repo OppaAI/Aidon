@@ -23,7 +23,7 @@ def _runner(work, tmp_path, clef):
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
     memory = SimpleNamespace(
         record_episodic=lambda *args: SimpleNamespace())
-    return GoalRunner(FakeClient("hi"), Sandbox(work), gate, tmp_path,
+    return GoalRunner(FakeClient('{"steps": [{"tool": "write", "args": {"file": "deliverable.md", "text": "Verified test deliverable.\\n"}, "deliverable": "deliverable.md"}], "deliverables": ["deliverable.md"], "criteria": []}'), Sandbox(work), gate, tmp_path,
                       memory=memory, clef_client=clef)
 
 

@@ -99,7 +99,7 @@ def test_vm_run_syncs_and_executes(tmp_path, monkeypatch):
     assert any("mkdir -p" in a for args in ssh_calls for a in args)
     assert any(a.startswith("cd ") and "echo" in a
                for args in ssh_calls for a in args)
-    assert any(args[0] == "tar" for args, _ in calls)  # sync back extract
+    assert any("filter='data'" in str(args) for args, _ in calls)
 
 
 def test_vm_sudo_password_via_stdin_only(tmp_path, monkeypatch):
@@ -137,7 +137,7 @@ def test_vm_timeout_returns_124(tmp_path, monkeypatch):
     assert result.returncode == 124
 
 
-def test_bubblewrap_backend_wraps_sandbox(tmp_path):
+def test_bubblewrap_backend_wraps_sandbox(tmp_path, require_bubblewrap):
     sandbox = Sandbox(tmp_path / "work")
     backend = BubblewrapBackend(sandbox)
     result = backend.run(["echo", "hi"], tmp_path / "work")
