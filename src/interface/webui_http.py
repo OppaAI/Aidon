@@ -618,72 +618,10 @@ def make_handler(server):
             elif parsed.path == '/api/preapprovals':
                 status, payload = server.handle_preapproval_grant(body)
                 self._send_json(status, payload)
-            elif parsed.path == '/api/studio/memory':
-                if str(body.get('action', '')) == 'edit':
-                    result = server.handle_memory_edit(str(body.get('collection', 'episodic')), str(body.get('point_id', '')), str(body.get('text', '')))
-                    self._send_json(200 if result.get('ok') else 400, result)
-                elif server.memory is None:
-                    self._send_json(500, {'error': 'no memory'})
-                else:
-                    action = str(body.get('action', ''))
-                    collection = str(body.get('collection', 'episodic'))
-                    point_id = str(body.get('point_id', ''))
-                    if action == 'forget':
-                        self._send_json(200, {'ok': server.memory.forget(collection, point_id)})
-                    elif action == 'prune':
-                        self._send_json(200, server.memory.prune(collection))
-                    elif action == 'promote':
-                        point = server.memory.store.get(collection, point_id)
-                        if point is None:
-                            self._send_json(404, {'error': 'point not found'})
-                        else:
-                            self._send_json(200, {'ok': True, 'result': str(server.memory.promote_to_ltm(point))})
-                    else:
-                        self._send_json(400, {'error': 'unknown memory studio action'})
-            elif parsed.path == '/api/studio/knowledge':
-                if server.memory is None:
-                    self._send_json(500, {'error': 'no memory'})
-                else:
-                    action = str(body.get('action', ''))
-                    if action == 'recall':
-                        self._send_json(200, {'results': [str(r) for r in server.memory.recall('knowledge', str(body.get('query', '')))]})
-                    elif action == 'ingest':
-                        server.memory.record('knowledge', str(body.get('text', '')))
-                        self._send_json(200, {'ok': True})
-                    elif action == 'delete':
-                        point_id = str(body.get('point_id', ''))
-                        self._send_json(200, {'ok': server.memory.forget('knowledge', point_id)})
-                    elif action == 'edit':
-                        point_id = str(body.get('point_id', ''))
-                        text = str(body.get('text', ''))
-                        if not point_id or not text:
-                            self._send_json(400, {'error': 'edit needs point_id and text'})
-                        else:
-                            ok = server.memory.forget('knowledge', point_id)
-                            server.memory.record('knowledge', text)
-                            self._send_json(200, {'ok': ok, 'edited': True})
-                    else:
-                        self._send_json(400, {'error': 'unknown knowledge studio action'})
-            elif parsed.path == '/api/studio/capabilities':
-                action = str(body.get('action', ''))
-                if action == 'edit':
-                    result = server.handle_skill_edit(str(body.get('name', '')), str(body.get('description', '')))
-                    self._send_json(200 if result.get('ok') else 400, result)
-                elif action in ('success', 'failure'):
-                    from ..capabilities.skill_lifecycle import LifecycleStore
-                    lifecycle = LifecycleStore(server.home)
-                    name = str(body.get('name', ''))
-                    result = lifecycle.record_success(name) if action == 'success' else lifecycle.record_failure(name)
-                    self._send_json(200, {'ok': True, 'state': result})
-                elif action == 'probe':
-                    from ..capabilities.security_probe import probe_plugin
-                    path = str(body.get('path', ''))
-                    if not path:
-                        self._send_json(400, {'error': 'probe needs a path'})
-                    else:
-                        self._send_json(200, {'findings': probe_plugin(path)})
-                else:
-                    self._send_json(400, {'error': 'unknown capabilities studio action'})
+            elif parsed.path.startswith('/api/studio/'):
+                from .webui_studios import handle_studio_post
+                status, payload = handle_studio_post(server, parsed.path, body)
+                self._send_json(status, payload)
             elif parsed.path == '/api/conversations':
                 self._send_json(200, server.handle_conversation_create(body))
             elif parsed.path == '/api/ideas':
