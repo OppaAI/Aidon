@@ -176,8 +176,12 @@
     const index = lines.findIndex((line) => /^\s*⏱️?\s/.test(line));
     if (index < 0) return { body: value, stats: "" };
     return {
-      body: lines.slice(0, index).join("\n").replace(/\s+$/, ""),
-      stats: lines.slice(index).join(" ").replace(/^\s*⏱️?\s*/, "").trim(),
+      // Older server versions appended artifact links after the stats line.
+      // Keep only that line in compact metadata and put any trailing content
+      // back in the message body so those links remain visible and clickable.
+      body: lines.slice(0, index).concat(lines.slice(index + 1))
+        .join("\n").replace(/^\s+|\s+$/g, ""),
+      stats: lines[index].replace(/^\s*⏱️?\s*/, "").trim(),
     };
   }
 

@@ -1551,6 +1551,21 @@ class GoalRunner:
             self.budget.add_tokens(reply)
         try:
             data = json.loads(reply)
+        except json.JSONDecodeError:
+            # Some models wrap the requested JSON in a short preface or a
+            # code fence. Recover a real object when possible, but never
+            # pretend a generic file-writing plan satisfies the user's goal.
+            try:
+                from .planner import _extract_json
+                data = _extract_json(reply)
+            except (ValueError, json.JSONDecodeError):
+                self._trace(
+                    "plan", "failed",
+                    "The model did not return a usable plan; no steps were run.")
+                raise ValueError(
+                    "planner: model did not return a usable JSON plan; "
+                    "no steps were run") from None
+        try:
             steps = data.get("steps", [])
             deliverables = [str(d) for d in data.get("deliverables", [])]
             if not deliverables:
@@ -1569,15 +1584,13 @@ class GoalRunner:
                         } if isinstance(data.get("deliverable_descriptions", {}), dict) else {},
                         needs_research=[str(x) for x in data.get("needs_research", []) or []],
                         skills=[str(s) for s in raw_skills])
-        except (json.JSONDecodeError, AttributeError):
-            fallback = Plan(
-                steps=[Step(tool="write", args={"file": "deliverable.md",
-                                                "text": f"Goal: {goal}\n"},
-                            deliverable="deliverable.md")],
-                deliverables=["deliverable.md"],
-                criteria=["deliverable.md exists"])
-            self._trace("plan", "done", "Prepared a basic file-writing plan.")
-            return fallback
+        except AttributeError as exc:
+            self._trace(
+                "plan", "failed",
+                "The model's plan JSON had an invalid structure; no steps were run.")
+            raise ValueError(
+                "planner: model returned a plan with an invalid structure; "
+                "no steps were run") from exc
         plan_note = plan.summary or (
             f"Prepared a plan with {len(plan.steps)} step(s) and "
             f"{len(plan.deliverables)} deliverable(s).")
