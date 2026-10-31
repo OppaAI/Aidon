@@ -29,6 +29,27 @@ class InterviewStore:
             row = db.execute("SELECT document FROM sessions WHERE session_key=?", (key,)).fetchone()
             return json.loads(row[0]) if row else None
 
+    def unfinished_for_conversation(self, conversation_id):
+        """Find a single recoverable interview; refuse ambiguous selections."""
+        if not conversation_id:
+            return None
+        matches = []
+        with self.connect() as db:
+            for (document,) in db.execute("SELECT document FROM sessions"):
+                state = json.loads(document)
+                if state.get("finished") or not state.get("goal"):
+                    continue
+                owner = state.get("conversation_id")
+                if owner is None:
+                    run_id = (state.get("pending") or {}).get("run_id")
+                    row = db.execute("SELECT conversation_id FROM turns WHERE run_id=? LIMIT 1", (run_id,)).fetchone()
+                    owner = row[0] if row else None
+                if owner == conversation_id:
+                    matches.append(state)
+        if len(matches) > 1:
+            raise ValueError("Multiple unfinished interviews; resubmit the original goal to select one")
+        return matches[0] if matches else None
+
     @contextmanager
     def connect(self):
         db = sqlite3.connect(self.path, timeout=10)

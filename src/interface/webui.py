@@ -1333,6 +1333,16 @@ class WebUIServer:
         if answered_run is not None:
             return {"run_id": answered_run, "conversation_id": conversation_id,
                     "goal": goal, "lab_answer": answering_lab}
+        if goal.strip().lower() == "/resume-interview":
+            from .interview_store import InterviewStore
+            try:
+                saved = InterviewStore(self.home).unfinished_for_conversation(conversation_id)
+            except ValueError as exc:
+                return self._simple_command_response(conversation_id, raw_goal, str(exc))
+            if not saved:
+                return self._simple_command_response(conversation_id, raw_goal, "There is no unfinished interview in this conversation.")
+            goal = saved["goal"]
+            raw_goal = goal
         goal = self._merge_correction_followup(raw_goal, prior_history)
         mirror_response = self._mirror_command(conversation_id, goal)
         if mirror_response is not None:
@@ -1549,7 +1559,7 @@ class WebUIServer:
                         out["events"].append({"kind": "lab-answer" if turn["lab"] else "user",
                                               "text": turn["answer"]})
                 out["events"].append({"kind": "aidon-final", "text":
-                    "This interview was interrupted. Your saved answers are preserved. Execution has not resumed."})
+                    "This interview was interrupted. Your saved answers are preserved. Send /resume-interview to resume it."})
         # The browser polls incrementally. Returning the complete history on
         # every poll caused each old assistant event to be rendered again,
         # which looked like an infinite model loop.

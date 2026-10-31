@@ -1718,7 +1718,7 @@ class GoalRunner:
         key = hashlib.sha256(identity.encode()).hexdigest()
         state = store.load_session(key)
         if not state or state.get("finished"):
-            state = {"goal": goal, "kind": status, "steps": [], "finished": False}
+            state = {"goal": goal, "kind": status, "conversation_id": getattr(self, "conversation_id", ""), "steps": [], "finished": False}
         cursor = 0
 
         def step(kind, prompt, action):
@@ -2130,8 +2130,12 @@ class GoalRunner:
                             spec.to_dict() if hasattr(spec, "to_dict") else spec)[:1000]
                     except Exception:
                         _spec_text = ""
+                from ..interface.interview_store import InterviewStore
+                _saved = InterviewStore(self.home).unfinished_for_conversation(getattr(self, "conversation_id", ""))
                 _clef = getattr(self, "clef_client", None)
-                if _clef is not None:
+                if _saved and _saved.get("goal") == goal and _saved.get("kind") in ("need_plugin", "need_skill", "need_mcp"):
+                    _triage = {"status": _saved["kind"], "confidence": 1.0, "note": "Resume saved interview"}
+                elif _clef is not None:
                     _triage = triage(goal, _inventory, _clef, spec_text=_spec_text)
                 else:
                     from .planner import _extract_json

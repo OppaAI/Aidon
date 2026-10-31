@@ -21,3 +21,14 @@ def test_answer_cannot_be_overwritten(tmp_path):
     with pytest.raises(ValueError):
         store.answer(turn, "proceed")
     assert InterviewStore(tmp_path).transcript("run")[0]["answer"] == "reject"
+
+
+def test_unfinished_interview_lookup_is_scoped_and_unambiguous(tmp_path):
+    store = InterviewStore(tmp_path)
+    store.save_session("one", {"goal": "edit video", "kind": "need_plugin", "conversation_id": "a", "finished": False})
+    store.save_session("other", {"goal": "other", "kind": "need_mcp", "conversation_id": "b", "finished": False})
+    assert store.unfinished_for_conversation("a")["goal"] == "edit video"
+    assert store.unfinished_for_conversation("c") is None
+    store.save_session("two", {"goal": "second", "conversation_id": "a", "finished": False})
+    with pytest.raises(ValueError, match="Multiple"):
+        store.unfinished_for_conversation("a")
