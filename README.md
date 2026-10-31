@@ -93,14 +93,15 @@ Run it with `python -m src.system.main goal "..."`, or `./launch.sh goal "..."`.
 
 ## 🔮 Future — post-hackathon (to be implemented in the near future)
 
-The items below are ideas only, for direction. None of them is
-in this repository, none is in the hackathon demo, and none was
-built during Oct 26 - Nov 4.
+The items below are ideas only, for direction. The full items are
+not in this repository; small parts of the first two exist (see below).
 
-1. **Procedural 3D game-asset generation.** A game maker asking
-   for a crate, chair, or sword gets no usable mesh today.
-2. **Dedicated live toolset.** Live tools with real network and
-   credentials, distinct from sandbox tools.
+1. **Procedural 3D game-asset generation.** Cube, sphere, and
+   cylinder primitives exist; a game maker asking for an arbitrary
+   crate, chair, or sword gets no usable mesh yet.
+2. **Dedicated live toolset.** Individual live tools exist
+   (YouTube, webcam); a dedicated live toolset as a subsystem,
+   distinct from sandbox tools, does not yet.
 3. **Stronger sandbox backend (spike).** A Tier-2 backend behind
    the isolation seam, with bubblewrap staying default until the
    probes say otherwise.

@@ -94,7 +94,7 @@ def test_source_changed_during_approval_aborts_and_keeps_old_install(tmp_path):
     # First adopt a known-good version.
     ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: True)
     assert ok is True
-    installed = (home / "plugins" / "upper" / "tool.py").read_text(encoding="utf-8")
+    installed = (home / "toolbox" / "upper" / "tool.py").read_text(encoding="utf-8")
 
     def approve_and_mutate(plugin, findings):
         # The owner approves, but the source changes before the copy.
@@ -107,7 +107,7 @@ def test_source_changed_during_approval_aborts_and_keeps_old_install(tmp_path):
     assert "changed after approval" in message
     assert "hash" in message.lower()
     # The abort happens before any rmtree: the old install survives.
-    assert (home / "plugins" / "upper" / "tool.py").read_text(encoding="utf-8") == installed
+    assert (home / "toolbox" / "upper" / "tool.py").read_text(encoding="utf-8") == installed
     assert registry.call("upper", {"text": "hi"}) != "MUTATED"
 
 
@@ -123,7 +123,7 @@ def test_size_cap_rejects_before_approval_card(tmp_path):
     assert ok is False
     assert "over" in message and "cap" in message
     assert called == [], "oversized source must not reach an approval card"
-    assert not (home / "plugins" / "upper").exists()
+    assert not (home / "toolbox" / "upper").exists()
 
 
 def test_gate_throwing_rejects_instead_of_clean_scan(tmp_path, monkeypatch):
@@ -142,7 +142,7 @@ def test_gate_throwing_rejects_instead_of_clean_scan(tmp_path, monkeypatch):
     assert "security gate error" in message
     assert "scanner exploded" in message
     assert called == [], "a failed gate must never reach an approval card"
-    assert not (home / "plugins" / "upper").exists()
+    assert not (home / "toolbox" / "upper").exists()
 
 
 def test_gate_per_file_oserror_still_skips_and_adopts(tmp_path, monkeypatch):
@@ -157,7 +157,7 @@ def test_gate_per_file_oserror_still_skips_and_adopts(tmp_path, monkeypatch):
     monkeypatch.setattr(security_gate, "gate_text", unreadable_gate)
     ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: True)
     assert ok is True
-    assert (home / "plugins" / "upper" / "plugin.json").exists()
+    assert (home / "toolbox" / "upper" / "plugin.json").exists()
 
 
 class _FailingSandbox:
@@ -1000,7 +1000,7 @@ def test_callback_old_arity_still_works(tmp_path):
     ok, _findings, _message = registry.adopt(
         directory, approve=lambda plugin, findings: True)
     assert ok is True
-    assert (home / "plugins" / "upper" / "tool.py").is_file()
+    assert (home / "toolbox" / "upper" / "tool.py").is_file()
 
 
 def test_callback_rejection_does_not_copy(tmp_path):
@@ -1010,7 +1010,7 @@ def test_callback_rejection_does_not_copy(tmp_path):
     ok, _findings, _message = registry.adopt(
         directory, approve=lambda plugin, findings, h, b: False)
     assert ok is False
-    assert not (home / "plugins" / "upper").exists()
+    assert not (home / "toolbox" / "upper").exists()
 
 
 def test_download_private_url_via_fake_get():

@@ -61,10 +61,29 @@ def test_approved_adoption_counts_once_then_exhausts(tmp_path):
     gov = AcquisitionGovernor(max_tools=1)
     tools = _tools(tmp_path, _ApproveGate(), gov)
     result = tools["adopt_tool_plugin"](str(plug))
-    assert result == "Adopted plugin five-plug"
+    assert result == (
+        "Adopted plugin five-plug; tools available to plans validated after "
+        "adoption: echo")
     assert gov.tools == 1
     with pytest.raises(AcquisitionBudgetExceeded, match="tool"):
         tools["adopt_tool_plugin"](str(plug))
+
+
+def test_adopted_tool_is_live_in_the_same_workflow(tmp_path):
+    workdir = tmp_path / "work"
+    plug = workdir / "plug"
+    _valid_plugin(plug)
+    registry = PluginRegistry(tmp_path)
+    registry.load_all()
+    tools = _goal_extra_tools(
+        SimpleNamespace(home=tmp_path), workdir, gate=_ApproveGate(),
+        plugin_registry=registry)
+
+    assert tools["adopt_tool_plugin"](str(plug)) == (
+        "Adopted plugin five-plug; tools available to plans validated after "
+        "adoption: echo")
+    assert "echo" in registry.tool_names()
+    assert registry.call("echo", {}) == "hi"
 
 
 def test_commit_rejects_changed_source(tmp_path):
@@ -78,7 +97,7 @@ def test_commit_rejects_changed_source(tmp_path):
         PluginRegistry(home), plug, preflight)
     assert ok is False
     assert "changed after approval" in message
-    assert not (home / "plugins" / "five-plug").exists()
+    assert not (home / "toolbox" / "five-plug").exists()
 
 
 class _FakeMcpClient:

@@ -184,12 +184,23 @@ sheet, or by choosing Execute mode.
 
 ## 🧰 Tool, skill, and plugin system
 
-Aidon builds his own capability tools by climbing, this
-module is the arena around that climb, not the tools
-themselves. A tool is code, a skill is Markdown
-instructions, a plugin is a bundle of both, with a
-plugin.json manifest, living in `~/.aidon/plugins/<name>/`,
-never in the repo.
+Aidon builds his own capability tools by climbing. The
+**Toolbox** is his local, persistent hub of adopted tools;
+it is implemented by the plugin registry and stored at
+`~/.aidon/toolbox/<name>/`. It runs inside Aidon, so it needs no separate tool,
+MCP, or API server. A tool is code, a skill is Markdown
+instructions, and a plugin bundles them with a `plugin.json`
+manifest.
+
+At the start of each workflow, the planner receives the
+available Toolbox tool names and descriptions alongside the
+built-in tools. It should use a suitable existing tool first.
+If none fits, it follows the capability ladder and can draft,
+sandbox-test, and propose adoption of a plugin. Adoption
+always presents an explicit owner decision, even when graduated
+autonomy or pre-approval is enabled. Once approved, the live
+registry updates immediately. Plans validated after adoption can
+use the tool; re-plan if the current plan needs it.
 
 - Adopt: `python -m src.system.main plugin scan <dir>`,
   then `python -m src.system.main plugin adopt <dir>`, then
@@ -207,6 +218,23 @@ never in the repo.
   client. File and network work stays with the sandbox
   tools and with later, explicitly approved capability
   plugins.
+- Tier 3 core-source editing is available when
+  `AIDON_TOOL_POSTURE=selfmod` and kernel mode is off
+  (`AIDON_KERNEL=0`); use it only when a goal
+  requires changing Aidon's core behavior. For new reusable
+  tools, use the Toolbox plugin workflow above instead.
+  Aidon can stage a complete replacement Python file in the
+  goal workdir, check it in the sandbox, and call
+  `self_modify` with `target` (an existing `src/**/*.py`
+  path) and `proposal_file` (the staged file). The tool
+  checks Python syntax, presents the complete diff and
+  hashes, and always requests an explicit `install`
+  approval, even when autonomy or pre-approval is enabled.
+  Approved changes are backed up under
+  `~/.aidon/self_modify_backups/` before atomic replacement.
+  It refuses new files and paths outside `src/`; restart
+  Aidon to load the edited source. Scheduled runs do not
+  expose this tool.
 - Standalone skills, Markdown only, live in
   `~/.aidon/skills/<name>.md` and are passed to the
   planner as context, never executed as code.
@@ -318,9 +346,14 @@ verification arena they will run in.
    docker.sock, no host credentials, and no silent
    fallback to a host shell if Docker is missing. The
    backend is chosen by the owner in config, never by the
-   model. A full VM is post-hackathon, future only, not
-   built here. Set `AIDON_EXECUTION_BACKEND=docker` to
-   use Docker, `AIDON_DOCKER_IMAGE` for the pinned image,
+   model. Modal is a cloud backend: commands run in Modal
+   sandboxes (`AIDON_MODAL_APP`, CPU/memory caps, network
+   off unless `AIDON_DOCKER_NETWORK=1`). A VM backend over
+   SSH to a VM you already run is built; setup does not
+   provision a VM, and disposable VM per run is
+   post-hackathon. Set `AIDON_EXECUTION_BACKEND=docker`
+   to use Docker, `AIDON_EXECUTION_BACKEND=modal` for
+   Modal, `AIDON_DOCKER_IMAGE` for the pinned image,
    `AIDON_DOCKER_NETWORK=1` only when a task needs network.
 4. **Verify** — a result is verified by evidence, not by
    assertion. Deliverables must exist and be non-empty,
@@ -469,8 +502,7 @@ collection.
   to require Bearer token for WebUI, localhost
   alone needs no token, remote without a token
   is denied.
-- Post-hackathon, not built, not demoed: VM backend,
-  Unity factory, procedural 3D assets, local server
+- Post-hackathon, not built, not demoed: Unity factory, procedural 3D assets, local server
   manager, stronger sandbox, dedicated live toolset,
   and SAM 3.1 segmentation, see [ROADMAP.md](ROADMAP.md).
 

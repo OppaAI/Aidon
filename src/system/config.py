@@ -48,6 +48,27 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+TOOL_POSTURES = ("locked", "standard", "developer", "selfmod")
+
+
+def _tool_posture() -> str:
+    """Read AIDON_TOOL_POSTURE, defaulting to selfmod.
+
+    The posture decides how far the self-development ladder is open:
+    locked (seed tools only, no adoption), standard (pure plugins
+    only), developer (capability plugins allowed), selfmod (developer
+    plus reviewed, owner-approved edits to Aidon's own Python source).
+    An unknown value
+    falls back to standard so a typo never silently opens the gate.
+    """
+    raw = os.environ.get("AIDON_TOOL_POSTURE", "selfmod").strip().lower()
+    if raw in TOOL_POSTURES:
+        return raw
+    print(f"warning: AIDON_TOOL_POSTURE={raw!r} is not one of "
+          f"{', '.join(TOOL_POSTURES)}, using standard", file=sys.stderr)
+    return "standard"
+
+
 def default_home() -> Path:
     env_home = os.environ.get("AIDON_HOME", "").strip()
     if env_home:
@@ -63,6 +84,8 @@ def load_dotenv(path: Path | None = None) -> None:
     missing .env is not an error. Quotes, comments, and an
     ``export `` prefix are handled, nothing else is parsed.
     """
+    process_environment = set(os.environ)
+    home_env = default_home() / ".env"
     candidates = []
     if path is not None:
         candidates.append(Path(path))
@@ -85,9 +108,13 @@ def load_dotenv(path: Path | None = None) -> None:
             key, value = key.strip(), value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
                 value = value[1:-1]
-            if key and key not in os.environ:
+            is_home_file = candidate.resolve() == home_env.resolve()
+            if (key and (key not in os.environ
+                         or (key == "AIDON_TOOL_POSTURE" and is_home_file
+                             and key not in process_environment))):
                 os.environ[key] = value
-        return
+        # Continue so keys absent from the current-directory file can
+        # still be supplied by the user's persistent Aidon home config.
 
 
 @dataclass
@@ -206,6 +233,7 @@ class Config:
     router_fast_phases: str = "interpret,learn,respond"
     kernel_mode: bool = False
     optional_tools: bool = False
+    tool_posture: str = "selfmod"
     computer_driver: str = ""
     # Clef decision tier: AIDON_ROUTER=clef selects the Clef intent
     # router (else semantic); AIDON_CLEF_URL enables Clef at all
@@ -345,6 +373,7 @@ class Config:
             clef_secret=os.environ.get("AIDON_CLEF_SECRET", ""),
             kernel_mode=os.environ.get("AIDON_KERNEL", "0") not in ("0", "false", "no"),
             optional_tools=os.environ.get("AIDON_OPTIONAL_TOOLS", "0") not in ("0", "false", "no", "off", ""),
+            tool_posture=_tool_posture(),
             computer_driver=os.environ.get("AIDON_COMPUTER_DRIVER", "").strip().lower(),
         )
 

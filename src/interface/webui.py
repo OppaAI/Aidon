@@ -62,6 +62,7 @@ import hashlib
 import hmac
 import html
 import json
+import math
 import mimetypes
 import os
 import threading
@@ -2096,6 +2097,7 @@ class WebUIServer:
         "router_fast_phases": "AIDON_ROUTER_FAST_PHASES",
         "kernel": "AIDON_KERNEL",
         "optional_tools": "AIDON_OPTIONAL_TOOLS",
+        "tool_posture": "AIDON_TOOL_POSTURE",
         "computer_driver": "AIDON_COMPUTER_DRIVER",
         # Historical spelling remains writable for old installations.
         # New configuration uses the canonical Slack variable below.
@@ -2115,6 +2117,7 @@ class WebUIServer:
             {"key": "AIDON_WEBUI_TOKEN", "label": "WebUI token", "type": "string", "default": "", "desc": "Bearer token for the WebUI API.", "secret": True},
             {"key": "AIDON_WEBUI_PORT", "label": "WebUI port", "type": "int", "default": "8765", "desc": "Port used by launch.sh when starting the WebUI.", "secret": False},
             {"key": "AIDON_WEBUI_ALLOWED_HOSTS", "label": "WebUI allowed hosts", "type": "string", "default": "", "desc": "Additional Host names accepted by the WebUI.", "secret": False},
+            {"key": "AIDON_VERSION", "label": "Displayed version override", "type": "string", "default": "", "desc": "Displayed release version override; empty = installed package version.", "secret": False},
             {"key": "AIDON_VRM_PATH", "label": "Avatar VRM path", "type": "string", "default": "", "desc": "Optional absolute path to the avatar VRM model.", "secret": False},
         ]},
         {"group": "Scheduler", "settings": [
@@ -2123,7 +2126,7 @@ class WebUIServer:
         ]},
         {"group": "System", "settings": [
             {"key": "AIDON_APPROVAL_TIMEOUT_S", "label": "Approval timeout seconds", "type": "int", "default": "900", "desc": "Seconds an approval card waits before failing closed.", "secret": False},
-            {"key": "AIDON_EXECUTION_BACKEND", "label": "Execution backend", "type": "enum", "default": "bubblewrap", "desc": "Sandbox backend for shell steps: bubblewrap (local isolation), docker (disposable container), subprocess (no isolation), or vm (SSH to a VM you run; needs AIDON_VM_HOST). The planner never chooses this; only the owner sets it. Default: bubblewrap.", "secret": False, "options": ["bubblewrap", "docker", "subprocess", "vm"]},
+            {"key": "AIDON_EXECUTION_BACKEND", "label": "Execution backend", "type": "enum", "default": "bubblewrap", "desc": "Sandbox backend for shell steps: bubblewrap (local isolation), docker (disposable container), subprocess (no isolation), vm (SSH to a VM you run; needs AIDON_VM_HOST), or modal (Modal cloud sandboxes; needs AIDON_MODAL_APP and `modal setup` on first use). The planner never chooses this; only the owner sets it. Default: bubblewrap.", "secret": False, "options": ["bubblewrap", "docker", "subprocess", "vm", "modal"]},
             {"key": "AIDON_DOCKER_IMAGE", "label": "Docker image", "type": "string", "default": "python:3.12-slim", "desc": "Pinned image for the Docker backend.", "secret": False},
             {"key": "AIDON_DOCKER_NETWORK", "label": "Docker network", "type": "bool", "default": "0", "desc": "Allow network for the Docker backend.", "secret": False},
             {"key": "AIDON_VM_HOST", "label": "VM host", "type": "string", "default": "", "desc": "Hostname or IP of the VM the VM backend SSHes into. Only used when the execution backend is vm; without it the VM backend refuses to run. Default: empty.", "secret": False},
@@ -2139,13 +2142,25 @@ class WebUIServer:
             {"key": "AIDON_SANDBOX_NETWORK", "label": "Sandbox network", "type": "bool", "default": "0", "desc": "Allow network access inside sandbox commands.", "secret": False},
             {"key": "AIDON_SANDBOX_REQUIRE_ISOLATION", "label": "Require isolation", "type": "bool", "default": "0", "desc": "Refuse sandbox commands when bubblewrap isolation is unavailable.", "secret": False},
             {"key": "AIDON_KERNEL", "label": "Kernel mode", "type": "bool", "default": "0", "desc": "Kernel mode: write/read/list/shell only, no calculate, no plugins.", "secret": False},
+            {"key": "AIDON_TOOL_POSTURE", "label": "Tool posture", "type": "enum", "default": "selfmod", "desc": "How far the self-development ladder is open: locked (seed only, no adoption), standard (pure plugins only), developer (capability plugins: http, fs, run, secrets), selfmod (developer plus source changes shown in full and gated by explicit owner approval). Source changes are limited to existing Python files under src/ and backed up before replacement.", "secret": False, "options": ["locked", "standard", "developer", "selfmod"]},
             {"key": "AIDON_OPTIONAL_TOOLS", "label": "Optional tools", "type": "bool", "default": "0", "desc": "Show the full built-in toolset (web search, documents, social, media, email, webcam, YouTube). Off: only the minimal core ladder tools (fetch, ask, installs, MCP connect, plugin adoption). Adopted plugins and trusted skills are never gated. Default: off (0).", "secret": False},
             {"key": "AIDON_COMPUTER_DRIVER", "label": "Computer driver", "type": "enum", "default": "", "desc": "Opt-in desktop driver; requires a graphical session and kernel mode off.", "secret": False, "options": ["", "x11"]},
+            {"key": "AIDON_COMPUTER_SECRETS", "label": "Computer secrets", "type": "string", "default": "", "desc": "Comma-separated env names the owner authorizes for computer use. Only listed names resolve; the model names a handle, never a value.", "secret": True},
             {"key": "AIDON_SLACK_AUTOSTART", "label": "Slack polling autostart", "type": "bool", "default": "0", "desc": "Start Slack polling automatically with the WebUI.", "secret": False},
             {"key": "AIDON_AUTONOMY_ENABLED", "label": "Autonomy enabled", "type": "bool", "default": "1", "desc": "Trust-based autonomy for repeated skills.", "secret": False},
             {"key": "AIDON_AUTONOMY_THRESHOLD", "label": "Autonomy threshold", "type": "int", "default": "5", "desc": "Successes before a skill graduates a trust tier.", "secret": False},
             {"key": "AIDON_AUTONOMY_DECAY_DAYS", "label": "Autonomy decay days", "type": "string", "default": "14", "desc": "Days after which trust decays.", "secret": False},
             {"key": "AIDON_TIMEZONE", "label": "Timezone", "type": "string", "default": "UTC", "desc": "Timezone for schedules and reports.", "secret": False},
+            {"key": "AIDON_MODAL_APP", "label": "Modal app", "type": "string", "default": "aidon-sandbox", "desc": "Modal app name for the Modal execution backend. Only used when the execution backend is modal.", "secret": False},
+            {"key": "AIDON_MODAL_CPU", "label": "Modal CPUs", "type": "string", "default": "1.0", "desc": "CPUs per Modal sandbox for the Modal execution backend. Only used when the execution backend is modal.", "secret": False},
+            {"key": "AIDON_MODAL_MEMORY_MB", "label": "Modal memory MB", "type": "int", "default": "1024", "desc": "Memory in MB per Modal sandbox for the Modal execution backend. Only used when the execution backend is modal.", "secret": False},
+            {"key": "AIDON_ACQ_MAX_TOOLS", "label": "Acquisition max tools", "type": "int", "default": "2", "desc": "Maximum capability tools acquired per run.", "secret": False},
+            {"key": "AIDON_ACQ_MAX_SKILLS", "label": "Acquisition max skills", "type": "int", "default": "2", "desc": "Maximum skills acquired per run.", "secret": False},
+            {"key": "AIDON_ACQ_MAX_MCP", "label": "Acquisition max MCP servers", "type": "int", "default": "1", "desc": "Maximum MCP servers acquired per run.", "secret": False},
+            {"key": "AIDON_ACQ_MAX_DEPS", "label": "Acquisition max dependency sets", "type": "int", "default": "2", "desc": "Maximum dependency sets acquired per run.", "secret": False},
+            {"key": "AIDON_ACQ_MAX_REPAIRS", "label": "Acquisition max repair cycles", "type": "int", "default": "3", "desc": "Maximum acquisition repair cycles per run.", "secret": False},
+            {"key": "AIDON_ACQ_MAX_SECONDS", "label": "Acquisition max seconds", "type": "string", "default": "600", "desc": "Maximum seconds of acquisition time per run (soft limit, checked between acquisitions).", "secret": False},
+            {"key": "AIDON_HUB_TOKEN", "label": "Hub token", "type": "string", "default": "", "desc": "Token for the capability hub client (aidon hub list/push). Empty = unauthenticated.", "secret": True},
         ]},
         {"group": "Cognitive", "settings": [
             {"key": "AIDON_MODEL", "label": "Chat model", "type": "string", "default": "muse-spark", "desc": "Model id for the agent loop.", "secret": False},
@@ -2181,9 +2196,15 @@ class WebUIServer:
             {"key": "AIDON_EFFORT_WEBCHAT", "label": "Thinking effort (webchat)", "type": "enum", "default": "", "desc": "Webchat-phase thinking effort pin; empty = built-in low. A pin is never raised by escalation.", "secret": False, "options": ["", "off", "low", "medium", "high"]},
             {"key": "AIDON_EFFORT_PLAN", "label": "Thinking effort (plan)", "type": "enum", "default": "", "desc": "Plan-phase thinking effort pin; empty = built-in low. A pin is never raised by escalation.", "secret": False, "options": ["", "off", "low", "medium", "high"]},
             {"key": "AIDON_EFFORT_VERIFY", "label": "Thinking effort (verify)", "type": "enum", "default": "", "desc": "Verify-phase thinking effort pin; empty = built-in low. A pin is never raised by escalation.", "secret": False, "options": ["", "off", "low", "medium", "high"]},
+            {"key": "AIDON_ROUTER", "label": "Intent router", "type": "enum", "default": "semantic", "desc": "Intent router: semantic (local routing) or clef (Clef decision model; needs AIDON_CLEF_URL). Default: semantic.", "secret": False, "options": ["semantic", "clef"]},
+            {"key": "AIDON_CLEF_URL", "label": "Clef URL", "type": "string", "default": "", "desc": "Clef decision-model endpoint URL. Empty = no Clef anywhere.", "secret": False},
+            {"key": "AIDON_CLEF_MODEL", "label": "Clef model", "type": "string", "default": "Cloudflare/clef-flash", "desc": "Clef model id.", "secret": False},
+            {"key": "AIDON_CLEF_KEY", "label": "Clef key", "type": "string", "default": "", "desc": "Clef proxy-auth key, only when the endpoint requires proxy auth.", "secret": True},
+            {"key": "AIDON_CLEF_SECRET", "label": "Clef secret", "type": "string", "default": "", "desc": "Clef proxy-auth secret, only when the endpoint requires proxy auth.", "secret": True},
         ]},
         {"group": "Memory", "settings": [
             {"key": "AIDON_EMBED_MODEL", "label": "Embed model", "type": "string", "default": "google/embeddinggemma-2", "desc": "Embedding model for memory.", "secret": False},
+            {"key": "AIDON_EMBEDDER", "label": "Embedder", "type": "enum", "default": "", "desc": "Embedder selection: empty = EmbeddingGemma 2 440M (with AIDON_EMBED_MODEL override), hash = offline hash embedder for tests.", "secret": False, "options": ["", "hash"]},
             {"key": "AIDON_SPARSE_MODEL", "label": "Sparse memory model", "type": "string", "default": "prithivida/Splade_PP_en_v1", "desc": "Learned sparse model for hybrid memory recall; empty uses keyword sparse weights.", "secret": False},
             {"key": "AIDON_EMBEDDING_REVISION", "label": "Embed model revision", "type": "string", "default": "f9972ac22e696a105c482202646979e33e4b5a1e", "desc": "Pinned snapshot revision of the embedding model. Upstream README edits otherwise mint a new snapshot directory on every HEAD move, which looks like the weights downloading again. Override with another revision hash to use a different snapshot. Default: f9972ac22e696a105c482202646979e33e4b5a1e.", "secret": False},
             {"key": "AIDON_FORGET_HALF_LIFE_DAYS", "label": "Forget half-life days", "type": "string", "default": "21", "desc": "Forgetting-curve half-life, in days.", "secret": False},
@@ -2244,6 +2265,7 @@ class WebUIServer:
             {"key": "AIDON_IG_ACCESS_TOKEN", "label": "Instagram access token", "type": "string", "default": "", "desc": "Instagram access token for publishing.", "secret": True},
             {"key": "GITHUB_TOKEN", "label": "GitHub token", "type": "string", "default": "", "desc": "GitHub token for repository tools.", "secret": True},
             {"key": "AIDON_SLACK_INBOUND_CHANNEL", "label": "Slack inbound channel(s)", "type": "string", "default": "", "desc": "Comma-separated Slack channel or DM IDs for polling.", "secret": False},
+            {"key": "AIDON_SLACK_OUTBOUND_CHANNEL", "label": "Slack outbound channel", "type": "string", "default": "", "desc": "Slack channel outbound replies go to; empty = the inbound channel.", "secret": False},
             {"key": "AIDON_SLACK_POLL_SECONDS", "label": "Slack poll seconds", "type": "int", "default": "10", "desc": "Polling interval for Slack inbound messages.", "secret": False},
             {"key": "AIDON_SLACK_ACK_AFTER_SECONDS", "label": "Slack acknowledgement delay", "type": "int", "default": "15", "desc": "Seconds before a long-running Slack goal gets an acknowledgement.", "secret": False},
             {"key": "AIDON_OWNER_EMAIL", "label": "Owner email", "type": "string", "default": "", "desc": "Where drafts and reports to the owner are addressed.", "secret": False},
@@ -2269,7 +2291,7 @@ class WebUIServer:
     _CATALOG_FLOAT_KEYS = frozenset({
         "AIDON_MODEL_TIMEOUT_S", "AIDON_FORGET_HALF_LIFE_DAYS",
         "AIDON_FORGET_CLEANUP_THRESHOLD", "AIDON_AUTONOMY_DECAY_DAYS",
-        "AIDON_DAG_SIMILARITY",
+        "AIDON_DAG_SIMILARITY", "AIDON_MODAL_CPU", "AIDON_ACQ_MAX_SECONDS",
     })
 
     def _catalog_entry(self, env_key: str):
@@ -2417,6 +2439,9 @@ class WebUIServer:
                     text = str(int(text))
                 except ValueError:
                     return {"ok": False, "error": f"{env_key}: not an integer: {value!r}"}
+                if env_key == "AIDON_ACQ_MAX_TOOLS" and int(text) < 0:
+                    return {"ok": False,
+                            "error": f"{env_key}: must be nonnegative"}
             elif kind == "bool":
                 lowered = text.lower()
                 if lowered not in ("0", "1", "true", "false", "yes", "no"):
@@ -2427,9 +2452,16 @@ class WebUIServer:
                     return {"ok": False, "error": f"{env_key}: must be one of {entry.get('options')}"}
             elif env_key in self._CATALOG_FLOAT_KEYS:
                 try:
-                    float(text)
+                    parsed_float = float(text)
                 except ValueError:
                     return {"ok": False, "error": f"{env_key}: not a number: {value!r}"}
+                if not math.isfinite(parsed_float):
+                    return {"ok": False,
+                            "error": f"{env_key}: must be a finite number: {value!r}"}
+                if (env_key == "AIDON_ACQ_MAX_SECONDS"
+                        and parsed_float < 0):
+                    return {"ok": False,
+                            "error": f"{env_key}: must be nonnegative"}
         path = self.home / ".env"
         lines: list[str] = []
         if path.is_file():
@@ -2543,7 +2575,11 @@ class WebUIServer:
         gate = None if approve is not None else getattr(self.webui_gate, "gate", None)
         if approve is None and gate is None:
             return {"ok": False, "error": "adoption needs approval"}
-        ok, findings, message = registry.adopt(source, gate=gate, approve=approve)
+        ok, findings, message = registry.adopt(
+            source, gate=gate, approve=approve,
+            tool_posture=str(getattr(self.config, "tool_posture", "standard")
+                              or "standard").strip().lower(),
+            kernel_mode=bool(getattr(self.config, "kernel_mode", False)))
         finding_dicts = []
         for finding in findings:
             if hasattr(finding, "to_dict"):
@@ -2633,7 +2669,11 @@ class WebUIServer:
         # from the WebUI just because the manifest was not edited.
         live_names = [str(item.get("name", "")) for item in discover_tools(self.home)
                       if item.get("name")]
-        goal_tools = list(dict.fromkeys(all_tool_names(plugin_tools) + live_names))
+        selfmod = (str(getattr(self.config, "tool_posture", "standard")
+                       or "standard").strip().lower() == "selfmod"
+                   and not getattr(self.config, "kernel_mode", False))
+        goal_tools = list(dict.fromkeys(
+            all_tool_names(plugin_tools, selfmod=selfmod) + live_names))
         return {"sandbox_tools": ["write", "read", "list", "shell", "calculate"],
                 "goal_tools": goal_tools,
                 "plugin_tools": plugin_tools}
@@ -3297,7 +3337,7 @@ class WebUIServer:
             "threads_publish", "threads_post", "instagram_publish",
             "instagram_post", "email_send", "record_system_audio", "notify",
             "uv_venv", "install_python_package", "apt_install",
-            "adopt_tool_plugin", "mcp_connect", "mcp_disconnect", "tts_speak",
+            "adopt_tool_plugin", "mcp_connect", "mcp_disconnect", "self_modify", "tts_speak",
             "write_file", "write_versioned", "sam_segment",
         }
         tool_rows = []
@@ -3351,7 +3391,10 @@ class WebUIServer:
         # misleading 404 from the capabilities studio.
         try:
             from ..capabilities.tool_catalog import all_tool_names
-            if wanted in all_tool_names():
+            selfmod = (str(getattr(self.config, "tool_posture", "standard")
+                           or "standard").strip().lower() == "selfmod"
+                       and not getattr(self.config, "kernel_mode", False))
+            if wanted in all_tool_names(selfmod=selfmod):
                 if wanted in {"write", "read", "list", "shell", "calculate"}:
                     source_module = importlib.import_module("src.capabilities.tools")
                     source = inspect.getsource(source_module.ToolRegistry)

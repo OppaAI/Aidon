@@ -12,7 +12,7 @@ approves them — this file is never rewritten silently.
 This repository uses the `src/` package layout. The old `aidon/` paths
 mentioned below map to `src/agentic/`, `src/capabilities/`,
 `src/interface/`, `src/memory/`, `src/social/`, and `src/system/`.
-Runtime plugins live under `<AIDON_HOME>/plugins/`; the repository example
+Runtime plugins live under `<AIDON_HOME>/toolbox/`; the repository example
 is in `examples/tool_plugins/example_echo/`.
 
 ## The loop
@@ -84,9 +84,10 @@ approval → live → learn
   - `tts_speak`, `slack_send`, `threads_publish` — voice, notifications,
     publishing (publishing always approval-gated).
   - `adopt_tool_plugin` — adopt a tested tool plugin from the workdir
-    into `aidon/tool_plugins/` (mandatory human approval, kind
-    `install`). Adopted tools register immediately — usable by the
-    rest of the current run and every later goal, no restart needed.
+    into `<AIDON_HOME>/toolbox/` (mandatory human approval, kind
+    `install`). Adopted tools register immediately. Plans validated
+    after adoption can use them; re-plan when the current plan needs a
+    newly adopted tool. Every later goal also sees the adopted tools.
 - **Meta**: `ask_user` (questions), `declare_blocked` (true dead-ends),
   `steer` (mid-run redirection, via the WebUI).
 - **Inbound chat**: `aidon slack listen` watches a Slack DM/channel
@@ -228,7 +229,7 @@ Two-tier model routing with fast and strong model tiers.
 
 When `AIDON_FAST_MODEL` specifies a different model, Aidon routes lightweight 
 phases to the fast tier and more demanding phases to the strong tier. 
-`AIDON_ROUTER_FAST_PHASES` (default: `interpret,learn,respond`) determines 
+`AIDON_ROUTER_FAST_PHASES` (default: `interpret,learn,respond,webchat`) determines 
 which phases use the fast tier; all other phases use the strong tier.
 
 Per-tier call and token usage is available through `aidon report autonomy`. 

@@ -70,7 +70,7 @@ flowchart TB
     T[⚡ Trigger dispatcher]
     LOOP[🔁 Goal runner]
     TOOLS[🧰 Tools and plugins]
-    SANDBOX[🔒 Bubblewrap, Docker, or VM]
+    SANDBOX[🔒 Bubblewrap, Docker, VM, or Modal]
     MEMORY[(🧠 Qdrant / memory)]
     APPROVAL[👤 Approval gate]
     REPORT[📊 Trace, reports, metrics]
@@ -104,13 +104,28 @@ flowchart TB
   TriggerEvents that start a goal run, never bypassing
   approval, spec, or verification. No Telegram source.
 - Execution: bubblewrap backend, Docker backend,
-  subprocess backend, and VM backend over SSH to a VM
-  you already run. Setup does not provision a VM;
+  subprocess backend, VM backend over SSH to a VM
+  you already run, and Modal backend running commands
+  in Modal cloud sandboxes. Setup does not provision a VM;
   disposable VM per run is post-hackathon. Docker is
   disposable, workdir only mounted, non-root, all
   capabilities dropped, network off by default,
   resource limits, pinned image, no docker.sock,
   no host credentials, fail closed if Docker is missing.
+- Capability hub and acquisition governor: the hub
+  indexes every capability with lifecycle, health,
+  availability, and verification, and triage reads it;
+  ordinary skill recall is trusted-only. A per-run
+  governor caps tools, skills, MCP servers, dependency
+  sets, repair cycles, and acquisition seconds, with
+  budgets that survive stops.
+- Clef router: when `AIDON_ROUTER=clef` and
+  `AIDON_CLEF_URL` is set, a decision model ranks intent
+  and DAG candidates; an empty URL means no Clef
+  anywhere.
+- Diagnostics: rotating log, error records, and
+  `aidon diagnostics <run_id>` reports. Diagnostics
+  record only and never steer planning.
 - Budgets and trace: token, step, and time budgets,
   enforced, with estimated tokens labeled as estimates.
   Trace events, one per stage, in run order, with no

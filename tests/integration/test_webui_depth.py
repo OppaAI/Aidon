@@ -123,10 +123,10 @@ def test_plugin_adopt_needs_approval_and_copies_when_approved(tmp_path):
     directory = _plugin_dir(tmp_path, "upper")
     refused = server.handle_plugin_adopt(str(directory), approve=lambda plugin, f: False)
     assert refused["ok"] is False
-    assert not (tmp_path / "home" / "plugins" / "upper").exists()
+    assert not (tmp_path / "home" / "toolbox" / "upper").exists()
     approved = server.handle_plugin_adopt(str(directory), approve=lambda plugin, f: True)
     assert approved["ok"] is True
-    assert (tmp_path / "home" / "plugins" / "upper" / "tool.py").exists()
+    assert (tmp_path / "home" / "toolbox" / "upper" / "tool.py").exists()
     assert server.handle_plugin_adopt("/nonexistent-dir")["ok"] is False
 
 
@@ -168,6 +168,6 @@ def test_http_routes_for_new_endpoints(tmp_path):
         server.webui_gate.timeout_seconds = 1
         status, payload = post("/api/plugins/adopt", {"path": str(directory)})
         assert payload["ok"] is False
-        assert not (tmp_path / "home" / "plugins" / "upper2").exists()
+        assert not (tmp_path / "home" / "toolbox" / "upper2").exists()
     finally:
         httpd.shutdown()

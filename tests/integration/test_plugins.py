@@ -86,7 +86,7 @@ def test_adopt_rejects_blocking_even_if_approved(tmp_path):
     ok, findings, message = registry.adopt(
         directory, approve=lambda plugin, f: True)
     assert ok is False
-    assert not (home / "plugins" / "upper").exists()
+    assert not (home / "toolbox" / "upper").exists()
 
 
 def test_adopt_copies_after_approval_and_registry_loads(tmp_path):
@@ -96,7 +96,7 @@ def test_adopt_copies_after_approval_and_registry_loads(tmp_path):
     ok, findings, message = registry.adopt(
         directory, approve=lambda plugin, f: True)
     assert ok is True
-    assert (home / "plugins" / "upper" / "plugin.json").exists()
+    assert (home / "toolbox" / "upper" / "plugin.json").exists()
     registry2 = PluginRegistry(home)
     registry2.load_all()
     assert registry2.call("upper", {"text": "hi"}) == "HI"
@@ -109,7 +109,40 @@ def test_adopt_without_approval_does_not_copy(tmp_path):
     directory = _plugin_dir(tmp_path)
     ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: False)
     assert ok is False
-    assert not (home / "plugins" / "upper").exists()
+    assert not (home / "toolbox" / "upper").exists()
+
+
+def test_registry_adopt_enforces_capability_posture_before_approval(tmp_path):
+    home = tmp_path / "home"
+    registry = PluginRegistry(home)
+    directory = _plugin_dir(tmp_path)
+    manifest_path = directory / "plugin.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["capabilities"] = ["fs"]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    approval_calls = []
+    ok, _, message = registry.adopt(
+        directory,
+        approve=lambda plugin, findings: approval_calls.append(plugin.name),
+        tool_posture="standard")
+    assert ok is False
+    assert "capability or sandbox plugin" in message
+    assert approval_calls == []
+    assert not (home / "toolbox" / "upper").exists()
+
+
+def test_loader_rejects_module_path_outside_plugin_tree(tmp_path):
+    directory = _plugin_dir(tmp_path)
+    manifest_path = directory / "plugin.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["tools"][0]["module"] = "../outside.py"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    try:
+        load_plugin(directory, execute=False)
+    except ValueError as exc:
+        assert "outside the plugin directory" in str(exc)
+    else:
+        raise AssertionError("escaping plugin module path was accepted")
 
 
 def test_adoption_never_executes_plugin_code_before_approval(tmp_path):

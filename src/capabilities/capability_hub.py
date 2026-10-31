@@ -17,7 +17,7 @@ It owns no capability and no store of record. Each
 index() call rebuilds entries fresh from the live
 stores, so the index cannot drift from what is
 actually installed, and writers keep writing where
-they always wrote: adoption to plugins/, skills to
+they always wrote: adoption to toolbox/, skills to
 skills.json, images to capability_images.json, MCP
 registrations to capabilities.json, operator servers
 to mcp_servers.json. The one thing the hub does own
@@ -66,7 +66,7 @@ expose untrusted tools.
                 placed or configured it (adopted plugins,
                 hand-placed skill files, mcp_servers.json).
   source        pointer to the store of record, e.g.
-                "plugins/<name>", "skills.json:<name>",
+                "toolbox/<name>", "skills.json:<name>",
                 "capabilities.json:<name>".
   tools         tool names the capability exposes
                 (plugins list theirs; MCP entries list
@@ -389,13 +389,13 @@ class CapabilityHub:
             tools = [str(t.get("name", "")) for t in plugin.tools]
             put(_entry(f"plugin:{plugin.name}", plugin.name, "plugin",
                        "trusted", "local", "passed", "operator",
-                       f"plugins/{plugin.name}", tools,
+                       f"toolbox/{plugin.name}", tools,
                        plugin.description))
             for skill in plugin.skills:
                 skill_name = f"{plugin.name}/{skill}"
                 put(_entry(f"skill:{skill_name}", skill_name, "skill",
                            "trusted", "local", "passed", "operator",
-                           f"plugins/{plugin.name}/{skill}", [],
+                           f"toolbox/{plugin.name}/{skill}", [],
                            f"Skill bundled with plugin {plugin.name}"))
 
     def _add_standalone_skills(self, put) -> None:

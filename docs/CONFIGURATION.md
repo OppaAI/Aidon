@@ -43,8 +43,10 @@ Layout: the code lives in `src/` in six groups
 Aidon is self-hosted by design: clone it to your own computer
 or server, run it there, and use the WebUI or call the API.
 There is no central Aidon cloud, and your data is not sent to
-one. Your memory, workdirs, and keys stay on your machine,
-under your Aidon home, outside this repository.
+one. Your memory and keys stay on your machine under your Aidon
+home, outside this repository. Workdirs stay local except when
+`AIDON_EXECUTION_BACKEND=modal`, which copies the workdir into
+a Modal cloud sandbox.
 
 Important runtime settings include the model backend, execution isolation, memory, messaging, budgets, and the Aidon home:
 
@@ -52,7 +54,7 @@ Important runtime settings include the model backend, execution isolation, memor
 - `AIDON_API_KEY` — API key for that endpoint
 - `AIDON_MODEL` — model name at that endpoint
 - `AIDON_HOME` — where Aidon keeps its state (default `~/.aidon`)
-- `AIDON_EXECUTION_BACKEND` — `bubblewrap` by default, or `docker`, `subprocess`, or `vm` (SSH to a VM you already run)
+- `AIDON_EXECUTION_BACKEND` — `bubblewrap` by default, or `docker`, `subprocess`, `vm` (SSH to a VM you already run), or `modal` (Modal cloud sandboxes; `AIDON_MODAL_APP` is optional and defaults to `aidon-sandbox`; run `modal setup` first)
 - `AIDON_DOCKER_IMAGE` — Docker image when Docker execution is selected
 - `AIDON_DOCKER_NETWORK` — keep `0` unless network access is required
 - `AIDON_EMBED_MODEL` / `AIDON_SPARSE_MODEL` — dense and sparse memory models

@@ -88,6 +88,19 @@ post-hackathon, NOT built, NOT demoed, at the end.
 
 - Adaptive DAG, steer and cancel across WebUI,
   WhatsApp, Slack, CLI, v1, and MCP, with RunControl.
+- Built in v0.4.0: Ask → Plan → Execute run-mode chain with spec
+  cards; Clef intent router, DAG matching, validate gate, and
+  recovery router; Modal execution backend, capability image
+  builder, and worker pool; capability registry, failure-lessons
+  store, and capability hub with triage reading it and skill recall
+  restricted to trusted skills; per-run capability acquisition
+  governor with budgets that survive stops; YouTube upload and
+  webcam capture (both approval-gated); skill lifecycle (import,
+  Tests-section format, mission harvest); optional built-in tools
+  flip (default off); centralized diagnostics
+  (`aidon diagnostics <run_id>`); operating-manual sections riding
+  in every run's system prompt; image editing tool; intent routing
+  in every mode.
 - WebUI avatar and mic, DAG editor, entity graph,
   3D factory, run replay, 9-stage pills, VRM avatar
   viewer with SVG fallback, Meta Transcribe via

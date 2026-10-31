@@ -1153,7 +1153,13 @@ class GoalRunner:
         except ValueError as exc:
             if str(exc).startswith("unknown tool:") and self.plugins is not None:
                 try:
-                    return self.plugins.call(name, args)
+                    return self.plugins.call(
+                        name, args,
+                        context_factory=lambda plugin: self.plugins.context_for(
+                            name, self.home,
+                            sandbox=getattr(self, "sandbox", None),
+                            network_available=self.network_available),
+                        sandbox=getattr(self, "sandbox", None))
                 except ValueError as plugin_exc:
                     if str(plugin_exc).startswith("unknown plugin tool:"):
                         pass
@@ -1285,9 +1291,27 @@ class GoalRunner:
                    "never send plaintext to the model verifier. Default "
                    "cipher AES-256-GCM unless the user specifies another.")
         if self.plugins is not None and not self.kernel_mode:
-            plugin_tools = self.plugins.tool_names()
-            if plugin_tools:
-                system += f" Adopted plugin tools: {', '.join(plugin_tools)}."
+            plugin_entries = []
+            registry_plugins = getattr(self.plugins, "plugins", {})
+            for plugin in list(registry_plugins.values()):
+                for spec in getattr(plugin, "tools", ()):
+                    tool_name = str(spec.get("name", "")).strip()
+                    if tool_name:
+                        description = str(spec.get("description", "")).strip()
+                        entry = tool_name + (": " + description if description else "")
+                        plugin_entries.append(entry[:300])
+            if plugin_entries:
+                system += (" Toolbox (the local adopted-tool hub) currently has: "
+                           + "; ".join(plugin_entries[:100]) + ".")
+            system += (" Capability rule: before planning a tool step, check the "
+                       "built-in tools and the Toolbox tools above for a suitable "
+                       "match. If none fits, follow the capability ladder: check "
+                       "relevant skills and known MCP options, then draft a plugin "
+                       "in the workdir only when needed, sandbox-test it, and use "
+                       "adopt_tool_plugin. Adoption requires the owner's approval. "
+                       "After approval, the new tool is added to this run's live "
+                       "registry. It can be used by a plan validated after adoption; "
+                       "replan if the current plan needs that new tool.")
             skill_texts = self.plugins.skill_texts()
             if skill_texts:
                 system += " Skills, follow them when relevant: " + " ".join(
@@ -1314,6 +1338,20 @@ class GoalRunner:
             # extra tools are advertised only outside kernel mode.
             system += (" Extra tools available to plan steps: "
                        + ", ".join(sorted(self.extra_tools)) + ".")
+            if "self_modify" in self.extra_tools:
+                system += (" For a new reusable capability, use the Toolbox "
+                           "plugin workflow above; do not edit Aidon's core source. "
+                           "Use Tier 3 self_modify only when the goal explicitly "
+                           "requires changing Aidon's core behavior. In that case, "
+                           "stage a complete proposed "
+                           "Python file in the workdir, sandbox-check it (and run "
+                           "relevant tests in the sandbox), then call self_modify "
+                           "with target='src/relative/module.py' and "
+                           "proposal_file='<workdir file>'. The tool validates "
+                           "syntax, shows the full diff, and always requires an "
+                           "owner install approval. It only replaces existing "
+                           "Python files under src/; restart Aidon to load the "
+                           "approved source change.")
             if "schedule_job" in self.extra_tools:
                 system += (" schedule_job takes name, kind, schedule, goal, "
                            "and optional until (ISO datetime, the job "
@@ -2414,6 +2452,12 @@ class GoalRunner:
                     self._call_tool("write", {"file": step.deliverable, "text": _reply})
             else:
                 tool_result = self._call_tool(step.tool, step.args)
+                if (step.tool == "self_modify"
+                        and str(tool_result).startswith((
+                            "self-modification refused:",
+                            "self-modification aborted:",
+                            "self-modification failed ("))):
+                    raise RuntimeError(str(tool_result))
                 # File-producing extra tools return their actual
                 # path. Bind that path to the step when the model
                 # supplied a prose deliverable such as
