@@ -71,12 +71,9 @@ html[data-theme="light"] .card { border-color: color-mix(in srgb, var(--text) 60
   display: flex; align-items: center; justify-content: center;
   color: #fff; background: var(--moss);
   box-shadow: 0 0 12px var(--moss-glow); }
-#brand-mark svg { width: 25px; height: 25px; display: block; }
-#brand-mark text { fill: #fff; }
+#brand-mark svg { width: 25px; height: 25px; display: block; color: #fff; }
 #brand-name { font-family: var(--font-display); font-size: 19px; font-weight: 700;
   letter-spacing: .18em; text-transform: uppercase; flex: 1; }
-.brand-a { color: var(--moss); font-family: var(--font-serif); font-style: italic;
-  font-size: 1.12em; font-weight: 400; letter-spacing: .02em; }
 #brand-subtitle { margin: -7px 14px 9px 56px; color: var(--muted); font-size: 14px;
   letter-spacing: .04em; }
 #main-nav { display: flex; flex-direction: column; gap: 2px; padding: 4px 10px 10px; }
@@ -176,7 +173,8 @@ a.nav-btn { text-decoration: none; width: 100%; box-sizing: border-box; }
   font-size: 19px; font-weight: 600; letter-spacing: .03em; }
 .center-mark { display: inline-flex; width: 25px; height: 25px; align-items: center;
   justify-content: center; border-radius: 8px; background: var(--moss);
-  color: #fff; font-family: var(--font-serif); font-size: 21px; font-style: italic; font-weight: 400; }
+  color: #fff; }
+.center-mark svg { display: block; width: 21px; height: 21px; }
 .online-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green);
   box-shadow: 0 0 8px var(--green); margin-left: 2px; }
 .online-label, .version-label { color: var(--muted); font-size: 11px; font-family: var(--font-mono);

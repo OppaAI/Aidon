@@ -23,10 +23,15 @@
     <div id="brand">
       <span id="brand-mark" aria-label="Aidon mark">
         <svg viewBox="0 0 64 64" role="img" aria-hidden="true">
-          <text x="32" y="51" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="49" font-style="italic" font-weight="400">A</text>
+          <path d="M32 7v8" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="32" cy="6" r="4" fill="currentColor"/>
+          <rect x="11" y="17" width="42" height="34" rx="13" fill="none" stroke="currentColor" stroke-width="4"/>
+          <circle cx="24" cy="32" r="3.5" fill="currentColor"/>
+          <circle cx="40" cy="32" r="3.5" fill="currentColor"/>
+          <path d="M24 41q8 7 16 0" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
         </svg>
       </span>
-      <span id="brand-name"><span class="brand-a">A</span>idon</span>
+      <span id="brand-name">Aidon</span>
       <button id="theme-toggle" class="icon-btn" title="Toggle dark / light theme">◐</button>
     </div>
     <div id="brand-subtitle">Your Goals. My Actions.</div>
@@ -110,7 +115,13 @@
   <!-- ============ CENTER: CHAT ============ -->
   <main id="center">
     <header id="center-head">
-      <div class="center-brand"><span class="center-mark">A</span><span>Aidon</span>
+      <div class="center-brand"><span class="center-mark" aria-hidden="true"><svg viewBox="0 0 64 64">
+        <path d="M32 7v8" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+        <circle cx="32" cy="6" r="4" fill="currentColor"/>
+        <rect x="11" y="17" width="42" height="34" rx="13" fill="none" stroke="currentColor" stroke-width="4"/>
+        <circle cx="24" cy="32" r="3.5" fill="currentColor"/><circle cx="40" cy="32" r="3.5" fill="currentColor"/>
+        <path d="M24 41q8 7 16 0" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+      </svg></span><span>Aidon</span>
         <span class="version-label">v__AIDON_VERSION__</span><span class="online-dot"></span><span class="online-label">Autonomous Agent</span></div>
     </header>
     <div id="stages"></div>
