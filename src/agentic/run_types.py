@@ -7,6 +7,9 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+MAX_ATTEMPTS = 3
+MAX_PLAN_REPAIRS = 2
+
 def _resolve_count(env_name: str, default: int, minimum: int) -> int:
     """Resolve a "how many times" knob: env var, else default, clamped.
 
