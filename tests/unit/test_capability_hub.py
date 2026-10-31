@@ -187,7 +187,7 @@ def test_adopt_replaces_and_resets_health(tmp_path):
         "tools": [{"name": "upper", "module": "tool.py",
                    "function": "upper"}],
         "skills": ["skill.md"],
-        "acceptance_tests": [["python3", "-c", "assert True"]]}))
+        "acceptance_tests": [["python3", "-c", "from pathlib import Path; assert Path('plugin.json').is_file()"]]}))
     (src / "tool.py").write_text(
         "def upper(args):\n    return 'HI'\n")
     (src / "skill.md").write_text("# Skill\n")

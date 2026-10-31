@@ -973,7 +973,10 @@ class PluginRegistry:
                 "\nAcceptance validation: "
                 f"{len(evidence['tests'])} test command(s) passed in isolated "
                 f"{evidence['backend']} with network disabled. Evidence is bound "
-                f"to candidate hash {evidence['source_hash']}."
+                f"to candidate hash {evidence['source_hash']}.\n"
+                "Test quality: known no-op commands are rejected, but static "
+                "checks cannot prove behavioral coverage or that a test is safe; "
+                "review the candidate test source before approving adoption."
             )
         except Exception as exc:
             return False, preflight.findings, f"Adoption refused: acceptance tests failed: {type(exc).__name__}: {exc}"

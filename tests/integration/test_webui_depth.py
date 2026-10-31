@@ -34,7 +34,8 @@ def _plugin_dir(tmp_path, name="upper"):
     (directory / "tool.py").write_text(
         "def upper(args):\n    return str(args.get('text', '')).upper()\n",
         encoding="utf-8")
-    (directory / "test_plugin.py").write_text("assert 2 + 2 == 4\n",
+    (directory / "test_plugin.py").write_text(
+        "from pathlib import Path\nassert Path('plugin.json').is_file()\n",
                                               encoding="utf-8")
     return directory
 

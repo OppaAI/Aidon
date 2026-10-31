@@ -7,9 +7,10 @@ Reviewed repair commit `88f91af`. Verdict: **not production-ready for unrestrict
 The findings below describe the audited baseline; the status in this section reflects later fixes on `dev`.
 
 - **Code mitigations implemented:** MCP child credential inheritance and blocking I/O, WebUI file/body bounds, local sandbox output/process-tree bounds, X11 wheel scrolling, staged plugin replacement, and filtered/validated remote archive extraction.
+- **Validation improvements implemented:** plugin acceptance rejects known no-op tests and missing/out-of-candidate Python scripts; unsupported recommendation URLs are removed in the capability interview.
 - **Additional hardening implemented:** MCP connection approvals now bind a SHA-256 fingerprint to the exact config and optional functional test; secrets are not printed or stored in test evidence. Lab transcripts are durable per conversation, with migration from the previous global-per-kind table.
 - **Still open:** durable acquisition completion and automatic workflow restoration after process restart. Home-PC browser refresh/switching, Modal, real MCP servers, and X11/desktop behavior require runtime validation and are not proven by offline tests.
-- **Current full suite:** 1,401 passed, 7 skipped on 2026-10-31; see `PRODUCTION_READINESS.md` for the home-PC procedure.
+- **Current full suite:** 1,410 passed, 7 skipped on 2026-10-31; see `PRODUCTION_READINESS.md` for the home-PC procedure.
 
 ## Coverage and limits
 

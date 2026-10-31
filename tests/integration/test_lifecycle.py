@@ -45,7 +45,7 @@ def _plugin_dir(tmp_path, name="upper", code=None):
         "tools": [{"name": "upper", "description": "Uppercase text",
                    "module": "tool.py", "function": "upper"}],
         "skills": [],
-        "acceptance_tests": [["python3", "-c", "assert True"]]}), encoding="utf-8")
+        "acceptance_tests": [["python3", "-c", "from pathlib import Path; assert Path('plugin.json').is_file()"]]}), encoding="utf-8")
     (directory / "tool.py").write_text(
         code or "def upper(args):\n    return str(args.get('text', '')).upper()\n",
         encoding="utf-8")
@@ -970,7 +970,7 @@ def _plugin_dir(tmp_path, name="upper"):
         "tools": [{"name": "upper", "description": "Uppercase text",
                    "module": "tool.py", "function": "upper"}],
         "skills": [],
-        "acceptance_tests": [["python3", "-c", "assert True"]]}), encoding="utf-8")
+        "acceptance_tests": [["python3", "-c", "from pathlib import Path; assert Path('plugin.json').is_file()"]]}), encoding="utf-8")
     (directory / "tool.py").write_text(
         "def upper(args):\n    return str(args.get('text', '')).upper()\n",
         encoding="utf-8")

@@ -10,7 +10,8 @@ def candidate(tmp_path):
     root = tmp_path / "plugin"
     root.mkdir()
     (root / "plugin.json").write_text(json.dumps({"name": "sample", "acceptance_tests": [["python3", "test_tool.py"]]}))
-    (root / "test_tool.py").write_text("assert 1 + 1 == 2\n")
+    (root / "test_tool.py").write_text(
+        "from pathlib import Path\nassert Path('plugin.json').is_file()\n")
     return root
 
 
@@ -58,3 +59,27 @@ def test_rejects_failed_unisolated_and_modified_tests(tmp_path):
             return SimpleNamespace(isolated=True, ok=True, returncode=0)
     with pytest.raises(ValueError, match="modified"):
         verify_candidate(root, Changing())
+
+
+@pytest.mark.parametrize("command", [
+    ["true"], ["echo", "it works"], ["python3", "--version"],
+    ["python3", "-c", "assert True"],
+    ["python3", "-c", "assert 1 + 1 == 2"],
+    ["python3", "-c", "print('test passed')"],
+])
+def test_rejects_obvious_noop_acceptance_commands(tmp_path, command):
+    root = candidate(tmp_path)
+    manifest = json.loads((root / "plugin.json").read_text())
+    manifest["acceptance_tests"] = [command]
+    (root / "plugin.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="no-op|behavioral assertion"):
+        verify_candidate(root, Backend())
+
+
+def test_rejects_missing_python_test_script(tmp_path):
+    root = candidate(tmp_path)
+    manifest = json.loads((root / "plugin.json").read_text())
+    manifest["acceptance_tests"] = [["python3", "missing_test.py"]]
+    (root / "plugin.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="missing or outside"):
+        verify_candidate(root, Backend())

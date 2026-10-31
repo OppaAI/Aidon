@@ -982,7 +982,10 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                     "\nAcceptance validation: "
                     f"{len(evidence['tests'])} test command(s) passed in isolated "
                     f"{evidence['backend']} with network disabled. Evidence is "
-                    f"bound to candidate hash {evidence['source_hash']}."
+                    f"bound to candidate hash {evidence['source_hash']}.\n"
+                    "Test quality: known no-op commands are rejected, but static "
+                    "checks cannot prove behavioral coverage or that a test is "
+                    "safe; review the candidate test source before approval."
                 )
             except Exception as exc:
                 return f"adoption refused: acceptance tests failed: {type(exc).__name__}: {exc}"

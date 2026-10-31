@@ -209,3 +209,36 @@ def test_mcp_connect_rejects_test_args_without_named_tool(tmp_path):
     result = _goal_extra_tools(config, tmp_path / "work")["mcp_connect"](
         "papers", command="papers-mcp", test_args={"query": "example"})
     assert result == "MCP_REFUSED: test_args requires test_tool"
+
+
+def test_capability_interview_removes_unverified_source_links():
+    from src.agentic.loop import GoalRunner
+
+    prompts = []
+    replies = iter([
+        '{"question":"Compare these options: https://invented.invalid"}',
+        '{"brief":"Choose option A based on current pricing: '
+        'https://official.example/pricing"}',
+    ])
+
+    def ask(prompt):
+        prompts.append(prompt)
+        if "May I open the Tool Crafting Lab" in prompt:
+            return "proceed"
+        if "Proposed tool brief" in prompt:
+            return "proceed"
+        if prompt.startswith("[AIDON_LAB]"):
+            return "I do not know; compare options for me."
+        return "proceed"
+
+    outcome, brief = GoalRunner._run_capability_interview(
+        None, "Create a video workflow", "need_plugin", ask,
+        lambda *_: next(replies),
+        research=lambda *_: [
+            "Official pricing page https://official.example/pricing"])
+
+    assert outcome == "approved"
+    assert "https://invented.invalid" not in "\n".join(prompts)
+    assert "[unverified URL removed]" in "\n".join(prompts)
+    assert "https://official.example/pricing" in brief
+    assert "check that they support the claims" in brief

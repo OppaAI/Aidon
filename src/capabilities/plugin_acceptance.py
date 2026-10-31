@@ -1,11 +1,73 @@
 """Run declared plugin acceptance checks against immutable candidate bytes."""
 from pathlib import Path
+import ast
 import json
 import shutil
 import tempfile
 from datetime import datetime, timezone
 
 from .plugins import plugin_tree_hash
+
+
+def _python_check_is_dynamic(node) -> bool:
+    """Reject assertions made only from constants/operators."""
+    return any(isinstance(part, (ast.Name, ast.Call, ast.Attribute,
+                                 ast.Subscript, ast.Await, ast.Yield))
+               for part in ast.walk(node))
+
+
+def _python_code_has_check(code: str) -> bool:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return True  # let the isolated runner report syntax failures
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assert) and _python_check_is_dynamic(node.test):
+            return True
+        if isinstance(node, ast.Call):
+            func = node.func
+            if (isinstance(func, ast.Attribute)
+                    and (func.attr.startswith("assert") or func.attr in {
+                        "fail", "failUnless", "raises"})):
+                return True
+    return False
+
+
+def _reject_obvious_noop(command: list[str], source: Path) -> None:
+    """Refuse known commands that report success without checking behavior.
+
+    This is a narrow guard against vacuous evidence, not a proof that a test
+    meaningfully covers its plugin. The owner still reviews the test source.
+    """
+    executable = Path(command[0]).name.lower()
+    tail = [str(part).strip() for part in command[1:]]
+    if (executable in {"true", ":"}
+            or (executable in {"sh", "bash", "dash"}
+                and len(tail) >= 2 and tail[0] == "-c"
+                and tail[1].strip() in {"true", ":", "exit 0"})
+            or (executable in {"echo", "printf"})
+            or (executable in {"python", "python3", "pypy", "pypy3"}
+                and any(arg in {"--version", "-V", "--help", "-h"}
+                        for arg in tail))):
+        raise ValueError("acceptance test is an obvious no-op; add a behavioral assertion")
+    if executable not in {"python", "python3", "pypy", "pypy3"}:
+        return
+    if "-c" in tail:
+        code = tail[tail.index("-c") + 1] if tail.index("-c") + 1 < len(tail) else ""
+        if not _python_code_has_check(code):
+            raise ValueError("Python acceptance command has no behavioral assertion")
+        return
+    script = next((part for part in tail if part.endswith(".py")), None)
+    if script:
+        candidate = (source / script).resolve()
+        try:
+            candidate.relative_to(source.resolve())
+            code = candidate.read_text(encoding="utf-8")
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                "Python acceptance script is missing or outside the candidate") from exc
+        if not _python_code_has_check(code):
+            raise ValueError("Python acceptance script has no behavioral assertion")
 
 
 def acceptance_backend(config, workspace):
@@ -33,6 +95,8 @@ def test_candidate(source, backend):
                    or any(not isinstance(arg, str) or not arg or "\x00" in arg for arg in c)
                    for c in commands)):
         raise ValueError("acceptance_tests must contain 1–10 nonempty argv arrays")
+    for command in commands:
+        _reject_obvious_noop(command, source)
     if getattr(backend, "name", "") not in ("modal", "docker", "bubblewrap"):
         raise ValueError("acceptance tests require an isolated Bubblewrap, Modal, or Docker backend")
     if getattr(backend, "allow_network", True):

@@ -267,6 +267,58 @@ def test_loop_with_memory_records_chat_and_experience(tmp_path):
     assert memory.list_points("experience")
 
 
+def test_capability_interview_recovers_durable_answer_after_restart(tmp_path):
+    from src.interface.interview_store import InterviewStore
+
+    home = tmp_path / "home"
+    home.mkdir()
+    store = InterviewStore(home)
+    first = GoalRunner(
+        FakeClient('{"question":"Which output format?"}'),
+        Sandbox(home / "work-first"),
+        ApprovalGate(lambda *args, **kwargs: Decision("approved")),
+        home, conversation_id="chat-recovery", run_id="run-before-crash")
+
+    def interrupted_ask(prompt):
+        if prompt.startswith("[AIDON_LAB] "):
+            question = prompt.removeprefix("[AIDON_LAB] ")
+            turn_id = store.question(
+                first.run_id, first.conversation_id, question, True)
+            store.answer(turn_id, "MP4")
+            raise RuntimeError("simulated process interruption")
+        return "proceed"
+
+    first.question_ask = interrupted_ask
+    try:
+        first._capability_interview("Create a launch video", "need_skill")
+        assert False, "interview should be interrupted after its answer is saved"
+    except RuntimeError as exc:
+        assert "simulated process interruption" in str(exc)
+
+    recovered = GoalRunner(
+        FakeClient('{"brief":"Draft an MP4 editing procedure."}'),
+        Sandbox(home / "work-recovered"),
+        ApprovalGate(lambda *args, **kwargs: Decision("approved")),
+        home, conversation_id="chat-recovery", run_id="run-after-restart")
+    questions = []
+
+    def resume_ask(prompt):
+        questions.append(prompt)
+        return "proceed"
+
+    recovered.question_ask = resume_ask
+    outcome, brief = recovered._capability_interview(
+        "Create a launch video", "need_skill")
+
+    assert outcome == "approved"
+    assert brief == "Draft an MP4 editing procedure."
+    assert not any("Which output format?" in prompt for prompt in questions)
+    assert "MP4" in recovered.client.calls[-1][-1].content
+    state = store.unfinished_for_conversation(
+        "chat-recovery", goal="Create a launch video")
+    assert state["outcome"] == "approved" and state["finished"] is False
+
+
 def test_kb_parser_needed_detection(tmp_path):
     assert parser_needed_for(tmp_path / "model.dwg") == "cad-parser"
     assert parser_needed_for(tmp_path / "paper.tex") == "latex-parser"

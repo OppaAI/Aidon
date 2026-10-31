@@ -32,7 +32,7 @@ def _sandbox_plugin(tmp_path, code, capabilities=None, name="heavy",
     tools.extend(extra_tools or [])
     manifest = {"name": name, "version": "1.0.0",
                 "description": "sandbox tool test", "tools": tools,
-                "acceptance_tests": [["python3", "-c", "assert True"]]}
+                "acceptance_tests": [["python3", "-c", "from pathlib import Path; assert Path('plugin.json').is_file()"]]}
     if capabilities is not None:
         manifest["capabilities"] = capabilities
     (directory / "plugin.json").write_text(json.dumps(manifest))
