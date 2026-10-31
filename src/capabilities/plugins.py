@@ -747,6 +747,13 @@ class PluginRegistry:
                 target = self.toolbox_dir / plugin.name
                 if plugin_is_adopted(plugin) and not target.exists():
                     backup.rename(target)
+                elif plugin_is_adopted(plugin) and target.is_dir():
+                    # A crash after the new version was installed may leave
+                    # the old backup behind. Only remove it after verifying
+                    # the current target has an intact approval marker.
+                    current = load_plugin(target, execute=False)
+                    if current.name == plugin.name and plugin_is_adopted(current):
+                        shutil.rmtree(backup)
             except (OSError, ValueError, KeyError, TypeError):
                 continue
         for path in sorted(self.toolbox_dir.iterdir()):

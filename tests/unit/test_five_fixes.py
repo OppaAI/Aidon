@@ -63,6 +63,26 @@ def test_registry_restores_approved_backup_after_interruption(tmp_path):
     assert restored.tool_names() == ["echo"]
 
 
+def test_registry_cleans_backup_only_after_verifying_installed_plugin(tmp_path):
+    import shutil
+    source = tmp_path / "draft"
+    _valid_plugin(source)
+    registry = PluginRegistry(tmp_path / "home")
+    assert commit_plugin(registry, source, preflight_plugin(source))[0]
+    target = registry.toolbox_dir / "five-plug"
+    backup = registry.toolbox_dir / ".backup-interrupted"
+    shutil.copytree(target, backup)
+    (target / "tool.py").write_text("tampered")
+    registry.load_all()
+    assert backup.exists()
+    shutil.rmtree(target)
+    registry.load_all()
+    assert target.exists()
+    shutil.copytree(target, backup)
+    registry.load_all()
+    assert not backup.exists()
+
+
 class _ApproveGate:
     def ask(self, kind, title, body, action_class=None, force_ask=False):
         return SimpleNamespace(verdict="approved")
