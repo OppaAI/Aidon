@@ -3,6 +3,7 @@
 BASE_CSS = """
 :root{--bg:#d3d1c5;--surface:#f0ede3;--surface2:#e4e1d6;--text:#343a2e;--muted:#62695a;--border:#b8bbaa;--accent:#b96e35;--accent2:#65734f;--moss:#65734f;--green:#53725e;--amber:#a96a43;--red:#a85e53}
 body.dark{--bg:#19161d;--surface:#211d25;--surface2:#28242e;--text:#f2f1f4;--muted:#938f9b;--border:#352f3d;--accent:#b080ff;--accent2:#7138cc;--moss:#a3b58a;--green:#80ffb5;--amber:#ffcf99;--red:#ff8080}
+html[data-theme="dark"]{--bg:#19161d;--surface:#211d25;--surface2:#28242e;--text:#f2f1f4;--muted:#938f9b;--border:#352f3d;--accent:#b080ff;--accent2:#7138cc;--moss:#a3b58a;--green:#80ffb5;--amber:#ffcf99;--red:#ff8080}
 body{font-family:"Avenir Next",Avenir,"Trebuchet MS",system-ui,sans-serif;background:var(--bg);color:var(--text);margin:0 auto;padding:24px;max-width:980px;line-height:1.5}
 body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:56px 56px;opacity:.14}body:not(.dark)::before{display:none}
 h1{font-family:Georgia,"Times New Roman",serif;font-size:1.8em;color:var(--text);margin:0 0 0.5em;letter-spacing:-.025em}

@@ -2224,8 +2224,11 @@
   // ── theme: dark / light chooser, persisted ──────────────────────────
   const rootEl = document.documentElement;
   function setTheme(t) {
-    rootEl.dataset.theme = t;
-    try { localStorage.setItem("aidon-theme", t); } catch (e) {}
+    if (window.AidonTheme) window.AidonTheme.set(t);
+    else {
+      rootEl.dataset.theme = t;
+      try { localStorage.setItem("aidon-theme", t); } catch (e) {}
+    }
     const btn = document.getElementById("theme-toggle");
     if (btn) btn.textContent = t === "dark" ? "◐" : "◑";
   }

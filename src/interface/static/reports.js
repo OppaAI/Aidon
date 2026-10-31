@@ -121,8 +121,11 @@
   document.getElementById("theme-toggle").addEventListener("click", () => {
     const cur = document.documentElement.getAttribute("data-theme");
     const nxt = cur === "dark" ? "light" : "dark";
-    document.documentElement.setAttribute("data-theme", nxt);
-    localStorage.setItem("aidon-theme", nxt);
+    if (window.AidonTheme) window.AidonTheme.set(nxt);
+    else {
+      document.documentElement.setAttribute("data-theme", nxt);
+      localStorage.setItem("aidon-theme", nxt);
+    }
   });
 
   loadDays();

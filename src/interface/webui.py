@@ -114,8 +114,8 @@ def _app_version() -> str:
 
 def _page_html(title, body):
     """Wrap a handler-built fragment in a full styled page."""
-    return ("<!doctype html><html><head><meta charset=\"utf-8\"><title>" + title +
-            "</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/favicon.svg\"><style>" + BASE_CSS + "</style></head><body><script>try{if(localStorage.getItem('aidon-theme')==='dark'){document.body.classList.add('dark')}}catch(e){}</script>" + body + "</body></html>")
+    return ("<!doctype html><html data-theme=\"light\"><head><meta charset=\"utf-8\"><title>" + title +
+            "</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/favicon.svg\"><style>" + BASE_CSS + "</style><script src=\"/static/theme.js\"></script></head><body>" + body + "</body></html>")
 
 
 CHAT_HTML = """<!doctype html>

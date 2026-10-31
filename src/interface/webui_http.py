@@ -31,6 +31,9 @@ def make_handler(server):
                 return
 
         def _send_html(self, status: int, html: str):
+            if "</head>" in html and "/static/theme.js" not in html:
+                html = html.replace(
+                    "</head>", '<script src="/static/theme.js"></script></head>', 1)
             data = html.encode()
             self.send_response(status)
             self.send_header('Content-Type', 'text/html')
@@ -58,14 +61,16 @@ def make_handler(server):
                 self._send_json(404, {'error': 'not found'})
                 return
             data = candidate.read_bytes()
-            if candidate.name in {'index.html', 'dag.html', 'capabilities.html', 'memory.html', 'knowledge.html', 'reports.html', 'graph.html', 'docs.html'}:
+            if candidate.suffix.lower() == '.html':
                 asset_times = [candidate.stat().st_mtime]
-                for asset_name in ('style.css', 'app.js', 'avatar.js'):
+                for asset_name in ('style.css', 'theme.js', 'app.js', 'avatar.js'):
                     asset = STATIC_DIR / asset_name
                     if asset.is_file():
                         asset_times.append(asset.stat().st_mtime)
                 version = str(int(max(asset_times))).encode()
                 data = data.replace(b'__ASSET_V__', version)
+                data = data.replace(
+                    b'</head>', b'<script src="/static/theme.js?v=' + version + b'"></script></head>', 1)
             data = data.replace(b'__AIDON_VERSION__', _app_version().encode())
             content_type = mimetypes.guess_type(str(candidate))[0] or 'application/octet-stream'
             self._send_bytes(200, content_type, data)
