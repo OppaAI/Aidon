@@ -16,38 +16,72 @@
   const wrap = document.getElementById("avatar-wrap");
   const canvas = document.getElementById("avatar");
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let fallbackMood = "idle";
+  window.aidonSetMood = function (name) { fallbackMood = name === "working" ? "working" : "idle"; };
 
-  // Soft, irregular idle gestures for the illustrated avatar. The random
-  // targets are eased so movement stays calm instead of twitchy.
+  // The illustrated robot gets occasional, complete gestures rather than
+  // a constant bob: wave, step around, hop, and turn. Keyframes are eased
+  // between random pauses so it feels lively without being distracting.
   function animateFallbackIdle() {
     if (reduceMotion) return;
     const root = document.querySelector(".robot-body-anim") || document.getElementById("robot");
     if (!root) return;
-    const nodes = [
-      { el: root, kind: "bob", now: 0, target: 0 },
-      { el: document.querySelector(".robot-head-anim") || document.getElementById("robot-head"), kind: "angle", now: 0, target: 0 },
-      { el: document.querySelector(".robot-arm-left") || document.getElementById("robot-arm-left"), kind: "angle", now: 0, target: 0 },
-      { el: document.querySelector(".robot-arm-right") || document.getElementById("robot-arm-right"), kind: "angle", now: 0, target: 0 },
-    ].filter((item) => item.el);
-    let nextGesture = 0;
+    const head = document.querySelector(".robot-head-anim") || document.getElementById("robot-head");
+    const left = document.querySelector(".robot-arm-left") || document.getElementById("robot-arm-left");
+    const right = document.querySelector(".robot-arm-right") || document.getElementById("robot-arm-right");
+    const pose = { x: 0, y: 0, yaw: 0, head: 0, left: 0, right: 0 };
+    let action = null;
+    let nextGesture = performance.now() + 1800;
     let previous = performance.now();
+
+    const actions = [
+      { duration: 2300, frames: [
+        [0, 0, 0, 0, 0, 0, 0], [.18, 0, -2, 0, -4, -8, 0], [.34, 0, -2, 0, -4, -32, 0],
+        [.50, 0, -2, 0, -4, -12, 0], [.66, 0, -2, 0, -4, -32, 0], [.82, 0, -1, 0, -2, -10, 0], [1, 0, 0, 0, 0, 0, 0],
+      ] }, // wave
+      { duration: 2100, frames: [
+        [0, 0, 0, 0, 0, 0, 0], [.2, -7, -3, 0, 0, 14, -12], [.42, 7, -5, 0, 0, -12, 14],
+        [.64, -6, -3, 0, 0, 12, -12], [.82, 5, -1, 0, 0, -8, 10], [1, 0, 0, 0, 0, 0, 0],
+      ] }, // step side to side
+      { duration: 2800, frames: [
+        [0, 0, 0, 0, 0, 0, 0], [.12, 0, -2, 0, 0, -8, 8], [.38, 0, -2, 180, 0, -8, 8],
+        [.52, 0, -2, 180, 0, 8, -8], [.88, 0, -1, 360, 0, 8, -8], [1, 0, 0, 360, 0, 0, 0],
+      ] }, // turn around and face forward again
+      { duration: 1900, frames: [
+        [0, 0, 0, 0, 0, 0, 0], [.2, 0, -7, 0, -2, -24, -24], [.44, 0, -3, 0, -2, -32, -32],
+        [.68, 0, -2, 0, -1, -16, -16], [1, 0, 0, 0, 0, 0, 0],
+      ] }, // happy hop with arms up
+    ];
+
+    function interpolate(frames, p) {
+      let i = 0;
+      while (i < frames.length - 2 && p > frames[i + 1][0]) i++;
+      const a = frames[i], b = frames[i + 1];
+      const u = Math.max(0, Math.min(1, (p - a[0]) / (b[0] - a[0])));
+      const eased = u * u * (3 - 2 * u);
+      return a.slice(1).map((v, j) => v + (b[j + 1] - v) * eased);
+    }
+
     function tick(now) {
       const dt = Math.min(0.05, (now - previous) / 1000);
       previous = now;
-      if (now >= nextGesture) {
-        for (const item of nodes) {
-          const range = item.kind === "bob" ? 2.2 : (item.el === nodes[1]?.el ? 1.7 : 3.5);
-          item.target = (Math.random() * 2 - 1) * range;
+      if (!action && now >= nextGesture) {
+        action = { ...actions[Math.floor(Math.random() * actions.length)], started: now };
+      }
+      if (action) {
+        const p = Math.min(1, (now - action.started) / action.duration);
+        const [x, y, yaw, headAngle, leftAngle, rightAngle] = interpolate(action.frames, p);
+        pose.x = x; pose.y = y; pose.yaw = yaw;
+        pose.head = headAngle; pose.left = leftAngle; pose.right = rightAngle;
+        if (p >= 1) {
+          action = null;
+          nextGesture = now + (fallbackMood === "working" ? 6500 : 3500) + Math.random() * 7000;
         }
-        nextGesture = now + 1300 + Math.random() * 2300;
       }
-      const ease = 1 - Math.exp(-dt * 1.5);
-      for (const item of nodes) {
-        item.now += (item.target - item.now) * ease;
-        item.el.style.transform = item.kind === "bob"
-          ? `translateY(${item.now.toFixed(2)}px)`
-          : `rotate(${item.now.toFixed(2)}deg)`;
-      }
+      root.style.transform = `perspective(420px) rotateY(${pose.yaw.toFixed(1)}deg) translate(${pose.x.toFixed(1)}px, ${pose.y.toFixed(1)}px)`;
+      if (head) head.style.transform = `rotate(${pose.head.toFixed(1)}deg)`;
+      if (left) left.style.transform = `rotate(${pose.left.toFixed(1)}deg)`;
+      if (right) right.style.transform = `rotate(${pose.right.toFixed(1)}deg)`;
       requestAnimationFrame(tick);
     }
     requestAnimationFrame(tick);
