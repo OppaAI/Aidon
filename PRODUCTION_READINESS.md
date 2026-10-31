@@ -44,6 +44,7 @@ The code changes and offline tests are complete for these items. This cloud work
 - Remote archive sync-back rejects traversal and escaping links before extraction and applies Python's data filter.
 - Standalone lab transcripts have conversation-scoped durable identities and no longer overwrite another conversation's tool, skill or MCP lab state.
 - Plugin candidate hashes and MCP target/config fingerprints bind approval to the artifact or exact connection; an explicitly requested MCP functional probe is displayed before execution.
+- Large Python modules remain under active decomposition. This revision extracts workflow provenance, DAG persistence/layout, and trace replay handlers from `webui.py` into `webui_workflows.py`; `webui.py` drops from 2,424 to about 2,283 lines. `main.py`, `loop.py`, and `goal_tools.py` remain large and need separate behavior-preserving extractions.
 
 ## Required end-to-end scenarios
 

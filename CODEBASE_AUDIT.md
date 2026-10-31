@@ -15,6 +15,7 @@ The findings below describe the audited baseline; the status in this section ref
 - **Current full suite:** 1,414 passed, 7 skipped on 2026-10-31; see `PRODUCTION_READINESS.md` for the home-PC procedure.
 - **Skill lifecycle refinement:** missing skills are treated as post-success optimization, while missing executable capabilities use Tool/MCP acquisition. Successful WebUI runs can open Skill Lab with conversation-bound, server-validated workflow evidence. Skill adoption is available only to that validated follow-up. Offline tests and live browser flow should be rerun for this revision.
 - **Workflow DAG editor:** the editor persists dependency edges and node positions, validates cycles and metadata, and exposes fit-to-view and node-contract controls. Its scope is user workflow editing/execution; the internal agent loop remains responsible for stateful control flow, so a separate LangGraph-compatible runtime is not duplicated.
+- **Module decomposition:** WebUI workflow APIs have been extracted into `src/interface/webui_workflows.py`; the main WebUI module decreased from 2,424 to about 2,283 lines. The largest remaining modules are `src/agentic/loop.py` (~3,864 lines), `src/system/main.py` (~3,165), and `src/system/goal_tools.py` (~1,491); these still merit careful, separately tested refactors.
 
 ## Coverage and limits
 
