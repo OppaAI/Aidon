@@ -17,6 +17,8 @@
   const canvas = document.getElementById("avatar");
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let fallbackMood = "idle";
+  let currentMouthLevel = 0;
+  let proceduralMouth = null;
   window.aidonSetMood = function (name) { fallbackMood = name === "working" ? "working" : "idle"; };
 
   // The illustrated robot gets occasional, complete gestures rather than
@@ -43,10 +45,6 @@
         [0, 0, 0, 0, 0, 0, 0], [.2, -7, -3, 0, 0, 14, -12], [.42, 7, -5, 0, 0, -12, 14],
         [.64, -6, -3, 0, 0, 12, -12], [.82, 5, -1, 0, 0, -8, 10], [1, 0, 0, 0, 0, 0, 0],
       ] }, // step side to side
-      { duration: 2800, frames: [
-        [0, 0, 0, 0, 0, 0, 0], [.12, 0, -2, 0, 0, -8, 8], [.38, 0, -2, 180, 0, -8, 8],
-        [.52, 0, -2, 180, 0, 8, -8], [.88, 0, -1, 360, 0, 8, -8], [1, 0, 0, 360, 0, 0, 0],
-      ] }, // turn around and face forward again
       { duration: 1900, frames: [
         [0, 0, 0, 0, 0, 0, 0], [.2, 0, -7, 0, -2, -24, -24], [.44, 0, -3, 0, -2, -32, -32],
         [.68, 0, -2, 0, -1, -16, -16], [1, 0, 0, 0, 0, 0, 0],
@@ -92,6 +90,7 @@
   // mouth. A loaded model replaces this hook with its morph-target driver.
   window.aidonSetMouthOpen = function (level) {
     const amount = Math.max(0, Math.min(1, Number(level) || 0));
+    currentMouthLevel = amount;
     const smile = document.getElementById("fallback-mouth-smile");
     const opening = document.getElementById("fallback-mouth-open");
     if (smile) smile.setAttribute("opacity", String(1 - Math.min(1, amount * 5)));
