@@ -21,12 +21,12 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 html[data-theme="light"] {
-  /* Warm Editorial Pastel: cream paper, ink outlines, and quiet accents. */
-  --bg: #f3f0e8; --surface: #fffdf8; --surface2: #eeeae1;
-  --text: #292823; --muted: #777469; --border: #d4cfc3;
-  --accent: #cf793e; --accent2: #9380b5;
-  --accent-glow: rgba(207, 121, 62, .18);
-  --green: #74a895; --cyan: #74a9a1; --toggle-off: #a8a294; --amber: #bd7952; --red: #bd6f72;
+  /* Olive and terracotta on shaded parchment, tuned for lower glare. */
+  --bg: #d3d1c5; --surface: #f0ede3; --surface2: #e4e1d6;
+  --text: #343a2e; --muted: #62695a; --border: #b8bbaa;
+  --accent: #b96e35; --accent2: #65734f;
+  --accent-glow: rgba(185, 110, 53, .18);
+  --green: #53725e; --cyan: #64877d; --toggle-off: #929584; --amber: #a96a43; --red: #a85e53;
   --font-display: "Avenir Next", Avenir, "Trebuchet MS", system-ui, sans-serif;
   --font-serif: Georgia, "Times New Roman", serif;
   --font-body: "Avenir Next", Avenir, "Trebuchet MS", system-ui, sans-serif;

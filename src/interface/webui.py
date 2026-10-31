@@ -105,7 +105,7 @@ def _app_version() -> str:
 # pages shipped no <head> at all, so they rendered as plain white text.
 # No external assets: everything here is inline, so pages work offline.
 BASE_CSS = """
-:root{--bg:#f3f0e8;--surface:#fffdf8;--surface2:#eeeae1;--text:#292823;--muted:#777469;--border:#d4cfc3;--accent:#cf793e;--accent2:#9380b5;--green:#74a895;--amber:#bd7952;--red:#bd6f72}
+:root{--bg:#d3d1c5;--surface:#f0ede3;--surface2:#e4e1d6;--text:#343a2e;--muted:#62695a;--border:#b8bbaa;--accent:#b96e35;--accent2:#65734f;--green:#53725e;--amber:#a96a43;--red:#a85e53}
 body.dark{--bg:#030b1c;--surface:#07152d;--surface2:#0c2040;--text:#e9eef8;--muted:#8b96b3;--border:#1e2a45;--accent:#0082fb;--accent2:#7c5cff;--green:#3ecf8e;--amber:#f5a623;--red:#f0564f}
 body{font-family:"Avenir Next",Avenir,"Trebuchet MS",system-ui,sans-serif;background:var(--bg);color:var(--text);margin:0 auto;padding:24px;max-width:980px;line-height:1.5}
 body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:56px 56px;opacity:.14}body:not(.dark)::before{display:none}
@@ -165,6 +165,7 @@ body.chat-page h1{display:inline-block;margin-right:12px;vertical-align:middle}
 .range-control{display:grid;grid-template-columns:1fr 92px;gap:10px;align-items:center}.range-control input[type=range]{width:100%;accent-color:var(--accent)}.range-control input[type=number]{width:100%}.range-meta{display:flex;justify-content:space-between;margin-top:4px;color:var(--muted);font-size:.7em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .switch{position:relative;display:inline-block;width:46px;height:25px}.switch input{opacity:0;width:0;height:0}.switch span{position:absolute;inset:0;border-radius:13px;background:var(--surface2);border:1px solid var(--border);cursor:pointer}.switch span:before{content:"";position:absolute;width:17px;height:17px;left:3px;top:3px;border-radius:50%;background:var(--muted);transition:.15s}.switch input:checked+span{background:var(--accent);border-color:var(--accent)}.switch input:checked+span:before{transform:translateX(21px);background:#fff}
 #settings-footer{display:flex;align-items:center;gap:14px;padding:16px 0 28px}#settings-note{flex:1;color:var(--muted);font-size:.8em}#settings-save{padding:11px 24px;border:0;border-radius:10px;background:linear-gradient(92deg,var(--accent),var(--accent2));color:#fff;font-weight:700;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}
+.set-tabs{display:flex;gap:6px;overflow-x:auto;padding:12px 0 4px;border-bottom:1px solid var(--border)}.set-tab{flex:0 0 auto;padding:8px 12px;border:1px solid var(--border);border-radius:9px 9px 0 0;background:var(--surface2);color:var(--text);font:inherit;font-size:.82em;cursor:pointer}.set-tab:hover{border-color:var(--accent)}.set-tab.active{background:var(--surface);border-color:var(--accent);color:var(--accent);font-weight:700}.set-group[hidden]{display:none!important}
 @media(max-width:700px){.set-row{display:block}.set-input{width:100%;margin-top:10px}.settings-top{align-items:flex-start}.settings-shell{padding:0 4px 30px}}
 @media (max-width:700px){#layout{display:block}#sidecol{width:auto;margin-bottom:20px}}
 """
@@ -3559,19 +3560,25 @@ class WebUIServer:
                     html = """<div class="settings-shell">
 <div class="settings-top"><a href="/">← Back to WebUI</a><h1>Settings</h1><button id="theme-toggle" title="Toggle dark / light theme">◐</button></div>
 <div class="settings-intro">Tune Aidon in one place. Changes are written to <code id="env-path"></code> and take effect after restarting Aidon. Secrets are never displayed; <span class="set-badge">SET</span> means a value already exists.</div>
-<div id="settings-groups"></div>
+<div id="settings-groups"><nav id="settings-tabs" class="set-tabs" role="tablist" aria-label="Settings categories"></nav><div id="settings-panels"></div></div>
 <div id="settings-footer"><span id="settings-note">Use sliders where safe bounds are known; fields without bounds accept a value directly.</span><button id="settings-save">Save settings</button><span id="settings-status"></span></div>
-<div class="set-group"><h2>API access keys</h2>"""
+<section id="settings-api-panel" class="set-group" hidden><h2>API access keys</h2>"""
                     for key in keys:
                         html += _api_key_row(key)
-                    html += """</div></div><script>
+                    html += """</section></div><script>
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 async function loadSettings(){
   const r = await fetch('/api/settings/catalog'); const data = await r.json();
   document.getElementById('env-path').textContent = data.env_file || '';
-  let out = '';
-  (data.groups || []).forEach(function(g){
-    out += '<section class="set-group"><h2>' + esc(g.group) + '</h2>';
+  const tabs = document.getElementById('settings-tabs');
+  const panels = document.getElementById('settings-panels');
+  let tabOut = '', panelOut = '';
+  const groups = data.groups || [];
+  groups.forEach(function(g, index){
+    const panelId = 'settings-panel-' + index;
+    let out = '';
+    tabOut += '<button type="button" class="set-tab" role="tab" id="settings-tab-' + index + '" aria-controls="' + panelId + '" aria-selected="false" data-settings-target="' + panelId + '">' + esc(g.group) + '</button>';
+    panelOut += '<section class="set-group" id="' + panelId + '" role="tabpanel" aria-labelledby="settings-tab-' + index + '" hidden><h2>' + esc(g.group) + '</h2>';
     g.settings.forEach(function(s){
       out += '<div class="set-row"><div class="set-label"><label>' + esc(s.label) + '</label>' + (s.is_set ? '<span class="set-badge">SET</span>' : '') + '<span class="set-key">' + esc(s.key) + '</span>';
       if (s.desc) out += '<div class="set-desc">' + esc(s.desc) + '</div>';
@@ -3601,9 +3608,43 @@ async function loadSettings(){
       }
       out += '</div></div>';
     });
-    out += '</section>';
+    panelOut += out + '</section>';
   });
-  document.getElementById('settings-groups').innerHTML = out;
+  const apiPanel = document.getElementById('settings-api-panel');
+  if (apiPanel) {
+    const index = groups.length, panelId = 'settings-panel-' + index;
+    apiPanel.id = panelId;
+    apiPanel.setAttribute('role', 'tabpanel');
+    apiPanel.setAttribute('aria-labelledby', 'settings-tab-' + index);
+    tabOut += '<button type="button" class="set-tab" role="tab" id="settings-tab-' + index + '" aria-controls="' + panelId + '" aria-selected="false" data-settings-target="' + panelId + '">API access</button>';
+    panels.appendChild(apiPanel);
+  }
+  tabs.innerHTML = tabOut;
+  panels.insertAdjacentHTML('afterbegin', panelOut);
+  function activateTab(button) {
+    tabs.querySelectorAll('[role="tab"]').forEach(function(tab){
+      const active = tab === button;
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      tab.classList.toggle('active', active);
+      tab.tabIndex = active ? 0 : -1;
+    });
+    panels.querySelectorAll('[role="tabpanel"]').forEach(function(panel){
+      panel.hidden = panel.id !== button.getAttribute('data-settings-target');
+    });
+  }
+  tabs.querySelectorAll('[role="tab"]').forEach(function(button){
+    button.addEventListener('click', function(){ activateTab(button); });
+    button.addEventListener('keydown', function(event){
+      if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+      event.preventDefault();
+      const all = Array.from(tabs.querySelectorAll('[role="tab"]'));
+      const step = event.key === 'ArrowRight' ? 1 : -1;
+      const next = all[(all.indexOf(button) + step + all.length) % all.length];
+      activateTab(next); next.focus();
+    });
+  });
+  const firstTab = tabs.querySelector('[role="tab"]');
+  if (firstTab) activateTab(firstTab);
   document.querySelectorAll('[data-range-for]').forEach(function(range){
     const number = document.querySelector('[data-key="' + range.getAttribute('data-range-for') + '"]');
     if (!number) return;
