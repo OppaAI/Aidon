@@ -61,6 +61,7 @@ def test_settings_page_and_api_are_available():
             with urllib.request.urlopen(base + "/settings") as response:
                 page = response.read().decode()
             assert "settings-groups" in page
+            assert "AidonTheme.toggle()" in page
         finally:
             httpd.shutdown()
 
