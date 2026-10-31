@@ -2533,7 +2533,9 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 _pbackend = None
             if coerce_preapprove(schedule.get("preapprove", True)):
-                _pgate = PracticeGate(_pdir, sandboxed=_pbackend is not None)
+                from ..capabilities.execution import backend_is_sandboxed
+                _pgate = PracticeGate(
+                    _pdir, sandboxed=backend_is_sandboxed(_pbackend, _psandbox))
             else:
                 _pgate = _cli_gate(config.home, config.approval_timeout_seconds)
             from ..interface.messaging import MessagingConfig as _PMC
@@ -3891,7 +3893,9 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 _be = None
             if coerce_preapprove(schedule.get("preapprove", True)):
-                _gate = PracticeGate(practice_dir, sandboxed=_be is not None)
+                from ..capabilities.execution import backend_is_sandboxed
+                _gate = PracticeGate(
+                    practice_dir, sandboxed=backend_is_sandboxed(_be, _psandbox))
             else:
                 _gate = server.webui_gate.gate
             return GoalRunner(client, _psandbox, _gate, config.home, memory=memory,
@@ -4095,13 +4099,11 @@ def main(argv: list[str] | None = None) -> int:
                     # agentic pipeline; the web_search plan tool
                     # carries its own researcher.
                     _job_researcher = _make_web_researcher(config)
-                    # Sandboxed shell for the gate: a real backend
-                    # (bwrap/Docker) isolates, and a host Sandbox
-                    # with bwrap present is offline; a host Sandbox
-                    # without bwrap is not isolated, so its shell
-                    # approvals stay rejected.
-                    _job_sandboxed = _backend is not None or bool(
-                        getattr(sandbox, "bwrap", False))
+                    # SSH is an owner PC/VM execution target, not a
+                    # sandbox; only container or working bubblewrap
+                    # backends can auto-approve scheduled shell steps.
+                    from ..capabilities.execution import backend_is_sandboxed
+                    _job_sandboxed = backend_is_sandboxed(_backend, sandbox)
                     _job_gate = _scheduled_gate(sandboxed=_job_sandboxed)
                     _job_governor = _make_governor(config)
                     _job_tools = _goal_extra_tools(config, sandbox.workdir, gate=_job_gate, researcher=_job_researcher, question_answer=None, scheduled=True, governor=_job_governor, plugin_registry=_plugins)

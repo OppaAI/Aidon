@@ -18,7 +18,7 @@ Reviewed against the requested chat → capability inventory → Tool Crafting L
 3. **Recovery — open:** interview steps persist, live runs reconnect, and reopened chats show an explicit recovery action. Process restart still requires user action; automatic workflow restoration, idempotent acquisition retries, and browser refresh/switching tests remain incomplete.
 4. **Recommendations — in progress:** uncertain-choice interviews can call web search, but the configured researcher previously discarded source URLs. Preserve citations and verify them in the interview flow before claiming current prices, compatibility or MCP endpoints.
 5. **Regression failures — closed for current revision:** full suite passed 1,376 tests with 7 environment-dependent skips on 2026-10-31. Re-run after subsequent code changes and in CI.
-6. **PC execution:** SSH is an alternative execution backend, not a separate scoped PC capability alongside Modal. Desktop actions run on Aidon's host. Verify target selection, permissions and credentials before enabling remote installations or desktop access.
+6. **PC execution — in progress:** SSH remains a separately selected remote execution backend, not a scoped PC capability alongside Modal; real PC targeting, permissions, credentials and X11 control are unvalidated. SSH is now explicitly treated as unsandboxed, cannot trigger unattended shell auto-approval, and cleanup is confined to a unique per-run child directory.
 7. **Deployment validation:** real model, Modal authentication/networking, browser interactions and PC/X11 control have not been validated end to end in this session.
 
 ## Additional hardening to review
@@ -39,6 +39,7 @@ Covered goal; reject lab; uncertain user compares options; approve and revise br
 - Research is available during uncertain-choice interviews through the configured researcher. Source URLs are now retained for citations; unavailable research is labeled unverified.
 - Plugin replacement now stages and hashes new bytes, preserves the previous version until installation, and rolls back on copy/load failures. Sudden process termination during rename still needs startup reconciliation.
 - The WebUI refuses plugin adoption when it has no configured isolated acceptance-test backend. Lower-level registry callers can still omit acceptance testing; that API boundary remains part of the functional-validation blocker.
+- SSH execution is marked unsandboxed, so practice and scheduled approval paths no longer treat it as a disposable container. Remote workspaces are unique child directories; configured parent paths, `..`, and `~` are not removed or accepted as cleanup targets.
 - SSH sync-back now uses Python's data-filtered archive extraction, matching Modal's extraction policy.
 - Workflow fixtures now supply executable model plans. Empty/invalid real model plans remain rejected. Updated assertions reflect the current lab and tool contracts.
 - Actual model, Modal and PC integration checks remain unrun without the required configured endpoints, authentication and reachable PC. These cannot be established by offline tests.

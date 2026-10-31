@@ -1,11 +1,10 @@
-"""Execution backends: lightweight sandbox, Docker, and VM later.
+"""Execution backends: local sandbox, disposable containers, and SSH target.
 
 Decision, fixed:
-- Docker and the existing sandbox are now. A full VM is
-  post-hackathon, future only, not built here.
-- Keep the lightweight sandbox, add Docker as a second
-  backend, do not replace the sandbox with Docker, and
-  do not replace either with a VM now.
+- The owner chooses the backend in configuration; the planner cannot switch it.
+- SSH is a remote host, not a sandbox or disposable VM. It is never treated as
+  isolated from the machine owner or as network-restricted.
+- Only Docker, Modal, or working bubblewrap boundaries count as isolated.
 
 Interface, small on purpose:
 An ExecutionBackend has a name, a run() that takes a
@@ -44,14 +43,16 @@ Backends:
   does not silently fall back to a host subprocess.
   That is the difference from the bwrap fallback,
   which is labeled, not silent, and which stays.
-- VMBackend runs commands over SSH on a VM the owner
-  already runs (no provisioning here: lifecycle stays
-  future work). The local workdir is tarred up to a
-  remote dir, the command runs there, results tar back.
+- VMBackend runs commands over SSH on an owner-selected
+  host. The local workdir is tarred to a unique child of
+  the configured remote workspace, the command runs there,
+  results tar back, and cleanup removes only that child.
+  This is remote execution, not sandboxing: the process can
+  access the remote account's files and network permissions.
   With use_sudo, commands run under sudo -S, the
   password arriving on stdin only — never in argv,
-  never logged. A disposable VM per run, and a Docker
-  container inside it, remain future work.
+  never logged. System packages or desktop access require
+  explicit owner policy and approvals.
 - ModalBackend runs commands in a Modal sandbox
   (modal.Sandbox.create), the same tar-up / run / tar-back
   shape as VMBackend over Modal exec instead of SSH. One
@@ -82,6 +83,8 @@ outputs and files, never just an exit code.
 
 from __future__ import annotations
 
+import posixpath
+import re
 import shlex
 import shutil
 import subprocess
@@ -115,6 +118,21 @@ class ExecutionBackend:
 
     def cleanup(self) -> None:
         return None
+
+
+def backend_is_sandboxed(backend, sandbox=None) -> bool:
+    """Whether mandatory shell work runs inside a real sandbox boundary.
+
+    SSH reaches an owner-selected machine and is not treated as an isolated
+    container. Bubblewrap counts only when the configured sandbox can invoke
+    it; a host fallback stays unsandboxed.
+    """
+    name = str(getattr(backend, "name", "") or "")
+    if name in ("docker", "modal"):
+        return True
+    if name == "bubblewrap":
+        sandbox = getattr(backend, "sandbox", sandbox)
+    return bool(getattr(sandbox, "bwrap", None))
 
 
 class BubblewrapBackend(ExecutionBackend):
@@ -235,9 +253,16 @@ class VMBackend(ExecutionBackend):
         return cmd
 
     def _remote_dir(self, workspace: Path) -> str:
-        if self.remote_workspace:
-            return self.remote_workspace
-        return f"~/aidon-work/{workspace.name}"
+        base = str(self.remote_workspace or ".aidon-work").strip()
+        if (not base or "\x00" in base or ".." in base.split("/")
+                or base.startswith("~")):
+            raise ValueError("remote workspace must be a safe path below the SSH account")
+        leaf = re.sub(r"[^A-Za-z0-9._-]+", "-", workspace.name).strip(".-")
+        if not leaf:
+            leaf = "work"
+        # Cleanup may remove only this unique per-run directory, never the
+        # configured parent (which may contain owner data).
+        return posixpath.join(base, f"{leaf}-{uuid.uuid4().hex}")
 
     def _sync_up(self, workspace: Path, remote: str,
                  timeout_seconds: int) -> bool:
@@ -292,7 +317,7 @@ class VMBackend(ExecutionBackend):
         self._last_remote = remote
         if not self._sync_up(workspace, remote, timeout_seconds):
             return ExecutionResult(1, "", "workspace sync to VM failed",
-                                   isolated=True, backend=self.name)
+                                   isolated=False, backend=self.name)
         shell_cmd = f"cd {shlex.quote(remote)} && {shlex.join(command)}"
         if self.use_sudo:
             shell_cmd = f"sudo -S -- sh -c {shlex.quote(shell_cmd)}"
@@ -303,13 +328,13 @@ class VMBackend(ExecutionBackend):
                 capture_output=True, text=True, timeout=timeout_seconds)
         except subprocess.TimeoutExpired as exc:
             return ExecutionResult(124, exc.stdout or "", "timeout",
-                                   isolated=True, backend=self.name)
+                                   isolated=False, backend=self.name)
         if not self._sync_back(workspace, remote, timeout_seconds):
             return ExecutionResult(1, proc.stdout,
                                    "workspace sync back from VM failed",
-                                   isolated=True, backend=self.name)
+                                   isolated=False, backend=self.name)
         return ExecutionResult(proc.returncode, proc.stdout, proc.stderr,
-                               isolated=True, backend=self.name)
+                               isolated=False, backend=self.name)
 
     def cleanup(self) -> None:
         if self._last_remote and self.ssh_path:

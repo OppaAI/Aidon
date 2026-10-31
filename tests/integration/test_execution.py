@@ -93,13 +93,53 @@ def test_vm_run_syncs_and_executes(tmp_path, monkeypatch):
     calls = []
     backend = _vm_backend(monkeypatch, calls)
     result = backend.run(["echo", "hi"], tmp_path / "work")
-    assert result.ok and result.isolated and result.backend == "vm"
+    assert result.ok and not result.isolated and result.backend == "vm"
     ssh_calls = [args for args, _ in calls if args[0] == "/usr/bin/ssh"]
     assert len(ssh_calls) == 2  # sync up, execute (sync back is ssh Popen)
     assert any("mkdir -p" in a for args in ssh_calls for a in args)
     assert any(a.startswith("cd ") and "echo" in a
                for args in ssh_calls for a in args)
     assert any("filter='data'" in str(args) for args, _ in calls)
+
+
+def test_vm_remote_workspace_is_unique_child_and_cleanup_never_targets_parent(
+        tmp_path, monkeypatch):
+    calls = []
+    backend = _vm_backend(monkeypatch, calls, remote_workspace="/home/aidon/work")
+    first = backend._remote_dir(tmp_path / "work")
+    second = backend._remote_dir(tmp_path / "work")
+    assert first.startswith("/home/aidon/work/work-")
+    assert first != second
+    assert first != backend.remote_workspace
+    with pytest.raises(ValueError, match="safe path"):
+        _vm_backend(monkeypatch, calls, remote_workspace="/home/aidon/../")._remote_dir(
+            tmp_path / "work")
+    with pytest.raises(ValueError, match="safe path"):
+        _vm_backend(monkeypatch, calls, remote_workspace="~/aidon")._remote_dir(
+            tmp_path / "work")
+
+
+def test_ssh_backend_is_never_treated_as_a_sandbox(tmp_path):
+    from types import SimpleNamespace
+    from src.capabilities.execution import backend_is_sandboxed
+    from src.interface.practice import PracticeGate
+
+    backend = VMBackend(host="pc", ssh_path="/usr/bin/ssh")
+    assert backend_is_sandboxed(backend) is False
+    gate = PracticeGate(tmp_path, sandboxed=backend_is_sandboxed(backend))
+    assert gate.ask("mandatory", "shell", "Run shell command: rm -r cache").verdict == "rejected"
+
+
+def test_container_and_bubblewrap_sandbox_detection():
+    from types import SimpleNamespace
+    from src.capabilities.execution import backend_is_sandboxed
+
+    assert backend_is_sandboxed(SimpleNamespace(name="docker")) is True
+    assert backend_is_sandboxed(SimpleNamespace(name="modal")) is True
+    assert backend_is_sandboxed(SimpleNamespace(name="bubblewrap"),
+                                SimpleNamespace(bwrap="/usr/bin/bwrap")) is True
+    assert backend_is_sandboxed(SimpleNamespace(name="bubblewrap"),
+                                SimpleNamespace(bwrap=None)) is False
 
 
 def test_vm_sudo_password_via_stdin_only(tmp_path, monkeypatch):
