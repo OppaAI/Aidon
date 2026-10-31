@@ -16,6 +16,29 @@
   const wrap = document.getElementById("avatar-wrap");
   const canvas = document.getElementById("avatar");
 
+  // The CSS/SVG fallback avatar uses the same audio level as the VRM
+  // mouth. A loaded model replaces this hook with its morph-target driver.
+  window.aidonSetMouthOpen = function (level) {
+    const amount = Math.max(0, Math.min(1, Number(level) || 0));
+    const smile = document.getElementById("fallback-mouth-smile");
+    const opening = document.getElementById("fallback-mouth-open");
+    if (smile) smile.setAttribute("opacity", String(1 - Math.min(1, amount * 5)));
+    if (opening) {
+      opening.setAttribute("rx", String(2 + amount * 5));
+      opening.setAttribute("ry", String(1 + amount * 4));
+      opening.setAttribute("opacity", String(Math.min(1, amount * 5)));
+    }
+    // The legacy chat template keeps its original mouth element IDs.
+    const legacySmile = document.getElementById("mouth-smile");
+    const legacyOpen = document.getElementById("mouth-open");
+    if (legacySmile) legacySmile.setAttribute("opacity", String(1 - Math.min(1, amount * 5)));
+    if (legacyOpen) {
+      legacyOpen.setAttribute("rx", String(2 + amount * 5));
+      legacyOpen.setAttribute("ry", String(1 + amount * 4));
+      legacyOpen.setAttribute("opacity", String(Math.min(1, amount * 5)));
+    }
+  };
+
   // Load the VRM into the chat when one is present, as old Aidon did;
   // without one, the robot placeholder stays.
   async function boot() {

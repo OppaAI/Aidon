@@ -392,9 +392,7 @@ html[data-theme="light"] #guidance-input::placeholder { color: var(--muted); }
   font-family: var(--font-display); }
 #avatar-placeholder .fallback-robot { width: 184px; height: 184px; }
 #avatar-placeholder .robot-body-anim { animation: fallback-robot-bob 4s ease-in-out infinite;
-  transform-origin: 100px 170px; }
-#avatar-placeholder .robot-head { animation: fallback-robot-head-sway 6s ease-in-out infinite;
-  transform-origin: 100px 58px; }
+  transform-origin: 100px 190px; }
 #avatar-placeholder .robot-arm-left { animation: fallback-robot-arm-sway 5s ease-in-out infinite;
   transform-origin: 52px 111px; }
 #avatar-placeholder .robot-arm-right { animation: fallback-robot-arm-sway 5s ease-in-out infinite reverse;
@@ -403,8 +401,6 @@ html[data-theme="light"] #guidance-input::placeholder { color: var(--muted); }
   transform-origin: center; transform-box: fill-box; }
 @keyframes fallback-robot-bob { 0%,100% { transform: translateY(0); }
   50% { transform: translateY(-3px); } }
-@keyframes fallback-robot-head-sway { 0%,100% { transform: rotate(0); }
-  25% { transform: rotate(1deg); } 75% { transform: rotate(-1deg); } }
 @keyframes fallback-robot-arm-sway { 0%,100% { transform: rotate(0); }
   50% { transform: rotate(3deg); } }
 @keyframes fallback-robot-blink { 0%,92%,98%,100% { transform: scaleY(1); }

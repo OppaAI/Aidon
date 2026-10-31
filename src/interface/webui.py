@@ -208,35 +208,46 @@ CHAT_HTML = """<!doctype html>
 <div id="avatar" aria-label="Aidon robot avatar, default; VRM is available separately">
 <svg id="robot-avatar" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="Aidon robot">
 <g id="robot">
+<defs>
+<radialGradient id="robot-shell" cx="35%" cy="18%" r="85%"><stop offset="0" stop-color="#fff"/><stop offset=".46" stop-color="#f3f5f4"/><stop offset=".82" stop-color="#d7deeb"/><stop offset="1" stop-color="#aebbd4"/></radialGradient>
+<linearGradient id="robot-arm-shell" x1="0" y1="0" x2="1" y2=".25"><stop offset="0" stop-color="#c4d5e8"/><stop offset=".32" stop-color="#fff"/><stop offset=".72" stop-color="#eef1f4"/><stop offset="1" stop-color="#bbc9dd"/></linearGradient>
+<radialGradient id="robot-head-shell" cx="34%" cy="14%" r="88%"><stop offset="0" stop-color="#fff"/><stop offset=".52" stop-color="#f5f5e8"/><stop offset=".84" stop-color="#dce1e6"/><stop offset="1" stop-color="#b9c4d4"/></radialGradient>
+<linearGradient id="robot-face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#263a60"/><stop offset=".55" stop-color="#1a2a4a"/><stop offset="1" stop-color="#101b32"/></linearGradient>
+<linearGradient id="robot-ear" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7899bc"/><stop offset=".38" stop-color="#a9c8df"/><stop offset=".68" stop-color="#7095bc"/><stop offset="1" stop-color="#486b96"/></linearGradient>
+</defs>
 <g id="robot-arm-left">
-<path d="M 68 99 Q 53 100 45 113 Q 36 130 28 150 Q 24 160 31 165 Q 38 169 46 160 L 65 139 Z" fill="#eef2e4" stroke="#d7dbea" stroke-width="2"/>
-<path d="M 45 116 Q 39 137 30 153 Q 28 158 32 161 Q 37 163 42 155 L 59 135 Z" fill="#c2c8d9"/>
-<path d="M 29 159 Q 24 165 22 172 M 37 163 Q 34 171 33 176 M 44 162 Q 44 170 46 175" fill="none" stroke="#1a2a4a" stroke-width="5" stroke-linecap="round"/>
+<path d="M 68 103 Q 53 103 47 117 Q 41 134 35 150 Q 33 160 40 164 Q 47 167 53 157 Q 64 140 72 124 Z" fill="url(#robot-arm-shell)" stroke="#c6d0df" stroke-width="1.5"/>
+<path d="M 54 117 Q 49 135 41 153 Q 39 158 42 159 Q 46 157 49 150 L 64 127 Z" fill="#fff" opacity=".62"/>
 </g>
 <g id="robot-arm-right">
-<path d="M 132 99 Q 147 100 155 113 Q 164 130 172 150 Q 176 160 169 165 Q 162 169 154 160 L 135 139 Z" fill="#eef2e4" stroke="#d7dbea" stroke-width="2"/>
-<path d="M 155 116 Q 161 137 170 153 Q 172 158 168 161 Q 163 163 158 155 L 141 135 Z" fill="#c2c8d9"/>
-<path d="M 171 159 Q 176 165 178 172 M 163 163 Q 166 171 167 176 M 156 162 Q 156 170 154 175" fill="none" stroke="#1a2a4a" stroke-width="5" stroke-linecap="round"/>
+<path d="M 132 103 Q 147 103 153 117 Q 159 134 165 150 Q 167 160 160 164 Q 153 167 147 157 Q 136 140 128 124 Z" fill="url(#robot-arm-shell)" stroke="#c6d0df" stroke-width="1.5"/>
+<path d="M 146 117 Q 151 135 159 153 Q 161 158 158 159 Q 154 157 151 150 L 136 127 Z" fill="#fff" opacity=".62"/>
 </g>
 <g id="robot-head">
-<rect x="18" y="37" width="23" height="61" rx="12" fill="#1a2a4a"/>
-<rect x="159" y="37" width="23" height="61" rx="12" fill="#1a2a4a"/>
-<path d="M 54 17 Q 61 11 75 11 L 125 11 Q 139 11 146 17 Q 164 33 164 57 L 164 73 Q 164 103 143 108 L 57 108 Q 36 103 36 73 L 36 57 Q 36 33 54 17 Z" fill="#eef2e4" stroke="#d7dbea" stroke-width="2"/>
-<path d="M 48 43 Q 51 28 68 27 L 132 27 Q 149 28 152 43 L 152 73 Q 150 91 137 94 L 63 94 Q 50 91 48 73 Z" fill="#1a2a4a"/>
-<path d="M 55 43 Q 58 34 69 34 L 131 34 Q 142 34 145 43 L 145 69 Q 144 84 133 86 L 67 86 Q 56 84 55 69 Z" fill="#223b70"/>
-<path d="M 58 47 Q 62 39 72 39 L 128 39 Q 138 39 142 47 L 142 60 Q 104 78 58 65 Z" fill="#29477e" opacity=".72"/>
-<rect class="robot-eye" id="eye-left" x="65" y="43" width="17" height="34" rx="8" fill="#32c5ec"/>
-<rect class="robot-eye" id="eye-right" x="118" y="43" width="17" height="34" rx="8" fill="#32c5ec"/>
-<path id="mouth-smile" d="M 87 79 Q 100 85 113 79" fill="none" stroke="#32c5ec" stroke-width="3" stroke-linecap="round"/>
-<ellipse id="mouth-open" cx="100" cy="80" rx="11" ry="6" fill="#32c5ec"/>
+<rect x="36" y="40" width="12" height="32" rx="6" fill="url(#robot-ear)" stroke="#7894b5" stroke-width="1"/>
+<rect x="152" y="40" width="12" height="32" rx="6" fill="url(#robot-ear)" stroke="#7894b5" stroke-width="1"/>
+<path d="M38 48 Q39 43 42 44 M154 48 Q155 43 158 44" fill="none" stroke="#e5f4ff" stroke-width="1.5" stroke-linecap="round" opacity=".58"/>
+<rect x="48" y="18" width="104" height="72" rx="21" fill="url(#robot-head-shell)" stroke="#c4cedb" stroke-width="1.5"/>
+<path d="M55 39 Q58 29 71 28 H129 Q142 29 145 40" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".68"/>
+<rect x="59" y="28" width="82" height="52" rx="14" fill="url(#robot-face)" stroke="#15223b" stroke-width="1"/>
+<path d="M68 33 Q74 30 84 30 H128 Q135 31 137 36" fill="none" stroke="#6680a5" stroke-width="1.5" stroke-linecap="round" opacity=".4"/>
+<path d="M70 38 Q76 31 88 31 H121 Q130 31 134 36 Q114 33 96 42 Q82 49 71 47 Z" fill="#d9f2ff" opacity=".2"/>
+<path d="M71 39 Q78 33 89 33 H112 Q95 36 82 43 Q75 46 71 45 Z" fill="#fff" opacity=".16"/>
+<circle class="robot-eye" id="eye-left" cx="85" cy="50" r="9" fill="#7de9ff"/>
+<circle class="robot-eye" id="eye-right" cx="115" cy="50" r="9" fill="#7de9ff"/>
+<path id="mouth-smile" d="M 90 67 Q 100 73 110 67" fill="none" stroke="#7de9ff" stroke-width="3" stroke-linecap="round"/>
+<ellipse id="mouth-open" cx="100" cy="69" rx="2" ry="1" fill="#7de9ff" opacity="0"/>
 </g>
-<path d="M 84 99 Q 100 108 116 99 L 115 111 Q 100 118 85 111 Z" fill="#c2c8d9"/>
+<rect x="92" y="90" width="16" height="12" fill="#c2c2b8"/>
 <g id="robot-body">
-<path d="M 67 103 Q 74 111 100 111 Q 126 111 133 103 L 137 141 Q 134 160 117 168 Q 100 176 83 168 Q 66 160 63 141 Z" fill="#eef2e4" stroke="#d7dbea" stroke-width="2"/>
-<path d="M 66 122 Q 81 140 100 141 Q 119 140 134 122 L 137 142 Q 133 158 117 165 Q 100 170 83 165 Q 67 158 63 142 Z" fill="#c2c8d9"/>
-<path d="M 74 151 Q 100 161 126 151" fill="none" stroke="#1a2a4a" stroke-width="1.5"/>
+<path d="M74 104 C82 96 118 96 126 104 C140 119 139 153 127 173 C119 185 108 190 100 190 C92 190 81 185 73 173 C61 153 60 119 74 104 Z" fill="url(#robot-shell)" stroke="#c6d0df" stroke-width="1.5"/>
+<ellipse cx="81" cy="119" rx="13" ry="6" fill="#fff" opacity=".72"/>
+<path d="M71 151 C82 164 118 164 129 151 Q124 173 109 181 Q100 186 91 181 Q76 173 71 151 Z" fill="#aebbd4" opacity=".24"/>
+<path d="M81 177 Q100 188 119 177 Q114 187 100 188 Q86 187 81 177Z" fill="#1a2a4a" opacity=".92"/>
+<path d="M73 101 Q69 102 69 107 L72 114 Q74 111 76 106 L76 102Z" fill="#1a2a4a"/>
+<path d="M127 101 Q131 102 131 107 L128 114 Q126 111 124 106 L124 102Z" fill="#1a2a4a"/>
 </g>
-<path d="M 81 165 Q 100 180 119 165 Q 115 184 100 185 Q 85 184 81 165 Z" fill="#1a2a4a"/>
+</g>
 </svg>
 <p id="avatar-status">Idle</p>
 <div id="wave-bars"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
