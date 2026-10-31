@@ -1,4 +1,4 @@
-/* Aidon optional VRM head avatar.
+/* Aidon procedural 3D robot with an optional owner-provided VRM avatar.
  *
  * The user makes the male VRM himself. Zero-code-change contract:
  *   1. drop the file at aidon/webui/avatar.vrm   (or set AIDON_VRM_PATH)
@@ -7,22 +7,21 @@
  * The chat loads the VRM when one is present, as old Aidon did; without
  * one, the robot placeholder stays.
  *
- * Head-only VRM portrait: three.js + @pixiv/three-vrm, camera locked on
- * the head bone, subtle idle sway + blinking.
+ * The built-in mascot is made from Three.js primitives, so it can turn as
+ * a real 3D figure. A supplied VRM takes precedence when one is available.
  */
 (function () {
   "use strict";
 
   const wrap = document.getElementById("avatar-wrap");
-  const canvas = document.getElementById("avatar");
+  let canvas = document.getElementById("avatar");
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let fallbackMood = "idle";
   let currentMouthLevel = 0;
   let proceduralMouth = null;
   window.aidonSetMood = function (name) { fallbackMood = name === "working" ? "working" : "idle"; };
 
-  // The illustrated robot gets occasional, complete gestures rather than
-  // a constant bob: wave, step around, hop, and turn. Keyframes are eased
+  // The SVG fallback gets short arm waves, side steps, and hops. Keyframes are eased
   // between random pauses so it feels lively without being distracting.
   function animateFallbackIdle() {
     if (reduceMotion) return;
@@ -125,6 +124,11 @@
         return;
       } catch (e) {
         console.warn("[avatar] VRM load failed, using the built-in robot:", e);
+        const replacement = document.createElement("canvas");
+        replacement.id = "avatar";
+        replacement.width = replacement.height = 224;
+        canvas.replaceWith(replacement);
+        canvas = replacement;
       }
     }
     try {
@@ -199,7 +203,8 @@
       new THREE.Vector3(0, -0.195, 0.47), new THREE.Vector3(0.08, -0.18, 0.465),
       new THREE.Vector3(0.15, -0.13, 0.45),
     ]);
-    head.add(new THREE.Mesh(new THREE.TubeGeometry(smileCurve, 20, 0.018, 8, false), cyan));
+    const proceduralSmile = new THREE.Mesh(new THREE.TubeGeometry(smileCurve, 20, 0.018, 8, false), cyan);
+    head.add(proceduralSmile);
     proceduralMouth = orb(head, cyan, [0, -0.16, 0.46], [0.105, 0.025, 0.025]);
     proceduralMouth.visible = false;
     // A short aerial gives the silhouette the same friendly gadget feel.
@@ -253,6 +258,9 @@
     let blinkAt = performance.now() + 2400;
     let blinkStarted = 0;
     let previous = performance.now();
+    let nextHeadMove = performance.now() + 900;
+    const headMotion = { x: 0, y: 0, z: 0 };
+    const headTarget = { x: 0, y: 0, z: 0 };
     function readFrames(frames, p) {
       let i = 0;
       while (i < frames.length - 2 && p > frames[i + 1][0]) i++;
@@ -266,6 +274,16 @@
       const dt = Math.min(0.05, (now - previous) / 1000);
       previous = now;
       if (!reduceMotion) {
+        if (now >= nextHeadMove) {
+          headTarget.x = (Math.random() * 2 - 1) * 0.055; // nod
+          headTarget.y = (Math.random() * 2 - 1) * 0.13;  // glance left/right
+          headTarget.z = (Math.random() * 2 - 1) * 0.09;  // tilt
+          nextHeadMove = now + 1100 + Math.random() * 2300;
+        }
+        const headEase = 1 - Math.exp(-dt * 1.8);
+        headMotion.x += (headTarget.x - headMotion.x) * headEase;
+        headMotion.y += (headTarget.y - headMotion.y) * headEase;
+        headMotion.z += (headTarget.z - headMotion.z) * headEase;
         if (!action && now >= nextAction) action = { ...actions[Math.floor(Math.random() * actions.length)], started: now };
         if (action) {
           const p = Math.min(1, (now - action.started) / action.duration);
@@ -274,12 +292,12 @@
           robot.rotation.y = yaw;
           arms[0].rotation.z = leftAngle;
           arms[1].rotation.z = rightAngle;
-          head.rotation.z = Math.sin(p * Math.PI) * (yaw ? 0.04 : 0.07);
           if (p >= 1) {
             action = null;
             nextAction = now + (fallbackMood === "working" ? 6500 : 3000) + Math.random() * 6500;
           }
         }
+        head.rotation.set(headMotion.x, headMotion.y, headMotion.z + (action ? 0.025 : 0));
         if (now >= blinkAt && !blinkStarted) blinkStarted = now;
         if (blinkStarted) {
           const bp = (now - blinkStarted) / 130;
@@ -295,6 +313,7 @@
       if (proceduralMouth) {
         proceduralMouth.visible = currentMouthLevel > 0.06;
         proceduralMouth.scale.y = Math.max(0.012, currentMouthLevel * 0.12);
+        proceduralSmile.visible = currentMouthLevel < 0.18;
       }
       renderer.render(scene, camera);
     }
