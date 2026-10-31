@@ -5,6 +5,7 @@ with a blocking scan finding is rejected even if the
 owner would approve. A plugin with only warnings is
 adopted only after approval, with warnings on the card.
 """
+from tests.plugin_acceptance import passing_backend_factory
 
 import json
 
@@ -28,7 +29,8 @@ def _plugin_dir(tmp_path, name="upper", code=None, skills=None):
         "description": "Test plugin",
         "tools": [{"name": "upper", "description": "Uppercase text",
                    "module": "tool.py", "function": "upper"}],
-        "skills": skills or []}), encoding="utf-8")
+        "skills": skills or [],
+        "acceptance_tests": [["python3", "-c", "assert True"]]}), encoding="utf-8")
     (directory / "tool.py").write_text(
         code or "def upper(args):\n    return str(args.get('text', '')).upper()\n",
         encoding="utf-8")
@@ -62,7 +64,7 @@ def test_skill_texts_only_trusted_standalone_skills(tmp_path):
     home = tmp_path / "home"
     registry = PluginRegistry(home)
     directory = _plugin_dir(tmp_path, skills=["skill.md"])
-    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: True)
+    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: True, test_backend_factory=passing_backend_factory)
     assert ok is True
     from src.capabilities.skill_library import Skill, SkillLibrary
     lib = SkillLibrary(home)
@@ -92,7 +94,7 @@ def test_adopt_rejects_blocking_even_if_approved(tmp_path):
     directory = _plugin_dir(tmp_path, code=(
         "def upper(args):\n    return eval(args.get('text', ''))\n"))
     ok, findings, message = registry.adopt(
-        directory, approve=lambda plugin, f: True)
+        directory, approve=lambda plugin, f: True, test_backend_factory=passing_backend_factory)
     assert ok is False
     assert not (home / "toolbox" / "upper").exists()
 
@@ -102,7 +104,7 @@ def test_adopt_copies_after_approval_and_registry_loads(tmp_path):
     registry = PluginRegistry(home)
     directory = _plugin_dir(tmp_path, skills=["skill.md"])
     ok, findings, message = registry.adopt(
-        directory, approve=lambda plugin, f: True)
+        directory, approve=lambda plugin, f: True, test_backend_factory=passing_backend_factory)
     assert ok is True
     assert (home / "toolbox" / "upper" / "plugin.json").exists()
     registry2 = PluginRegistry(home)
@@ -115,7 +117,7 @@ def test_adopt_without_approval_does_not_copy(tmp_path):
     home = tmp_path / "home"
     registry = PluginRegistry(home)
     directory = _plugin_dir(tmp_path)
-    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: False)
+    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: False, test_backend_factory=passing_backend_factory)
     assert ok is False
     assert not (home / "toolbox" / "upper").exists()
 
@@ -132,7 +134,7 @@ def test_registry_adopt_enforces_capability_posture_before_approval(tmp_path):
     ok, _, message = registry.adopt(
         directory,
         approve=lambda plugin, findings: approval_calls.append(plugin.name),
-        tool_posture="standard")
+        tool_posture="standard", test_backend_factory=passing_backend_factory)
     assert ok is False
     assert "capability or sandbox plugin" in message
     assert approval_calls == []
@@ -169,11 +171,11 @@ def test_adoption_never_executes_plugin_code_before_approval(tmp_path):
         f"Path({str(marker)!r}).write_text('ran')\n"
         "def upper(args):\n    return str(args.get('text', '')).upper()\n")
     directory = _plugin_dir(tmp_path, code=code)
-    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: False)
+    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: False, test_backend_factory=passing_backend_factory)
     assert ok is False
     assert not marker.exists()
     # After approval the copy is loaded for real and still works.
-    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: True)
+    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: True, test_backend_factory=passing_backend_factory)
     assert ok is True
     assert marker.exists()
     assert registry.call("upper", {"text": "hi"}) == "HI"
@@ -182,7 +184,7 @@ def test_adoption_never_executes_plugin_code_before_approval(tmp_path):
 def test_loop_dispatches_to_plugin_tool(tmp_path):
     home = tmp_path / "home"
     registry = PluginRegistry(home)
-    registry.adopt(_plugin_dir(tmp_path), approve=lambda plugin, f: True)
+    registry.adopt(_plugin_dir(tmp_path), approve=lambda plugin, f: True, test_backend_factory=passing_backend_factory)
     registry.load_all()
     plan = {"steps": [
         {"tool": "upper", "args": {"text": "hi"}, "deliverable": ""},

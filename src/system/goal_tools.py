@@ -959,20 +959,27 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                     for t in preflight.plugin.tools))
             if not allowed:
                 return f"adoption refused: {reason}"
-            evidence = None
-            if test_backend_factory is not None:
-                backend = None
-                try:
-                    from ..capabilities.plugin_acceptance import test_candidate
-                    backend = test_backend_factory()
-                    evidence = test_candidate(source, backend)
-                    if evidence["source_hash"] != preflight.approved_hash:
-                        return "adoption refused: candidate changed after preflight"
-                except Exception as exc:
-                    return f"adoption refused: acceptance tests failed: {type(exc).__name__}: {exc}"
-                finally:
-                    if backend is not None:
-                        backend.cleanup()
+            if test_backend_factory is None:
+                return ("adoption refused: an isolated, network-disabled "
+                        "acceptance-test backend is required")
+            backend = None
+            try:
+                from ..capabilities.plugin_acceptance import test_candidate
+                backend = test_backend_factory()
+                evidence = test_candidate(source, backend)
+                if evidence["source_hash"] != preflight.approved_hash:
+                    return "adoption refused: candidate changed after preflight"
+                preflight.body += (
+                    "\nAcceptance validation: "
+                    f"{len(evidence['tests'])} test command(s) passed in isolated "
+                    f"{evidence['backend']} with network disabled. Evidence is "
+                    f"bound to candidate hash {evidence['source_hash']}."
+                )
+            except Exception as exc:
+                return f"adoption refused: acceptance tests failed: {type(exc).__name__}: {exc}"
+            finally:
+                if backend is not None:
+                    backend.cleanup()
             if not ask_plugin_approval(gate, None, preflight):
                 return "adoption refused: Adoption rejected by owner"
             if governor is not None:

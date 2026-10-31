@@ -1,5 +1,6 @@
 """Wiring tests: component modules are reachable from real entry points,
 not just importable in isolation."""
+from tests.plugin_acceptance import passing_backend_factory
 
 import sys
 from pathlib import Path
@@ -40,6 +41,6 @@ def test_plugin_adopt_blocked_by_security_gate(tmp_path):
         encoding="utf-8")
     registry = PluginRegistry(tmp_path)
     ok, _findings, message = registry.adopt(
-        plugin_dir, approve=lambda plugin, f: True)
+        plugin_dir, approve=lambda plugin, f: True, test_backend_factory=passing_backend_factory)
     assert ok is False
     assert "security gate" in message

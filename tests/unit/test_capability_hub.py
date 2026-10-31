@@ -1,5 +1,6 @@
 """Capability Hub index: sources, dimensions, precedence,
 health cache, search, and filters."""
+from tests.plugin_acceptance import passing_backend_factory
 
 import json
 from types import SimpleNamespace
@@ -185,17 +186,18 @@ def test_adopt_replaces_and_resets_health(tmp_path):
         "name": "upper", "version": "1", "description": "Up",
         "tools": [{"name": "upper", "module": "tool.py",
                    "function": "upper"}],
-        "skills": ["skill.md"]}))
+        "skills": ["skill.md"],
+        "acceptance_tests": [["python3", "-c", "assert True"]]}))
     (src / "tool.py").write_text(
         "def upper(args):\n    return 'HI'\n")
     (src / "skill.md").write_text("# Skill\n")
     registry = PluginRegistry(home)
-    ok, _, _ = registry.adopt(src, approve=lambda p, f: True)
+    ok, _, _ = registry.adopt(src, approve=lambda p, f: True, test_backend_factory=passing_backend_factory)
     assert ok is True
     hub = CapabilityHub(home)
     hub.record_health("plugin:upper", "degraded")
     hub.record_health("skill:upper/skill.md", "degraded")
-    ok, _, _ = registry.adopt(src, approve=lambda p, f: True)
+    ok, _, _ = registry.adopt(src, approve=lambda p, f: True, test_backend_factory=passing_backend_factory)
     assert ok is True
     assert hub.get("plugin:upper")["health"] == "unknown"
     assert hub.get("skill:upper/skill.md")["health"] == "unknown"

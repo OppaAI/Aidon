@@ -62,4 +62,5 @@ Green offline tests do not satisfy the host-access, crash-recovery, functional-a
 - POST and PUT body parsing rejects invalid framing and payloads above 80 MiB and uses a socket read deadline.
 - Local sandbox output is capped at 1 MiB per stream and its process group is killed at the end of a run or on timeout. Process groups are not a substitute for OS isolation: escaped sessions and other backends need separate verification.
 - X11 scrolling emits wheel button events; verification on a real desktop is still outstanding.
-- Durable acquisition states, verified acceptance-test evidence, and automatic interruption recovery remain unresolved.
+- Plugin registry, goal-tool, and low-level commit paths now fail closed without successful isolated, network-disabled acceptance evidence bound to candidate bytes. Approval identifies the backend, test count and hash without exposing arbitrary test arguments or output. Test quality still requires review.
+- Durable end-to-end acquisition state and automatic interruption recovery remain unresolved.

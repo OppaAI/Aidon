@@ -5,6 +5,7 @@ Pure tools keep ``fn(args)``; a tool with ``"context": true`` gets
 manifest declared and the owner approved. The posture decides how far
 adoption may go, and the approval card still lists every capability.
 """
+from tests.plugin_acceptance import passing_backend_factory
 
 import json
 
@@ -32,6 +33,7 @@ def _plugin_dir(tmp_path, name="gadget", capabilities=None, code="",
     manifest = {
         "name": name, "version": "1.0.0", "description": "capability test",
         "tools": [tool], "skills": [],
+        "acceptance_tests": [["python3", "-c", "assert True"]],
     }
     if capabilities is not None:
         manifest["capabilities"] = capabilities
@@ -89,7 +91,7 @@ def test_pure_tool_still_one_arg(tmp_path):
                             code="def gadget_tool(args):\n    return args['x'].upper()\n")
     registry = PluginRegistry(tmp_path / "home")
     registry.adopt(directory, approve=lambda plugin, findings: True,
-                   tool_posture="developer")
+                   tool_posture="developer", test_backend_factory=passing_backend_factory)
     registry.load_all()
     assert registry.call("gadget", {"x": "hi"}) == "HI"
 
@@ -103,7 +105,7 @@ def test_context_tool_fs_is_confined(tmp_path):
               "    return ctx.read_file(args['name'])\n"))
     registry = PluginRegistry(home)
     registry.adopt(directory, approve=lambda plugin, findings: True,
-                   tool_posture="developer")
+                   tool_posture="developer", test_backend_factory=passing_backend_factory)
     registry.load_all()
     result = registry.call(
         "gadget", {"name": "note.txt", "text": "hello"},
@@ -130,7 +132,7 @@ def test_adopted_plugin_gets_declared_capabilities(tmp_path):
               "    return ctx.read_file(args['name'])\n"))
     registry = PluginRegistry(home)
     registry.adopt(directory, approve=lambda plugin, findings: True,
-                   tool_posture="developer")
+                   tool_posture="developer", test_backend_factory=passing_backend_factory)
     registry.load_all()
     plugin = registry.plugins["gadget"]
     assert (Path(plugin.directory) / ".adopted").is_file()
@@ -242,7 +244,7 @@ def test_context_tool_without_broker_fails_loudly(tmp_path):
     directory = _plugin_dir(tmp_path, capabilities=["fs"])
     registry = PluginRegistry(tmp_path / "home")
     registry.adopt(directory, approve=lambda plugin, findings: True,
-                   tool_posture="developer")
+                   tool_posture="developer", test_backend_factory=passing_backend_factory)
     registry.load_all()
     with pytest.raises(ValueError):
         registry.call("gadget", {})

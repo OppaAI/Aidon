@@ -15,6 +15,8 @@
   hint; with network True or unknown the message is unchanged.
 """
 
+from tests.plugin_acceptance import passing_backend_factory
+
 import hashlib
 import hmac
 import json
@@ -42,7 +44,8 @@ def _plugin_dir(tmp_path, name="upper", code=None):
         "description": "Test plugin",
         "tools": [{"name": "upper", "description": "Uppercase text",
                    "module": "tool.py", "function": "upper"}],
-        "skills": []}), encoding="utf-8")
+        "skills": [],
+        "acceptance_tests": [["python3", "-c", "assert True"]]}), encoding="utf-8")
     (directory / "tool.py").write_text(
         code or "def upper(args):\n    return str(args.get('text', '')).upper()\n",
         encoding="utf-8")
@@ -80,7 +83,7 @@ def test_card_shows_approved_hash_and_rehash_matches(tmp_path):
     registry = PluginRegistry(home)
     directory = _plugin_dir(tmp_path)
     gate = _CapturingGate()
-    ok, _, _ = registry.adopt(directory, gate=gate)
+    ok, _, _ = registry.adopt(directory, gate=gate, test_backend_factory=passing_backend_factory)
     assert ok is True
     assert len(gate.bodies) == 1
     assert plugin_tree_hash(directory) in gate.bodies[0]
@@ -92,7 +95,7 @@ def test_source_changed_during_approval_aborts_and_keeps_old_install(tmp_path):
     registry = PluginRegistry(home)
     directory = _plugin_dir(tmp_path)
     # First adopt a known-good version.
-    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: True)
+    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: True, test_backend_factory=passing_backend_factory)
     assert ok is True
     installed = (home / "toolbox" / "upper" / "tool.py").read_text(encoding="utf-8")
 
@@ -102,7 +105,7 @@ def test_source_changed_during_approval_aborts_and_keeps_old_install(tmp_path):
             "def upper(args):\n    return 'MUTATED'\n", encoding="utf-8")
         return True
 
-    ok, _, message = registry.adopt(directory, approve=approve_and_mutate)
+    ok, _, message = registry.adopt(directory, approve=approve_and_mutate, test_backend_factory=passing_backend_factory)
     assert ok is False
     assert "changed after approval" in message
     assert "hash" in message.lower()
@@ -119,7 +122,7 @@ def test_size_cap_rejects_before_approval_card(tmp_path):
     (directory / "blob.bin").write_bytes(b"x" * (MAX_PLUGIN_BYTES + 1))
     called = []
     ok, _, message = registry.adopt(
-        directory, approve=lambda plugin, f: called.append(True) or True)
+        directory, approve=lambda plugin, f: called.append(True) or True, test_backend_factory=passing_backend_factory)
     assert ok is False
     assert "over" in message and "cap" in message
     assert called == [], "oversized source must not reach an approval card"
@@ -137,7 +140,7 @@ def test_gate_throwing_rejects_instead_of_clean_scan(tmp_path, monkeypatch):
     monkeypatch.setattr(security_gate, "gate_text", broken_gate)
     called = []
     ok, _, message = registry.adopt(
-        directory, approve=lambda plugin, f: called.append(True) or True)
+        directory, approve=lambda plugin, f: called.append(True) or True, test_backend_factory=passing_backend_factory)
     assert ok is False
     assert "security gate error" in message
     assert "scanner exploded" in message
@@ -155,7 +158,7 @@ def test_gate_per_file_oserror_still_skips_and_adopts(tmp_path, monkeypatch):
         raise OSError("cannot read")
 
     monkeypatch.setattr(security_gate, "gate_text", unreadable_gate)
-    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: True)
+    ok, _, _ = registry.adopt(directory, approve=lambda plugin, f: True, test_backend_factory=passing_backend_factory)
     assert ok is True
     assert (home / "toolbox" / "upper" / "plugin.json").exists()
 
@@ -966,7 +969,8 @@ def _plugin_dir(tmp_path, name="upper"):
         "description": "Test plugin",
         "tools": [{"name": "upper", "description": "Uppercase text",
                    "module": "tool.py", "function": "upper"}],
-        "skills": []}), encoding="utf-8")
+        "skills": [],
+        "acceptance_tests": [["python3", "-c", "assert True"]]}), encoding="utf-8")
     (directory / "tool.py").write_text(
         "def upper(args):\n    return str(args.get('text', '')).upper()\n",
         encoding="utf-8")
@@ -985,12 +989,14 @@ def test_callback_receives_hash_and_body(tmp_path):
         return True
 
     registry = PluginRegistry(home)
-    ok, _findings, _message = registry.adopt(directory, approve=approve)
+    ok, _findings, _message = registry.adopt(directory, approve=approve, test_backend_factory=passing_backend_factory)
     assert ok is True
     assert seen["hash"] == plugin_tree_hash(directory)
     assert seen["name"] == "upper"
     assert f"Approved source hash: {seen['hash']}" in seen["body"]
     assert "Plugin: upper 1.0.0" in seen["body"]
+    assert "isolated docker" in seen["body"]
+    assert "network disabled" in seen["body"]
 
 
 def test_callback_old_arity_still_works(tmp_path):
@@ -998,7 +1004,7 @@ def test_callback_old_arity_still_works(tmp_path):
     directory = _plugin_dir(tmp_path)
     registry = PluginRegistry(home)
     ok, _findings, _message = registry.adopt(
-        directory, approve=lambda plugin, findings: True)
+        directory, approve=lambda plugin, findings: True, test_backend_factory=passing_backend_factory)
     assert ok is True
     assert (home / "toolbox" / "upper" / "tool.py").is_file()
 
@@ -1008,7 +1014,7 @@ def test_callback_rejection_does_not_copy(tmp_path):
     directory = _plugin_dir(tmp_path)
     registry = PluginRegistry(home)
     ok, _findings, _message = registry.adopt(
-        directory, approve=lambda plugin, findings, h, b: False)
+        directory, approve=lambda plugin, findings, h, b: False, test_backend_factory=passing_backend_factory)
     assert ok is False
     assert not (home / "toolbox" / "upper").exists()
 

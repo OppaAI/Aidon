@@ -10,6 +10,7 @@ from src.capabilities.acquisition_governor import (
     AcquisitionBudgetExceeded, AcquisitionGovernor)
 from src.capabilities.modal_images import CapabilityImageBuilder
 from src.system.main import _goal_extra_tools
+from tests.plugin_acceptance import passing_backend_factory
 
 
 def test_defaults_and_summary():
@@ -68,7 +69,8 @@ class _ApproveGate:
 def _tools(tmp_path, governor):
     config = SimpleNamespace(home=tmp_path)
     return _goal_extra_tools(config, tmp_path, gate=_ApproveGate(),
-                             governor=governor)
+                             governor=governor,
+                             test_backend_factory=passing_backend_factory)
 
 
 def test_mcp_connect_wiring_counts_and_caps(tmp_path):
@@ -98,7 +100,8 @@ def test_adopt_and_install_wiring_caps(tmp_path):
         "name": "cap-plug", "version": "1", "description": "test",
         "tools": [{"name": "echo", "module": "tool.py",
                    "function": "echo"}],
-        "skills": []}))
+        "skills": [],
+        "acceptance_tests": [["python3", "-c", "assert True"]]}))
     (plugin_dir / "tool.py").write_text("def echo(args):\n    return 'hi'\n")
     with pytest.raises(AcquisitionBudgetExceeded, match="tool"):
         tools["adopt_tool_plugin"](str(plugin_dir))

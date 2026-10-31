@@ -6,6 +6,7 @@ subprocess/network/eval in tool code stay contained. Args and approved
 secrets travel on stdin; the tool is adoption-gated like any capability
 plugin.
 """
+from tests.plugin_acceptance import passing_backend_factory
 
 import json
 import os
@@ -30,7 +31,8 @@ def _sandbox_plugin(tmp_path, code, capabilities=None, name="heavy",
               "mode": "sandbox"}]
     tools.extend(extra_tools or [])
     manifest = {"name": name, "version": "1.0.0",
-                "description": "sandbox tool test", "tools": tools}
+                "description": "sandbox tool test", "tools": tools,
+                "acceptance_tests": [["python3", "-c", "assert True"]]}
     if capabilities is not None:
         manifest["capabilities"] = capabilities
     (directory / "plugin.json").write_text(json.dumps(manifest))
@@ -112,7 +114,7 @@ def test_registry_call_requires_sandbox(tmp_path):
     directory = _sandbox_plugin(tmp_path, code)
     registry = PluginRegistry(tmp_path / "home")
     registry.adopt(directory, approve=lambda plugin, findings: True,
-                   tool_posture="developer")
+                   tool_posture="developer", test_backend_factory=passing_backend_factory)
     registry.load_all()
     with pytest.raises(ValueError, match="no sandbox"):
         registry.call("heavy", {})
@@ -131,7 +133,7 @@ def test_run_sandbox_tool_end_to_end(tmp_path, monkeypatch, require_bubblewrap):
         tmp_path, code, capabilities=["secret:AIDON_T2_SECRET"])
     registry = PluginRegistry(tmp_path / "home")
     registry.adopt(directory, approve=lambda plugin, findings: True,
-                   tool_posture="developer")
+                   tool_posture="developer", test_backend_factory=passing_backend_factory)
     registry.load_all()
     template = Sandbox(tmp_path / "template_work")
     result = registry.call("heavy", {"city": "Kyiv"}, sandbox=template)
@@ -148,7 +150,7 @@ def test_run_sandbox_tool_reports_plugin_error(tmp_path, require_bubblewrap):
     directory = _sandbox_plugin(tmp_path, code)
     registry = PluginRegistry(tmp_path / "home")
     registry.adopt(directory, approve=lambda plugin, findings: True,
-                   tool_posture="developer")
+                   tool_posture="developer", test_backend_factory=passing_backend_factory)
     registry.load_all()
     with pytest.raises(RuntimeError, match="boom"):
         registry.call("heavy", {}, sandbox=Sandbox(tmp_path / "work"))
@@ -163,7 +165,7 @@ def test_run_sandbox_tool_writes_no_result_outside_run_dir(tmp_path, require_bub
     directory = _sandbox_plugin(tmp_path, code)
     registry = PluginRegistry(tmp_path / "home")
     registry.adopt(directory, approve=lambda plugin, findings: True,
-                   tool_posture="developer")
+                   tool_posture="developer", test_backend_factory=passing_backend_factory)
     registry.load_all()
     result = registry.call("heavy", {"payload": "hello"},
                            sandbox=Sandbox(tmp_path / "work"))
@@ -185,7 +187,7 @@ def test_sandbox_plugin_cannot_write_outside_its_run_dir(tmp_path, require_bubbl
     directory = _sandbox_plugin(tmp_path, code)
     registry = PluginRegistry(tmp_path / "home")
     registry.adopt(directory, approve=lambda plugin, findings: True,
-                   tool_posture="developer")
+                   tool_posture="developer", test_backend_factory=passing_backend_factory)
     registry.load_all()
     host_path = tmp_path / "outside.txt"
     result = registry.call(

@@ -650,7 +650,16 @@ def _commit_plugin_locked(registry, source_dir: Path, preflight: Preflight,
             "Adoption aborted: plugin source changed after approval "
             f"(approved hash {preflight.approved_hash}, current hash {current_hash}); "
             "approve the new source to adopt it")
-    if test_evidence is not None and test_evidence.get("source_hash") != current_hash:
+    if (not isinstance(test_evidence, dict)
+            or test_evidence.get("backend") not in ("modal", "docker")
+            or not isinstance(test_evidence.get("tests"), list)
+            or not test_evidence["tests"]
+            or any(not isinstance(result, dict)
+                   or result.get("returncode") != 0
+                   for result in test_evidence["tests"])):
+        return False, findings, (
+            "Adoption refused: verified isolated acceptance-test evidence is required")
+    if test_evidence.get("source_hash") != current_hash:
         return False, findings, "Adoption aborted: test evidence does not match candidate"
     target = registry.toolbox_dir / plugin.name
     registry.toolbox_dir.mkdir(parents=True, exist_ok=True)
@@ -946,20 +955,31 @@ class PluginRegistry:
                           for tool in preflight.plugin.tools))
         if not allowed:
             return False, preflight.findings, f"Adoption refused: {reason}"
-        evidence = None
-        if test_backend_factory is not None:
-            backend = None
-            try:
-                from .plugin_acceptance import test_candidate
-                backend = test_backend_factory()
-                evidence = test_candidate(source_dir, backend)
-                if evidence["source_hash"] != preflight.approved_hash:
-                    return False, preflight.findings, "Adoption refused: candidate changed after preflight"
-            except Exception as exc:
-                return False, preflight.findings, f"Adoption refused: acceptance tests failed: {type(exc).__name__}: {exc}"
-            finally:
-                if backend is not None:
-                    backend.cleanup()
+        if test_backend_factory is None:
+            return False, preflight.findings, (
+                "Adoption refused: an isolated, network-disabled acceptance-test "
+                "backend is required")
+        backend = None
+        try:
+            from .plugin_acceptance import test_candidate
+            backend = test_backend_factory()
+            evidence = test_candidate(source_dir, backend)
+            if evidence["source_hash"] != preflight.approved_hash:
+                return False, preflight.findings, "Adoption refused: candidate changed after preflight"
+            # Tell the owner what was validated before asking for approval.
+            # Do not include arbitrary argv or test output, which may contain
+            # secrets supplied by the plugin author.
+            preflight.body += (
+                "\nAcceptance validation: "
+                f"{len(evidence['tests'])} test command(s) passed in isolated "
+                f"{evidence['backend']} with network disabled. Evidence is bound "
+                f"to candidate hash {evidence['source_hash']}."
+            )
+        except Exception as exc:
+            return False, preflight.findings, f"Adoption refused: acceptance tests failed: {type(exc).__name__}: {exc}"
+        finally:
+            if backend is not None:
+                backend.cleanup()
         if not ask_plugin_approval(gate, approve, preflight):
             return False, preflight.findings, "Adoption rejected by owner"
         return commit_plugin(self, source_dir, preflight,
