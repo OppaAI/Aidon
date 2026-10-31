@@ -2728,9 +2728,26 @@ class WebUIServer:
         selfmod = (str(getattr(self.config, "tool_posture", "standard")
                        or "standard").strip().lower() == "selfmod"
                    and not getattr(self.config, "kernel_mode", False))
+        kernel_mode = bool(getattr(self.config, "kernel_mode", False))
+        optional_tools = bool(getattr(self.config, "optional_tools", False))
         goal_tools = list(dict.fromkeys(
             all_tool_names(plugin_tools, selfmod=selfmod) + live_names))
-        return {"sandbox_tools": ["write", "read", "list", "shell", "calculate"],
+        sandbox_tools = ["write", "read", "list", "shell", "calculate"]
+        if kernel_mode:
+            from ..agentic.kernel import SEED_TOOLS
+            sandbox_tools = [name for name in sandbox_tools if name in SEED_TOOLS]
+            goal_tools = [name for name in goal_tools if name in SEED_TOOLS]
+            # Kernel mode blocks plugin dispatch even if an adopted plugin
+            # remains installed in the registry.
+            plugin_tools = []
+        elif not optional_tools:
+            from ..agentic.kernel import CORE_LADDER_TOOLS
+            always_available = (CORE_LADDER_TOOLS
+                                | {"write", "read", "list", "shell", "calculate",
+                                   "read_file", "write_file"}
+                                | set(plugin_tools))
+            goal_tools = [name for name in goal_tools if name in always_available]
+        return {"sandbox_tools": sandbox_tools,
                 "goal_tools": goal_tools,
                 "plugin_tools": plugin_tools}
 
@@ -3376,8 +3393,8 @@ class WebUIServer:
         return {"ok": True}
 
     def handle_capabilities(self) -> dict:
-        """One view over what Aidon can do: sandbox + plugin tool
-        names, skill library names, and MCP server names. A source
+        """One view over tools available under the current config,
+        plus skill library names and MCP server names. A source
         that is missing or unreadable contributes an empty list,
         never an error, so the route works on a fresh home.
         """

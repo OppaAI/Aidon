@@ -8,7 +8,7 @@
 <style>
   .cap-wrap { max-width: 980px; margin: 0 auto; padding: 20px 18px 60px; }
   .cap-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 4px; }
-  .cap-head a.brand { color: var(--text); text-decoration: none; font-family: var(--font-display); font-size: 22px; font-weight: 700; }
+  .cap-head a.brand { color: var(--olive); text-decoration: none; font-family: var(--font-display); font-size: 22px; font-weight: 700; }
   .cap-head .cap-title { color: var(--muted); font-size: 15px; }
   .cap-sub { color: var(--muted); margin: 2px 0 18px; max-width: 72ch; }
   .cap-kernel { border: 1px solid var(--amber); color: var(--amber); border-radius: 8px; padding: 8px 12px; margin-bottom: 16px; display: none; }
@@ -89,12 +89,10 @@
 
   <section class="cap-sec">
     <h2>Tools <span id="tools-count" class="cap-note"></span></h2>
-    <p class="cap-note">This catalog includes optional built-in tools even
-    when they are disabled for runs. With <code>AIDON_OPTIONAL_TOOLS=0</code>
-    (the default), those tools are hidden from the agent; sandbox basics,
-    core ladder tools, and approved plugins remain available unless kernel
-    mode further restricts them. “Acts on the world” tools are
-    approval-gated before live use.</p>
+    <p class="cap-note">Showing tools available with the current settings.
+    Ask, Plan, and Execute use the same tool set; optional tools and kernel
+    mode affect availability. “Acts on the world” tools are approval-gated
+    before live use.</p>
     <div class="cap-cards" id="tools"></div>
   </section>
 
