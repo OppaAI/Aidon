@@ -30,6 +30,20 @@ class InterviewStore:
             row = db.execute("SELECT document FROM sessions WHERE session_key=?", (key,)).fetchone()
             return json.loads(row[0]) if row else None
 
+    def complete_session(self, key):
+        """Mark an approved capability workflow complete after its goal succeeds."""
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT document FROM sessions WHERE session_key=?", (key,)).fetchone()
+            if not row:
+                return False
+            state = json.loads(row[0])
+            if state.get("outcome") != "approved":
+                return False
+            state["finished"] = True
+            db.execute("UPDATE sessions SET document=? WHERE session_key=?", (json.dumps(state, ensure_ascii=False), key))
+            return True
+
     def load_lab(self, kind):
         if kind not in ("tool", "skill", "mcp"):
             raise ValueError("invalid lab")

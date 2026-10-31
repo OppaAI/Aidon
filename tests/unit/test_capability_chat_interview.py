@@ -75,3 +75,17 @@ def test_answer_committed_before_interruption_is_replayed(tmp_path):
     resumed = _runner([], [])
     resumed.home, resumed.conversation_id, resumed.run_id = tmp_path, "chat", "new-run"
     assert resumed._capability_interview("Edit video", "need_plugin")[0] == "rejected"
+
+
+def test_approved_brief_remains_recoverable_until_goal_completes(tmp_path):
+    from src.interface.interview_store import InterviewStore
+    runner = _runner(["proceed", "proceed"], [{"brief": "Export MP4."}])
+    runner.home, runner.conversation_id, runner.run_id = tmp_path, "chat", "run"
+    assert runner._capability_interview("Edit video", "need_plugin")[0] == "approved"
+    store = InterviewStore(tmp_path)
+    assert store.unfinished_for_conversation("chat")["outcome"] == "approved"
+    resumed = _runner([], [])
+    resumed.home, resumed.conversation_id, resumed.run_id = tmp_path, "chat", "new-run"
+    assert resumed._capability_interview("Edit video", "need_plugin") == ("approved", "Export MP4.")
+    assert store.complete_session(resumed._capability_session_key)
+    assert store.unfinished_for_conversation("chat") is None

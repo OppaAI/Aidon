@@ -1718,6 +1718,7 @@ class GoalRunner:
         store = InterviewStore(self.home)
         identity = json.dumps([getattr(self, "conversation_id", ""), goal, status])
         key = hashlib.sha256(identity.encode()).hexdigest()
+        self._capability_session_key = key
         state = store.load_session(key)
         if not state or state.get("finished"):
             state = {"goal": goal, "kind": status, "conversation_id": getattr(self, "conversation_id", ""), "steps": [], "finished": False}
@@ -1753,7 +1754,9 @@ class GoalRunner:
                                          lambda: self._chat(phase, messages)),
             lambda query: step("research", query, lambda: str(self.researcher(query))[:16000])
                 if callable(getattr(self, "researcher", None)) else None)
-        state["finished"] = result[0] in ("approved", "rejected")
+        # An approved brief is not completion: keep it recoverable until
+        # the original goal has actually completed.
+        state["finished"] = result[0] == "rejected"
         state["outcome"] = result[0]
         store.save_session(key, state)
         return result
@@ -2691,6 +2694,12 @@ class GoalRunner:
 
         if report.status in ("done", "failed", "rejected", "chat", "cancelled"):
             self._clear_checkpoint()
+        if report.status == "done" and getattr(self, "_capability_session_key", None):
+            try:
+                from ..interface.interview_store import InterviewStore
+                InterviewStore(self.home).complete_session(self._capability_session_key)
+            except Exception as exc:
+                self._trace("capability", "failed", f"Could not close interview recovery state: {type(exc).__name__}")
         reg = getattr(self, "_checkpoint_registry", None)
         if reg is not None:
             try:
