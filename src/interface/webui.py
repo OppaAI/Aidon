@@ -3606,8 +3606,10 @@ class WebUIServer:
                     self._send_static(relative)
                 elif parsed.path == "/":
                     self._send_static("index.html")
+                elif parsed.path == "/documents":
+                    self._send_static("docs.html")
                 elif parsed.path in ("/dag", "/capabilities", "/memory", "/knowledge",
-                                     "/reports", "/practice", "/graph", "/documents"):
+                                     "/reports", "/practice", "/graph"):
                     self._send_static(parsed.path.lstrip("/") + ".html")
                 elif parsed.path == "/settings":
                     keys = server.auth_store.list_keys() if server.auth_store else []
