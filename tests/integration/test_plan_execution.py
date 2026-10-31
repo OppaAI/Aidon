@@ -128,11 +128,15 @@ def test_trusted_skill_replans_original_goal_and_keeps_completed_draft(
     )
 
     class Plugins:
+        trusted = False
+
         def tool_names(self):
             return []
 
         def skill_texts(self):
-            return {"video-editing": "Trusted, tested video editing procedure."}
+            if self.trusted:
+                return {"video-editing": "Trusted, tested video editing procedure."}
+            return {}
 
     runner.plugins = Plugins()
     original_call_tool = runner._call_tool
@@ -141,6 +145,7 @@ def test_trusted_skill_replans_original_goal_and_keeps_completed_draft(
     def call_tool(name, args):
         calls.append(name)
         if name == "adopt_skill":
+            runner.plugins.trusted = True
             return "Trusted skill video-editing; its tested procedure is available."
         return original_call_tool(name, args)
 
@@ -150,6 +155,8 @@ def test_trusted_skill_replans_original_goal_and_keeps_completed_draft(
     assert report.status == "done"
     assert calls.count("adopt_skill") == 1
     assert calls.count("write") == 2  # draft once; only the new final is rerun
+    assert any("Trusted, tested video editing procedure" in message.content
+               for message in runner.client.calls[-1])
     assert (tmp_path / "home" / "work" / "draft.md").read_text() == "kept"
     assert (tmp_path / "home" / "work" / "final.md").read_text() == "skill-informed"
 
