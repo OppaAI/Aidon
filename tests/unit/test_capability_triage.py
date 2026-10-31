@@ -39,6 +39,9 @@ def test_inventory_reads_tools_skills_and_mcp_file(tmp_path):
         "def demo_fn(args):\n    return 'ok'\n")
     (plug / "pdf.md").write_text("# PDF skill\nmake pdfs with text\n")
     from src.capabilities.plugins import PluginRegistry
+    from src.capabilities.plugins import plugin_tree_hash
+    (plug / ".adopted").write_text(json.dumps({
+        "approved_hash": plugin_tree_hash(plug)}))
     registry = PluginRegistry(tmp_path)
     registry.load_all()
     tools = SimpleNamespace(names=lambda: ["write", "read"])

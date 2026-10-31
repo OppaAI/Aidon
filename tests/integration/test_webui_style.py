@@ -16,10 +16,10 @@ from src.interface.webui import (
 
 
 def test_base_css_has_page_rules():
-    # Dark theme: variables, dark default, light override.
+    # Dark theme and the low-glare olive/terracotta light theme.
     assert "--bg:#030b1c" in BASE_CSS
     assert "--accent:#0082fb" in BASE_CSS
-    assert "body.light{--bg:#dfe8f4" in BASE_CSS
+    assert ":root{--bg:#d3d1c5;--surface:#f0ede3" in BASE_CSS
     assert "button{" in BASE_CSS
     assert "#messages p{" in BASE_CSS
 

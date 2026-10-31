@@ -30,6 +30,9 @@ def _plugin(tmp_path):
     (plug / "demo_mod.py").write_text(
         "def demo_fn(args):\n    return 'ok'\n")
     (plug / "demo_skill.md").write_text("# Demo skill\nDo demos.\n")
+    from src.capabilities.plugins import plugin_tree_hash
+    (plug / ".adopted").write_text(json.dumps({
+        "approved_hash": plugin_tree_hash(plug)}))
 
 
 @pytest.fixture
@@ -68,6 +71,7 @@ def _by_id(hub):
 def test_preloaded_registry_is_reused_without_reimport(tmp_path):
     plug = tmp_path / "toolbox" / "demo"
     plug.mkdir(parents=True)
+    marker = tmp_path / "imports.txt"
     (plug / "plugin.json").write_text(json.dumps({
         "name": "demo", "version": "1", "description": "Demo plugin",
         "tools": [{"name": "demo_tool", "module": "demo_mod.py",
@@ -75,13 +79,14 @@ def test_preloaded_registry_is_reused_without_reimport(tmp_path):
         "skills": []}))
     (plug / "demo_mod.py").write_text(
         "import os\n"
-        "open(os.path.join(os.path.dirname(__file__), "
-        "'imports.txt'), 'a').write('x')\n"
+        f"open({str(marker)!r}, 'a').write('x')\n"
         "def demo_fn(args):\n    return 'ok'\n")
     from src.capabilities.plugins import PluginRegistry
+    from src.capabilities.plugins import plugin_tree_hash
+    (plug / ".adopted").write_text(json.dumps({
+        "approved_hash": plugin_tree_hash(plug)}))
     registry = PluginRegistry(tmp_path)
     registry.load_all()
-    marker = plug / "imports.txt"
     assert marker.read_text() == "x"
     hub = CapabilityHub(tmp_path, plugins=registry)
     assert hub.get("plugin:demo") is not None

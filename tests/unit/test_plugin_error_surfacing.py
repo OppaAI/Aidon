@@ -2,19 +2,25 @@
 as "unknown tool" (which would send the model off to build a tool
 that already exists)."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from src.agentic.loop import GoalRunner
-from src.capabilities.plugins import PluginRegistry
+from src.capabilities.plugins import PluginRegistry, plugin_tree_hash
 
 
 def _runner(tmp_path, functions):
     registry = PluginRegistry(tmp_path)
+    plugin_dir = tmp_path / "toolbox" / "p"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / ".adopted").write_text(json.dumps({
+        "approved_hash": plugin_tree_hash(plugin_dir)}))
     registry.plugins = {
         "p": SimpleNamespace(
-            functions=functions, tool_names=lambda: sorted(functions))
+            directory=plugin_dir, functions=functions,
+            tool_names=lambda: sorted(functions))
     }
 
     def _unknown(name, args):
