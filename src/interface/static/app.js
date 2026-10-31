@@ -334,6 +334,49 @@
     };
   }
 
+  function mouthVisemeForChar(ch) {
+    const c = String(ch || "").toLowerCase();
+    if (/[mbp]/.test(c)) return "closed";
+    if (/[fv]/.test(c)) return "fv";
+    if (/[aáàâäãå]/.test(c)) return "ah";
+    if (/[eéèêëiyíìîï]/.test(c)) return "ee";
+    if (/[oóòôöõ]/.test(c)) return "oh";
+    if (/[uúùûüw]/.test(c)) return "oo";
+    return /[a-z]/.test(c) ? "teeth" : "closed";
+  }
+
+  // TTS does not provide phoneme timestamps, so estimate viseme timing from
+  // the spoken text and the audio duration. The audio envelope still sets
+  // opening strength through aidonSetMouthOpen.
+  function syncMouthToText(text, audio) {
+    const chars = Array.from(String(text || "")).filter((ch) => !/\s/.test(ch));
+    if (!chars.length || !window.aidonSetMouthPose) return () => {};
+    const weights = chars.map((ch) => /[.,!?;:]/.test(ch) ? 1.8 : 1);
+    const total = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+    let raf = 0;
+    const tick = () => {
+      if (audio.ended) {
+        window.aidonSetMouthPose("closed");
+        return;
+      }
+      const duration = Number(audio.duration);
+      if (duration > 0 && isFinite(duration)) {
+        let position = (audio.currentTime / duration) * total;
+        let index = 0;
+        while (index < chars.length - 1 && position >= weights[index]) {
+          position -= weights[index++];
+        }
+        window.aidonSetMouthPose(mouthVisemeForChar(chars[index]));
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      if (window.aidonSetMouthPose) window.aidonSetMouthPose("closed");
+    };
+  }
+
   // ---- attached images: rendered as <img>, not typed text --------------
   const IMG_MARKER = "![attached image](";
   function addMsgImage(kind, dataUrl, t) {
@@ -489,6 +532,7 @@
   }).catch(() => {});
 
   let stopKaraokeActive = null;  // cancels the rAF loop of the current voice
+  let stopMouthSync = null;
   let currentAudioUrl = null;    // blob URL to revoke when playback ends
   let currentAudioCancel = null;
   function resetSpeakBtn() {
@@ -498,6 +542,10 @@
     if (stopKaraokeActive) {
       try { stopKaraokeActive(); } catch (e) { /* already gone */ }
       stopKaraokeActive = null;
+    }
+    if (stopMouthSync) {
+      try { stopMouthSync(); } catch (e) { /* already gone */ }
+      stopMouthSync = null;
     }
     if (currentAudioUrl) {
       try { URL.revokeObjectURL(currentAudioUrl); } catch (e) { /* noop */ }
@@ -580,6 +628,7 @@
       currentAudioUrl = progressive.url;
       currentAudioCancel = progressive.cancel;
       ttsPlaying = true;
+      stopMouthSync = syncMouthToText(item.text, audio);
       startMouthLoop();
       try {
         const analyser = getTtsAnalyser();
@@ -592,6 +641,7 @@
         audio.addEventListener("error", resolve, { once: true });
       });
       if (progressive.url) URL.revokeObjectURL(progressive.url);
+      if (stopMouthSync) { stopMouthSync(); stopMouthSync = null; }
       currentAudio = null;
       currentAudioUrl = null;
       currentAudioCancel = null;
@@ -777,6 +827,7 @@
       btn.classList.add("playing");
       btn.title = "Stop";
       ttsPlaying = true;
+      stopMouthSync = syncMouthToText(spoken, audio);
       startMouthLoop();
       // Karaoke: the words light up as the voice reaches them.
       // resetSpeakBtn() owns cancellation and the blob URL, so a

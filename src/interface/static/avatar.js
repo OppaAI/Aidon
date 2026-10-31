@@ -83,27 +83,40 @@
   }
   animateFallbackIdle();
 
-  // The CSS/SVG fallback avatar uses the same audio level as the VRM
-  // mouth. A loaded model replaces this hook with its morph-target driver.
-  window.aidonSetMouthOpen = function (level) {
-    const amount = Math.max(0, Math.min(1, Number(level) || 0));
-    const smile = document.getElementById("fallback-mouth-smile");
-    const opening = document.getElementById("fallback-mouth-open");
-    if (smile) smile.setAttribute("opacity", String(1 - Math.min(1, amount * 5)));
+  // The SVG mouth uses text-derived visemes; audio level only modulates
+  // how open each pose is. A loaded VRM keeps its own morph-target driver.
+  const mouthShapes = {
+    ah: "M94 64 Q100 62 106 64 Q109 68 106 73 Q100 77 94 73 Q91 68 94 64Z",
+    ee: "M91 66 Q100 64 109 66 Q108 70 100 72 Q92 70 91 66Z",
+    oh: "M96 63 Q100 61 104 63 Q108 67 105 73 Q100 77 95 73 Q92 67 96 63Z",
+    oo: "M97 64 Q100 62 103 64 Q106 67 104 72 Q100 75 96 72 Q94 67 97 64Z",
+    fv: "M92 67 Q100 66 108 67 L106 70 Q100 71 94 70Z",
+    teeth: "M93 65 Q100 63 107 65 L106 70 Q100 72 94 70Z",
+  };
+  let mouthViseme = "closed";
+  let mouthLevel = 0;
+  function paintMouth(smileId, openId) {
+    const smile = document.getElementById(smileId);
+    const opening = document.getElementById(openId);
+    if (smile) smile.setAttribute("opacity", mouthViseme === "closed" ? "1" : "0");
     if (opening) {
-      opening.setAttribute("rx", String(2 + amount * 5));
-      opening.setAttribute("ry", String(1 + amount * 4));
-      opening.setAttribute("opacity", String(Math.min(1, amount * 5)));
+      opening.setAttribute("d", mouthShapes[mouthViseme] || mouthShapes.teeth);
+      opening.setAttribute("opacity", mouthViseme === "closed" ? "0" : String(Math.min(1, mouthLevel * 5)));
+      const scaleY = (0.72 + mouthLevel * 0.42).toFixed(2);
+      opening.setAttribute("transform", `translate(0 ${69 - 69 * scaleY}) scale(1 ${scaleY})`);
     }
-    // The legacy chat template keeps its original mouth element IDs.
-    const legacySmile = document.getElementById("mouth-smile");
-    const legacyOpen = document.getElementById("mouth-open");
-    if (legacySmile) legacySmile.setAttribute("opacity", String(1 - Math.min(1, amount * 5)));
-    if (legacyOpen) {
-      legacyOpen.setAttribute("rx", String(2 + amount * 5));
-      legacyOpen.setAttribute("ry", String(1 + amount * 4));
-      legacyOpen.setAttribute("opacity", String(Math.min(1, amount * 5)));
-    }
+  }
+  window.aidonSetMouthPose = function (viseme) {
+    mouthViseme = mouthShapes[viseme] ? viseme : "closed";
+    paintMouth("fallback-mouth-smile", "fallback-mouth-open");
+    paintMouth("mouth-smile", "mouth-open");
+  };
+  // The audio envelope adds natural opening strength without reducing the
+  // mouth to a single pulsing circle.
+  window.aidonSetMouthOpen = function (level) {
+    mouthLevel = Math.max(0, Math.min(1, Number(level) || 0));
+    paintMouth("fallback-mouth-smile", "fallback-mouth-open");
+    paintMouth("mouth-smile", "mouth-open");
   };
 
   // Load the VRM into the chat when one is present, as old Aidon did;
