@@ -173,7 +173,13 @@ def build_minimal_prompt(phase: str = "", user_text: str = "") -> str:
 
 def build_identity_prompt(phase: str = "", user_text: str = "",
                           persona: str = "") -> str:
-    """Compact runtime identity: Aidon's persona plus the user profile."""
+    """Compact runtime identity: Aidon's persona plus the user profile,
+    plus the manual sections every phase decides by: the loop, the
+    plugin instructions, the capability ladder, and the hard rules.
+    The full manual stays available via build_system_prompt; these
+    sections are the ones a phase needs without paying for all of
+    it on every call. When the manual is absent the sections are
+    simply missing, never faked."""
     parts = [SYSTEM_LINE]
     if phase:
         parts.append(f"You are in the {phase} phase.")
@@ -181,6 +187,13 @@ def build_identity_prompt(phase: str = "", user_text: str = "",
     persona = persona or _read_doc("SOUL.md")
     if persona:
         parts.append("\n# Persona\n" + persona)
+    manual = _read_doc("AGENTS.md")
+    if manual:
+        for heading in ("The loop", "Writing tool plugins",
+                        "Capability ladder", "Hard rules"):
+            section = _section(manual, heading)
+            if section:
+                parts.append("\n" + section.rstrip())
     user_text = user_text or _read_doc("USER.md")
     if user_text:
         parts.append("\n# The user\n" + user_text)

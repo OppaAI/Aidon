@@ -91,7 +91,7 @@ class MCPServer:
                     return {"jsonrpc": "2.0", "id": request_id,
                             "error": {"code": -32002, "message": "insufficient scope"}}
                 goal = self.goals.submit(str(args.get("goal", "")),
-                                         str(args.get("project_id", "default")),
+                                         str(args.get("conversation_id", "")),
                                          owner_name=record.name)
                 return {"jsonrpc": "2.0", "id": request_id,
                         "result": {"content": [{"type": "text", "text": json.dumps(goal.to_dict())}]}}
@@ -117,7 +117,7 @@ class MCPServer:
                     from .run_control import RunControl
                     control = RunControl(self.goals.home)
                     if control.get(str(args.get("id", ""))) is None:
-                        control.register(str(args.get("id", "")), goal.goal, goal.project_id)
+                        control.register(str(args.get("id", "")), goal.goal, goal.conversation_id)
                     control.steer(str(args.get("id", "")), str(args.get("note", "")))
                 except Exception:
                     pass

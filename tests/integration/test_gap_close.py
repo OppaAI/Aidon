@@ -69,18 +69,18 @@ def test_sparse_vector_and_conversations_db(tmp_path):
     assert indices and values and len(indices) == len(values)
     from src.memory.conversations_db import ConversationStoreDB
     db = ConversationStoreDB(tmp_path)
-    conv = db.create_conversation("proj-a")
+    conv = db.create_conversation()
     db.record_exchange(conv["id"], "user", "hi")
     assert db.list_all_conversations()
-    assert db.import_conversation("legacy-1", "proj-a", [{"role": "user", "text": "old"}])["id"] == "legacy-1"
+    assert db.import_conversation("legacy-1", [{"role": "user", "text": "old"}])["id"] == "legacy-1"
     assert db.history("legacy-1")[0]["text"] == "old"
 
 
 def test_webui_conversations_use_sqlite(tmp_path):
     from src.interface.webui import WebUIServer
     server = WebUIServer(tmp_path, memory=None)
-    conv = server.handle_conversation_create({"project_id": "proj-a", "turns": [{"role": "user", "text": "hi"}]})
-    assert conv["project_id"] == "proj-a"
+    conv = server.handle_conversation_create({"turns": [{"role": "user", "text": "hi"}]})
+    assert conv["id"]
     assert any(c["id"] == conv["id"] for c in server.handle_conversations_list()["conversations"])
     got = server.handle_conversation_get(conv["id"])
     assert got["id"] == conv["id"] and got["turns"][0]["text"] == "hi"

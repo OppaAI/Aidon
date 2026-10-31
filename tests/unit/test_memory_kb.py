@@ -36,13 +36,11 @@ def test_stm_episodic_semantic_collections_are_separate(tmp_path):
     assert memory.store.get("episodic", episodic.id).payload["promoted"] is True
 
 
-def test_forget_and_forget_project(tmp_path):
+def test_forget(tmp_path):
     memory = _memory(tmp_path)
-    point = memory.record_episodic("proj1", "secret project fact")
+    point = memory.record_episodic("chat1", "secret chat fact")
     assert memory.forget("episodic", point.id) is True
     assert memory.forget("episodic", point.id) is False
-    memory.record_episodic("proj2", "another fact")
-    assert memory.forget_project("proj2")["episodic"] == 1
 
 
 def test_graph_expansion_follows_links(tmp_path):

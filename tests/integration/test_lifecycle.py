@@ -605,7 +605,7 @@ class _FakeMemory:
     def recall(self, collection, query, limit=1, graph=False):
         return [_FakeHit(_FakePoint(self._payload))]
 
-    def record_episodic(self, project_id, goal, data):
+    def record_episodic(self, conversation_id, goal, data):
         return object()
 
     def auto_promote_enabled(self):
@@ -722,7 +722,9 @@ def _run_simple_goal(tmp_path, network_available):
 
 def test_network_on_announces_reports_and_marks_card(tmp_path, capsys):
     runner, bodies = _run_simple_goal(tmp_path, True)
-    report = runner.run("Write e.md")
+    report = runner.run("Write e.md", live_actions=[
+        {"kind": "notify", "recipient": "owner",
+         "subject": "t", "body": "b"}])
     assert report.status == "done"
     assert report.network is True
     assert "Sandbox network: on" in capsys.readouterr().err
@@ -731,7 +733,9 @@ def test_network_on_announces_reports_and_marks_card(tmp_path, capsys):
 
 def test_network_none_says_nothing(tmp_path, capsys):
     runner, bodies = _run_simple_goal(tmp_path, None)
-    report = runner.run("Write e.md")
+    report = runner.run("Write e.md", live_actions=[
+        {"kind": "notify", "recipient": "owner",
+         "subject": "t", "body": "b"}])
     assert report.status == "done"
     assert report.network is None
     assert "Sandbox network: on" not in capsys.readouterr().err
@@ -740,7 +744,9 @@ def test_network_none_says_nothing(tmp_path, capsys):
 
 def test_network_false_says_nothing(tmp_path, capsys):
     runner, bodies = _run_simple_goal(tmp_path, False)
-    report = runner.run("Write e.md")
+    report = runner.run("Write e.md", live_actions=[
+        {"kind": "notify", "recipient": "owner",
+         "subject": "t", "body": "b"}])
     assert report.status == "done"
     assert report.network is False
     assert "Sandbox network: on" not in capsys.readouterr().err
@@ -858,7 +864,7 @@ def test_cancelled_registered_run_reports_cancelled(tmp_path):
 
 
 def test_trace_attribution_shared_recorder(tmp_path):
-    recorder = TraceRecorder(tmp_path, project_id="default")
+    recorder = TraceRecorder(tmp_path, conversation_id="test")
     parent = _runner(tmp_path, trace=recorder)
     sub = _runner(tmp_path, trace=recorder, run_id="sub-abc")
     parent._trace("sandbox", "started", "parent step")
@@ -872,7 +878,7 @@ def test_trace_attribution_shared_recorder(tmp_path):
 
 
 def test_trace_no_run_id_falls_back_to_recorder(tmp_path):
-    recorder = TraceRecorder(tmp_path, project_id="default")
+    recorder = TraceRecorder(tmp_path, conversation_id="test")
     runner = _runner(tmp_path, trace=recorder)
     assert runner.run_id is None
     runner._trace("sandbox", "started", "fallback step")
@@ -1224,7 +1230,7 @@ def test_executor_tiers_untouched():
 Covers what can be unit-tested without running the CLI: the CLI gate
 timeout threading, declare_blocked's direction-backed string shape, and
 the dag run wiring (executor + tool registry + Registry checkpoints)
-that `aidon dag run` uses. The serve-project, interview-runner, and
+that `aidon dag run` uses. The serve, interview-runner, and
 swarm-runner branch edits are verified by inspection of the branch
 code (they live inside main() and need a full CLI run to execute);
 the assertions below pin the helpers those branches depend on.

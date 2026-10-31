@@ -1,4 +1,4 @@
-"""WebUI settings catalog and project deletion.
+"""WebUI settings catalog and chat deletion.
 
 Handler methods are called directly on WebUIServer, no real
 server on a fixed port; one test also drives the HTTP routes
@@ -111,37 +111,38 @@ def test_settings_set_env_writes_secrets_unknown_and_newlines(tmp_path):
     assert "a\nb" not in (tmp_path / "home" / ".env").read_text()
 
 
-def test_project_delete_removes_conversations_and_memory(tmp_path):
+def test_chat_delete_removes_only_that_chat_and_keeps_global_memory(tmp_path):
     memory = Memory(tmp_path / "mem", embedder=HashEmbedder(), store=InMemoryStore())
-    memory.record("episodic", "hello project", payload={"project_id": "proj-a"})
-    memory.record("episodic", "other project", payload={"project_id": "proj-b"})
+    memory.record("episodic", "hello chat", payload={"conversation_id": "chat-a"})
+    memory.record("episodic", "other chat", payload={"conversation_id": "chat-b"})
     server = _server(tmp_path, memory=memory)
     db = ConversationStoreDB(server.home)
-    conv = db.create_conversation("proj-a")
+    conv = db.create_conversation()
     db.record_exchange(conv["id"], "user", "hi")
-    other = db.create_conversation("proj-b")
+    other = db.create_conversation()
     db.record_exchange(other["id"], "user", "hey")
-    result = server.handle_project_delete("proj-a")
+    server.handle_brief_save(conv["id"], {"brief": "standing instructions"})
+    brief_path = server.home / "chat_briefs" / f"{conv['id']}.json"
+    assert brief_path.is_file()
+    result = server.handle_conversation_delete(conv["id"])
     assert result["ok"] is True
-    assert result["removed_conversations"] == 1
-    assert db.list_conversations("proj-a") == []
-    assert len(db.list_conversations("proj-b")) == 1
-    assert memory.list_points("episodic") == [
-        point for point in memory.list_points("episodic")
-        if point.payload.get("project_id") == "proj-b"]
-    # Unknown project: ok False, nothing touched.
-    assert server.handle_project_delete("no-such-project")["ok"] is False
-    assert len(db.list_conversations("proj-b")) == 1
+    assert [c["id"] for c in db.list_all_conversations()] == [other["id"]]
+    assert not brief_path.is_file()
+    # Memory is global: deleting a chat deletes neither chat's points.
+    assert len(memory.list_points("episodic")) == 2
+    # Unknown chat: ok False, nothing touched.
+    assert server.handle_conversation_delete("no-such-chat")["ok"] is False
+    assert len(db.list_all_conversations()) == 1
 
 
-def test_project_delete_without_memory(tmp_path):
+def test_chat_delete_without_memory(tmp_path):
     server = _server(tmp_path, memory=None)
     db = ConversationStoreDB(server.home)
-    conv = db.create_conversation("proj-a")
+    conv = db.create_conversation()
     db.record_exchange(conv["id"], "user", "hi")
-    assert server.handle_project_delete("proj-a")["ok"] is True
-    assert db.list_conversations("proj-a") == []
-    assert server.handle_project_delete("proj-a")["ok"] is False
+    assert server.handle_conversation_delete(conv["id"])["ok"] is True
+    assert db.list_all_conversations() == []
+    assert server.handle_conversation_delete(conv["id"])["ok"] is False
 
 
 def _start_webui(tmp_path):
@@ -166,7 +167,7 @@ def _request(base, method, path, body=None):
         return exc.code, json.loads(exc.read() or b"{}")
 
 
-def test_http_catalog_and_project_delete_routes(tmp_path):
+def test_http_catalog_and_chat_delete_routes(tmp_path):
     server, httpd, base = _start_webui(tmp_path)
     try:
         status, data = _request(base, "GET", "/api/settings/catalog")
@@ -188,11 +189,17 @@ def test_http_catalog_and_project_delete_routes(tmp_path):
         assert status == 200 and data["ok"] is True
         assert "nope" not in str(data)
         assert "AIDON_API_KEY=nope" in (tmp_path / "home" / ".env").read_text()
-        # Project delete route.
-        conv = server.handle_conversation_create({"project_id": "proj-x"})
-        status, data = _request(base, "DELETE", "/api/projects/proj-x")
+        # Chat delete route, plus the per-chat brief routes.
+        conv = server.handle_conversation_create({})
+        conv_id = conv["id"]
+        status, data = _request(base, "PUT", f"/api/conversations/{conv_id}/brief",
+                                {"brief": {"goal": "dinner"}})
+        assert status == 200 and data["brief"]["goal"] == "dinner"
+        status, data = _request(base, "GET", f"/api/conversations/{conv_id}/brief")
+        assert status == 200 and data["brief"]["goal"] == "dinner"
+        status, data = _request(base, "DELETE", f"/api/conversations/{conv_id}")
         assert status == 200 and data["ok"] is True
-        status, _ = _request(base, "DELETE", "/api/projects/proj-x")
+        status, _ = _request(base, "DELETE", f"/api/conversations/{conv_id}")
         assert status == 404
     finally:
         httpd.shutdown()

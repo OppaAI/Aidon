@@ -14,7 +14,7 @@ from .messaging import MessagingConfig, send_whatsapp
 from .triggers import TriggerEvent
 
 
-def parse_whatsapp_message(payload: dict, project_id: str = "default") -> TriggerEvent | None:
+def parse_whatsapp_message(payload: dict) -> TriggerEvent | None:
     try:
         entry = payload["entry"][0]["changes"][0]["value"]
         message = entry["messages"][0]
@@ -25,7 +25,7 @@ def parse_whatsapp_message(payload: dict, project_id: str = "default") -> Trigge
     text = message.get("text", {}).get("body", "")
     if not text:
         return None
-    return TriggerEvent(source="whatsapp", project_id=project_id, goal=text, payload={"from": message.get("from", "")}, reply=lambda reply: None)
+    return TriggerEvent(source="whatsapp", conversation_id="whatsapp:" + str(message.get("from", "")), goal=text, payload={"from": message.get("from", "")}, reply=lambda reply: None)
 
 
 def send_whatsapp_message(config: MessagingConfig, to: str, text: str, post=None) -> dict:

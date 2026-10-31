@@ -52,6 +52,25 @@ Backends:
   password arriving on stdin only — never in argv,
   never logged. A disposable VM per run, and a Docker
   container inside it, remain future work.
+- ModalBackend runs commands in a Modal sandbox
+  (modal.Sandbox.create), the same tar-up / run / tar-back
+  shape as VMBackend over Modal exec instead of SSH. One
+  sandbox per backend instance (per run), /work inside it,
+  no shared volume as the workdir: the owner's /data
+  volume persists across runs, so it would leak files
+  between runs, and its cross-sandbox commit is racy.
+  The tar streams travel base64-encoded because Modal
+  exec stdout is text; binary tar through a text stream
+  would corrupt. The image is built in-process, mirroring
+  modal/sandbox_deploy.py BASE_IMAGE, and Modal caches
+  image layers, so repeated construction is cheap after
+  the first build. No `modal deploy` is needed:
+  Sandbox.create is API-driven and App.lookup creates
+  the app on first use. The modal package is imported
+  lazily: without it, or without Modal auth on the
+  machine, construction raises a clear error, never a
+  host fallback. Network maps from allow_network to
+  block_network, locked by default like the rest.
 
 Docker does not give Aidon learning. Learning comes
 from planning, experience storage, retrieval, and
@@ -306,7 +325,11 @@ def make_backend(name: str, sandbox: Sandbox, image: str = "python:3.12-slim",
                  vm_host: str | None = None, vm_user: str | None = None,
                  vm_remote_workspace: str | None = None,
                  vm_sudo_password: str | None = None,
-                 vm_use_sudo: bool = False) -> ExecutionBackend:
+                 vm_use_sudo: bool = False,
+                 modal_app: str | None = None,
+                 modal_image=None,
+                 modal_cpu: float = 1.0,
+                 modal_memory_mb: int = 1024) -> ExecutionBackend:
     """Owner-chosen backend, never model-chosen."""
     if name == "docker":
         return DockerBackend(image=image, allow_network=allow_network)
@@ -317,6 +340,210 @@ def make_backend(name: str, sandbox: Sandbox, image: str = "python:3.12-slim",
                          remote_workspace=vm_remote_workspace,
                          sudo_password=vm_sudo_password,
                          use_sudo=vm_use_sudo)
+    if name == "modal":
+        return ModalBackend(app_name=modal_app or "aidon-sandbox",
+                            allow_network=allow_network,
+                            image=modal_image,
+                            cpu=modal_cpu, memory_mb=modal_memory_mb)
     if name in ("bubblewrap", "sandbox", ""):
         return BubblewrapBackend(sandbox)
     raise ValueError(f"unknown execution backend: {name}")
+
+
+class ModalBackend(ExecutionBackend):
+    """Run commands in a Modal sandbox, VMBackend's shape over
+    the Modal API instead of SSH. See the module docstring for
+    the image, volume, network, and base64 decisions."""
+
+    name = "modal"
+    REMOTE_WORKDIR = "/work"
+
+    def __init__(self, app_name: str = "aidon-sandbox",
+                 allow_network: bool = False,
+                 timeout_seconds: int = 600,
+                 sandbox_factory=None,
+                 image=None,
+                 cpu: float = 1.0,
+                 memory_mb: int = 1024):
+        self.app_name = app_name
+        self.allow_network = allow_network
+        self.timeout_seconds = timeout_seconds
+        self.cpu = cpu
+        self.memory_mb = memory_mb
+        self._sandbox_factory = sandbox_factory
+        # An image object from the capability image builder;
+        # None means the default base image. Set by the
+        # builder's caller, not by config: images are
+        # objects, not names.
+        self._image_obj = image
+        self._sb = None
+
+    def _image(self):
+        # Mirrors modal/sandbox_deploy.py BASE_IMAGE, as the
+        # capability image builder does; keep both in sync.
+        import modal
+        return (
+            modal.Image.from_registry("ubuntu:24.04", add_python="3.12")
+            .run_commands(
+                "apt-get update",
+                "DEBIAN_FRONTEND=noninteractive apt-get upgrade -y",
+            )
+            .apt_install("git", "curl", "build-essential", "tree")
+            .run_commands("python -m pip install --upgrade pip")
+            .pip_install("requests", "numpy")
+        )
+
+    def _ensure_sandbox(self):
+        if self._sb is not None:
+            return self._sb
+        if self._sandbox_factory is not None:
+            self._sb = self._sandbox_factory(self.app_name,
+                                             self.allow_network,
+                                             self._image_obj)
+            return self._sb
+        try:
+            import modal
+        except ImportError as exc:
+            raise RuntimeError(
+                "Modal backend needs the modal package: pip install "
+                "modal, then run modal setup") from exc
+        try:
+            app = modal.App.lookup(self.app_name, create_if_missing=True)
+            self._sb = modal.Sandbox.create(
+                app=app, image=self._image_obj or self._image(),
+                timeout=self.timeout_seconds,
+                block_network=not self.allow_network,
+                cpu=self.cpu, memory=self.memory_mb)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Modal sandbox create failed: {exc}") from exc
+        return self._sb
+
+    def _exec(self, sb, cmd, timeout_seconds, stdin_bytes=None):
+        """One exec, mirroring the owner's harness: stdin bytes
+        first when given, then stdout/stderr, then wait."""
+        proc = sb.exec(*cmd, timeout=timeout_seconds)
+        if stdin_bytes is not None:
+            proc.stdin.write(stdin_bytes)
+            proc.stdin.write_eof()
+            proc.stdin.drain()
+        out = proc.stdout.read()
+        err = proc.stderr.read()
+        proc.wait()
+        return proc.returncode, out, err
+
+    def _tar_bytes(self, workspace: Path) -> bytes:
+        import io
+        import tarfile
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tf:
+            tf.add(str(workspace), arcname=".")
+        return buf.getvalue()
+
+    def _validate_tar_members(self, tf) -> None:
+        """Explicit pre-scan before any extraction. An archive
+        returned by a sandbox running generated code is
+        untrusted: reject absolute paths, parent traversal,
+        and links whose target escapes the workspace, so a
+        symlink created by one member cannot redirect a later
+        member outside. This runs before filter="data", so
+        the defense does not depend on one Python version's
+        filter behavior."""
+        import posixpath
+        for member in tf.getmembers():
+            name = member.name
+            if posixpath.isabs(name):
+                raise ValueError(f"tar member escapes workspace: {name}")
+            parts = [p for p in posixpath.normpath(name).split("/")
+                     if p not in ("", ".")]
+            if ".." in parts:
+                raise ValueError(f"tar member escapes workspace: {name}")
+            if member.issym() or member.islnk():
+                target = member.linkname
+                if posixpath.isabs(target):
+                    raise ValueError(
+                        f"tar link escapes workspace: {name} -> {target}")
+                base = posixpath.dirname(name)
+                resolved = posixpath.normpath(
+                    posixpath.join(base, target))
+                rparts = [p for p in resolved.split("/")
+                          if p not in ("", ".")]
+                if ".." in rparts:
+                    raise ValueError(
+                        f"tar link escapes workspace: {name} -> {target}")
+
+    def _untar_bytes(self, data: bytes, workspace: Path) -> None:
+        import io
+        import tarfile
+        buf = io.BytesIO(data)
+        with tarfile.open(fileobj=buf, mode="r") as tf:
+            self._validate_tar_members(tf)
+            # No fallback: an unrestricted extract would let a
+            # malicious archive write outside the workspace. If
+            # this Python cannot filter, the sync fails closed
+            # and the run reports a sync-back failure.
+            tf.extractall(path=str(workspace), filter="data")
+
+    def run(self, command: list[str], workspace: Path,
+            timeout_seconds: int = 120) -> ExecutionResult:
+        import base64
+        if not command:
+            raise ValueError("command must not be empty")
+        workspace = Path(workspace)
+        workspace.mkdir(parents=True, exist_ok=True)
+        sb = self._ensure_sandbox()
+        try:
+            rc, _out, _err = self._exec(
+                sb, ["mkdir", "-p", self.REMOTE_WORKDIR], timeout_seconds)
+            if rc != 0:
+                return ExecutionResult(1, "", "modal workdir setup failed",
+                                       isolated=True, backend=self.name)
+            tar = base64.b64encode(self._tar_bytes(workspace))
+            rc, _out, err = self._exec(
+                sb, ["sh", "-c",
+                     f"base64 -d | tar -xf - -C {shlex.quote(self.REMOTE_WORKDIR)}"],
+                timeout_seconds, stdin_bytes=tar)
+            if rc != 0:
+                return ExecutionResult(1, "",
+                                       "workspace sync to Modal failed: "
+                                       + str(err)[-500:],
+                                       isolated=True, backend=self.name)
+            shell_cmd = (f"cd {shlex.quote(self.REMOTE_WORKDIR)} && "
+                         f"{shlex.join(command)}")
+            rc, out, err = self._exec(
+                sb, ["sh", "-c", shell_cmd], timeout_seconds)
+            rc_back, out_back, _err_back = self._exec(
+                sb, ["sh", "-c",
+                     f"tar -cf - -C {shlex.quote(self.REMOTE_WORKDIR)} . "
+                     "| base64 -w0"],
+                timeout_seconds)
+            if rc_back != 0:
+                return ExecutionResult(1, out,
+                                       "workspace sync back from Modal failed",
+                                       isolated=True, backend=self.name)
+            try:
+                raw = base64.b64decode("".join(str(out_back).split()))
+                self._untar_bytes(raw, workspace)
+            except Exception:
+                return ExecutionResult(1, out,
+                                       "workspace sync back from Modal failed",
+                                       isolated=True, backend=self.name)
+            return ExecutionResult(rc, out, err,
+                                   isolated=True, backend=self.name)
+        except Exception as exc:
+            # Modal raises on exec timeout; the SDK exception type
+            # is not pinned here, so the mapping is message-based.
+            if "timeout" in str(exc).lower() or "timed out" in str(exc).lower():
+                return ExecutionResult(124, "", "timeout",
+                                       isolated=True, backend=self.name)
+            return ExecutionResult(1, "",
+                                   f"modal exec failed: {exc}",
+                                   isolated=True, backend=self.name)
+
+    def cleanup(self) -> None:
+        if self._sb is not None:
+            try:
+                self._sb.terminate()
+            except Exception:
+                pass
+            self._sb = None

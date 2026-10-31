@@ -23,7 +23,7 @@ Design, fixed:
     for goals that agent submitted, never approve,
     never key management.
 - Goals, shared store for v1 API and MCP:
-  A goal record has an id, a goal text, a project
+  A goal record has an id, a goal text, a conversation
   id, an owner scope name, a status (queued, running,
   done, failed, cancelled, rejected), and a steer
   note list. Submitting a goal queues it, it does
@@ -138,14 +138,14 @@ class AuthStore:
 class GoalRecord:
     id: str
     goal: str
-    project_id: str = "default"
+    conversation_id: str = ""
     owner_name: str = ""
     status: str = "queued"
     steer_notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {"id": self.id, "goal": self.goal,
-                "project_id": self.project_id, "owner_name": self.owner_name,
+                "conversation_id": self.conversation_id, "owner_name": self.owner_name,
                 "status": self.status, "steer_notes": self.steer_notes}
 
 
@@ -164,6 +164,8 @@ class GoalStore:
         try:
             data = json.loads(self.store_path.read_text(encoding="utf-8"))
             for record in data.get("goals", []):
+                if "project_id" in record and "conversation_id" not in record:
+                    record = {**record, "conversation_id": record["project_id"]}
                 goal = GoalRecord(**record)
                 self.goals[goal.id] = goal
         except (json.JSONDecodeError, TypeError):
@@ -174,9 +176,9 @@ class GoalStore:
             json.dumps({"goals": [g.to_dict() for g in self.goals.values()]}, indent=2),
             encoding="utf-8")
 
-    def submit(self, goal: str, project_id: str, owner_name: str) -> GoalRecord:
+    def submit(self, goal: str, conversation_id: str, owner_name: str) -> GoalRecord:
         record = GoalRecord(id=uuid.uuid4().hex[:12], goal=goal,
-                            project_id=project_id, owner_name=owner_name)
+                            conversation_id=conversation_id, owner_name=owner_name)
         self.goals[record.id] = record
         self._save()
         return record
@@ -232,7 +234,7 @@ def handle(auth: AuthStore, goals: GoalStore, method: str, path: str,
         if denied:
             return denied
         goal = goals.submit(str(body.get("goal", "")),
-                            str(body.get("project_id", "default")),
+                            str(body.get("conversation_id", "")),
                             owner_name=record.name)
         return 201, goal.to_dict()
     if path == "/api/v1/goals" and method == "GET":
@@ -277,7 +279,7 @@ def handle(auth: AuthStore, goals: GoalStore, method: str, path: str,
                 from .run_control import RunControl
                 control = RunControl(goals.home)
                 if control.get(goal_id) is None:
-                    control.register(goal_id, goal.goal, goal.project_id)
+                    control.register(goal_id, goal.goal, goal.conversation_id)
                 control.steer(goal_id, str(body.get("note", "")))
             except Exception:
                 pass

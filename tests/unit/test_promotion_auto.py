@@ -70,7 +70,7 @@ def test_chat_exchange_promotes_to_ltm(tmp_path):
     runner._adapted_from = ""
     runner._dag_summary = {}
     runner.memory = memory
-    runner.project_id = "default"
+    runner.conversation_id = "test"
     runner.run_id = "test"
     runner.home = tmp_path
     report = RunReport("chat", "Hello there",

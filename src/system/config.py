@@ -114,6 +114,9 @@ class Config:
     vm_user: str = ""
     vm_sudo_password: str = ""
     vm_use_sudo: bool = False
+    modal_app: str = "aidon-sandbox"
+    modal_cpu: float = 1.0
+    modal_memory_mb: int = 1024
     ingest_dir: Path | None = None
     budget_tokens: int = 200000
     budget_seconds: int = 3600
@@ -164,6 +167,25 @@ class Config:
     sam_api_key: str = ""
     learn_max_skills_per_day: int = 5
     skill_max_failures: int = 3
+    # Per-run acquisition governor caps (AIDON_ACQ_MAX_*):
+    # how much one run may grow the toolbox. Defaults are
+    # the starting policy; a mission with explicit owner
+    # authorization runs with larger caps.
+    acq_max_tools: int = 2
+    acq_max_skills: int = 2
+    acq_max_mcp: int = 1
+    acq_max_dependency_sets: int = 2
+    acq_max_repair_cycles: int = 3
+    acq_max_seconds: float = 600.0
+    # YouTube upload (Data API v3): OAuth client + refresh
+    # token from a one-time consent requesting the
+    # youtube.upload scope. Privacy defaults to private:
+    # a demo must never publish by accident.
+    youtube_client_id: str = ""
+    youtube_client_secret: str = ""
+    youtube_refresh_token: str = ""
+    youtube_privacy_status: str = "private"
+    youtube_category_id: str = "22"
     # Backend selection: AIDON_BACKEND decides between the native chat
     # protocol, the Meta Model API, a plain OpenAI-compatible endpoint,
     # and the offline fake client.
@@ -183,7 +205,16 @@ class Config:
     sam_model: str = "meta-sam"
     router_fast_phases: str = "interpret,learn,respond"
     kernel_mode: bool = False
+    optional_tools: bool = False
     computer_driver: str = ""
+    # Clef decision tier: AIDON_ROUTER=clef selects the Clef intent
+    # router (else semantic); AIDON_CLEF_URL enables Clef at all
+    # (router + capability triage). Empty URL = no Clef anywhere.
+    intent_router: str = "semantic"
+    clef_url: str = ""
+    clef_model: str = "Cloudflare/clef-flash"
+    clef_key: str = ""
+    clef_secret: str = ""
 
     @classmethod
     def load(cls, home: Path | None = None) -> "Config":
@@ -223,6 +254,9 @@ class Config:
             vm_sudo_password=os.environ.get("AIDON_VM_SUDO_PASSWORD", ""),
             vm_use_sudo=os.environ.get("AIDON_VM_USE_SUDO",
                                        "0") == "1",
+            modal_app=os.environ.get("AIDON_MODAL_APP", "aidon-sandbox"),
+            modal_cpu=_env_float("AIDON_MODAL_CPU", 1.0),
+            modal_memory_mb=_env_int("AIDON_MODAL_MEMORY_MB", 1024),
             ingest_dir=(Path(os.environ["AIDON_INGEST_DIR"]).expanduser()
                         if os.environ.get("AIDON_INGEST_DIR") else None),
             budget_tokens=_env_int(
@@ -279,6 +313,17 @@ class Config:
             learn_max_skills_per_day=_env_int(
                 "AIDON_LEARN_MAX_SKILLS_PER_DAY", 5),
             skill_max_failures=_env_int("AIDON_SKILL_MAX_FAILURES", 3),
+            acq_max_tools=_env_int("AIDON_ACQ_MAX_TOOLS", 2),
+            acq_max_skills=_env_int("AIDON_ACQ_MAX_SKILLS", 2),
+            acq_max_mcp=_env_int("AIDON_ACQ_MAX_MCP", 1),
+            acq_max_dependency_sets=_env_int("AIDON_ACQ_MAX_DEPS", 2),
+            acq_max_repair_cycles=_env_int("AIDON_ACQ_MAX_REPAIRS", 3),
+            acq_max_seconds=_env_float("AIDON_ACQ_MAX_SECONDS", 600.0),
+            youtube_client_id=os.environ.get("YOUTUBE_CLIENT_ID", ""),
+            youtube_client_secret=os.environ.get("YOUTUBE_CLIENT_SECRET", ""),
+            youtube_refresh_token=os.environ.get("YOUTUBE_REFRESH_TOKEN", ""),
+            youtube_privacy_status=os.environ.get("YOUTUBE_PRIVACY_STATUS", "private"),
+            youtube_category_id=os.environ.get("YOUTUBE_CATEGORY_ID", "22"),
             backend=os.environ.get("AIDON_BACKEND", "").strip().lower(),
             model_think=os.environ.get("AIDON_MODEL_THINK", "0") not in
             ("0", "false", "no", ""),
@@ -293,7 +338,13 @@ class Config:
             image_model=os.environ.get("AIDON_IMAGE_MODEL", "muse-image-1.0"),
             sam_model=os.environ.get("AIDON_SAM_MODEL", "meta-sam"),
             router_fast_phases=os.environ.get("AIDON_ROUTER_FAST_PHASES", "interpret,learn,respond,webchat"),
+            intent_router=os.environ.get("AIDON_ROUTER", "semantic"),
+            clef_url=os.environ.get("AIDON_CLEF_URL", ""),
+            clef_model=os.environ.get("AIDON_CLEF_MODEL", "Cloudflare/clef-flash"),
+            clef_key=os.environ.get("AIDON_CLEF_KEY", ""),
+            clef_secret=os.environ.get("AIDON_CLEF_SECRET", ""),
             kernel_mode=os.environ.get("AIDON_KERNEL", "0") not in ("0", "false", "no"),
+            optional_tools=os.environ.get("AIDON_OPTIONAL_TOOLS", "0") not in ("0", "false", "no", "off", ""),
             computer_driver=os.environ.get("AIDON_COMPUTER_DRIVER", "").strip().lower(),
         )
 

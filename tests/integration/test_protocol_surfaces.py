@@ -236,18 +236,17 @@ def test_webui_tools_conversations_brief_ideas(tmp_path):
         status, data = _request(base, "GET", "/api/tools")
         assert status == 200
         assert "write" in data["sandbox_tools"]
-        status, conv = _request(base, "POST", "/api/conversations",
-                                {"project_id": "proj-a"})
-        assert status == 200 and conv["project_id"] == "proj-a"
+        status, conv = _request(base, "POST", "/api/conversations", {})
+        assert status == 200 and conv["id"]
         conv_id = conv["id"]
         status, data = _request(base, "GET", "/api/conversations")
         assert any(c["id"] == conv_id for c in data["conversations"])
         status, data = _request(base, "GET", f"/api/conversations/{conv_id}")
         assert status == 200 and data["id"] == conv_id
-        status, data = _request(base, "PUT", "/api/projects/proj-a/brief",
+        status, data = _request(base, "PUT", f"/api/conversations/{conv_id}/brief",
                                 {"brief": {"goal": "dinner"}})
         assert status == 200 and data["brief"]["goal"] == "dinner"
-        status, data = _request(base, "GET", "/api/projects/proj-a/brief")
+        status, data = _request(base, "GET", f"/api/conversations/{conv_id}/brief")
         assert status == 200 and data["brief"]["goal"] == "dinner"
         status, idea = _request(base, "POST", "/api/ideas", {"text": "an idea"})
         assert status == 200 and idea["text"] == "an idea"
@@ -299,7 +298,9 @@ def test_webui_tts_501_without_key_and_goals_with_images(tmp_path):
                                 {"goal": "make a poster",
                                  "images": [{"name": "poster.png", "data_b64": image_b64}]})
         assert status == 200
-        assert data["goal"] == "make a poster"
+        assert data["goal"].startswith("make a poster")
+        assert "Attached image paths" in data["goal"]
+        assert data["goal"].endswith("-poster.png")
         assert len(data["images"]) == 1 and data["images"][0].endswith("-poster.png")
         assert data["run_id"]
         assert list((tmp_path / "home" / "library" / "uploads").glob("*-poster.png"))

@@ -1,0 +1,86 @@
+python test_clef.py
+Warming up (first call may take a while on a cold start)...
+--- raw response (choice) ---
+{
+  "model": "Cloudflare/clef-flash",
+  "answers": {
+    "decision": {
+      "type": "choice",
+      "choice": "B",
+      "confidence": 0.9684079780649584,
+      "probabilities": {
+        "A": 0.008738328958156624,
+        "B": 0.9789386520433057,
+        "C": 0.012323018998537733
+      }
+    }
+  },
+  "usage": {
+    "input_tokens": 171,
+    "output_tokens": 0
+  }
+}
+---
+
+Warm-up done in 0.6s
+
+--- raw response (score + noul) ---
+{
+  "model": "Cloudflare/clef-flash",
+  "answers": {
+    "urgency": {
+      "type": "score",
+      "score": 0.3611647202343208,
+      "confidence": 0.27767055953135833,
+      "legend": {
+        "0": "How urgent is it to act?",
+        "1": "How risky is doing nothing?"
+      },
+      "probabilities": {
+        "0": 0.6388352797656791,
+        "1": 0.3611647202343208
+      }
+    },
+    "is_low": {
+      "type": "noul",
+      "noul": 0.9407897492587141
+    }
+  },
+  "usage": {
+    "input_tokens": 228,
+    "output_tokens": 0
+  }
+}
+---
+
+- Phone battery is 8%, home is 5 km away, a charger is 200 m away.
+  forward:  OK  -> Go to the charger
+  reversed: OK  -> Go to the charger
+
+- A pot of oil on the stove has caught fire.
+  forward:  OK  -> Cover it with a lid and turn off the heat
+  reversed: OK  -> Cover it with a lid and turn off the heat
+
+- You hear a smoke alarm at 3 a.m. and smell smoke.
+  forward:  OK  -> Get everyone out and call emergency services
+  reversed: OK  -> Get everyone out and call emergency services
+
+- A robot's left wheel motor reports a stall current of 3x normal.
+  forward:  OK  -> Stop the motor and flag a fault
+  reversed: OK  -> Stop the motor and flag a fault
+
+- Raw chicken has been sitting on the counter for 6 hours at room temperature.
+  forward:  OK  -> Throw it away
+  reversed: OK  -> Throw it away
+
+- You find an unknown mushroom while hiking and cannot identify it.
+  forward:  OK  -> Do not eat it
+  reversed: OK  -> Do not eat it
+
+- A server's disk is 98% full and a log folder holds 40 GB of old logs.
+  forward:  OK  -> Archive or delete the old logs
+  reversed: OK  -> Archive or delete the old logs
+
+- An API call fails with HTTP 429 (rate limited) and a Retry-After of 30 seconds.
+  forward:  OK  -> Wait 30 seconds, then retry
+  reversed: OK  -> Wait 30 seconds, then retry

@@ -1,9 +1,7 @@
 # Spec Sheet
 
-How to use this sheet: fill it in, save it, and attach it in the chat box.
-Aidon reads it, verifies it, and skips the interview.
-Template: specs/template.md in your Aidon home, and docs/examples/SPEC-SHEET-TEMPLATE.md in the repo.
-Docs: README, Spec sheet section.
+How to use this sheet: fill in the three required sections (Goal, Done when, Constraints). Everything else is optional. Blank means "use Aidon's configured defaults", and blank never triggers a question.
+Save it and attach it in the chat box. Aidon reads it, verifies it, and skips the interview. You can also edit a frozen spec on the sheet itself in chat, save it, and proceed.
 
 This is a filled example, not a template. The customers, invoice numbers, and amounts below are fictional, for illustration only. Totals are calculated by code from the invoice amounts, not typed in by hand, and they reconcile as follows: Northside Bakery $755.50, Acme Consulting $2,020.00, Cedar Landscaping $0.00 paid in full, grand total due $2,775.50.
 
@@ -15,14 +13,13 @@ SCHEDULING AND REVIEW: Accounting emails are drafts first, not sent immediately.
 
 Generate standard-format monthly statements for October 2026 from customer invoice accounts, calculate the total due for each customer with a full breakdown, draft each statement email, schedule it to send at 3:00pm on the first Wednesday of the month, and let the AR department review the drafts before they send.
 
-## Deliverables
+## Done when
 
-- statement-2026-10-northside-bakery.pdf
-- statement-2026-10-acme-consulting.pdf
-- statement-2026-10-cedar-landscaping.pdf
-- monthly-statements-2026-10-summary.csv
-- One draft email per customer, each with only that customer's statement PDF attached, to that customer's own email only, scheduled to send at 3:00pm on the first Wednesday of the month
-- AR review list for the AR department, with each draft, customer, PDF filename, recipient email, total due, and scheduled send time
+- Each customer has one statement PDF in the standard format: customer info, opening balance, invoices, payments, credits, closing balance, and pay by date
+- The summary CSV lists every customer, PDF filename, recipient email, total due, and scheduled send time
+- The summary CSV totals match the sum of the statement totals: $2,775.50
+- Each draft email has only that customer's statement PDF attached, to that customer's own email only
+- No draft sends before AR review, and a draft AR rejects or flags is held and not sent
 
 ## Constraints
 
@@ -34,6 +31,25 @@ Generate standard-format monthly statements for October 2026 from customer invoi
 - Totals are calculated by code from the invoice, payment, and credit amounts, never typed in by hand
 - Pay by date is November 15, 2026 for every customer with a balance due
 - A customer with a zero balance still receives a statement, marked paid in full, with no payment requested
+
+## Priorities
+
+- Accuracy over speed: a wrong-email send is worse than a late draft
+- AR review before any send, no exceptions
+
+## Deliverables
+
+- statement-2026-10-northside-bakery.pdf
+- statement-2026-10-acme-consulting.pdf
+- statement-2026-10-cedar-landscaping.pdf
+- monthly-statements-2026-10-summary.csv
+- One draft email per customer, each with only that customer's statement PDF attached, to that customer's own email only, scheduled to send at 3:00pm on the first Wednesday of the month
+- AR review list for the AR department, with each draft, customer, PDF filename, recipient email, total due, and scheduled send time
+
+## Inputs and context
+
+- invoices-2026-10.csv, the October invoices to build statements from
+- customer-accounts-2026-10.csv, customer info and billing emails
 
 ## Budget
 
@@ -52,8 +68,6 @@ Drafts ready for AR review by November 2, 2026, scheduled to send at 3:00pm on W
 
 ## Files
 
-- invoices-2026-10.csv
-- customer-accounts-2026-10.csv
 - statement-2026-10-northside-bakery.pdf
 - statement-2026-10-acme-consulting.pdf
 - statement-2026-10-cedar-landscaping.pdf
@@ -65,6 +79,25 @@ Drafts ready for AR review by November 2, 2026, scheduled to send at 3:00pm on W
 - Email the owner a confirmation list after all statements are sent, with each customer, PDF filename, recipient email, total due, and pay by date, so a wrong-email send can be spotted
 - Report any failed email send immediately, do not mark that statement as sent
 - Report any customer name, PDF filename, and recipient email mismatch immediately, do not send that statement until the owner confirms the correct email
+
+## Permissions
+
+Aidon enforces its own policy; this table is the default, not a grant. Unspecified permissions follow Aidon's enforced policy; a blank field never grants additional authority. Actions that need approval stay gated even after the plan is approved.
+
+| Action | Level |
+|---|---|
+| Read files, browse, research | auto |
+| Write or edit files in the workspace | auto |
+| Run code, scripts, tests in the sandbox | auto |
+| Install packages or tools | ask |
+| Create and register new tools, skills, or MCP servers | ask |
+| Send email or messages to other people | ask (draft first) |
+| Spend real money or make purchases | never |
+| Post or publish anything publicly | never |
+
+## If something goes wrong
+
+Aidon preserves successful outputs, diagnoses the failure, attempts a bounded repair, re-runs the affected checks, records the failure and repair outcome, and stops and reports if the retry limit is reached. A failed email send is reported immediately and that statement is not marked as sent.
 
 ## Assumptions
 

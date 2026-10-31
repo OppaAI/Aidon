@@ -11,7 +11,7 @@ What is an entity, here, no model call, no NER model:
 - a capitalised phrase, for example "Northside Bakery" or
   "Save-On-Foods", found by regex, case-normalised for the index,
 - a file name, for example worm.py or menu.pdf,
-- a project id, goal word, or tool name, when it appears in
+- a conversation id, goal word, or tool name, when it appears in
   the point payload, because those are the entities Aidon
   already uses to organise work.
 
@@ -61,7 +61,7 @@ def extract_entities(text: str, payload: dict | None = None) -> list[str]:
     for match in _FILE.findall(text or ""):
         entities.add(match.lower())
     if payload:
-        for key in ("project_id", "goal", "deliverable", "file"):
+        for key in ("conversation_id", "goal", "deliverable", "file"):
             value = payload.get(key)
             if isinstance(value, str) and value:
                 entities.update(extract_entities(value))

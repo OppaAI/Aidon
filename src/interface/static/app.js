@@ -1025,27 +1025,187 @@
       decide(run.run_id, "rejected", ""));
   }
 
-  // A stopped Ask/Plan run renders one Proceed button, not an
-  // approval card: proceeding resumes the run, it does not approve
-  // an action. The button posts to /api/proceed and follows the
-  // resume run it returns, like any other new run.
-  function showProceedCard(run, stop) {
-    if (proceedShownFor === run.run_id) return;
-    proceedShownFor = run.run_id;
-    approvalSlot.innerHTML = "";
+  // Readable rendering of a frozen Ask spec or Plan for the Proceed
+  // card's View button. Unknown fields fall back to JSON lines so
+  // nothing the stop stored is hidden.
+  function renderStopDetail(stop) {
+    const lines = [];
+    const pushList = (label, items) => {
+      const arr = Array.isArray(items) ? items : [];
+      if (!arr.length) return;
+      lines.push("<strong>" + esc(label) + "</strong>");
+      arr.forEach((item) => lines.push("• " + esc(String(item))));
+    };
+    if (stop.spec) {
+      const s = stop.spec;
+      if (s.goal) lines.push("<strong>Goal</strong><br>" + esc(String(s.goal)));
+      pushList("Done when", s.criteria);
+      pushList("Deliverables", s.deliverables);
+      pushList("Constraints", s.constraints);
+      pushList("Recipients", s.recipients);
+      pushList("Files", s.files);
+      pushList("Notifications", s.notifications);
+      pushList("Assumptions", s.assumptions);
+      pushList("Open questions", s.open_questions);
+      if (s.deadline) lines.push("<strong>Deadline</strong><br>" + esc(String(s.deadline)));
+      if (s.budget_cents != null) lines.push("<strong>Budget (cents)</strong><br>" + esc(String(s.budget_cents)));
+    } else if (stop.plan) {
+      const p = stop.plan;
+      pushList("Deliverables", p.deliverables);
+      pushList("Criteria", p.criteria);
+      const steps = Array.isArray(p.steps) ? p.steps : [];
+      if (steps.length) {
+        lines.push("<strong>Steps</strong>");
+        steps.forEach((st, i) => {
+          const label = st && typeof st === "object"
+            ? (st.tool || st.deliverable || JSON.stringify(st)) : String(st);
+          lines.push((i + 1) + ". " + esc(String(label)));
+        });
+      }
+    }
+    if (!lines.length) lines.push(esc(JSON.stringify(stop.spec || stop.plan || {})));
+    return lines.join("<br>");
+  }
+
+  // A stopped Ask/Plan run renders its card IN the thread, not in
+  // the approval slot: the slot is a modal overlay, and a card there
+  // vanishes with the run. A thread bubble stays in the chat
+  // session's scrollback, the way old Aidon's card did. Dedup is by
+  // stop id in the DOM, so repeated polls and chat re-opens never
+  // stack the same card twice. An Ask card is an editable sheet,
+  // not a raw textbox: edit the fields, Save, then Proceed. Save
+  // writes the edited spec back to the stop, so Proceed resumes
+  // from the edited spec.
+  function specFieldText(s, key) {
+    const v = s[key];
+    if (Array.isArray(v)) return v.join("\n");
+    if (v == null) return "";
+    return String(v);
+  }
+  function specBudgetText(s) {
+    if (s.budget_cents == null) return "";
+    return "$" + (s.budget_cents / 100).toFixed(2);
+  }
+  function renderStopCard(stop) {
+    if (!stop || !stop.stop_id) return null;
+    if (thread.querySelector('[data-stop-id="' + stop.stop_id + '"]')) return null;
     const card = document.createElement("div");
-    card.className = "card approval-card";
-    card.innerHTML =
-      '<div class="kind">stopped — ' + esc(stop.mode) + " ready</div>" +
-      "<h3>" + (stop.mode === "ask" ? "Spec ready" : "Plan ready") + "</h3>" +
-      '<div class="row">' +
-      '<button class="approve" data-d="proceed">Proceed</button>' +
-      "</div>";
-    approvalSlot.appendChild(card);
-    card.querySelector('[data-d="proceed"]').addEventListener("click", async () => {
-      const btn = card.querySelector('[data-d="proceed"]');
+    card.className = "msg aidon";
+    card.dataset.stopId = stop.stop_id;
+    const isAsk = stop.mode === "ask";
+    // Local copy: Save updates it, so View always shows the latest
+    // saved sheet, and Proceed never runs a stale one.
+    let spec = stop.spec ? JSON.parse(JSON.stringify(stop.spec)) : null;
+    const shell = document.createElement("div");
+    shell.className = "card approval-card spec-card";
+    card.appendChild(shell);
+    let dirty = false;
+    let editing = false;
+    function formFields() {
+      const listFields = [["criteria", "Done when"],
+        ["deliverables", "Deliverables"], ["constraints", "Constraints"],
+        ["recipients", "Recipients"], ["files", "Files"],
+        ["notifications", "Notifications"], ["assumptions", "Assumptions"],
+        ["open_questions", "Open questions"]];
+      let fields = '<label>Goal</label><textarea data-f="goal" rows="3">' +
+        esc(specFieldText(spec, "goal")) + "</textarea>";
+      listFields.forEach(([key, label]) => {
+        fields += "<label>" + label + '</label><textarea data-f="' + key +
+          '" rows="3">' + esc(specFieldText(spec, key)) + "</textarea>";
+      });
+      fields += '<label>Budget</label><input type="text" data-f="budget" value="' +
+        esc(specBudgetText(spec)) + '"><label>Deadline</label>' +
+        '<input type="text" data-f="deadline" value="' +
+        esc(specFieldText(spec, "deadline")) + '">';
+      return fields;
+    }
+    function readForm() {
+      const out = {};
+      shell.querySelectorAll("[data-f]").forEach((el) => {
+        const key = el.dataset.f;
+        if (key === "goal" || key === "budget" || key === "deadline") {
+          out[key] = el.value;
+        } else {
+          out[key] = el.value.split("\n").map((x) => x.trim()).filter(Boolean);
+        }
+      });
+      return out;
+    }
+    async function saveForm() {
+      const r = await fetch("/api/mode-stops/" +
+        encodeURIComponent(stop.stop_id) + "/spec", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spec: readForm() }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) throw new Error((data && data.error) || "save failed");
+      spec = data.spec;
+      dirty = false;
+      return data;
+    }
+    function setStatus(text) {
+      const el = shell.querySelector(".spec-save-status");
+      if (el) el.textContent = text;
+    }
+    function render() {
+      if (isAsk && spec && editing) {
+        shell.innerHTML =
+          '<div class="kind">stopped — spec ready</div><h3>Edit spec</h3>' +
+          formFields() +
+          '<div class="spec-save-status"></div><div class="row">' +
+          '<button data-d="save">Save</button>' +
+          '<button class="approve" data-d="proceed">Proceed</button>' +
+          '<button class="reject" data-d="reject">Reject</button></div>';
+        shell.querySelectorAll("[data-f]").forEach((el) =>
+          el.addEventListener("input", () => { dirty = true; }));
+        shell.querySelector('[data-d="save"]').addEventListener("click", async () => {
+          const btn = shell.querySelector('[data-d="save"]');
+          btn.disabled = true;
+          try {
+            const data = await saveForm();
+            editing = false;
+            render();
+            setStatus(data.verified ? "Saved · spec verified"
+              : "Saved · not verified: " + (data.failures || []).join("; "));
+          } catch (e) {
+            setStatus("Could not save: " + e.message);
+            btn.disabled = false;
+          }
+        });
+      } else {
+        shell.innerHTML =
+          '<div class="kind">stopped — ' + esc(stop.mode) + " ready</div>" +
+          "<h3>" + (isAsk ? "Spec ready" : "Plan ready") + "</h3>" +
+          (isAsk
+            ? '<p class="spec-note">Proceeding builds a plan for your approval — nothing runs yet.</p>'
+            : '<p class="spec-note">Proceeding runs the plan.</p>') +
+          ((spec || stop.plan)
+            ? '<div class="spec-detail">' +
+              renderStopDetail({ spec: spec, plan: stop.plan }) + "</div>" : "") +
+          '<div class="spec-save-status"></div><div class="row">' +
+          '<button class="approve" data-d="proceed">Proceed</button>' +
+          (isAsk && spec ? '<button data-d="edit">Edit</button>' : "") +
+          '<button class="reject" data-d="reject">Reject</button></div>';
+        const editBtn = shell.querySelector('[data-d="edit"]');
+        if (editBtn) editBtn.addEventListener("click", () => {
+          editing = true;
+          render();
+        });
+      }
+      shell.querySelector('[data-d="proceed"]').addEventListener("click", onProceed);
+      shell.querySelector('[data-d="reject"]').addEventListener("click", onReject);
+    }
+    async function onProceed() {
+      const btn = shell.querySelector('[data-d="proceed"]');
       btn.disabled = true;
       try {
+        // Proceeding from the editor saves first, so Proceed never
+        // runs a spec older than what is on screen.
+        if (editing && dirty) {
+          const data = await saveForm();
+          setStatus(data.verified ? "Saved · spec verified"
+            : "Saved · not verified: " + (data.failures || []).join("; "));
+        }
         const convCtx = window.aidonConversation ? window.aidonConversation() : {};
         const r = await fetch("/api/proceed", {
           method: "POST",
@@ -1057,7 +1217,6 @@
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok || !data.run_id) throw new Error((data && data.detail) || "no run");
-        approvalSlot.innerHTML = "";
         proceedShownFor = null;
         cardShownFor = null;
         currentRun = data.run_id;
@@ -1073,8 +1232,45 @@
         btn.disabled = false;
         showMiddleStatus("Could not proceed: " + e.message, "error");
       }
-    });
+    }
+    async function onReject() {
+      const btn = shell.querySelector('[data-d="reject"]');
+      btn.disabled = true;
+      try {
+        const r = await fetch("/api/mode-stops/" +
+          encodeURIComponent(stop.stop_id), { method: "DELETE" });
+        if (!r.ok) throw new Error("reject failed");
+        // The card stays as history: rejected, not vanished.
+        shell.innerHTML =
+          '<div class="kind">stopped — ' + esc(stop.mode) + " rejected</div>" +
+          "<h3>" + (isAsk ? "Spec rejected" : "Plan rejected") + "</h3>" +
+          '<p class="spec-note">This run was abandoned. Start a new goal to try again.</p>';
+      } catch (e) {
+        btn.disabled = false;
+        showMiddleStatus("Could not reject: " + e.message, "error");
+      }
+    }
+    render();
+    thread.appendChild(card);
+    if (typeof scrollThreadToLatest === "function") scrollThreadToLatest();
+    return card;
   }
+  function showProceedCard(run, stop) {
+    if (!stop) return;
+    if (proceedShownFor === stop.stop_id) return;
+    const card = renderStopCard(stop);
+    if (card) proceedShownFor = stop.stop_id;
+  }
+  // Chat re-open path: a stop outlives its run record, so the card
+  // is re-rendered from the stored stop when the chat opens.
+  window.aidonRenderStopCardForConversation = async (conversationId) => {
+    try {
+      const r = await fetch("/api/mode-stops/latest?conversation_id=" +
+        encodeURIComponent(conversationId || ""));
+      if (!r.ok) return;
+      renderStopCard(await r.json());
+    } catch (e) { /* no pending stop: nothing to render */ }
+  };
 
   async function decide(runId, decision, editedText) {
     try {
@@ -1163,7 +1359,7 @@
               if (e.kind === "aidon-final") delete streamMessages[sid];
             }
           } else {
-            m = addMsgTyped("aidon", e.text, e.t, e.kind === "aidon-final", lastRoute);
+            m = addMsgTyped("aidon", e.text, e.t, e.kind === "aidon-final" || !!finalMessageParts(e.text).stats, lastRoute);
           }
           const btn = playButton(e.text || m._streamText || "", m);
           m.appendChild(btn);
@@ -1259,7 +1455,10 @@
         guidanceInput.disabled = false;
         input.placeholder = defaultGoalPlaceholder;
         steerRow.hidden = true;
-        approvalSlot.innerHTML = ""; // no stale card survives completion
+        // A stopped run's Proceed card is not stale: it is the way back
+        // in, so the terminal cleanup leaves it standing. Every other
+        // terminal status clears the slot as before.
+        if (!run.mode_stop) approvalSlot.innerHTML = "";
         // loadHistory lives in the sidebar IIFE below (exposed on window)
         if (window.aidonLoadHistory) window.aidonLoadHistory();
         // no "Finished" chat line — the stage bar + status already show it
@@ -1547,9 +1746,9 @@
     // after POST succeeds (below). For an answer to a waiting
     // question the server returns the SAME run id, and resetting
     // here would re-append the whole thread from event 0.
-    // Continue the open conversation (if any) in the selected
-    // project; the server creates a persistent conversation when
-    // this is the first message of a new chat.
+    // Continue the open conversation (if any); the server creates
+    // a persistent conversation when this is the first message of
+    // a new chat.
     const convCtx = window.aidonConversation
       ? window.aidonConversation() : {};
     let data;
@@ -1562,7 +1761,6 @@
         if (forceWeb) fd.append("force_web", "true");
         if (convCtx.conversation_id)
           fd.append("conversation_id", convCtx.conversation_id);
-        if (convCtx.project_id) fd.append("project_id", convCtx.project_id);
         for (const f of files) fd.append("files", f, f.name);
         const r = await fetch("/api/goals/with-images", {
           method: "POST",
@@ -1577,7 +1775,6 @@
           body: JSON.stringify({
             goal, guidance, force_web: forceWeb, mode: runMode,
             conversation_id: convCtx.conversation_id || "",
-            project_id: convCtx.project_id || "",
           }),
         });
         data = await r.json().catch(() => ({}));
@@ -1781,10 +1978,14 @@
   });
   const preapproveBtn = document.getElementById("preapprove-btn");
   if (preapproveBtn) preapproveBtn.addEventListener("click", async () => {
-    const project = window.aidonConversation ? window.aidonConversation() : {};
-    const specId = project.project_id || "default";
+    const conv = window.aidonConversation ? window.aidonConversation() : {};
+    const specId = conv.conversation_id || "";
+    if (!specId) {
+      window.alert("Start a chat first — Auto-Approve is scoped to a chat.");
+      return;
+    }
     const active = preapproveBtn.classList.contains("active");
-    if (!active && !window.confirm("Turn on Auto-Approve for " + specId + "? Eligible reversible live actions will pass without asking for 8 hours. Restricted actions will still pause.")) return;
+    if (!active && !window.confirm("Turn on Auto-Approve for this chat? Eligible reversible live actions will pass without asking for 8 hours. Restricted actions will still pause.")) return;
     preapproveBtn.disabled = true;
     try {
       const r = await fetch(active
@@ -2094,7 +2295,7 @@
   drawWave(); // idle waveform frame on load
 })();
 
-/* ── left sidebar: projects, history, search, ideas, goals, library ── */
+/* ── left sidebar: history, search, ideas, goals, library ── */
 (function () {
   "use strict";
 
@@ -2109,11 +2310,9 @@
   const thread = document.getElementById("thread");
   const input = document.getElementById("goal-input");
 
-  let currentProjectId = localStorage.getItem("aidon-project") || "";
   let currentConversationId = localStorage.getItem("aidon-conversation") || "";
   window.aidonConversation = () => ({
     conversation_id: currentConversationId,
-    project_id: currentProjectId,
   });
   window.aidonSetConversation = (id) => {
     currentConversationId = id || "";
@@ -2149,7 +2348,7 @@
     if (b.dataset.view === "ideas") loadIdeas();
   }));
 
-  // ---- projects ----
+  // ---- delete helper (missions, library) ----
   async function deleteWithConfirm(url, confirmText) {
     if (!window.confirm(confirmText)) return false;
     try {
@@ -2163,92 +2362,9 @@
       return true;
     } catch (e) { return false; }
   }
-  async function loadProjects() {
-    const list = document.getElementById("project-list");
-    let projects = [];
-    try {
-      const data = await (await fetch("/api/projects")).json();
-      projects = Array.isArray(data) ? data : (data.projects || []);
-      projects = projects.map((p) => typeof p === "string"
-        ? { id: p, name: p, conversation_count: 0 } : p);
-    } catch (e) { projects = []; }
-    if (!projects.length) { list.innerHTML = ""; return; }
-    if (!projects.some((p) => p.id === currentProjectId))
-      currentProjectId = projects[0].id;
-    localStorage.setItem("aidon-project", currentProjectId);
-    list.innerHTML = "";
-    projects.forEach((p) => {
-      const d = document.createElement("div");
-      d.className = "project-item" +
-        (p.id === currentProjectId ? " active" : "");
-      d.innerHTML = "<span>📁</span><span>" + esc(p.name) + "</span>" +
-        '<span class="proj-count">' + (p.conversation_count || 0) +
-        "</span>" +
-        '<button class="hist-del brief-btn" title="Project brief — ' +
-        'standing instructions for this project">📋</button>' +
-        // Distinct class for the delete button: it used to share
-        // "hist-del" with the brief button, and querySelector
-        // (".hist-del") returned the brief button first — so the X
-        // got NO handler at all and clicking it did nothing, while
-        // the brief icon fired both handlers.
-        '<button class="hist-del proj-del" title="Delete project">' +
-        "✕</button>";
-      d.querySelector(".brief-btn").addEventListener("click",
-        (ev) => {
-          ev.stopPropagation();
-          openBrief(p);
-        });
-      d.querySelector(".proj-del").addEventListener("click",
-        async (ev) => {
-          ev.stopPropagation();
-          if (await deleteWithConfirm(
-              "/api/projects/" + encodeURIComponent(p.id),
-              "Delete the project '" + p.name + "'? This deletes " +
-              "its chats and ideas. Runs in it are cancelled first.")) {
-            if (p.id === currentProjectId) {
-              currentProjectId = "";
-              currentConversationId = "";
-              thread.innerHTML = "";
-            }
-            loadProjects(); loadHistory(); loadIdeas(); loadLibrary();
-          }
-        });
-      d.addEventListener("click", () => selectProject(p.id));
-      list.appendChild(d);
-    });
-  }
-  function selectProject(id) {
-    if (id === currentProjectId) return;
-    currentProjectId = id;
-    localStorage.setItem("aidon-project", id);
-    currentConversationId = "";
-    thread.innerHTML = "";
-    loadProjects();
-    loadHistory();
-    loadIdeas();
-    loadLibrary();
-  }
-  document.getElementById("new-project").addEventListener("click",
-    async () => {
-      const name = prompt("New project name:");
-      if (!name || !name.trim()) return;
-      try {
-        const p = await (await fetch("/api/projects", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: name.trim() }),
-        })).json();
-        currentProjectId = p.id;
-        localStorage.setItem("aidon-project", p.id);
-        currentConversationId = "";
-        thread.innerHTML = "";
-        loadProjects(); loadHistory(); loadIdeas(); loadLibrary();
-      } catch (e) { /* the list simply stays as it was */ }
-    });
-
-  // ---- project brief: standing instructions, loaded into every
-  // run in the project as binding guidance ----
-  let briefProjectId = "";
+  // ---- chat brief: standing instructions, loaded into every
+  // run in this chat as binding guidance ----
+  let briefConversationId = "";
   function ensureBriefModal() {
     let overlay = document.getElementById("brief-overlay");
     if (overlay) return overlay;
@@ -2257,10 +2373,10 @@
     overlay.hidden = true;
     overlay.innerHTML =
       '<div class="cam-panel brief-panel" role="dialog" ' +
-      'aria-label="Project brief">' +
-      '<div class="cam-title" id="brief-title">Project brief</div>' +
+      'aria-label="Chat brief">' +
+      '<div class="cam-title" id="brief-title">Chat brief</div>' +
       '<div class="brief-hint">Standing instructions for this ' +
-      'project. Every chat and run opened here starts from this ' +
+      'chat. Every run in this chat starts from this ' +
       'brief. Leave it empty to clear it.</div>' +
       '<textarea id="brief-text" rows="14" spellcheck="false" ' +
       'placeholder="e.g. Hard budget cap: CAD $100 for the shopping ' +
@@ -2284,27 +2400,33 @@
     const o = document.getElementById("brief-overlay");
     if (o) o.hidden = true;
   }
-  async function openBrief(p) {
-    briefProjectId = p.id;
+  async function openBrief() {
+    if (!currentConversationId) {
+      window.alert("Start a chat first, then set its brief.");
+      return;
+    }
+    briefConversationId = currentConversationId;
     const overlay = ensureBriefModal();
-    overlay.querySelector("#brief-title").textContent =
-      "Project brief — " + p.name;
+    overlay.querySelector("#brief-title").textContent = "Chat brief";
     const ta = overlay.querySelector("#brief-text");
     ta.value = "";
     ta.placeholder = "Loading…";
     overlay.hidden = false;
     try {
       const r = await (await fetch(
-        "/api/projects/" + encodeURIComponent(p.id) + "/brief")).json();
+        "/api/conversations/" + encodeURIComponent(currentConversationId) +
+        "/brief")).json();
       ta.value = r.brief || "";
     } catch (e) { ta.value = ""; }
     ta.focus();
   }
+  const chatBriefBtn = document.getElementById("chat-brief");
+  if (chatBriefBtn) chatBriefBtn.addEventListener("click", openBrief);
   async function saveBrief() {
     const ta = document.getElementById("brief-text");
     try {
       await fetch(
-        "/api/projects/" + encodeURIComponent(briefProjectId) +
+        "/api/conversations/" + encodeURIComponent(briefConversationId) +
         "/brief", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -2314,7 +2436,7 @@
     closeBrief();
   }
 
-  // ---- history: persistent conversations in this project ----
+  // ---- history: persistent conversations ----
   function conversationItem(conv) {
     const d = document.createElement("div");
     d.className = "hist-item" +
@@ -2357,8 +2479,7 @@
     const list = document.getElementById("history-list");
     let convs = [];
     try {
-      const r = await fetch("/api/conversations?limit=30&project_id=" +
-        encodeURIComponent(currentProjectId || ""));
+      const r = await fetch("/api/conversations?limit=30");
       const data = await r.json();
       convs = Array.isArray(data) ? data : (data.conversations || []);
     } catch (e) { convs = []; }
@@ -2371,7 +2492,7 @@
     convs.forEach((c) => list.appendChild(conversationItem(c)));
   }
   // poll() in the chat IIFE calls this when a run completes.
-  window.aidonLoadHistory = () => { loadHistory(); loadProjects(); };
+  window.aidonLoadHistory = () => { loadHistory(); };
 
   async function openConversation(id) {
     let conv;
@@ -2384,11 +2505,6 @@
     currentConversationId = conv.id;
     localStorage.setItem("aidon-conversation", currentConversationId);
     if (window.aidonStopPolling) window.aidonStopPolling();
-    if (conv.project_id) {
-      currentProjectId = conv.project_id;
-      localStorage.setItem("aidon-project", conv.project_id);
-      loadProjects();
-    }
     markActiveConversation();
     thread.innerHTML = "";
     const atts = conv.attachments || [];
@@ -2454,6 +2570,8 @@
       });
     }
     if (window.aidonScrollThread) window.aidonScrollThread();
+    if (window.aidonRenderStopCardForConversation)
+      window.aidonRenderStopCardForConversation(conv.id);
     if (window.aidonRestoreRunState) window.aidonRestoreRunState(conv.id);
     input.disabled = false;
     input.focus();
@@ -2486,13 +2604,12 @@
     }, 250);
   });
 
-  // ---- ideas (server-backed, per project) ----
+  // ---- ideas (server-backed) ----
   async function loadIdeas() {
     const list = document.getElementById("ideas-list");
     let ideas = [];
     try {
-      const data = await (await fetch("/api/ideas?project_id=" +
-        encodeURIComponent(currentProjectId || ""))).json();
+      const data = await (await fetch("/api/ideas")).json();
       ideas = Array.isArray(data) ? data : (data.ideas || []);
     } catch (e) { ideas = []; }
     if (!ideas.length) {
@@ -2527,13 +2644,12 @@
       await fetch("/api/ideas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_id: currentProjectId,
-                               text: text.trim() }),
+        body: JSON.stringify({ text: text.trim() }),
       });
       loadIdeas();
     });
 
-  // ---- goals: active runs in this project + durable missions ----
+  // ---- goals: active runs + durable missions ----
   async function loadGoals() {
     const list = document.getElementById("goals-list");
     let runs = [];
@@ -2547,7 +2663,6 @@
       missions = Array.isArray(data) ? data : (data.missions || []);
     } catch (e) { missions = []; }
     const active = runs.filter((x) =>
-      (!currentProjectId || x.project_id === currentProjectId) &&
       !/done|complete|answered|error|failed/i.test(x.status || ""));
     list.innerHTML = "";
     if (!active.length && !missions.length) {
@@ -2587,13 +2702,12 @@
     });
   }
 
-  // ---- library: every imported file + run output in this project ----
+  // ---- library: every imported file + run output ----
   async function loadLibrary() {
     const list = document.getElementById("library-list");
     let items = [];
     try {
-      const data = await (await fetch("/api/library?project_id=" +
-        encodeURIComponent(currentProjectId || ""))).json();
+      const data = await (await fetch("/api/library")).json();
       items = Array.isArray(data) ? data : (data.files || []);
     } catch (e) { items = []; }
     if (!items.length) {
@@ -2633,10 +2747,8 @@
   }
 
   // initial load
-  loadProjects().then(() => {
-    loadHistory();
-    loadIdeas();
-    loadLibrary();
-    if (currentConversationId) openConversation(currentConversationId);
-  });
+  loadHistory();
+  loadIdeas();
+  loadLibrary();
+  if (currentConversationId) openConversation(currentConversationId);
 })();

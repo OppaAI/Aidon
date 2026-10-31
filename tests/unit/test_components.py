@@ -157,14 +157,17 @@ def test_run_tests_reports_missing_dependencies(tmp_path):
     assert library.run_tests("hints", FakeSandbox())["passed"] is True
 
 
-def test_relevant_trusted_first_then_validated(tmp_path):
+def test_relevant_trusted_only_by_default(tmp_path):
     library = SkillLibrary(tmp_path)
     library.add(_skill("cand", description="write a csv report"))
     library.add(_skill("val", description="write a csv report"))
     library.promote("val", {"passed": True})
     library.add(_skill("trust", description="write a csv report"))
     library.trust("trust", approved=True)
-    names = [skill.name for skill in library.relevant("csv report", limit=3)]
+    assert [skill.name for skill in library.relevant("csv report", limit=3)] == ["trust"]
+    names = [skill.name for skill in library.relevant(
+        "csv report", limit=3,
+        states=("trusted", "validated", "candidate"))]
     assert names == ["trust", "val", "cand"]
 
 
@@ -179,7 +182,8 @@ def test_learn_cycle_promotes_and_consolidates_validated(tmp_path):
     library.promote("old_csv", {"passed": True})
     library.add(_skill("new_csv", description="write a csv report"))
     library.promote("new_csv", {"passed": True})
-    summary = run_learn_cycle(tmp_path, FakeSandbox())
+    summary = run_learn_cycle(tmp_path, FakeSandbox(),
+                                  governor_check=lambda name, max_per_day=5: True)
     assert "cand_csv" in summary["promoted"]
     assert library.get("cand_csv").state == "validated"
     # Validated duplicates: older retired, newer kept.
@@ -194,7 +198,8 @@ def test_learn_cycle_trusted_duplicates_only_reported(tmp_path):
     library.trust("t1", approved=True)
     library.add(_skill("t2", description="write a csv report"))
     library.trust("t2", approved=True)
-    summary = run_learn_cycle(tmp_path, FakeSandbox())
+    summary = run_learn_cycle(tmp_path, FakeSandbox(),
+                                  governor_check=lambda name, max_per_day=5: True)
     assert library.get("t1").state == "trusted"
     assert library.get("t2").state == "trusted"
     assert summary["trusted_duplicates_for_review"] == ["t1 ~ t2"]
@@ -211,7 +216,8 @@ def test_learn_cycle_skips_failing_candidate(tmp_path):
     library = SkillLibrary(tmp_path)
     library.add(_skill("broken"))
     summary = run_learn_cycle(
-        tmp_path, FakeSandbox(failing=["python3 -m pytest tests/test_csv.py -q"]))
+        tmp_path, FakeSandbox(failing=["python3 -m pytest tests/test_csv.py -q"]),
+        governor_check=lambda name, max_per_day=5: True)
     assert summary["promoted"] == []
     assert library.get("broken").state == "candidate"
     assert any("broken" in item for item in summary["skipped"])
@@ -588,9 +594,7 @@ from src.agentic.eval import (
 
 def test_conversations_db_numbering_is_serialised(tmp_path):
     store = ConversationStoreDB(tmp_path)
-    project = store.ensure_default_project()
-    assert store.ensure_default_project()["id"] == project["id"]
-    conv = store.create_conversation(project["id"])
+    conv = store.create_conversation()
     errors = []
 
     def record(n):
@@ -615,8 +619,7 @@ def test_conversations_db_numbering_is_serialised(tmp_path):
 
 def test_conversations_db_history_summary_delete(tmp_path):
     store = ConversationStoreDB(tmp_path)
-    project = store.create_project("dinner")
-    conv = store.create_conversation(project["id"])
+    conv = store.create_conversation()
     record_run_exchange(store, conv["id"], "user",
                         "Plan a roast beef dinner for two.")
     record_run_exchange(store, conv["id"], "assistant",
@@ -627,12 +630,12 @@ def test_conversations_db_history_summary_delete(tmp_path):
     summary = store.rolling_summary(conv["id"])
     assert "roast beef" in summary.lower()
     assert "budget" in summary.lower()
-    assert store.list_conversations(project["id"])
+    assert store.list_all_conversations()
     assert store.add_attachment(conv["id"], "menu.pdf", kind="pdf")["path"] == "menu.pdf"
-    assert store.add_idea(project["id"], "try yorkshire pudding")["text"]
+    assert store.add_idea("try yorkshire pudding")["text"]
     assert store.delete_conversation(conv["id"]) is True
     assert store.history(conv["id"]) == []
-    assert store.list_conversations(project["id"]) == []
+    assert store.list_all_conversations() == []
     store.close()
 
 

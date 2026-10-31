@@ -12,6 +12,7 @@ from src.agentic.semantic_router import SemanticRouter
 from src.capabilities.sandbox import Sandbox
 from src.interface.mode_stops import (
     delete_mode_stop,
+    enrich_mode_stop,
     latest_mode_stop,
     load_mode_stop,
     save_mode_stop,
@@ -87,6 +88,120 @@ def test_mode_stops_save_load_delete_latest(tmp_path):
     assert delete_mode_stop(tmp_path, first) is False
 
 
+def test_mode_stops_update_spec_and_latest_for_conversation(tmp_path):
+    from src.interface.mode_stops import (
+        latest_mode_stop_for_conversation, update_mode_stop_spec)
+    stop_id = save_mode_stop(tmp_path, "ask", "plan dinner",
+                             spec={"goal": "plan dinner"},
+                             conversation_key="conv-1",
+                             conversation_id="conv-1")
+    assert update_mode_stop_spec(tmp_path, stop_id,
+                                 {"goal": "plan dinner",
+                                  "deliverables": ["menu.pdf"]}) is True
+    assert load_mode_stop(tmp_path, stop_id)["spec"]["deliverables"] == ["menu.pdf"]
+    assert update_mode_stop_spec(tmp_path, "missing", {}) is False
+    # Key and id both match: a WebUI stop is findable either way.
+    assert latest_mode_stop_for_conversation(tmp_path, "conv-1")["stop_id"] == stop_id
+    assert latest_mode_stop_for_conversation(tmp_path, "nobody") is None
+    assert latest_mode_stop_for_conversation(tmp_path, "") is None
+
+
+def test_mode_stop_spec_save_round_trip(tmp_path):
+    from src.interface.webui import WebUIServer
+    from src.interface.mode_stops import load_mode_stop, save_mode_stop
+    server = WebUIServer(tmp_path, memory=None)
+    stop_id = save_mode_stop(tmp_path, "ask", "plan dinner",
+                             spec={"goal": "plan dinner"},
+                             conversation_key="conv-1",
+                             conversation_id="conv-1")
+    result = server.handle_mode_stop_spec_save(stop_id, {"spec": {
+        "goal": "plan dinner", "criteria": ["menu.pdf exists"],
+        "deliverables": ["menu.pdf"], "budget": "$25.00"}})
+    assert result["ok"] is True
+    assert result["verified"] is True
+    assert result["spec"]["criteria"] == ["menu.pdf exists"]
+    assert result["spec"]["budget_cents"] == 2500
+    assert load_mode_stop(tmp_path, stop_id)["spec"]["criteria"] == ["menu.pdf exists"]
+    saved = tmp_path / "specs" / "conv-1.json"
+    assert saved.exists()
+    # Unverified still saves, with failures reported, not hidden.
+    bad = server.handle_mode_stop_spec_save(stop_id, {"spec": {
+        "goal": "plan dinner", "deliverables": ["menu.pdf"],
+        "open_questions": ["which cuisine?"]}})
+    assert bad["ok"] is True
+    assert bad["verified"] is False
+    assert bad["failures"]
+    # Plan stops carry no spec; missing stops 404-style.
+    plan_id = save_mode_stop(tmp_path, "plan", "plan dinner",
+                             plan={"steps": []}, conversation_key="conv-plan")
+    assert server.handle_mode_stop_spec_save(plan_id, {"spec": {}})["ok"] is False
+    assert server.handle_mode_stop_spec_save("missing", {"spec": {}})["ok"] is False
+    latest = server.handle_mode_stop_latest("conv-1")
+    assert latest is not None and latest["spec"]["goal"] == "plan dinner"
+    assert server.handle_mode_stop_latest("nobody") is None
+
+
+def test_proceed_ask_stop_goes_to_plan_mode(tmp_path):
+    # Mode chain: Ask -> Plan -> Execute. An Ask stop's Proceed
+    # builds a plan for approval; a Plan stop's Proceed executes.
+    import time
+    from src.interface.webui import WebUIServer
+    from src.interface.mode_stops import save_mode_stop
+    seen = []
+
+    class _Dispatcher:
+        def __init__(self):
+            self.handlers = {}
+
+        def register(self, name, fn):
+            self.handlers[name] = fn
+
+        def dispatch(self, event):
+            seen.append(event)
+
+    server = WebUIServer(tmp_path, dispatcher=_Dispatcher(), memory=None)
+    ask_id = save_mode_stop(tmp_path, "ask", "plan dinner",
+                            spec={"goal": "plan dinner"},
+                            conversation_key="conv-1",
+                            conversation_id="conv-1")
+    plan_id = save_mode_stop(tmp_path, "plan", "plan dinner",
+                             plan={"steps": []}, conversation_key="conv-1",
+                             conversation_id="conv-1")
+    result = server.start_goal({"goal": f"/proceed {ask_id}",
+                                "conversation_id": "conv-1"})
+    assert "run_id" in result
+    for _ in range(100):
+        if seen:
+            break
+        time.sleep(0.02)
+    assert seen[0].payload["mode"] == "plan"
+    assert seen[0].payload["resume_spec"] == {"goal": "plan dinner"}
+    assert seen[0].payload["resume_stop_id"] == ask_id
+    seen.clear()
+    result = server.start_goal({"goal": f"/proceed {plan_id}",
+                                "conversation_id": "conv-1"})
+    assert "run_id" in result
+    for _ in range(100):
+        if seen:
+            break
+        time.sleep(0.02)
+    assert seen[0].payload["mode"] == "execute"
+    assert seen[0].payload["resume_plan"] == {"steps": []}
+
+
+def test_mode_stop_delete_via_server(tmp_path):
+    from src.interface.webui import WebUIServer
+    from src.interface.mode_stops import load_mode_stop, save_mode_stop
+    server = WebUIServer(tmp_path, memory=None)
+    stop_id = save_mode_stop(tmp_path, "ask", "plan dinner",
+                             spec={"goal": "plan dinner"},
+                             conversation_key="conv-1")
+    assert server.handle_mode_stop_delete(stop_id) == {"ok": True}
+    assert load_mode_stop(tmp_path, stop_id) is None
+    assert server.handle_mode_stop_delete(stop_id) == {"ok": False}
+    assert server.handle_mode_stop_latest("conv-1") is None
+
+
 def test_mode_stops_reject_unknown_mode(tmp_path):
     with pytest.raises(ValueError):
         save_mode_stop(tmp_path, "execute", "do it")
@@ -154,7 +269,7 @@ def _ask_runner(tmp_path):
     runner.sandbox = Sandbox(tmp_path / "work", 120)
     runner.home = tmp_path
     runner.run_id = "test-run"
-    runner.project_id = "default"
+    runner.conversation_id = "test"
     runner.execution_backend = None
     runner.gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
     runner.allowed_side_effect_tools = frozenset()
@@ -291,3 +406,27 @@ def test_webui_proceed_dispatches_resume(tmp_path):
     server.start_goal({"goal": "/proceed", "conversation_id": "other"})
     time.sleep(0.2)
     assert len(events) == 1
+
+
+def test_enrich_mode_stop_attaches_spec_and_plan(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    spec = {"goal": "make tarts", "deliverables": ["12 tarts"],
+            "constraints": ["milk-free"], "assumptions": [],
+            "open_questions": []}
+    ask_id = save_mode_stop(home, "ask", "make tarts", spec=spec,
+                            conversation_key="c1")
+    enriched = enrich_mode_stop(home, {"stop_id": ask_id, "mode": "ask",
+                                       "goal": "make tarts"})
+    assert enriched["spec"] == spec
+    assert "plan" not in enriched
+    plan = {"steps": [{"tool": "write", "args": {}, "deliverable": "a.md"}],
+            "deliverables": ["a.md"], "criteria": []}
+    plan_id = save_mode_stop(home, "plan", "make notes", plan=plan,
+                             conversation_key="c1")
+    enriched_plan = enrich_mode_stop(home, {"stop_id": plan_id, "mode": "plan",
+                                            "goal": "make notes"})
+    assert enriched_plan["plan"] == plan
+    assert enrich_mode_stop(home, {"stop_id": "missing", "mode": "ask",
+                                   "goal": "x"}) == {"stop_id": "missing",
+                                                    "mode": "ask", "goal": "x"}

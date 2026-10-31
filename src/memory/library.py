@@ -14,7 +14,7 @@ a ``memory_linked`` flag, click to open, delete to remove.
 
 A library item is a manifest entry, not a database row:
 ``<home>/library_manifest.json`` holds id, name, kind,
-project_id, conversation_id, stored path (relative to home),
+conversation_id, stored path (relative to home),
 size, mime, created time, and memory_id when linked. No
 second database is introduced; Qdrant remains the only
 memory store, and the manifest is just the file index.
@@ -80,7 +80,7 @@ class Library:
         self.manifest_path.write_text(json.dumps(manifest, indent=2))
 
     def add_file(self, source: Path, kind: str = "attachment",
-                 project_id: str = "", conversation_id: str = "",
+                 conversation_id: str = "",
                  description: str = "") -> dict:
         """Copy a file into the library and index it."""
         source = Path(source)
@@ -93,7 +93,6 @@ class Library:
             "id": item_id,
             "name": source.name,
             "kind": "image" if is_image(source) else kind,
-            "project_id": project_id,
             "conversation_id": conversation_id,
             "description": description,
             "stored_path": str(target.relative_to(self.home)),
@@ -111,7 +110,7 @@ class Library:
 
     def add_image(self, source: Path, description: str,
                   memory=None, collection: str = "episodic",
-                  project_id: str = "", conversation_id: str = "",
+                  conversation_id: str = "",
                   data_path: Path | None = None) -> tuple[dict, object | None]:
         """Library copy + memory point, with the link in the payload.
 
@@ -124,7 +123,6 @@ class Library:
         travel together.
         """
         item = self.add_file(source, kind="image",
-                             project_id=project_id,
                              conversation_id=conversation_id,
                              description=description)
         if data_path is not None:
@@ -140,14 +138,14 @@ class Library:
                 "library_id": item["id"],
                 "library_path": item["stored_path"],
                 "library_url": item["url"],
-                "project_id": project_id,
+                "conversation_id": conversation_id,
                 "file": item["name"],
             }
             if data_path is not None:
                 payload["data_file"] = item["data_file"]
             if collection == "episodic":
                 point = memory.record_episodic(
-                    project_id, description, payload=payload,
+                    conversation_id, description, payload=payload,
                     attachments=[item["id"]])
             else:
                 point = memory.record_image(collection,
@@ -168,10 +166,9 @@ class Library:
         self._save_manifest(manifest)
         return item
 
-    def list_items(self, project_id: str = "") -> list[dict]:
+    def list_items(self) -> list[dict]:
+        """Every library item, newest last; the library is global."""
         items = list(self._manifest().values())
-        if project_id:
-            items = [i for i in items if i.get("project_id") == project_id]
         return sorted(items, key=lambda i: i.get("created_at", ""))
 
     def get_item(self, item_id: str) -> dict | None:

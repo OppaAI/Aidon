@@ -100,3 +100,32 @@ def test_muse_image_edit_multiple_refs():
         assert False, "11 refs must raise, max is 10"
     except ValueError:
         pass
+
+
+def test_muse_image_edit_files_multipart(tmp_path):
+    from src.capabilities.image_gen import edit_image_files
+    photo = tmp_path / "face.png"
+    photo.write_bytes(b"\x89PNGface")
+    seen = {}
+
+    def fake_post(url, headers, body):
+        seen["url"] = url
+        seen["headers"] = headers
+        seen["body"] = body
+        return {"data": [{"b64_json": base64.b64encode(b"styled").decode()}]}
+
+    data = edit_image_files("anime style, @Image1", "test-key",
+                            "https://example.com/v1", [str(photo)],
+                            post=fake_post)
+    assert data == b"styled"
+    assert seen["url"].endswith("/images/edits")
+    assert "multipart/form-data; boundary=" in seen["headers"]["Content-Type"]
+    assert b'name="image[]"; filename="face.png"' in seen["body"]
+    assert b"anime style, @Image1" in seen["body"]
+    assert b"\x89PNGface" in seen["body"]
+    try:
+        edit_image_files("Hi", "test-key", "https://example.com/v1",
+                         [str(tmp_path / "missing.png")], post=fake_post)
+        assert False, "a missing reference file must raise"
+    except ValueError:
+        pass

@@ -53,7 +53,7 @@ def test_interview_chat_then_spec_approval(tmp_path):
     memory = _memory(tmp_path)
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
     runner = InterviewRunner(_InterviewClient(), tmp_path / "home",
-                             memory=memory, gate=gate, project_id="dinner")
+                             memory=memory, gate=gate, conversation_id="dinner")
     answers = iter(["roast beef"])
     result = runner.start_from_message(
         "Plan a dinner", ask=lambda q: next(answers))
@@ -75,7 +75,7 @@ def test_interview_unverified_spec_is_not_approved(tmp_path):
                                         "deliverables": []}})
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
     runner = InterviewRunner(BadClient(), tmp_path / "home",
-                             memory=None, gate=gate, project_id="dinner")
+                             memory=None, gate=gate, conversation_id="dinner")
     result = runner.start_from_message("Plan a dinner", ask=lambda q: "x")
     assert result.verified is False
     assert result.approved is False
@@ -117,7 +117,7 @@ def test_attach_skips_interview_and_saves_markdown(tmp_path):
     gate = ApprovalGate(decide)
     runner = InterviewRunner(FakeClient("should not be called"),
                              tmp_path / "home", memory=memory, gate=gate,
-                             project_id="dinner")
+                             conversation_id="dinner")
     sheet = spec_sheet_md(Spec(goal="Plan a dinner",
                                deliverables=["menu.pdf"],
                                constraints=["no milk"]))
@@ -147,10 +147,111 @@ def test_interview_prefills_from_previous_spec(tmp_path):
                                         "deliverables": []}})
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
     runner = InterviewRunner(EmptySpecClient(), tmp_path / "home",
-                             memory=memory, gate=gate, project_id="dinner")
+                             memory=memory, gate=gate, conversation_id="dinner")
     result = runner.start_from_message("Plan a dinner", ask=lambda q: "x")
     assert result.spec.deliverables == ["menu.pdf"]
     assert result.spec.constraints == ["no milk"]
+
+
+def test_interview_does_not_prefill_from_other_chat_spec(tmp_path):
+    memory = _memory(tmp_path)
+    memory.record_episodic("tart", "Interview spec: Make tarts",
+                           {"spec": {"goal": "Make tarts",
+                                     "deliverables": ["tarts.md"],
+                                     "constraints": ["no milk", "no gluten",
+                                                     "no coconut"]}})
+    class EmptySpecClient(FakeClient):
+        def chat(self, messages):
+            return json.dumps({"question": None, "complete": True,
+                               "spec": {"goal": "Say hi",
+                                        "deliverables": ["reply"]}})
+    gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
+    runner = InterviewRunner(EmptySpecClient(), tmp_path / "home",
+                             memory=memory, gate=gate, conversation_id="greeting")
+    result = runner.start_from_message("Hi Aidon", ask=lambda q: "x")
+    assert result.spec.deliverables == ["reply"]
+    assert result.spec.constraints == []
+    assert "no milk" not in " ".join(result.spec.constraints)
+
+
+def test_interview_prefills_newest_spec_only(tmp_path):
+    # Two specs in one chat: the old dinner spec must not seed
+    # a report interview. List order is oldest first; the seed
+    # is the newest spec, not the first.
+    memory = _memory(tmp_path)
+    memory.record_episodic("work", "Interview spec: Plan a dinner",
+                           {"spec": {"goal": "Plan a dinner",
+                                     "deliverables": ["menu.pdf"]}})
+    memory.record_episodic("work", "Interview spec: Write a report",
+                           {"spec": {"goal": "Write a report",
+                                     "deliverables": ["report.pdf"]}})
+    class EmptySpecClient(FakeClient):
+        def chat(self, messages):
+            return json.dumps({"question": None, "complete": True,
+                               "spec": {"goal": "Write a report about sales",
+                                        "deliverables": []}})
+    gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
+    runner = InterviewRunner(EmptySpecClient(), tmp_path / "home",
+                             memory=memory, gate=gate, conversation_id="work")
+    result = runner.start_from_message("Write a report about sales",
+                                       ask=lambda q: "x")
+    assert result.spec.deliverables == ["report.pdf"]
+
+
+def test_interview_greeting_does_not_prefill_previous_task(tmp_path):
+    # Yesterday's bug: a greeting after a failed task got
+    # interviewed about that task, because the prefill took the
+    # chat's oldest spec whatever the message said. A greeting
+    # shares no content word with the task goal, so no seed, and
+    # the model never even sees the old spec in context.
+    memory = _memory(tmp_path)
+    memory.record_episodic("work", "Interview spec: Plan a dinner",
+                           {"spec": {"goal": "Plan a dinner",
+                                     "deliverables": ["menu.pdf"],
+                                     "constraints": ["no milk"]}})
+    seen = {}
+
+    class CapClient(FakeClient):
+        def chat(self, messages):
+            seen["user"] = messages[1].content
+            return json.dumps({"question": None, "complete": True,
+                               "spec": {"goal": "Hey Aidon, how are you doing tonight?",
+                                        "deliverables": []}})
+    gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
+    runner = InterviewRunner(CapClient(), tmp_path / "home",
+                             memory=memory, gate=gate, conversation_id="work")
+    result = runner.start_from_message(
+        "Hey Aidon, how are you doing tonight?", ask=lambda q: "x")
+    assert result.spec.deliverables == []
+    assert result.spec.constraints == []
+    assert "previous_spec" not in json.loads(seen["user"])["from_memory"]
+
+
+def test_spec_sheet_done_when_and_section_aliases_parse(tmp_path):
+    text = ("# Spec Sheet\n\n## Goal\n\nDo X\n\n"
+            "## Done when\n\n- X exists\n- Y count is 3\n\n"
+            "## Deliverables\n\n- x.md\n\n"
+            "## Priorities\n\n- accuracy over speed\n\n"
+            "## Out of scope\n\n- Z\n\n"
+            "## If something goes wrong\n\n- ask me\n\n"
+            "## Checkpoints and reporting\n\n- ping me\n\n"
+            "## Inputs and context\n\n- in.csv\n")
+    parsed = parse_spec_sheet(text)
+    assert parsed.criteria == ["X exists", "Y count is 3"]
+    assert "Priority: accuracy over speed" in parsed.constraints
+    assert "Out of scope: Z" in parsed.constraints
+    assert "Recovery: ask me" in parsed.assumptions
+    assert "Checkpoint: ping me" in parsed.notifications
+    assert "in.csv" in parsed.files
+
+
+def test_spec_sheet_budget_ignores_stray_numbers(tmp_path):
+    text = ("# Spec Sheet\n\n## Goal\n\nDo X\n\n"
+            "## Deliverables\n\n- x.md\n\n"
+            "## Budget\n\nTime cap: 60 min\n")
+    assert parse_spec_sheet(text).budget_cents is None
+    assert parse_spec_sheet(text.replace("Time cap: 60 min", "$25.00")).budget_cents == 2500
+    assert parse_spec_sheet(text.replace("Time cap: 60 min", "25 dollars")).budget_cents == 2500
 
 
 def test_example_spec_sheet_parses_and_reconciles(tmp_path):
@@ -159,7 +260,7 @@ def test_example_spec_sheet_parses_and_reconciles(tmp_path):
     # from the local workdir, not from a test fixture.
     import pathlib
     repo = pathlib.Path(__file__).resolve().parents[2]
-    text = (repo / "docs" / "examples" / "SPEC-SHEET-EXAMPLE.md").read_text()
+    text = (repo / "examples" / "SPEC-SHEET-EXAMPLE.md").read_text()
     parsed = parse_spec_sheet(text)
     assert parsed.verify()[0] is True
     assert "October 2026" in parsed.goal
@@ -176,7 +277,7 @@ def test_example_spec_sheet_parses_and_reconciles(tmp_path):
 def test_template_has_no_amounts_or_example_constraints(tmp_path):
     import pathlib
     repo = pathlib.Path(__file__).resolve().parents[2]
-    text = (repo / "docs" / "examples" / "SPEC-SHEET-TEMPLATE.md").read_text()
+    text = (repo / "examples" / "SPEC-SHEET-TEMPLATE.md").read_text()
     assert "$100" not in text
     assert "no milk" not in text.lower()
     assert "no eggs" not in text.lower()

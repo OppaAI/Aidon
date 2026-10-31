@@ -61,7 +61,7 @@ def _collect_missions(home: Path) -> list[dict]:
         if isinstance(criteria, str):
             criteria = [criteria]
         missions.append({
-            "id": str(mission.get("project_id") or directory.name),
+            "id": str(mission.get("conversation_id") or mission.get("project_id") or directory.name),
             "goal": str(spec.get("goal") or mission.get("goal") or ""),
             "state": str(mission.get("status") or snapshot.get("status")
                          or ""),
@@ -123,7 +123,7 @@ def _collect_runs(home: Path) -> list[dict]:
             "id": str(data.get("run_id") or path.stem),
             "goal": str(data.get("goal") or ""),
             "state": str(data.get("status") or ""),
-            "project_id": str(data.get("project_id") or ""),
+            "conversation_id": str(data.get("conversation_id") or data.get("project_id") or ""),
             "cancelled": bool(data.get("cancelled", False)),
             "steer_notes": data.get("steer_notes") or [],
         })
@@ -234,7 +234,7 @@ def _write_runs(outdir: Path, runs: list[dict]) -> None:
         rows.append([run["id"], run["goal"][:80], run["state"]])
         lines = [f"# Run {run['id']}", "",
                  f"**state:** {run['state']}  ",
-                 f"**project:** {run['project_id']}  ",
+                 f"**chat:** {run['conversation_id']}  ",
                  f"**cancelled:** {'yes' if run['cancelled'] else 'no'}",
                  "", "## Goal", "", run["goal"] or "(none)", ""]
         if run["steer_notes"]:

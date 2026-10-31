@@ -20,15 +20,17 @@ model for a repaired plan, with the failure list and the
 list of passed deliverables. Passed deliverables are
 untouched: repair steps may only fix failed steps and
 failed criteria, they may not rewrite a passed file.
+Exception: a model-verifier NO that names no file keeps
+every deliverable repairable, since no file is known-good.
 At most 3 attempts in total (1 initial + 2 repairs),
 then the run fails, it does not ask for approval, and
 it does not go live.
 
 Memory, blank by design: a new home starts with empty
-collections, no import from previous projects. When a
+collections, no import from previous chats. When a
 memory is present, the loop recalls Experiences before
 planning fresh, records episodic memory scoped by
-project_id, and builds an Experience after a successful
+conversation_id, and builds an Experience after a successful
 run only. Promotion to long-term memory is automatic:
 a done run's episodic record and a chat exchange are
 copied to LTM, deduplicated when identical and
@@ -448,10 +450,31 @@ def run_react(client, messages: list, tools, *, max_rounds: int | None = None,
             "rounds": total_rounds, "error": "ReAct round limit exceeded"}
 
 
+def _normalize_shell_args(args: dict) -> dict:
+    """Coerce a shell step's command to the backend's list form.
+
+    The planner emits commands as strings and plan validation accepts
+    them (it only rejects empty commands), but the execution-backend
+    branch requires a non-empty list — and it ran before the shlex
+    normalization further down, so every string command died on
+    backend runs while the sandbox path worked. Normalize up front
+    so validation, backend, and sandbox all agree on the form.
+    """
+    if not isinstance(args, dict):
+        return args
+    out = dict(args)
+    if "command" not in out and "cmd" in out:
+        out["command"] = out["cmd"]
+    if isinstance(out.get("command"), str):
+        import shlex
+        out["command"] = shlex.split(out["command"])
+    return out
+
+
 class GoalRunner:
     def __init__(self, client: ModelClient, sandbox: Sandbox,
                  gate: ApprovalGate, home: Path, memory=None,
-                 project_id: str = "default",
+                 conversation_id: str = "",
                  plugins=None, execution_backend=None,
                  budget=None, trace=None, model_verifier=None,
                  kernel_mode: bool = False, semantic_router=None,
@@ -467,7 +490,8 @@ class GoalRunner:
                  think_max: bool = False, research_mode: bool = False,
                  deep_researcher=None, deadline_seconds: float | None = None,
                  mode: str | None = None, question_ask=None,
-                 conversation_key: str = "", resume_plan=None):
+                 conversation_key: str = "", resume_plan=None,
+                 clef_client=None, acquisition_governor=None):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -478,7 +502,7 @@ class GoalRunner:
         self.gate = gate
         self.home = Path(home)
         self.memory = memory
-        self.project_id = project_id
+        self.conversation_id = conversation_id
         self.network_available = network_available
         # Optional human guidance, binding on the planner: carried
         # into the plan prompt as a guidance block (the same block
@@ -513,6 +537,11 @@ class GoalRunner:
         self._effort_escalated = False
         if self.model_verifier is not None:
             self.model_verifier.effort_escalated = False
+        # Clef decision client (None = Clef not configured): used by
+        # capability triage in run(). Routing via Clef arrives as
+        # the semantic_router argument instead (ClefRouter).
+        self.clef_client = clef_client
+        self.acquisition_governor = acquisition_governor
         self.kernel_mode = kernel_mode
         self.semantic_router = semantic_router
         self.use_semantic_router_skip = use_semantic_router_skip
@@ -742,7 +771,7 @@ class GoalRunner:
             from .lifecycle import NotificationOutbox
             NotificationOutbox(self._mission_registry).enqueue(
                 "review_ready", "Mission ready for review",
-                f"{goal}: sandbox verification passed", self.project_id)
+                f"{goal}: sandbox verification passed", self.conversation_id)
         except Exception as exc:
             self._trace("mission", "failed", f"review snapshot failed: {exc}")
 
@@ -1017,6 +1046,8 @@ class GoalRunner:
             if not kernel_allowed(name, True):
                 raise ValueError(f"kernel mode: tool {name} is not a seed tool")
         if name == "shell":
+            args = _normalize_shell_args(args)
+        if name == "shell":
             # Mandatory-approval commands always need a human,
             # even in autonomous mode: recursive delete, piped
             # download-to-shell, sudo, raw disk writes, and the
@@ -1160,13 +1191,39 @@ class GoalRunner:
                             tool_rows.setdefault(t, "")
                     except Exception:
                         pass
-                matches = lookup_capability(name, tools=tool_rows)
+                # The ladder's skill and MCP rungs used to be dead
+                # here: only tools were passed, so skills and
+                # approved MCP servers could never match. Pass all
+                # three, from the same live sources triage uses.
+                skill_rows = []
+                if self.plugins is not None:
+                    try:
+                        for _name, _text in (self.plugins.skill_texts() or {}).items():
+                            skill_rows.append({"name": str(_name),
+                                               "description": str(_text or "")[:160]})
+                    except Exception:
+                        pass
+                mcp_rows = []
+                try:
+                    import json as _mcp_json
+                    _mcp_data = _mcp_json.loads(
+                        (self.home / "mcp_servers.json").read_text())
+                    if isinstance(_mcp_data, dict):
+                        mcp_rows = [str(k) for k in _mcp_data]
+                    elif isinstance(_mcp_data, list):
+                        mcp_rows = [str(i.get("name", i)) if isinstance(i, dict)
+                                    else str(i) for i in _mcp_data]
+                except Exception:
+                    pass
+                matches = lookup_capability(name, tools=tool_rows,
+                                            skills=skill_rows,
+                                            mcp_servers=mcp_rows)
                 raise ValueError(f"unknown tool: {name}\n{recovery_note(name, matches)}")
             raise
 
     def _plan(self, goal: str, failure_context: str = "",
               spec=None, research_context: str = "",
-              skill_full: dict | None = None) -> Plan:
+              skill_full: dict | None = None, triage_note: str = "") -> Plan:
         if self.kernel_mode:
             system = ("Propose a short plan as JSON with keys steps, "
                       "deliverables, criteria. Each step is an object "
@@ -1193,9 +1250,26 @@ class GoalRunner:
         system += (" Criteria must be checkable, one assertion each, no "
                    "parenthetical hedges. Forms that verify: 'NAME exists', "
                    "'NAME exists in the workspace folder', 'NAME is "
-                   "non-empty', 'NAME contains TEXT', 'ledger NAME total is "
+                   "non-empty', 'NAME contains TEXT', 'NAME does not "
+                   "contain TEXT', 'ledger NAME total is "
                    "CENTS'. Anything else fails verification even when the "
                    "files exist.")
+        system += (" Allergy and dietary restrictions: when the goal or "
+                   "spec names an allergy, intolerance, or dietary "
+                   "restriction, criteria must check the deliverable text "
+                   "for the allergen AND its hidden names (milk: whey, "
+                   "casein, lactose, milk solids; egg: albumin, egg white, "
+                   "yolk; gluten: wheat, barley, rye, and oats, which risk "
+                   "wheat cross-contact), for label-claim wording quoted "
+                   "from the source (a certified gluten-free logo or "
+                   "statement counts only when the source says so, never "
+                   "assumed), and for cross-contamination warnings in the "
+                   "ingredient or product text ('may contain', 'made in a "
+                   "facility that also processes', 'shared equipment'). A "
+                   "claim that can only be confirmed from a physical "
+                   "package label must NOT be asserted as met: include a "
+                   "criterion requiring the final output to list it as a "
+                   "label check for the user to confirm on the package.")
         system += (" Attempt outputs are numbered from the first attempt: "
                    "if a deliverable may be produced more than once, name "
                    "attempt outputs NAME_1, NAME_2, ... starting at 1, never "
@@ -1280,6 +1354,13 @@ class GoalRunner:
                            "isolated mission venv. Never install packages "
                            "through shell, pip, or sudo; installation is "
                            "approval-gated.")
+            if "edit_image" in self.extra_tools:
+                system += (" For an image restyle or edit, call edit_image "
+                           "with prompt, image (the attached image path), and "
+                           "output such as images/result.png. It sends the "
+                           "image to Muse Image, spends credits, and is "
+                           "approval-gated. Never use shell to re-encode or "
+                           "style an image.")
         system += (" Discover before building: the tools listed above are "
                    "what you can call. If a listed tool does the job, use "
                    "it; do not write a replacement script, plugin, or tool "
@@ -1368,6 +1449,17 @@ class GoalRunner:
             # than calling make_plan, so the block is appended here.
             from .prompts import guidance_block
             user = user + f"\n\n{guidance_block(self.guidance)}"
+        if triage_note:
+            # Capability triage ran before planning (see run()):
+            # the planner plans around a named gap instead of
+            # inventing a tool. This is context, not a previous
+            # failure, so it carries its own label.
+            user = user + (
+                f"\n\nCapability triage note, from before planning: "
+                f"{triage_note}\nPlan only with tools Aidon actually "
+                "has or the user approved; if a needed capability is "
+                "missing, climb the ladder (skill, MCP, plugin) or "
+                "say so instead of calling a tool that does not exist.")
         self._trace("plan", "started", goal[:100])
         if self.budget is not None:
             self.budget.add_tokens(user)
@@ -1423,7 +1515,8 @@ class GoalRunner:
                 return self._plan(goal, failure_context=failure_context,
                                   spec=spec,
                                   research_context=research_context,
-                                  skill_full=resolved)
+                                  skill_full=resolved,
+                                  triage_note=triage_note)
         return plan
 
     def _attachment_message(self, text: str) -> Message:
@@ -1485,6 +1578,30 @@ class GoalRunner:
                 return current
             current = replanned
         return current
+
+    def _failure_lessons_note(self, goal: str) -> str:
+        """Past failure lessons for this goal, as planner context.
+
+        Best effort: a lessons-store failure never fails the
+        run. Returns "" when there are no lessons.
+        """
+        try:
+            from ..memory.failure_lessons import FailureLessons
+            lessons = FailureLessons(self.home).lessons_for(goal, limit=3)
+        except Exception:
+            return ""
+        if not lessons:
+            return ""
+        bits = []
+        for lesson in lessons:
+            repair = (lesson.get("repair") or {}).get("description", "") or "none recorded"
+            bits.append(
+                f"{lesson.get('failure_class', 'failure')}: "
+                f"{str(lesson.get('failure_text', ''))[:200]} "
+                f"(seen {lesson.get('times_seen', 1)}x; repair: {str(repair)[:150]})")
+        return ("Failure lessons from past runs — do not repeat these "
+                "approaches; prefer the recorded repair when present: "
+                + "; ".join(bits))
 
     def run(self, goal: str, spec=None, research_report=None,
             live_actions=None) -> RunReport:
@@ -1566,6 +1683,36 @@ class GoalRunner:
         # the chat callback (no clock, no card); the spec decision is
         # the Proceed button, not an approval card, so no gate is
         # passed and no spec approval is asked here.
+        # Computed early: the pre-interview intent skip below
+        # needs it, and the write-intent guard below reuses it.
+        _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
+        # Intent routing applies in every mode, before any
+        # mode interview: a chat-routed message gets a plain
+        # reply and a webchat-routed message a research-backed
+        # reply, with no interview and no spec. Research mode
+        # and force_web keep their existing paths below, so
+        # they are excluded here.
+        _route = getattr(self, "last_route", None)
+        if (getattr(self, "use_semantic_router_skip", False) and _route
+                and _route[0] == "chat" and spec is None and not _write_intent
+                and not getattr(self, "research_mode", False)
+                and not getattr(self, "force_web", False)):
+            reply = self._chat("respond", [self._attachment_message(goal)])
+            report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                               False, False, chat_reply=reply)
+            return self._finalize(report)
+        if (getattr(self, "use_semantic_router_skip", False) and _route
+                and _route[0] == "webchat" and spec is None and not _write_intent
+                and self.researcher is not None
+                and not getattr(self, "research_mode", False)
+                and not getattr(self, "force_web", False)):
+            from ..capabilities.webchat import webchat_reply
+            reply = webchat_reply(goal, self.researcher, self.client,
+                                  on_token=self.stream_callback,
+                                  context=self.conversation_context)
+            report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                               False, False, chat_reply=reply)
+            return self._finalize(report)
         if getattr(self, "mode", None) == "ask" and spec is None:
             if getattr(self, "question_ask", None) is None:
                 return self._finalize(RunReport(
@@ -1577,7 +1724,7 @@ class GoalRunner:
                 from .interview import InterviewRunner
                 interviewer = InterviewRunner(
                     self.client, self.home, memory=self.memory, gate=None,
-                    project_id=self.project_id)
+                    conversation_id=self.conversation_id)
                 result = interviewer.start_from_message(
                     goal, ask=self.question_ask, approve=None)
             except Exception as exc:
@@ -1591,7 +1738,10 @@ class GoalRunner:
             stop_id = save_mode_stop(
                 self.home, mode="ask", goal=goal, spec=spec_dict,
                 conversation_key=getattr(self, "conversation_key", ""),
-                project_id=self.project_id)
+                conversation_id=self.conversation_id,
+                budget_key=getattr(
+                    getattr(self, "acquisition_governor", None),
+                    "budget_key", None) or "")
             return self._finalize(RunReport(
                 "stopped", goal, Plan(steps=[], deliverables=[], criteria=[]),
                 False, False,
@@ -1601,7 +1751,6 @@ class GoalRunner:
         # safety boundary. A goal that asks for a write, a save, or a file
         # is never answered by a path with no write tools, even if the
         # router said chat, because that would silently miss the task.
-        _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
         # Classification is advisory.  If the request reaches the
         # executable pipeline (especially because it writes a file), expose
         # the effective route, not the discarded low-confidence chat guess.
@@ -1666,10 +1815,50 @@ class GoalRunner:
             if callable(self.route_callback):
                 self.route_callback(self.last_route)
         self._start_mission(goal)
+        # Capability triage, before any planning: inventory what
+        # Aidon has, classify the gap with Clef when configured,
+        # and stop with a notification when blocked instead of
+        # planning an impossible goal. Skipped silently when no
+        # Clef client is configured or triage itself fails — an
+        # uncertain triage must never block a doable goal. Runs
+        # resumed from a Plan stop skip triage (they return
+        # before this point): a plan the user already approved
+        # is not re-blocked unless a tool disappeared, which the
+        # execution-time lookup still catches.
+        self._triage_note = ""
+        if getattr(self, "clef_client", None) is not None:
+            try:
+                from .capability_triage import build_inventory, triage
+                _inventory = build_inventory(
+                    self.home, self.tools, self.plugins, self.extra_tools)
+                _spec_text = ""
+                if spec is not None:
+                    try:
+                        _spec_text = json.dumps(
+                            spec.to_dict() if hasattr(spec, "to_dict") else spec)[:1000]
+                    except Exception:
+                        _spec_text = ""
+                _triage = triage(goal, _inventory, getattr(self, "clef_client", None),
+                                 spec_text=_spec_text)
+                self._trace("capability", "triage",
+                            f"{_triage['status']} ({_triage['confidence']:.2f})")
+                if _triage["status"] == "blocked":
+                    return self._finalize(RunReport(
+                        "failed", goal, Plan(steps=[], deliverables=[], criteria=[]),
+                        False, False, error=_triage["note"][:500],
+                        backend=self._backend_name()))
+                if _triage["status"] != "covered":
+                    self._triage_note = _triage["note"]
+            except Exception as exc:
+                self._trace("capability", "triage-skipped", str(exc)[:100])
+        _lessons_note = self._failure_lessons_note(goal)
+        if _lessons_note:
+            self._triage_note = ((self._triage_note + "\n") if self._triage_note else "") + _lessons_note
+            self._trace("capability", "failure-lessons", "recalled past failure lessons")
         if spec is not None:
             spec_deliverables = spec.deliverables if hasattr(spec, "deliverables") else spec.get("deliverables", [])
             try:
-                plan = self._plan(goal, spec=spec)
+                plan = self._plan(goal, spec=spec, triage_note=self._triage_note)
             except Exception as exc:
                 # A budget breach (or any plan failure) on the
                 # initial plan call is a failed run, not a crash
@@ -1699,6 +1888,20 @@ class GoalRunner:
                 # setting as written.
                 experiences = recall_experiences(
                     self.memory, goal, limit=max(recall_limit, 5))
+                # Clef DAG matching: re-rank the recalled workflows
+                # by fit before adaptation picks one. Jaccard recall
+                # stays the pre-filter; Clef only reorders within
+                # the recalled set, and any failure or low
+                # confidence keeps the recalled order.
+                if getattr(self, "clef_client", None) is not None and experiences:
+                    try:
+                        from .clef_dag import rank_dags
+                        _ranked = rank_dags(goal, experiences, getattr(self, "clef_client", None))
+                        self._trace("dag", "ranked",
+                                    f"{len(_ranked)} candidate(s) after Clef ranking")
+                        experiences = _ranked
+                    except Exception as exc:
+                        self._trace("dag", "rank-skipped", str(exc)[:100])
                 failure = matching_failure(self.memory, goal)
                 if failure is None:
                     # DAG composition first: when the goal spans
@@ -1780,7 +1983,8 @@ class GoalRunner:
             except Exception:
                 pass
         try:
-            plan = self._plan(goal, failure_context=failure_note)
+            plan = self._plan(goal, failure_context=failure_note,
+                              triage_note=self._triage_note)
         except Exception as exc:
             # Same rule as the spec branch above: an initial
             # plan failure (including a budget breach) fails
@@ -1984,7 +2188,7 @@ class GoalRunner:
         if report.status == "chat" and self.memory is not None:
             try:
                 episodic = self.memory.record_episodic(
-                    self.project_id, report.goal,
+                    self.conversation_id, report.goal,
                     {"kind": "chat", "outcome": report.chat_reply or "",
                      "status": "done"})
                 self.memory.promote_to_ltm(episodic, kind="semantic")
@@ -1997,7 +2201,7 @@ class GoalRunner:
         if report.status == "chat":
             try:
                 from ..memory.extraction import spawn_extraction
-                spawn_extraction(self.memory, self.project_id,
+                spawn_extraction(self.memory, self.conversation_id,
                                  f"User: {report.goal}\nAssistant: {report.chat_reply or ''}",
                                  self.client)
             except Exception:
@@ -2024,7 +2228,7 @@ class GoalRunner:
                 from ..memory.extraction import spawn_extraction
                 deliverables = ", ".join(report.plan.deliverables or [])
                 files = ", ".join(report.files or [])
-                spawn_extraction(self.memory, self.project_id,
+                spawn_extraction(self.memory, self.conversation_id,
                                  f"Goal: {report.goal}\nDeliverables: {deliverables}\nFiles: {files}",
                                  self.client)
             except Exception:
@@ -2049,6 +2253,64 @@ class GoalRunner:
                 record_failure(self.memory, report.goal,
                                (report.error or "")[:500],
                                failed_tools, failed_deliverables)
+            except Exception:
+                pass
+        # Failure-lessons store: the same failure, with repair
+        # linkage and recurrence, independent of memory. A
+        # rejection or cancellation is not evidence the
+        # approach was wrong, so those are not recorded.
+        # Best effort, as above.
+        if report.status == "failed":
+            _err = (report.error or "").lower()
+            if "reject" not in _err and "cancel" not in _err:
+                try:
+                    from ..memory.failure_lessons import FailureLessons
+                    _tools = []
+                    for _step in report.plan.normalized_steps():
+                        if _step.tool not in _tools:
+                            _tools.append(_step.tool)
+                    FailureLessons(self.home).record_failure(
+                        report.goal, report.error or "",
+                        context={"tools": _tools,
+                                 "deliverables": list(report.plan.deliverables or []),
+                                 "files": list(report.files or [])})
+                except Exception:
+                    pass
+        elif report.status == "done":
+            try:
+                from ..memory.failure_lessons import FailureLessons
+                _store = FailureLessons(self.home)
+                for _lesson in _store.lessons_for(report.goal, limit=3):
+                    if not _lesson.get("repair"):
+                        _store.record_repair(
+                            _lesson["id"],
+                            "A later run for a similar goal succeeded.")
+                        break
+            except Exception:
+                pass
+        # Diagnostics: a failed run records its error with
+        # its run id, redacted, for `aidon diagnostics`.
+        # Best effort, never fails the finished run.
+        if report.status == "failed":
+            try:
+                from ..system.diagnostics import log_run_error
+                log_run_error(self.home, str(getattr(self, "run_id", "") or ""),
+                              "finalize", report.error or report.status)
+            except Exception:
+                pass
+        # Mission skill harvest: ordinary runs test and
+        # promote candidate skills, bounded by the run's
+        # skill budget. Trust still needs owner approval,
+        # and validated skills never enter plan prompts
+        # until trusted. Best effort, never fails the run.
+        if report.status == "done":
+            try:
+                from ..capabilities.skill_library import SkillLibrary
+                _promoted = SkillLibrary(self.home).harvest_candidates(
+                    getattr(self, "sandbox", None),
+                    governor=getattr(self, "acquisition_governor", None))
+                if _promoted:
+                    report.promoted_skills = _promoted
             except Exception:
                 pass
         try:
@@ -2345,7 +2607,8 @@ class GoalRunner:
             + "\n".join(f"- {c}" for c in criteria)
             + "\nRewrite the failed criteria into checkable forms only: "
             "'NAME exists', 'NAME exists in the workspace folder', "
-            "'NAME is non-empty', 'NAME contains TEXT', 'ledger NAME "
+            "'NAME is non-empty', 'NAME contains TEXT', 'NAME does not "
+            "contain TEXT', 'ledger NAME "
             "total is CENTS'. One assertion each, no parenthetical "
             "hedges. Return JSON only: {\"criteria\": [...]}")
         try:
@@ -2543,7 +2806,10 @@ class GoalRunner:
             stop_id = save_mode_stop(
                 self.home, mode="plan", goal=goal, plan=plan_to_dict(plan),
                 conversation_key=getattr(self, "conversation_key", ""),
-                project_id=self.project_id)
+                conversation_id=self.conversation_id,
+                budget_key=getattr(
+                    getattr(self, "acquisition_governor", None),
+                    "budget_key", None) or "")
             return RunReport("stopped", goal, plan, False, False,
                              mode_stop={"stop_id": stop_id, "mode": "plan",
                                         "goal": goal,
@@ -2567,6 +2833,21 @@ class GoalRunner:
         max_attempts = _resolve_count("AIDON_MAX_ATTEMPTS", MAX_ATTEMPTS, 1)
         for attempt in range(1, max_attempts + 1):
             failures: list[str] = []
+            if attempt > 1:
+                # A repair cycle under the acquisition governor:
+                # the attempts cap stays authoritative, but the
+                # governor bounds repairs even if attempts are
+                # raised above it. Exhaustion fails the run with
+                # the governor's message, not another repair.
+                _gov = getattr(self, "acquisition_governor", None)
+                if _gov is not None:
+                    try:
+                        _gov.acquire("repair")
+                    except Exception as exc:
+                        return RunReport("failed", goal, current_plan,
+                                         False, False, error=str(exc)[:500],
+                                         attempts=attempt,
+                                         backend=self._backend_name())
             # Cancellation, checked before every attempt, and steer,
             # applied to the next repair attempt, not to passed work.
             if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
@@ -2632,7 +2913,32 @@ class GoalRunner:
             verifier_mode = _resolve_model_verifier_mode()
             verifier_wanted = _model_verifier_wanted(
                 verifier_mode, current_plan.deliverables)
-            if ok and self.model_verifier is not None and verifier_wanted:
+            # Clef validate gate, after code verification passes
+            # and before the model verifier: accept skips the
+            # model call, a high-confidence retry acts as a
+            # generic model NO (every deliverable stays
+            # repairable), and anything else defers to the model
+            # verifier as today. A gate failure also defers;
+            # the gate never blocks a code-passing run.
+            gate_skip_verifier = False
+            if ok and getattr(self, "clef_client", None) is not None:
+                try:
+                    from .clef_validate import validate_gate
+                    gate = validate_gate(
+                        goal, current_plan.deliverables, criteria,
+                        self.sandbox.workdir, getattr(self, "clef_client", None))
+                    self._trace("verify", f"gate-{gate['action']}",
+                                f"clef gate {gate['action']} "
+                                f"({gate['confidence']:.2f})")
+                    if gate["action"] == "accept":
+                        gate_skip_verifier = True
+                    elif gate["action"] == "retry":
+                        model_failed = True
+                        failures.append(f"clef gate: {gate['reason']}")
+                except Exception as exc:
+                    self._trace("verify", "gate-skipped", str(exc)[:100])
+            if (ok and not model_failed and self.model_verifier is not None
+                    and verifier_wanted and not gate_skip_verifier):
                 try:
                     mv = self.model_verifier.verify(goal, current_plan.deliverables, self.sandbox.workdir, criteria)
                     self._trace("verify", mv["verdict"], f"model verifier {mv['reason'][:100]}")
@@ -2641,7 +2947,8 @@ class GoalRunner:
                         failures.append(f"model verifier: {mv['reason']}")
                 except Exception as exc:
                     self._trace("verify", "failed", str(exc)[:100])
-            elif ok and self.model_verifier is not None:
+            elif (ok and self.model_verifier is not None
+                    and not gate_skip_verifier):
                 self._trace("verify", "skipped",
                             f"model verifier {verifier_mode}")
             # Passed means existence AND no failure mentions
@@ -2653,13 +2960,27 @@ class GoalRunner:
             # take it back out, or the repair attempt would skip
             # the very step it has to fix. A mention is an exact
             # filename match, not a substring, so a data.txt
-            # failure never takes a.txt out.
-            for name in list(passed):
-                if any(_mentions_file(msg, name) for msg in failures):
-                    passed.discard(name)
-            for name in verified:
-                if not any(_mentions_file(msg, name) for msg in failures):
-                    passed.add(name)
+            # failure never takes a.txt out. Exception: a model
+            # NO that names no deliverable at all. Crediting the
+            # code-verified files to passed there would tell the
+            # repair planner not to rewrite the very files the
+            # model rejected, and the next attempt would skip
+            # their steps entirely — a deadlock that re-verifies
+            # identical files until attempts run out. A generic
+            # rejection therefore keeps every deliverable
+            # repairable; only a NO naming a file narrows repair
+            # to that file.
+            if model_failed and not any(
+                    _mentions_file(msg, d) for msg in failures
+                    for d in current_plan.deliverables):
+                passed.difference_update(current_plan.deliverables)
+            else:
+                for name in list(passed):
+                    if any(_mentions_file(msg, name) for msg in failures):
+                        passed.discard(name)
+                for name in verified:
+                    if not any(_mentions_file(msg, name) for msg in failures):
+                        passed.add(name)
             if (not ok and not model_failed
                     and not self._criterion_repaired and failures
                     and all(f.startswith("unverified criterion: ")
@@ -2699,11 +3020,80 @@ class GoalRunner:
                     "verified", goal, current_plan, passed,
                     verified=verified, attempt=attempt)
                 break
+            if self._criterion_repaired and failures and all(
+                    f.startswith("unverified criterion: ") for f in failures):
+                # Criterion repair is spent (one per run) and the
+                # failure is still only uncheckable criteria: the
+                # assertions themselves are the problem, and no
+                # further repair exists for them. Re-executing
+                # would fail identically, so fail fast with the
+                # exact criteria named instead of burning the
+                # remaining attempts. The user (or a new run with
+                # checkable criteria) fixes the assertions; the
+                # loop does not re-execute to prove it again.
+                return RunReport("failed", goal, current_plan, False, False,
+                                 files=sorted(passed),
+                                 error=("criteria not checkable: "
+                                        + "; ".join(failures))[:500],
+                                 attempts=attempt)
             if attempt == max_attempts:
                 return RunReport("failed", goal, current_plan, False, False,
                                  files=sorted(passed),
                                  error="; ".join(failures)[:500],
                                  attempts=attempt)
+            # Clef recovery router: classify the failure before
+            # replanning. retry_execution skips the repair plan
+            # (the next attempt re-executes the same plan, passed
+            # files untouched); acquire_capability adds a note
+            # steering the repair toward the capability ladder;
+            # escalate at high confidence stops the run instead
+            # of burning attempts on an ambiguous failure.
+            # Anything else, low confidence, no client, or a
+            # router error, is the current repair path. Retry is
+            # once per run: a misclassified persistent failure
+            # must not burn every attempt on identical
+            # re-execution.
+            recovery_note = ""
+            if getattr(self, "clef_client", None) is not None:
+                try:
+                    from .clef_recovery import route_failure
+                    route = route_failure(
+                        goal, attempt, failures,
+                        getattr(self, "clef_client", None))
+                    self._trace("recovery", route["route"],
+                                f"clef recovery {route['route']} "
+                                f"({route['confidence']:.2f})")
+                    if (route["route"] == "escalate"
+                            and route["confidence"] >= 0.8):
+                        return RunReport(
+                            "failed", goal, current_plan, False, False,
+                            files=sorted(passed),
+                            error=("recovery router escalated "
+                                   f"({route['confidence']:.2f}); failure "
+                                   "needs a user decision or cannot be "
+                                   "safely routed")[:500],
+                            attempts=attempt,
+                            backend=self._backend_name())
+                    if (route["route"] == "acquire_capability"
+                            and route["confidence"] >= 0.6):
+                        recovery_note = (
+                            "\nRecovery router: a needed capability "
+                            "(tool, package, skill, or MCP connection) "
+                            "is suspected missing. Prefer finding, "
+                            "building, or connecting it via the "
+                            "capability ladder over rewriting the "
+                            "artifact.")
+                    elif (route["route"] == "retry_execution"
+                            and route["confidence"] >= 0.6):
+                        if not getattr(self, "_recovery_retried", False):
+                            self._recovery_retried = True
+                            self._trace("recovery", "retry",
+                                        "re-executing plan unchanged")
+                            continue
+                        self._trace("recovery", "retry-spent",
+                                    "retry already used; repairing instead")
+                except Exception as exc:
+                    self._trace("recovery", "skipped", str(exc)[:100])
             # Repair: ask for a repaired plan, passed files untouched.
             # Raise effort only for substantive verification rejection. A
             # shell/tool/network exception is operational, not something
@@ -2718,6 +3108,8 @@ class GoalRunner:
                        + "\nFailures:\n" + "\n".join(failures))
             if steer_notes:
                 context += "\nSteer notes from the owner, apply to the repair:\n" + "\n".join(steer_notes)
+            if recovery_note:
+                context += recovery_note
             try:
                 current_plan = self._plan(
                     goal, failure_context=context,
@@ -2739,22 +3131,31 @@ class GoalRunner:
             attempt = max_attempts
         files = sorted(passed) if passed else list(current_plan.deliverables)
         self._mission_prepare_review(goal, current_plan, files, sorted(verified))
-        self._trace("approval", "started", "live approval requested")
-        decision: Decision = self._ask_for_approval(
-            "live", "Approve live execution?",
-            self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"),
-            force_ask=True,
-            reversible=plan_is_reversible(
-                current_plan, self.allowed_side_effect_tools),
-        )
-        # edited means "change the proposal" — not approve the original.
-        # Live card has no apply-edit path; require a clean approved.
-        approved = decision.verdict in ("approved", "auto_approved")
-        self._mission_approval(approved)
-        if not approved:
-            return RunReport("rejected", goal, current_plan, True, False,
-                             files=files, attempts=attempt,
-                             backend=self._backend_name())
+        # Live approval is for live actions only. No caller populates
+        # _live_actions today, and a plan of sandbox steps has none:
+        # asking here would repeat the mode-stop approval for an
+        # empty set, and force_ask would bypass even an Auto-Approve
+        # grant. When live actions exist, the gate below still asks.
+        if getattr(self, "_live_actions", None):
+            self._trace("approval", "started", "live approval requested")
+            decision: Decision = self._ask_for_approval(
+                "live", "Approve live execution?",
+                self._approval_body(f"Goal: {goal}\nDeliverables: {', '.join(files)}"),
+                force_ask=True,
+                reversible=plan_is_reversible(
+                    current_plan, self.allowed_side_effect_tools),
+            )
+            # edited means "change the proposal" — not approve the original.
+            # Live card has no apply-edit path; require a clean approved.
+            approved = decision.verdict in ("approved", "auto_approved")
+            self._mission_approval(approved)
+            if not approved:
+                return RunReport("rejected", goal, current_plan, True, False,
+                                 files=files, attempts=attempt,
+                                 backend=self._backend_name())
+        else:
+            self._trace("approval", "skipped", "no live actions")
+            self._mission_approval(True)
         self._save_checkpoint(
             "approved", goal, current_plan, passed,
             verified=verified, attempt=attempt)
@@ -2773,7 +3174,7 @@ class GoalRunner:
                                  backend=self._backend_name())
         learn_dir = self.home / "learned"
         learn_dir.mkdir(parents=True, exist_ok=True)
-        record = {"status": "done", "project_id": self.project_id,
+        record = {"status": "done", "conversation_id": self.conversation_id,
                   "goal": goal, "deliverables": files,
                   "criteria": current_plan.criteria,
                   "backend": self._backend_name(),
@@ -2786,7 +3187,7 @@ class GoalRunner:
             json.dumps(record, indent=2), encoding="utf-8")
         if self.memory is not None:
             episodic = self.memory.record_episodic(
-                self.project_id, goal, {"deliverables": files})
+                self.conversation_id, goal, {"deliverables": files})
             try:
                 from ..memory.experience import build_experience, store_experience
                 nodes = []
@@ -2830,7 +3231,7 @@ class GoalRunner:
                 store_experience(self.memory, experience)
                 try:
                     from ..memory.memory_extras import rolling_summary as _rolling_summary
-                    _rolling_summary(self.home, self.project_id, goal, files, "done")
+                    _rolling_summary(self.home, self.conversation_id, goal, files, "done")
                 except Exception:
                     pass
             except Exception:

@@ -68,17 +68,11 @@
         <span class="nav-ico">📄</span><span class="nav-label">Documents</span>
       </a>
     </nav>
-    <div id="projects-bar">
-      <div class="left-head">
-        <span>Projects</span>
-        <button id="new-project" class="mini-btn" title="New project">＋</button>
-      </div>
-      <div id="project-list"></div>
-    </div>
     <div id="left-content">
       <div class="left-view active" id="view-chat">
         <div class="left-head">
           <span>History</span>
+          <button id="chat-brief" class="mini-btn" title="Chat brief">📋</button>
           <button id="new-chat" class="mini-btn" title="New chat">＋</button>
         </div>
         <div id="history-list"></div>
@@ -136,7 +130,7 @@
             <button id="camera-btn" class="composer-icon" title="Take photo" aria-label="Take photo">&#128247;</button>
             <button id="web-btn" class="composer-icon" title="Force web search" aria-label="Force web search"><svg class="globe-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.8 12h16.4M12 3.5c2.2 2.3 3.3 5.1 3.3 8.5s-1.1 6.2-3.3 8.5c-2.2-2.3-3.3-5.1-3.3-8.5S9.8 5.8 12 3.5z"></path></svg></button>
             <button id="think-btn" class="composer-icon" title="Maximum thinking" aria-label="Maximum thinking">&#129504;</button>
-            <label for="mode-chooser">Run Mode: </label><select id="mode-chooser" class="composer-icon" title="Run mode" aria-label="Run mode"><option value="ask">Ask</option><option value="execute">Execute</option><option value="plan">Plan</option></select>
+            <label for="mode-chooser">Run Mode: </label><select id="mode-chooser" class="composer-icon" title="Run mode" aria-label="Run mode"><option value="ask">Ask</option><option value="plan">Plan</option><option value="execute">Execute</option></select>
             <button id="preapprove-btn" class="composer-icon preapprove-control" title="Auto-Approve" aria-label="Auto-Approve"><span class="preapprove-icon">👌</span><span>Auto-Approve</span></button>
           </div>
           <div id="composer-right">
@@ -182,8 +176,8 @@
     <canvas id="avatar-wave" width="220" height="28" title="Aidon voice activity"></canvas>
     <div id="dashboard-stack">
       <section class="dash-card">
-        <div class="dash-title"><span>▣</span> Current Project <span class="dash-chevron">›</span></div>
-        <div class="dash-empty">Start a goal to create a project</div>
+        <div class="dash-title"><span>▣</span> Current Chat <span class="dash-chevron">›</span></div>
+        <div class="dash-empty">Start a goal to start a chat</div>
       </section>
       <section class="dash-card">
         <div class="dash-title"><span>✦</span> System Status</div>

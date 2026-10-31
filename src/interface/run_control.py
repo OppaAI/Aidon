@@ -8,9 +8,9 @@ a CLI control command runs in a different process from a
 WebUI run, so in-memory state alone cannot stop it.
 
 RunControl is file-based, in the Aidon home, under runs/:
-- runs/<run_id>.json, with goal, project_id, status,
+- runs/<run_id>.json, with goal, conversation_id, status,
   steer_notes, and cancelled.
-- register(run_id, goal, project_id) creates the file.
+- register(run_id, goal, conversation_id) creates the file.
 - cancel(run_id) sets cancelled=true, and the running loop
   checks it before every step and between attempts, and
   returns a cancelled report, without executing further steps.
@@ -55,8 +55,8 @@ class RunControl:
         safe = "".join(c for c in run_id if c.isalnum() or c in ("-", "_"))[:32]
         return self.runs_dir / f"{safe}.json"
 
-    def register(self, run_id: str, goal: str, project_id: str = "default") -> dict:
-        record = {"run_id": run_id, "goal": goal, "project_id": project_id,
+    def register(self, run_id: str, goal: str, conversation_id: str = "") -> dict:
+        record = {"run_id": run_id, "goal": goal, "conversation_id": conversation_id,
                   "status": "running", "steer_notes": [], "cancelled": False,
                   "created_at": datetime.now(timezone.utc).isoformat()}
         self._path(run_id).write_text(json.dumps(record, indent=2))

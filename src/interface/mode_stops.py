@@ -42,7 +42,7 @@ def _save(home: Path, stops: dict) -> None:
 
 def save_mode_stop(home: Path, mode: str, goal: str, spec=None, plan=None,
                    conversation_key: str = "",
-                   project_id: str = "default") -> str:
+                   conversation_id: str = "", budget_key: str = "") -> str:
     """Save a stopped run; returns its stop id."""
     if mode not in _MODES:
         raise ValueError(f"unknown stop mode: {mode}")
@@ -55,7 +55,8 @@ def save_mode_stop(home: Path, mode: str, goal: str, spec=None, plan=None,
         "spec": spec if isinstance(spec, dict) else None,
         "plan": plan if isinstance(plan, dict) else None,
         "conversation_key": str(conversation_key or ""),
-        "project_id": str(project_id or "default"),
+        "conversation_id": str(conversation_id or ""),
+        "budget_key": str(budget_key or ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     _save(home, stops)
@@ -68,6 +69,62 @@ def load_mode_stop(home: Path, stop_id: str) -> dict | None:
         return None
     record = _load(home).get(str(stop_id))
     return dict(record) if isinstance(record, dict) else None
+
+
+def enrich_mode_stop(home: Path, mode_stop: dict) -> dict:
+    """Attach the stored spec/plan to a run's mode_stop for the frontend.
+
+    The loop's mode_stop carries only stop_id/mode/goal; the frozen spec
+    (Ask) or plan (Plan) lives in the stop record. The Proceed card's
+    View spec/plan button renders from these fields. Unknown ids pass
+    through unchanged.
+    """
+    out = dict(mode_stop or {})
+    record = load_mode_stop(home, str(out.get("stop_id") or ""))
+    if record is None:
+        return out
+    if isinstance(record.get("spec"), dict):
+        out["spec"] = record["spec"]
+    if isinstance(record.get("plan"), dict):
+        out["plan"] = record["plan"]
+    return out
+
+
+def update_mode_stop_spec(home: Path, stop_id: str, spec: dict) -> bool:
+    """Replace an Ask stop's frozen spec; True when one was there.
+
+    The Save button on the editable spec sheet writes through here,
+    so a later Proceed resumes from the edited spec, not the frozen
+    one. Plan stops carry no spec and are refused by the caller.
+    """
+    stops = _load(home)
+    record = stops.get(str(stop_id))
+    if not isinstance(record, dict):
+        return False
+    record["spec"] = spec if isinstance(spec, dict) else None
+    _save(home, stops)
+    return True
+
+
+def latest_mode_stop_for_conversation(home: Path, conversation_id: str) -> dict | None:
+    """Newest stop for a chat, matching key or id.
+
+    WebUI stops carry both: conversation_key is the chat id for
+    WebUI runs, and conversation_id is set alongside it. Matching
+    either keeps the card findable after a refresh, when no run
+    record exists to carry the stop.
+    """
+    key = str(conversation_id or "")
+    if not key:
+        return None
+    candidates = [r for r in _load(home).values()
+                  if isinstance(r, dict)
+                  and (r.get("conversation_key") == key
+                       or r.get("conversation_id") == key)]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda r: str(r.get("created_at", "")))
+    return dict(candidates[-1])
 
 
 def delete_mode_stop(home: Path, stop_id: str) -> bool:

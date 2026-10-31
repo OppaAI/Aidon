@@ -366,6 +366,29 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
         path = resolve_in_workdir(workdir, match.group(1))
         ok = path is not None and path.is_file() and path.stat().st_size > 0
         return ok, f"{name} non-empty" if ok else f"{name} empty or missing"
+    match = re.match(r"^(.+?)\s+does not contain\s+(.+)$", text, re.IGNORECASE)
+    if match:
+        # Absence check, for allergy and dietary criteria ("menu.md does
+        # not contain milk"): the file must NOT contain the needle.
+        # Matching is case-insensitive because allergen names vary in
+        # case on labels and in prose (Milk, MILK, milk). This branch
+        # must stay BEFORE the plain "contains" branch below: the
+        # contains regex would otherwise match with the name
+        # "menu.md does not" and check the wrong assertion.
+        name, needle = _relative_name(workdir, match.group(1)), match.group(2).strip()
+        path = resolve_in_workdir(workdir, match.group(1))
+        if path is None or not path.is_file():
+            return False, f"{name} missing"
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            if path.stat().st_size > _EXTRACT_MAX_BYTES:
+                return False, f"{name} not searchable (binary, too large)"
+            content = _extract_binary_text(path)
+            if not content.strip():
+                return False, f"{name} not searchable (binary, text not extractable)"
+        ok = needle.lower() not in content.lower()
+        return ok, f"{name} lacks {needle}" if ok else f"{name} contains {needle}"
     match = re.match(r"^(.+?)\s+contains\s+(.+)$", text, re.IGNORECASE)
     if match:
         name, needle = _relative_name(workdir, match.group(1)), match.group(2).strip()

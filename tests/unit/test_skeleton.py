@@ -45,7 +45,9 @@ def test_goal_loop_requires_approval_before_learn(tmp_path):
     sandbox = Sandbox(home / "work")
     gate = ApprovalGate(lambda kind, title, body: Decision("rejected"))
     runner = GoalRunner(FakeClient(""), sandbox, gate, home)
-    report = runner.run("Write a note")
+    report = runner.run("Write a note", live_actions=[
+        {"kind": "notify", "recipient": "owner",
+         "subject": "t", "body": "b"}])
     assert report.status == "rejected"
     assert report.verified is True
     assert report.files == ["deliverable.md"]

@@ -1,7 +1,7 @@
 """Trace events: what a run actually did, in order.
 
 A run emits trace events, one per stage, with a
-timestamp, a run id, a project id, a kind, a status,
+timestamp, a run id, a conversation id, a kind, a status,
 and a detail string. Kinds, in run order:
 interpret, research, recall, plan, sandbox, verify,
 approval, live, learn. A trace event never contains
@@ -46,7 +46,7 @@ class TraceEvent:
     status: str
     detail: str = ""
     run_id: str = ""
-    project_id: str = "default"
+    conversation_id: str = ""
     timestamp: str = ""
 
     def __post_init__(self):
@@ -56,15 +56,15 @@ class TraceEvent:
     def to_dict(self) -> dict:
         return {"kind": self.kind, "status": self.status,
                 "detail": self.detail, "run_id": self.run_id,
-                "project_id": self.project_id, "timestamp": self.timestamp}
+                "conversation_id": self.conversation_id, "timestamp": self.timestamp}
 
 
 class TraceRecorder:
     def __init__(self, home: Path, run_id: str | None = None,
-                 project_id: str = "default"):
+                 conversation_id: str = ""):
         self.home = Path(home)
         self.run_id = run_id or uuid.uuid4().hex[:12]
-        self.project_id = project_id
+        self.conversation_id = conversation_id
         self.events: list[TraceEvent] = []
         self._lock = threading.RLock()
         self.trace_dir = self.home / "trace"
@@ -82,7 +82,7 @@ class TraceRecorder:
         effective_run_id = run_id or self.run_id
         event = TraceEvent(kind=kind, status=status, detail=detail,
                            run_id=effective_run_id,
-                           project_id=self.project_id)
+                           conversation_id=self.conversation_id)
         with self._lock:
             self.events.append(event)
             path = (self.trace_path if effective_run_id == self.run_id

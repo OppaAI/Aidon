@@ -96,6 +96,96 @@ def check_code_sources(sources: list[dict]) -> None:
             raise PermissionError(f"code source {name!r} blocked: {reason}")
 
 
+def import_skill_file(home, source_path, name: str | None = None) -> Skill:
+    """Import a Markdown skill file as a library candidate.
+
+    The file is copied to <home>/skills/<sanitized-name>.md,
+    so its stem always matches the trusted-name gate the
+    planner reads (skill_texts only admits files whose stem
+    is a trusted library name). The description is the
+    first non-heading, non-empty line outside any Tests
+    section. A ## Tests section, one test command per
+    line, becomes the skill's test_commands: without it
+    the skill has no tests and can never promote. A skill with no
+    borrowed code carries empty code_sources, which passes
+    the license gate.
+
+    Re-importing an existing non-retired name is refused:
+    retire it first, so trusted content is never silently
+    replaced by a new file. On an add failure the copied
+    file is removed again, so a failed import leaves no
+    orphan discovery file behind.
+    """
+    import re as _re
+    source = Path(source_path)
+    if not source.is_file():
+        raise ValueError(f"skill file not found: {source_path}")
+    text = source.read_text(encoding="utf-8")
+    raw_name = (name or source.stem).strip()
+    if not raw_name:
+        raise ValueError("skill name is required")
+    clean = _re.sub(r"[^A-Za-z0-9_.-]+", "-", raw_name)
+    lib = SkillLibrary(home)
+    existing = lib.get(clean)
+    if existing is not None and existing.state != "retired":
+        raise ValueError(
+            f"skill {clean!r} already exists ({existing.state}); "
+            "retire it first to re-import")
+    description = ""
+    in_tests = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            in_tests = stripped[3:].strip().lower() == "tests"
+            continue
+        if in_tests:
+            continue
+        if stripped and not stripped.startswith("#"):
+            description = stripped[:200]
+            break
+    skills_dir = Path(home) / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    target = skills_dir / f"{clean}.md"
+    target.write_text(text, encoding="utf-8")
+    try:
+        return lib.add(Skill(name=clean, description=description,
+                             test_commands=parse_test_commands(text)))
+    except Exception:
+        try:
+            target.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def parse_test_commands(text: str) -> list[str]:
+    """One test command per line from a skill file's ## Tests
+    section, until the next ## heading. Fence lines, blank
+    lines, and comment lines are skipped. No Tests section
+    means no test commands, and a skill with no test
+    commands is never promotable: tests are the evidence
+    promotion stands on, so they live in the file itself,
+    not in a side record."""
+    commands = []
+    in_tests = False
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            if stripped[3:].strip().lower() == "tests":
+                in_tests = True
+                continue
+            if in_tests:
+                break
+            continue
+        if not in_tests:
+            continue
+        if not stripped or stripped.startswith("#") or \
+                stripped.startswith("```"):
+            continue
+        commands.append(stripped)
+    return commands
+
+
 def is_trivial_test(cmd: str) -> bool:
     """True when a test command cannot fail for a broken skill.
 
@@ -116,9 +206,19 @@ def _sandbox_run(sandbox, cmd: str) -> tuple[bool, str]:
     Accepts run(cmd) returning a dict with ok/output, an
     object with ok/stdout/stderr, or a run_command(cmd)
     returning a result with returncode/stdout/stderr.
+
+    Skill test commands are shell strings, but the real
+    Sandbox.run takes an argv list, never a shell string:
+    passing the string straight through would run its
+    characters as argv. A real Sandbox therefore gets
+    ["sh", "-c", cmd]; doubles keep the old call.
     """
     if hasattr(sandbox, "run"):
-        out = sandbox.run(cmd)
+        from .sandbox import Sandbox as _RealSandbox
+        if isinstance(sandbox, _RealSandbox):
+            out = sandbox.run(["sh", "-c", cmd])
+        else:
+            out = sandbox.run(cmd)
         if isinstance(out, dict):
             return bool(out.get("ok")), str(out.get("output", ""))
         if hasattr(out, "ok"):
@@ -181,6 +281,8 @@ class Skill:
             for key, value in self.provenance.items():
                 lines.append(f"- {key}: {value}")
             lines.append("")
+        if self.test_commands:
+            lines += ["## Tests", ""] + list(self.test_commands) + [""]
         return "\n".join(lines)
 
     def required_packages(self) -> list[str]:
@@ -323,8 +425,49 @@ class SkillLibrary:
             self._update(skill)
         return skill
 
+    def harvest_candidates(self, sandbox, governor=None) -> list[str]:
+        """Test and promote candidate skills, bounded by the
+        run governor's skill budget.
+
+        The mission loop calls this on successful runs: each
+        candidate's own test commands run in the sandbox, and
+        a passing report promotes it to validated. A failed
+        test leaves the skill a candidate; an exhausted skill
+        budget stops the harvest. Nothing here trusts: trust
+        still needs owner approval, and validated skills
+        never enter plan prompts until trusted. Never raises
+        for a single skill's failure; a governor error stops
+        the harvest instead of failing the run.
+        """
+        promoted = []
+        for skill in self.list(states=("candidate",)):
+            if governor is not None:
+                try:
+                    governor.acquire("skill")
+                except Exception:
+                    break
+            try:
+                report = self.run_tests(skill.name, sandbox)
+            except Exception:
+                continue
+            if not report.get("passed"):
+                continue
+            try:
+                self.promote(skill.name, report)
+                promoted.append(skill.name)
+            except Exception:
+                continue
+        return promoted
+
     def trust(self, name: str, approved: bool = False) -> Skill:
-        """Mark a skill trusted. Owner approval is mandatory."""
+        """Mark a skill trusted. Owner approval is mandatory.
+
+        Trust also requires pinned string dependencies
+        (name==version): an unpinned build is not
+        reproducible, so it cannot be trusted. Dict
+        dependencies are verified-install records, not
+        requirements, and are exempt.
+        """
         if not approved:
             raise PermissionError(f"trusting skill {name!r} needs owner approval")
         skill = self.get(name)
@@ -332,6 +475,12 @@ class SkillLibrary:
             raise KeyError(f"no skill named {name!r}")
         if skill.state == "retired":
             raise ValueError(f"skill {name!r} is retired")
+        unpinned = [dep for dep in (skill.dependencies or [])
+                    if isinstance(dep, str) and "==" not in dep]
+        if unpinned:
+            raise ValueError(
+                f"trusting skill {name!r} needs pinned dependencies: "
+                f"{', '.join(sorted(set(unpinned)))} (use name==version)")
         skill.state = "trusted"
         self._update(skill)
         self._sync_discovery(skill)
@@ -347,6 +496,11 @@ class SkillLibrary:
         discovery directory; retiring one removes it again.
         Only trusted skills are published — candidates and
         validated skills stay unvetted and undiscovered.
+
+        A hand-written procedure file is never overwritten:
+        trust publishes the metadata stub only when no file
+        exists yet. Overwriting would destroy the procedure
+        the trust was meant to approve.
         """
         import re as _re
         skills_dir = self.home / "skills"
@@ -354,7 +508,8 @@ class SkillLibrary:
         path = skills_dir / filename
         if skill.state == "trusted":
             skills_dir.mkdir(parents=True, exist_ok=True)
-            path.write_text(skill.to_markdown(), encoding="utf-8")
+            if not path.exists():
+                path.write_text(skill.to_markdown(), encoding="utf-8")
         elif skill.state == "retired":
             try:
                 path.unlink()
@@ -369,6 +524,8 @@ class SkillLibrary:
         skill.retire_reason = reason
         self._update(skill)
         self._sync_discovery(skill)
+        from .capability_hub import invalidate_health
+        invalidate_health(self.home, f"skill:{name}")
         return skill
 
     def record_failure(self, name: str) -> Skill | None:
@@ -382,6 +539,9 @@ class SkillLibrary:
             skill.state = "retired"
             skill.retire_reason = f"failed {skill.failures} times"
         self._update(skill)
+        if skill.state == "retired":
+            from .capability_hub import invalidate_health
+            invalidate_health(self.home, f"skill:{name}")
         return skill
 
     def rollback(self, name: str, version: int) -> Skill:
@@ -488,14 +648,21 @@ class SkillLibrary:
         return missing
 
 
-    def relevant(self, goal: str, limit: int = 5) -> list[Skill]:
+    def relevant(self, goal: str, limit: int = 5,
+                 states: tuple = ("trusted",)) -> list[Skill]:
         """Skills for a goal: trusted first, then validated, then
         candidate; retired never returned. Within a state, more
         keyword overlap with the goal ranks higher.
+
+        Ordinary recall returns trusted skills only: a
+        validated skill is staged for approval, a candidate
+        is unvetted. Pass states explicitly for development
+        and approval views, where untrusted skills must
+        stay visible.
         """
         goal_words = set(re.findall(r"[a-z0-9]+", (goal or "").lower()))
         scored: list[tuple[int, int, Skill]] = []
-        for skill in self.list():
+        for skill in self.list(states=states):
             haystack = " ".join([skill.name, skill.description] + skill.capabilities).lower()
             words = set(re.findall(r"[a-z0-9]+", haystack))
             overlap = len(goal_words & words)

@@ -26,6 +26,20 @@ from __future__ import annotations
 
 SEED_TOOLS = {"write", "read", "list", "shell"}
 
+# The minimal core built-in set for the optional-tools flip.
+# When AIDON_OPTIONAL_TOOLS is off (the default), the goal
+# extra tools are exactly this set plus the read_file /
+# write_file step aliases, which are kept because the loop
+# step primitives already include them. Everything else
+# built-in is optional: invisible when off, restored by
+# flipping one setting on. Adopted plugins and trusted
+# skills are earned tools, never gated by this flip.
+CORE_LADDER_TOOLS = frozenset({
+    "fetch_url", "ask_user", "declare_blocked", "notify",
+    "uv_venv", "install_python_package", "apt_install",
+    "mcp_connect", "mcp_disconnect", "adopt_tool_plugin",
+})
+
 
 def kernel_allowed(tool_name: str, kernel_mode: bool) -> bool:
     if not kernel_mode:

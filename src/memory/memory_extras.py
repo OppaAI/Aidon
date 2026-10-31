@@ -2,7 +2,7 @@
 
 - Rolling summary: after a run, a short model-free summary
   (goal, files delivered, status) is appended to
-  <home>/summaries/<project>.md, so a later run can read
+  <home>/summaries/<conversation>.md, so a later run can read
   one file instead of re-reading every trace. Model-written
   summaries are still a climb for Aidon; this summary is
   code-written, from the run report, never invented.
@@ -34,12 +34,12 @@ def redact(text: str) -> str:
     return text
 
 
-def rolling_summary(home: Path, project_id: str, goal: str,
+def rolling_summary(home: Path, conversation_id: str, goal: str,
                     files: list[str], status: str) -> Path:
     """Append a redacted, code-written run summary, return its path."""
     summaries = Path(home) / "summaries"
     summaries.mkdir(parents=True, exist_ok=True)
-    path = summaries / f"{project_id}.md"
+    path = summaries / f"{conversation_id}.md"
     line = f"- {redact(goal)} -> {status}, files: {', '.join(files) or 'none'}\n"
     with path.open("a", encoding="utf-8") as handle:
         handle.write(line)
