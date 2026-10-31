@@ -32,6 +32,7 @@ function readState(kind) {
   return { id: "", created: false, started: false, turns: [] };
 }
 const state = Object.fromEntries(Object.keys(LABS).map(k => [k, readState(k)]));
+const revisions = { tool: 0, skill: 0, mcp: 0 };
 
 function render(kind) {
   const box = document.getElementById("chat-" + kind);
@@ -43,7 +44,16 @@ function render(kind) {
   const ready = state[kind].turns.some(turn => turn.role === "assistant" && marker.test(turn.text));
   document.querySelector('[data-brief="' + kind + '"]').disabled = !ready;
 }
-function save(kind) { localStorage.setItem(stateKey(kind), JSON.stringify(state[kind])); }
+async function save(kind) {
+  localStorage.setItem(stateKey(kind), JSON.stringify(state[kind]));
+  const response = await fetch("/api/lab-session", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, state: state[kind], revision: revisions[kind] })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Could not save the lab session");
+  revisions[kind] = data.revision;
+}
 
 async function send(kind) {
   const input = document.getElementById("input-" + kind);
@@ -53,10 +63,11 @@ async function send(kind) {
   if (!text) return;
   const research = document.getElementById("research-" + kind).checked;
   state[kind].turns.push({ role: "user", text });
-  save(kind); render(kind); input.value = ""; button.disabled = true;
+  render(kind); input.value = ""; button.disabled = true;
   status.textContent = "Aidon is thinking…";
   const message = (state[kind].started ? "" : "[" + LABS[kind].title + "] " + LABS[kind].intro + "\n\n") + text;
   try {
+    await save(kind);
     if (!state[kind].created) {
       const created = await fetch("/api/conversations", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -66,7 +77,7 @@ async function send(kind) {
       if (!created.ok || !record.id) throw new Error(record.error || "Could not create lab conversation");
       state[kind].id = record.id;
       state[kind].created = true;
-      save(kind);
+      await save(kind);
     }
     const response = await fetch("/api/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -77,7 +88,7 @@ async function send(kind) {
     const reply = data.reply || "Aidon did not return a response.";
     state[kind].started = true;
     state[kind].turns.push({ role: "assistant", text: reply });
-    save(kind); render(kind); status.textContent = "";
+    await save(kind); render(kind); status.textContent = "";
   } catch (error) {
     status.textContent = "Could not reach Aidon: " + error.message;
   } finally { button.disabled = false; }
@@ -119,12 +130,27 @@ document.querySelectorAll(".lab-tab").forEach(tab => tab.addEventListener("click
 }));
 document.querySelectorAll("[data-send]").forEach(btn => btn.addEventListener("click", () => send(btn.dataset.send)));
 document.querySelectorAll("[data-brief]").forEach(btn => btn.addEventListener("click", () => startFromBrief(btn.dataset.brief)));
-document.querySelectorAll("[data-reset]").forEach(btn => btn.addEventListener("click", () => {
+document.querySelectorAll("[data-reset]").forEach(btn => btn.addEventListener("click", async () => {
   const kind = btn.dataset.reset;
   state[kind] = { id: "", created: false, started: false, turns: [] };
-  save(kind); render(kind); document.getElementById("status-" + kind).textContent = "New interview started.";
+  try {
+    await save(kind); render(kind); document.getElementById("status-" + kind).textContent = "New interview started.";
+  } catch (error) { document.getElementById("status-" + kind).textContent = error.message; }
 }));
-Object.keys(LABS).forEach(kind => {
+Object.keys(LABS).forEach(async kind => {
+  const sendButton = document.querySelector('[data-send="' + kind + '"]');
+  sendButton.disabled = true;
+  try {
+    const response = await fetch("/api/lab-session?kind=" + encodeURIComponent(kind));
+    if (!response.ok) throw new Error("Could not load saved lab session");
+    const saved = await response.json();
+    revisions[kind] = saved.revision;
+    if (saved.state && Array.isArray(saved.state.turns)) state[kind] = saved.state;
+  } catch (error) {
+    document.getElementById("status-" + kind).textContent = error.message;
+    return;
+  }
+  sendButton.disabled = false;
   render(kind);
   document.getElementById("input-" + kind).addEventListener("keydown", event => {
     if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(kind); }

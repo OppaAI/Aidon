@@ -4018,6 +4018,13 @@ loadSettings();
                     self._send_json(200, {"research_mode": _get_research(server.home, conv)})
                 elif parsed.path == "/api/practice":
                     self._send_json(200, server.handle_practice_list())
+                elif parsed.path == "/api/lab-session":
+                    from .interview_store import InterviewStore
+                    try:
+                        kind = parse_qs(parsed.query).get("kind", [""])[0]
+                        self._send_json(200, InterviewStore(server.home).load_lab(kind))
+                    except ValueError as exc:
+                        self._send_json(400, {"error": str(exc)})
                 elif parsed.path == "/api/conversations":
                     self._send_json(200, server.handle_conversations_list())
                 elif parsed.path.startswith("/api/conversations/") and parsed.path.endswith("/brief"):
@@ -4335,6 +4342,14 @@ loadSettings();
                         self._send_json(404, {"error": "run not found"})
                     else:
                         self._send_json(409, {"error": "run is not queued"})
+                elif parsed.path == "/api/lab-session":
+                    from .interview_store import InterviewStore
+                    try:
+                        revision = InterviewStore(server.home).save_lab(
+                            body.get("kind"), body.get("state"), int(body.get("revision", 0)))
+                        self._send_json(200, {"revision": revision})
+                    except (ValueError, TypeError) as exc:
+                        self._send_json(409, {"error": str(exc)})
                 elif parsed.path == "/api/chat":
                     self._send_json(200, server.handle_chat(body))
                 elif parsed.path == "/api/dags":

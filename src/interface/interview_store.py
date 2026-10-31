@@ -17,6 +17,7 @@ class InterviewStore:
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 answered_at TEXT)""")
             db.execute("CREATE TABLE IF NOT EXISTS sessions (session_key TEXT PRIMARY KEY, document TEXT NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS lab_sessions (kind TEXT PRIMARY KEY, revision INTEGER NOT NULL, document TEXT NOT NULL)")
         self.path.chmod(0o600)
 
     def save_session(self, key, document):
@@ -28,6 +29,35 @@ class InterviewStore:
         with self.connect() as db:
             row = db.execute("SELECT document FROM sessions WHERE session_key=?", (key,)).fetchone()
             return json.loads(row[0]) if row else None
+
+    def load_lab(self, kind):
+        if kind not in ("tool", "skill", "mcp"):
+            raise ValueError("invalid lab")
+        with self.connect() as db:
+            row = db.execute("SELECT revision, document FROM lab_sessions WHERE kind=?", (kind,)).fetchone()
+            return {"revision": row[0], "state": json.loads(row[1])} if row else {"revision": 0, "state": None}
+
+    def save_lab(self, kind, state, revision):
+        if kind not in ("tool", "skill", "mcp") or not isinstance(state, dict):
+            raise ValueError("invalid lab state")
+        turns = state.get("turns")
+        if not isinstance(turns, list) or len(turns) > 500 or any(
+            not isinstance(t, dict) or t.get("role") not in ("user", "assistant") or
+            not isinstance(t.get("text"), str) or len(t["text"]) > 100000 for t in turns
+        ):
+            raise ValueError("invalid lab turns")
+        document = json.dumps(state, ensure_ascii=False)
+        if len(document.encode("utf-8")) > 2 * 1024 * 1024:
+            raise ValueError("lab state too large")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = db.execute("SELECT revision FROM lab_sessions WHERE kind=?", (kind,)).fetchone()
+            actual = current[0] if current else 0
+            if actual != revision:
+                raise ValueError("lab session changed in another browser")
+            db.execute("INSERT INTO lab_sessions VALUES (?,?,?) ON CONFLICT(kind) DO UPDATE SET revision=excluded.revision, document=excluded.document",
+                       (kind, actual + 1, document))
+            return actual + 1
 
     def unfinished_for_conversation(self, conversation_id, goal=None):
         """Find a single recoverable interview; refuse ambiguous selections."""

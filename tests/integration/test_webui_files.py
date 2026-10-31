@@ -86,6 +86,21 @@ def _get(base, path):
         return exc.code, exc.headers.get("Content-Type", ""), exc.read()
 
 
+def test_lab_session_http_persists_and_rejects_stale_revision(live_server):
+    base, _ = live_server
+    state = {"id": "chat", "turns": [{"role": "user", "text": "Help with video"}]}
+    body = json.dumps({"kind": "tool", "state": state, "revision": 0}).encode()
+    request = urllib.request.Request(base + "/api/lab-session", body,
+                                     {"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(request) as response:
+        assert json.load(response)["revision"] == 1
+    with urllib.request.urlopen(base + "/api/lab-session?kind=tool") as response:
+        assert json.load(response) == {"revision": 1, "state": state}
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(request)
+    assert exc.value.code == 409
+
+
 def test_file_route_serves_file_under_home_with_md_type(live_server):
     base, home = live_server
     target = home / "workspace" / "notes.md"

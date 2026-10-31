@@ -34,3 +34,16 @@ def test_unfinished_interview_lookup_is_scoped_and_unambiguous(tmp_path):
         store.unfinished_for_conversation("a")
     assert store.unfinished_for_conversation("a", goal="edit video")["goal"] == "edit video"
     assert store.unfinished_for_conversation("a", goal="new goal") is None
+
+
+def test_standalone_lab_persists_and_rejects_stale_writes(tmp_path):
+    store = InterviewStore(tmp_path)
+    state = {"id": "chat", "turns": [{"role": "user", "text": "Edit a video"}]}
+    assert store.save_lab("tool", state, 0) == 1
+    restored = InterviewStore(tmp_path).load_lab("tool")
+    assert restored == {"revision": 1, "state": state}
+    with pytest.raises(ValueError, match="another browser"):
+        store.save_lab("tool", {"turns": []}, 0)
+    assert store.load_lab("tool")["state"] == state
+    with pytest.raises(ValueError, match="invalid lab"):
+        store.load_lab("../../secret")
