@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aidon — Capability Labs</title>
+<link rel="stylesheet" href="/static/style.css?v=__ASSET_V__">
+<style>
+  html, body { height:auto; }
+  body { overflow:auto; }
+  .lab-wrap { max-width: 1050px; margin: 0 auto; padding: 22px 20px 60px; }
+  .lab-head { display:flex; align-items:baseline; gap:14px; }
+  .lab-head a { color:var(--olive); text-decoration:none; font:700 22px var(--font-display); }
+  .lab-head span { color:var(--muted); }
+  .lab-intro { color:var(--muted); max-width:76ch; margin:6px 0 22px; }
+  .lab-tabs { display:flex; flex-wrap:wrap; gap:8px; border-bottom:1px solid var(--border); padding-bottom:10px; }
+  .lab-tab { background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text); padding:9px 14px; cursor:pointer; }
+  .lab-tab[aria-selected="true"] { background:var(--moss); color:#fff; border-color:var(--moss); }
+  .lab-panel { display:none; padding-top:18px; }
+  .lab-panel.active { display:block; }
+  .lab-panel h1 { font:700 25px var(--font-display); margin:0 0 6px; }
+  .lab-note { color:var(--muted); max-width:80ch; margin:0 0 14px; }
+  .lab-hints { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+  .lab-hint { border:1px solid var(--border); border-radius:999px; padding:5px 10px; color:var(--muted); font-size:12px; }
+  .lab-chat { height:min(52vh, 520px); min-height:300px; overflow:auto; background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:14px; }
+  .lab-msg { max-width:86%; padding:10px 12px; margin:8px 0; border:1px solid var(--border); border-radius:10px; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .lab-msg.assistant { background:var(--surface); }
+  .lab-msg.user { background:color-mix(in srgb, var(--moss) 14%, var(--surface)); margin-left:auto; }
+  .lab-compose { display:flex; gap:8px; margin-top:9px; }
+  .lab-compose textarea { flex:1; min-height:62px; resize:vertical; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:10px; font:inherit; }
+  .lab-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:9px; }
+  .lab-actions button, .lab-compose button { background:var(--moss); color:#fff; border:0; border-radius:8px; padding:9px 14px; cursor:pointer; }
+  .lab-actions button.secondary { background:var(--surface); color:var(--text); border:1px solid var(--border); }
+  .lab-actions button:disabled, .lab-compose button:disabled { opacity:.55; cursor:wait; }
+  .lab-actions label { color:var(--muted); font-size:13px; }
+  .lab-status { min-height:22px; color:var(--muted); font-size:13px; margin-top:7px; }
+  .lab-next { margin-top:18px; padding:12px; border-left:3px solid var(--amber); background:var(--surface); color:var(--muted); }
+  @media(max-width:640px) { .lab-wrap{padding:16px 12px 40px}.lab-chat{height:48vh}.lab-msg{max-width:96%} }
+</style>
+</head>
+<body>
+<main class="lab-wrap">
+  <div class="lab-head"><a href="/">◈ Aidon</a><span>Capability Labs</span></div>
+  <p class="lab-intro">Choose what Aidon should learn or build. The lab interviews you one question at a time, helps compare options when you ask, and turns your decisions into a brief. Approving a brief starts a normal workflow; tool adoption and new MCP connections still have their own approval cards.</p>
+  <nav class="lab-tabs" role="tablist" aria-label="Capability labs">
+    <button class="lab-tab" role="tab" aria-selected="true" data-lab="tool">Tool crafting</button>
+    <button class="lab-tab" role="tab" aria-selected="false" data-lab="skill">Skill learning</button>
+    <button class="lab-tab" role="tab" aria-selected="false" data-lab="mcp">MCP connection</button>
+  </nav>
+  <section class="lab-panel active" id="lab-tool" role="tabpanel">
+    <h1>Tool Crafting Lab</h1>
+    <p class="lab-note">Define the outcome, inputs, preferred service or software, and what the tool may access. For image editing, specify whether you want an AI image model or an editing application and name it if you have a preference. Ask for researched options if you want help choosing.</p>
+    <div class="lab-hints"><span class="lab-hint">One question at a time</span><span class="lab-hint">Can compare options</span><span class="lab-hint">Approval before adoption</span></div>
+    <div class="lab-chat" id="chat-tool" aria-live="polite"></div>
+    <div class="lab-compose"><textarea id="input-tool" placeholder="What should the tool help you do?"></textarea><button data-send="tool">Send</button></div>
+    <div class="lab-actions"><label><input type="checkbox" id="research-tool"> Research and compare options online</label><button class="secondary" data-reset="tool">Start over</button><button data-brief="tool">Approve brief &amp; start build</button></div>
+    <div class="lab-status" id="status-tool" role="status"></div>
+  </section>
+  <section class="lab-panel" id="lab-skill" role="tabpanel">
+    <h1>Skill Learning Lab</h1>
+    <p class="lab-note">Describe a repeatable job and the behavior you want. Aidon will clarify triggers, steps, examples, boundaries, and checks, then prepare a reusable skill in the documented Markdown convention, including tests where practical.</p>
+    <div class="lab-hints"><span class="lab-hint">Reusable instructions</span><span class="lab-hint">Examples and tests</span><span class="lab-hint">Review before import</span></div>
+    <div class="lab-chat" id="chat-skill" aria-live="polite"></div>
+    <div class="lab-compose"><textarea id="input-skill" placeholder="What should Aidon learn to do consistently?"></textarea><button data-send="skill">Send</button></div>
+    <div class="lab-actions"><label><input type="checkbox" id="research-skill"> Research conventions or references online</label><button class="secondary" data-reset="skill">Start over</button><button data-brief="skill">Approve brief &amp; draft skill</button></div>
+    <div class="lab-status" id="status-skill" role="status"></div>
+  </section>
+  <section class="lab-panel" id="lab-mcp" role="tabpanel">
+    <h1>MCP Connection Lab</h1>
+    <p class="lab-note">Describe the workflow you want to connect. Aidon can research and compare services, including pricing and open-source options, then help you select one. The final brief must identify a real server and exact connection details; connecting it requires a separate approval.</p>
+    <div class="lab-hints"><span class="lab-hint">Compare services</span><span class="lab-hint">Record free / paid / open source</span><span class="lab-hint">Exact server reviewed before connect</span></div>
+    <div class="lab-chat" id="chat-mcp" aria-live="polite"></div>
+    <div class="lab-compose"><textarea id="input-mcp" placeholder="What do you want to connect Aidon to? e.g. organize notes across my projects"></textarea><button data-send="mcp">Send</button></div>
+    <div class="lab-actions"><label><input type="checkbox" id="research-mcp" checked> Research and compare options online</label><button class="secondary" data-reset="mcp">Start over</button><button data-brief="mcp">Approve brief &amp; prepare connection</button></div>
+    <div class="lab-status" id="status-mcp" role="status"></div>
+  </section>
+  <div class="lab-next">Brief approval authorizes Aidon to work on that brief. It does not grant access by itself: plugin adoption, MCP connections, package installs, and live actions keep their existing explicit approval gates.</div>
+</main>
+<script src="/static/labs.js?v=__ASSET_V__"></script>
+</body>
+</html>

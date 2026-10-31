@@ -1156,6 +1156,7 @@ class WebUIServer:
         if memory_reply is not None:
             return {"reply": memory_reply}
         message, force_web = self._force_web_prefix(message)
+        force_web = force_web or bool(body.get("force_web", False))
         if not message:
             return {"reply": "Usage: /web <question>"}
         message, delivery = extract_result_delivery(message)
@@ -3658,7 +3659,7 @@ class WebUIServer:
                     self._send_static("index.html")
                 elif parsed.path == "/documents":
                     self._send_static("docs.html")
-                elif parsed.path in ("/dag", "/capabilities", "/memory", "/knowledge",
+                elif parsed.path in ("/dag", "/capabilities", "/labs", "/memory", "/knowledge",
                                      "/reports", "/practice", "/graph"):
                     self._send_static(parsed.path.lstrip("/") + ".html")
                 elif parsed.path == "/settings":

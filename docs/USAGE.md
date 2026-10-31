@@ -212,8 +212,14 @@ manifest.
 At the start of each workflow, the planner receives the
 available Toolbox tool names and descriptions alongside the
 built-in tools. It should use a suitable existing tool first.
-If none fits, it follows the capability ladder and can draft,
-sandbox-test, and propose adoption of a plugin. Adoption
+If a capability is missing, Aidon directs the owner to the
+Capability Labs (`/labs`) instead of guessing which service or
+implementation to choose. The Tool Crafting Lab, Skill Learning Lab,
+and MCP Connection Lab interview the owner one question at a time;
+they can research and compare options when asked, then prepare a brief
+for approval. Approving that brief starts a workflow but does not
+replace the existing approval for plugin adoption, MCP connection,
+package installation, or live actions. Adoption
 always presents an explicit owner decision, even when graduated
 autonomy or pre-approval is enabled. Once approved, the live
 registry updates immediately. Plans validated after adoption can

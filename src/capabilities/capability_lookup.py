@@ -164,14 +164,14 @@ def recovery_note(tool_name: str, matches: list[dict]) -> str:
         return head + "\nExisting capabilities that cover this:\n" + \
             "\n".join(lines)
     return (head + "\nNo existing tool, skill, or approved MCP server "
-            "covers it. Climb the capability ladder instead of "
-            "retrying the same plan: research how to do it, draft a "
-            "tool plugin in the workdir, test it in the sandbox, and "
-            "adopt it with adopt_tool_plugin (human approval is "
-            "mandatory) — after adoption the tool registry rebuilds "
-            "and the new tool is available in this same run. Or write "
-            "a skill that achieves the goal with registered tools. "
-            "Then re-plan around the result.")
+            "covers it. Do not guess which service or implementation "
+            "the owner wants, and do not start writing or connecting "
+            "one yet. Tell the owner this capability is missing and "
+            "direct them to the Capability Labs at [/labs](/labs), where they "
+            "can choose tool crafting, skill learning, or MCP and work "
+            "through the requirements before approving a brief. Resume "
+            "the goal only after the owner has chosen and approved the "
+            "needed capability.")
 
 
 def capabilities_overview(*, tools, skills, mcp_servers, dags,

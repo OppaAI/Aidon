@@ -66,19 +66,22 @@ STATUS_CRITERIA = {
 _NOTES = {
     "need_skill": (
         "Capability triage: this goal may need a capability not in "
-        "the current inventory. A skill may cover it — look for or "
-        "propose one before assuming the tool exists."),
+        "the current inventory. Do not draft a skill or guess the "
+        "owner's preferred workflow. Ask them to continue in the "
+        "Skill Learning Lab at [/labs](/labs), where requirements "
+        "and tests can be agreed before a draft is made."),
     "need_mcp": (
         "Capability triage: this goal may need a capability not in "
-        "the current inventory. An MCP server may cover it — propose "
-        "a connection (approved servers reconnect; a new server needs "
-        "the user's approval with its exact command or URL) before "
-        "assuming it exists."),
+        "the current inventory. Do not guess a vendor or connect. Ask "
+        "the owner to continue in the MCP Connection Lab at "
+        "[/labs](/labs) to compare real options and agree on the exact "
+        "server before connection approval."),
     "need_plugin": (
         "Capability triage: this goal may need a capability not in "
-        "the current inventory. A new tool plugin may be needed — "
-        "draft it, sandbox-test it, and propose it for approval "
-        "instead of calling a tool that does not exist."),
+        "the current inventory. Do not choose an implementation on the "
+        "owner's behalf. Ask them to continue in the Tool Crafting Lab "
+        "at [/labs](/labs) to define the tool before drafting or "
+        "adoption approval."),
     "blocked": (
         "Capability check: this goal needs something Aidon does not "
         "have and cannot safely build, find, or connect, so I am "

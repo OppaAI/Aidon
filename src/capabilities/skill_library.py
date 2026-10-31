@@ -112,7 +112,9 @@ def import_skill_file(home, source_path, name: str | None = None) -> Skill:
 
     Re-importing an existing non-retired name is refused:
     retire it first, so trusted content is never silently
-    replaced by a new file. On an add failure the copied
+    replaced by a new file. Claude-style SKILL.md YAML
+    front matter (name and description) is recognized; on
+    add failure the copied
     file is removed again, so a failed import leaves no
     orphan discovery file behind.
     """
@@ -121,7 +123,8 @@ def import_skill_file(home, source_path, name: str | None = None) -> Skill:
     if not source.is_file():
         raise ValueError(f"skill file not found: {source_path}")
     text = source.read_text(encoding="utf-8")
-    raw_name = (name or source.stem).strip()
+    metadata, _body = _skill_front_matter(text)
+    raw_name = (name or metadata.get("name") or source.stem).strip()
     if not raw_name:
         raise ValueError("skill name is required")
     clean = _re.sub(r"[^A-Za-z0-9_.-]+", "-", raw_name)
@@ -131,10 +134,17 @@ def import_skill_file(home, source_path, name: str | None = None) -> Skill:
         raise ValueError(
             f"skill {clean!r} already exists ({existing.state}); "
             "retire it first to re-import")
-    description = ""
+    description = str(metadata.get("description", "")).strip()
     in_tests = False
+    in_front_matter = text.startswith("---\n")
     for line in text.splitlines():
         stripped = line.strip()
+        if in_front_matter:
+            if stripped == "---":
+                in_front_matter = False
+            continue
+        if description:
+            break
         if stripped.startswith("## "):
             in_tests = stripped[3:].strip().lower() == "tests"
             continue
@@ -156,6 +166,30 @@ def import_skill_file(home, source_path, name: str | None = None) -> Skill:
         except OSError:
             pass
         raise
+
+
+def _skill_front_matter(text: str) -> tuple[dict[str, str], str]:
+    """Read the small string-only subset of Claude SKILL.md metadata.
+
+    This intentionally avoids a YAML dependency and ignores nested or
+    multiline values; skill names and descriptions are plain scalars.
+    """
+    lines = (text or "").splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}, text or ""
+    metadata: dict[str, str] = {}
+    end = next((i for i in range(1, len(lines))
+                if lines[i].strip() == "---"), None)
+    if end is None:
+        return {}, text or ""
+    for line in lines[1:end]:
+        key, sep, value = line.partition(":")
+        if sep and key.strip() in {"name", "description"}:
+            scalar = value.strip()
+            if len(scalar) >= 2 and scalar[0] == scalar[-1] and scalar[0] in "\"'":
+                scalar = scalar[1:-1]
+            metadata[key.strip()] = scalar
+    return metadata, "\n".join(lines[end + 1:])
 
 
 def parse_test_commands(text: str) -> list[str]:

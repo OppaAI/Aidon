@@ -152,48 +152,6 @@ async function load() {
   }
 }
 
-const TEACH_TEMPLATE =
-  "Learn how to do this: {x}. Research how it can be done, then climb " +
-  "your capability ladder — use an existing skill if one covers it, " +
-  "propose an MCP server if one provides it, or draft and sandbox-test " +
-  "a tool plugin and adopt it with my approval. Prove the new " +
-  "capability with a small test, and save what you learned as a " +
-  "reusable skill or workflow so it appears in your capability library.";
-
-async function teach() {
-  const input = document.getElementById("teach-input");
-  const status = document.getElementById("teach-status");
-  const what = input.value.trim();
-  if (!what) {
-    status.textContent = "Name a capability first.";
-    return;
-  }
-  status.textContent = "Asking Aidon…";
-  try {
-    const r = await fetch("/api/goals", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        goal: TEACH_TEMPLATE.replace("{x}", what),
-      }),
-    });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    const data = await r.json();
-    status.innerHTML =
-      "Aidon is on it (run " + esc(data.run_id || "") + "). Follow the " +
-      'run — and any approval cards — in <a href="/">Chat</a>. When the ' +
-      "capability is verified, refresh this page and it will be listed " +
-      "with its evidence.";
-    input.value = "";
-  } catch (e) {
-    status.textContent = "Could not start the run: " + e.message;
-  }
-}
-
-document.getElementById("teach-btn").addEventListener("click", teach);
-document.getElementById("teach-input").addEventListener("keydown",
-  function (e) { if (e.key === "Enter") teach(); });
-
 // ---- code viewer -----------------------------------------------------------
 // Clicking a tool or skill card fetches the code behind it from
 // /api/capabilities/code — a skill's stored content, a plugin tool's

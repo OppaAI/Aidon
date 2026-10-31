@@ -1611,8 +1611,10 @@ class GoalRunner:
                 f"\n\nCapability triage note, from before planning: "
                 f"{triage_note}\nPlan only with tools Aidon actually "
                 "has or the user approved; if a needed capability is "
-                "missing, climb the ladder (skill, MCP, plugin) or "
-                "say so instead of calling a tool that does not exist.")
+                "missing, do not choose or build it for the user. Ask "
+                "them to continue in the relevant Capability Lab at "
+                "[/labs](/labs), then wait for their approved brief "
+                "instead of calling a tool that does not exist.")
         self._trace("plan", "started", goal[:100])
         if self.budget is not None:
             self.budget.add_tokens(user)

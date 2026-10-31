@@ -153,6 +153,15 @@ names. Plugins live in the Aidon home once adopted, never in the repo.
 
 ## Capability ladder
 
+When a goal needs a capability that is not already available, do not
+guess the owner's preferred service or implementation. Tell them what is
+missing and direct them to the WebUI Capability Labs at `/labs`. The
+Tool Crafting, Skill Learning, and MCP Connection labs interview the
+owner one question at a time, may research options when requested, and
+produce a brief for the owner to approve before a workflow starts.
+Approval of a brief does not approve plugin adoption, MCP connection,
+package installation, or live actions; those keep their existing gates.
+
 When a goal needs something you don't have, climb in order, never skip
 a rung:
 
@@ -171,8 +180,9 @@ a rung:
    mission venv, run its Python with `.venv/bin/python` in the
    sandbox) or `apt_install`. Both run on the host, need owner
    approval, and are counted against the run's acquisition budget.
-5. **Write a tool plugin**: last resort. Draft, sandbox-test, adopt,
-   as described in Writing tool plugins.
+5. **Write a tool plugin**: last resort. First use the Capability Labs
+   to agree on the desired service and interface. Then draft,
+   sandbox-test, and adopt as described in Writing tool plugins.
 
 ## Acquisition budgets
 
