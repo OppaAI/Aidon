@@ -2697,6 +2697,7 @@ class WebUIServer:
         if not source.is_dir():
             return {"ok": False, "error": f"plugin directory not found: {path}"}
         from ..capabilities.plugins import PluginRegistry
+        from ..capabilities.plugin_acceptance import acceptance_backend
         registry = PluginRegistry(self.home)
         registry.load_all()
         gate = None if approve is not None else getattr(self.webui_gate, "gate", None)
@@ -2704,6 +2705,7 @@ class WebUIServer:
             return {"ok": False, "error": "adoption needs approval"}
         ok, findings, message = registry.adopt(
             source, gate=gate, approve=approve,
+            test_backend_factory=(lambda: acceptance_backend(self.config, self.home / "workspace")) if self.config is not None else None,
             tool_posture=str(getattr(self.config, "tool_posture", "standard")
                               or "standard").strip().lower(),
             kernel_mode=bool(getattr(self.config, "kernel_mode", False)))

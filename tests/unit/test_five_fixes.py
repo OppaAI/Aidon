@@ -182,6 +182,29 @@ def test_adoption_rejects_evidence_for_different_bytes(tmp_path):
     assert not (registry.toolbox_dir / "five-plug").exists()
 
 
+def test_direct_registry_adoption_checks_acceptance_when_configured(tmp_path):
+    source = tmp_path / "plug"
+    _valid_plugin(source)
+    registry = PluginRegistry(tmp_path / "home")
+    class Backend:
+        name = "modal"
+        allow_network = False
+        def run(self, command, workspace, timeout_seconds):
+            return SimpleNamespace(isolated=True, ok=True, returncode=0)
+        def cleanup(self):
+            pass
+    approve = lambda *_: True
+    result = registry.adopt(source, approve=approve, test_backend_factory=Backend)
+    assert not result[0] and "acceptance tests failed" in result[2]
+    manifest = json.loads((source / "plugin.json").read_text())
+    manifest["acceptance_tests"] = [["python3", "test_tool.py"]]
+    (source / "plugin.json").write_text(json.dumps(manifest))
+    (source / "test_tool.py").write_text("assert True\n")
+    assert registry.adopt(source, approve=approve, test_backend_factory=Backend)[0]
+    marker = json.loads((registry.toolbox_dir / "five-plug" / ".adopted").read_text())
+    assert marker["acceptance_evidence"]["source_hash"] == marker["approved_hash"]
+
+
 def test_configured_cli_adoption_fails_closed_without_isolated_backend(tmp_path):
     from src.system.config import Config
     plug = tmp_path / "plug"

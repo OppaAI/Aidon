@@ -4268,6 +4268,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "plugin":
         from pathlib import Path
         from ..capabilities.plugins import PluginRegistry, scan_plugin
+        from ..capabilities.plugin_acceptance import acceptance_backend
         registry = PluginRegistry(config.home)
         if args.action == "list":
             plugins = registry.load_all()
@@ -4285,6 +4286,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         ok, findings, message = registry.adopt(
             Path(args.path), gate=_cli_gate(config.home, config.approval_timeout_seconds), memory=memory,
+            test_backend_factory=lambda: acceptance_backend(config, sandbox.workdir),
             conversation_id=args.conversation,
             tool_posture=str(getattr(config, "tool_posture", "standard")
                              or "standard").strip().lower(),

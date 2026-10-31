@@ -922,7 +922,7 @@ class PluginRegistry:
 
     def adopt(self, source_dir: Path, gate=None, approve=None, memory=None,
               conversation_id: str = "", tool_posture: str = "standard",
-              kernel_mode: bool = False) -> tuple[bool, list[ScanFinding], str]:
+              kernel_mode: bool = False, test_backend_factory=None) -> tuple[bool, list[ScanFinding], str]:
         """Adopt a plugin, in stages: preflight, approval,
         then commit. Returns (ok, findings, message).
 
@@ -947,7 +947,22 @@ class PluginRegistry:
                           for tool in preflight.plugin.tools))
         if not allowed:
             return False, preflight.findings, f"Adoption refused: {reason}"
+        evidence = None
+        if test_backend_factory is not None:
+            backend = None
+            try:
+                from .plugin_acceptance import test_candidate
+                backend = test_backend_factory()
+                evidence = test_candidate(source_dir, backend)
+                if evidence["source_hash"] != preflight.approved_hash:
+                    return False, preflight.findings, "Adoption refused: candidate changed after preflight"
+            except Exception as exc:
+                return False, preflight.findings, f"Adoption refused: acceptance tests failed: {type(exc).__name__}: {exc}"
+            finally:
+                if backend is not None:
+                    backend.cleanup()
         if not ask_plugin_approval(gate, approve, preflight):
             return False, preflight.findings, "Adoption rejected by owner"
         return commit_plugin(self, source_dir, preflight,
-                             memory=memory, conversation_id=conversation_id)
+                             memory=memory, conversation_id=conversation_id,
+                             test_evidence=evidence)

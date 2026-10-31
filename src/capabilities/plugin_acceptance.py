@@ -8,6 +8,16 @@ from datetime import datetime, timezone
 from .plugins import plugin_tree_hash
 
 
+def acceptance_backend(config, workspace):
+    """Create a fresh, network-disabled backend for one acceptance run."""
+    from .execution import make_backend
+    from .sandbox import Sandbox
+    return make_backend(config.execution_backend, Sandbox(workspace, require_isolation=True),
+                        image=config.docker_image, allow_network=False,
+                        modal_app=config.modal_app, modal_cpu=config.modal_cpu,
+                        modal_memory_mb=config.modal_memory_mb)
+
+
 def test_candidate(source, backend):
     """Return evidence or raise; callers must bind approval to ``source_hash``.
 
