@@ -57,7 +57,7 @@
       document.querySelectorAll("[data-status]").forEach((node) => {
         const key = node.getAttribute("data-status");
         let value = data[key] || "Unavailable";
-        if (key === "model" && data.backend) value += " · " + data.backend;
+        if (key === "model") value = String(value).split("/").pop();
         node.textContent = value;
         node.classList.toggle("status-ready", ["Online", "Ready", "bubblewrap", "docker", "Semantic memory (on demand)", "EmbeddingGemma2Embedder"].includes(value));
       });

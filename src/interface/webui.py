@@ -113,7 +113,7 @@ h1{font-family:Georgia,"Times New Roman",serif;font-size:1.8em;color:var(--text)
 h2{font-size:1.2em;color:var(--text);margin:1.2em 0 0.4em}
 h3{font-size:1em;margin:1em 0 0.3em}
 a{color:var(--accent)}
-button{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:7px 14px;font-size:1em;cursor:pointer}
+button{background:var(--moss);color:#fff;border:0;border-radius:6px;padding:7px 14px;font-size:1em;cursor:pointer}
 button:hover{filter:brightness(1.15)}
 .settings-shell button:not(.set-tab){background:var(--moss)}
 input,select,textarea{border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:1em;background:var(--surface2);color:var(--text)}

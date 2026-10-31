@@ -369,7 +369,7 @@ html[data-theme="light"] #guidance-input::placeholder { color: var(--muted); }
 #send:disabled { opacity: .5; cursor: default; box-shadow: none; }
 #mic { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 10px;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
-  font-size: 18px; cursor: pointer; display: inline-flex; align-items: center;
+  font-size: 20px; cursor: pointer; display: inline-flex; align-items: center;
   justify-content: center; }
 #mic:hover { border-color: var(--accent); color: var(--accent); }
 #mic.recording { background: var(--red); border-color: var(--red); color: #fff;
@@ -386,7 +386,7 @@ html[data-theme="light"] #guidance-input::placeholder { color: var(--muted); }
 /* ── RIGHT SIDEBAR ──────────────────────────────────────────────── */
 #rightbar { width: 300px; flex: 0 0 auto; display: flex; flex-direction: column;
   background: var(--surface); border-left: 1px solid var(--border);
-  min-height: 0; }
+  min-height: 0; font-size: 18px; }
 #avatar-wrap { position: relative; width: 200px; height: 200px; margin: 22px auto 14px;
   border-radius: 50%; overflow: hidden; background: var(--surface2);
   border: 2px solid var(--border); flex: 0 0 auto;
@@ -586,10 +586,10 @@ body:has(.settings-app) { overflow: auto; }
   border: 1px solid var(--border); background: var(--surface2);
   color: var(--text); font-size: 13px; margin-left: 6px; }
 #report-generate { padding: 9px 18px; border-radius: 10px; border: none;
-  background: linear-gradient(92deg, var(--accent), var(--accent2));
+  background: var(--moss);
   color: #fff; font-family: var(--font-display); font-size: 13px; font-weight: 700;
   letter-spacing: .12em; text-transform: uppercase; cursor: pointer;
-  box-shadow: 0 0 16px var(--accent-glow); margin-left: 8px; }
+  box-shadow: 0 0 16px var(--moss-glow); margin-left: 8px; }
 #report-status { font-size: 12.5px; color: var(--muted); margin-left: 10px; }
 #report-brief-wrap h2, #report-goals-wrap h2 {
   font-family: var(--font-display); font-size: 17px; font-weight: 700;
@@ -706,13 +706,13 @@ body:has(.settings-app) { overflow: auto; }
 #cam-cancel:hover { color: var(--text); border-color: var(--muted); }
 #cam-capture {
   padding: 10px 22px; border-radius: 10px; border: none;
-  background: linear-gradient(92deg, var(--accent), var(--accent2));
+  background: var(--moss);
   color: #fff;
   font-family: var(--font-display); font-size: 14px; font-weight: 700;
   letter-spacing: .12em; text-transform: uppercase; cursor: pointer;
-  box-shadow: 0 0 16px var(--accent-glow);
+  box-shadow: 0 0 16px var(--moss-glow);
 }
-#cam-capture:hover { filter: brightness(1.12); box-shadow: 0 0 24px var(--accent-glow); }
+#cam-capture:hover { filter: brightness(1.12); box-shadow: 0 0 24px var(--moss-glow); }
 
 /* ---- DAG editor (n8n-style graph view/edit) ------------------------- */
 .dag-body { margin: 0; height: 100vh; display: flex; flex-direction: column;
@@ -735,8 +735,8 @@ body:has(.settings-app) { overflow: auto; }
   transition: border-color .15s, box-shadow .15s;
 }
 .dag-btn:hover { border-color: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
-.dag-btn-primary { background: linear-gradient(92deg, var(--accent), var(--accent2));
-  border: none; color: #fff; box-shadow: 0 0 14px var(--accent-glow); }
+.dag-btn-primary { background: var(--moss);
+  border: none; color: #fff; box-shadow: 0 0 14px var(--moss-glow); }
 .dag-btn-danger { color: var(--red); border-color: var(--red); background: transparent; }
 .dag-btn-small { padding: 4px 9px; font-size: 11px; }
 .dag-status { margin-left: auto; font-size: 12px; color: var(--muted);
@@ -856,11 +856,11 @@ body:has(.settings-app) { overflow: auto; }
 #brief-cancel:hover { color: var(--text); border-color: var(--muted); }
 #brief-save {
   padding: 10px 22px; border-radius: 10px; border: none;
-  background: linear-gradient(92deg, var(--accent), var(--accent2));
+  background: var(--moss);
   color: #fff;
   font-family: var(--font-display); font-size: 14px; font-weight: 700;
   letter-spacing: .12em; text-transform: uppercase; cursor: pointer;
-  box-shadow: 0 0 16px var(--accent-glow);
+  box-shadow: 0 0 16px var(--moss-glow);
 }
 
 /* ── pre-approvals panel (settings page) ─────────────────────────── */
