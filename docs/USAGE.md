@@ -48,12 +48,17 @@
   is linked.
 - With optional tools enabled (`AIDON_OPTIONAL_TOOLS=1`),
   Aidon can use the full built-in toolset, including Muse Image
-  editing and webcam capture. Image edits require attached reference
+  editing. Image edits require attached reference
   images and a fresh approval before sending them to Muse Image; the
   API may spend image credits. Every camera activation also requires
   a fresh `record` approval card; declining it leaves the camera
   untouched. Captures are saved in the run workspace and included
   with completed deliverables.
+- Webcam photo/video capture and system-audio recording are also
+  available when optional tools are off. Each use still requires a
+  fresh `record` approval. The WebUI microphone button separately
+  records voice input in the browser and is available independently
+  of this setting.
 
 ## ✅ Pre-approvals, the same on every surface
 

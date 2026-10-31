@@ -26,7 +26,9 @@ from __future__ import annotations
 
 SEED_TOOLS = {"write", "read", "list", "shell"}
 
-# The minimal core built-in set for the optional-tools flip.
+# Built-ins kept available when optional tools are off. These include
+# explicitly approval-gated host capture tools; the flip controls
+# visibility, not their record approval boundary.
 # When AIDON_OPTIONAL_TOOLS is off (the default), the goal
 # extra tools are exactly this set plus the read_file /
 # write_file step aliases, which are kept because the loop
@@ -38,6 +40,7 @@ CORE_LADDER_TOOLS = frozenset({
     "fetch_url", "ask_user", "declare_blocked", "notify",
     "uv_venv", "install_python_package", "apt_install",
     "mcp_connect", "mcp_disconnect", "adopt_tool_plugin",
+    "capture_webcam_photo", "record_webcam", "record_system_audio",
 })
 
 
