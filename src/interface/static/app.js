@@ -187,7 +187,7 @@
     node.innerHTML = role === "assistant"
       ? renderFinalMessage(String(text || ""), route) : md(String(text || ""));
     if (role === "assistant") {
-      node.appendChild(playButton(String(text || ""), node));
+      appendMessagePlayButton(node, String(text || ""));
     }
     return node;
   };
@@ -935,6 +935,19 @@
     return b;
   }
 
+  function appendMessagePlayButton(message, text) {
+    let stats = message.querySelector(":scope > .run-stats");
+    if (!stats) {
+      stats = document.createElement("div");
+      stats.className = "run-stats";
+      message.appendChild(stats);
+    }
+    const button = playButton(text, message);
+    button.classList.add("run-stats-play");
+    stats.appendChild(button);
+    return button;
+  }
+
   function maybeAnnounce(text, btn) {
     // Running commentary: no element, so no karaoke highlight - it is
     // spoken as plain text.
@@ -1518,8 +1531,8 @@
           } else {
             m = addMsgTyped("aidon", e.text, e.t, e.kind === "aidon-final" || !!finalMessageParts(e.text).stats, lastRoute);
           }
-          const btn = playButton(e.text || m._streamText || "", m);
-          m.appendChild(btn);
+          const btn = appendMessagePlayButton(
+            m, e.text || m._streamText || "");
           if (e.kind === "aidon-final") {
             // The run is over: the avatar smiles, the answer is read
             // (never the elapsed clock - that is for the eye), with the
