@@ -84,8 +84,13 @@ class WebUIMessagingMixin:
                                 except Exception as exc:
                                     text = caption or f"{mtype} received, could not save: {exc}"
                         sender = message.get("from", "")
-                        if not owner or normalize_number(sender) != owner:
+                        if not owner:
+                            print("WhatsApp inbound ignored: owner is not configured")
                             continue
+                        if normalize_number(sender) != owner:
+                            print("WhatsApp inbound ignored: sender failed owner check")
+                            continue
+                        print("WhatsApp inbound owner message accepted")
                         decision_reply = self._resolve_decision(text)
                         if decision_reply is None:
                             decision_reply = self._resolve_control(text)
@@ -206,7 +211,22 @@ class WebUIMessagingMixin:
                         event = TriggerEvent(source="whatsapp", kind="message",
                                              goal=text, payload=_wa_payload,
                                              reply=local_replies.append)
-                        self.dispatcher.dispatch(event)
+                        try:
+                            self.dispatcher.dispatch(event)
+                        except Exception as exc:
+                            # Meta's webhook response is not delivered to the
+                            # sender as a chat message. Surface shared goal
+                            # handler failures on the WhatsApp conversation.
+                            print(f"WhatsApp goal handler failed: "
+                                  f"{type(exc).__name__}")
+                            error_reply = (
+                                "Aidon couldn't process that message because its "
+                                "run encountered an internal error. Check the "
+                                "Aidon logs, then send it again.")
+                            replies.append(error_reply)
+                            if self.whatsapp_sender is not None:
+                                self.whatsapp_sender(sender, error_reply)
+                            continue
                         for reply in local_replies:
                             replies.append(reply)
                             if self.whatsapp_sender is not None:

@@ -249,6 +249,31 @@ def test_whatsapp_command_grants_and_confirms(tmp_path):
     assert PreapprovalStore(server.home).is_preapproved("dinner", "spec")
 
 
+def test_whatsapp_goal_handler_failure_is_replied_to_owner(tmp_path):
+    dispatcher = TriggerDispatcher()
+
+    def fail(_event):
+        raise RuntimeError("private detail must not reach WhatsApp")
+
+    dispatcher.register("whatsapp", fail)
+    replies = []
+    config = MessagingConfig(whatsapp_owner="+16045551234")
+    server = WebUIServer(
+        tmp_path, dispatcher=dispatcher, messaging_config=config,
+        whatsapp_sender=lambda recipient, text: replies.append((recipient, text)))
+    body = {"entry": [{"changes": [{"value": {"messages": [
+        {"from": "+16045551234", "text": {"body": "hello"}}]}}]}]}
+
+    status, result = server.handle_whatsapp_post(body)
+
+    assert status == 200
+    assert len(replies) == 1
+    assert replies[0][0] == "+16045551234"
+    assert "internal error" in replies[0][1]
+    assert "private detail" not in replies[0][1]
+    assert result["replies"] == [replies[0][1]]
+
+
 def test_slack_command_grants_and_confirms(tmp_path):
     server, _, replies = _server(tmp_path)
     body = {"type": "event", "event": {
