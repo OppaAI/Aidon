@@ -59,6 +59,8 @@ def test_plain_chat_route_includes_recalled_cross_chat_fact(tmp_path, monkeypatc
         def recall(self, collection, query, limit=5):
             assert collection == "semantic"
             assert "test project" in query
+            if "name" not in query:
+                return []
             point = SimpleNamespace(
                 text="The user's test project is named Cedar Lantern.",
                 payload={})
