@@ -42,7 +42,8 @@ def _save(home: Path, stops: dict) -> None:
 
 def save_mode_stop(home: Path, mode: str, goal: str, spec=None, plan=None,
                    conversation_key: str = "",
-                   conversation_id: str = "", budget_key: str = "") -> str:
+                   conversation_id: str = "", budget_key: str = "",
+                   thread_ts: str = "") -> str:
     """Save a stopped run; returns its stop id."""
     if mode not in _MODES:
         raise ValueError(f"unknown stop mode: {mode}")
@@ -57,6 +58,7 @@ def save_mode_stop(home: Path, mode: str, goal: str, spec=None, plan=None,
         "conversation_key": str(conversation_key or ""),
         "conversation_id": str(conversation_id or ""),
         "budget_key": str(budget_key or ""),
+        "thread_ts": str(thread_ts or ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     _save(home, stops)
@@ -125,6 +127,23 @@ def latest_mode_stop_for_conversation(home: Path, conversation_id: str) -> dict 
         return None
     candidates.sort(key=lambda r: str(r.get("created_at", "")))
     return dict(candidates[-1])
+
+
+def mode_stops_for_conversation(home: Path, conversation_id: str) -> list[dict]:
+    """Return active stops for a conversation, oldest first.
+
+    Slack polling uses these records to watch their originating threads
+    for a proceed reply without scanning unrelated conversations.
+    """
+    key = str(conversation_id or "")
+    if not key:
+        return []
+    candidates = [dict(record) for record in _load(home).values()
+                  if isinstance(record, dict)
+                  and (record.get("conversation_key") == key
+                       or record.get("conversation_id") == key)]
+    candidates.sort(key=lambda record: str(record.get("created_at", "")))
+    return candidates
 
 
 def delete_mode_stop(home: Path, stop_id: str) -> bool:
