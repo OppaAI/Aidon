@@ -175,6 +175,7 @@
     const d = document.createElement("div");
     d.className = "msg " + kind;
     d.innerHTML = (t ? '<div class="t">' + esc(t) + "</div>" : "") + md(text);
+    if (kind === "user") appendMessageCopyButton(d, text);
     thread.appendChild(d);
     scrollThreadToLatest();
     return d;
@@ -189,6 +190,7 @@
     if (role === "assistant") {
       appendMessagePlayButton(node, String(text || ""));
     }
+    appendMessageCopyButton(node, String(text || ""));
     return node;
   };
 
@@ -1030,6 +1032,62 @@
     return button;
   }
 
+  async function copyMessageText(text) {
+    const value = String(text || "");
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+    const field = document.createElement("textarea");
+    field.value = value;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed";
+    field.style.opacity = "0";
+    document.body.appendChild(field);
+    field.select();
+    const copied = document.execCommand("copy");
+    field.remove();
+    if (!copied) throw new Error("Clipboard access is unavailable");
+  }
+
+  function appendMessageCopyButton(message, text) {
+    if (!message || message.querySelector(":scope > .msg-actions .msg-copy, :scope > .run-stats .msg-copy"))
+      return null;
+    const isAssistant = message.classList.contains("aidon");
+    let row = isAssistant ? message.querySelector(":scope > .run-stats") : null;
+    if (!row) {
+      row = document.createElement("div");
+      row.className = "msg-actions";
+      message.appendChild(row);
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "msg-copy";
+    button.textContent = "⧉";
+    button.title = "Copy message";
+    button.setAttribute("aria-label", "Copy message");
+    const copyText = isAssistant ? finalMessageParts(text).body : String(text || "");
+    button.addEventListener("click", async () => {
+      try {
+        await copyMessageText(copyText);
+        button.textContent = "✓";
+        button.title = "Copied";
+        button.setAttribute("aria-label", "Copied");
+      } catch (e) {
+        button.textContent = "!";
+        button.title = "Could not copy message";
+        button.setAttribute("aria-label", "Could not copy message");
+      }
+      setTimeout(() => {
+        button.textContent = "⧉";
+        button.title = "Copy message";
+        button.setAttribute("aria-label", "Copy message");
+      }, 1400);
+    });
+    row.appendChild(button);
+    return button;
+  }
+
   function maybeAnnounce(text, btn) {
     // Running commentary: no element, so no karaoke highlight - it is
     // spoken as plain text.
@@ -1621,6 +1679,7 @@
           }
           const btn = appendMessagePlayButton(
             m, e.text || m._streamText || "");
+          appendMessageCopyButton(m, e.text || m._streamText || "");
           if (e.kind === "aidon-final") {
             // The run is over: the avatar smiles, the answer is read
             // (never the elapsed clock - that is for the eye), with the
