@@ -530,6 +530,23 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
         path = resolve_in_workdir(workdir, match.group(1))
         ok = path is not None and path.is_file() and path.stat().st_size > 0
         return ok, f"{name} non-empty" if ok else f"{name} empty or missing"
+    match = re.match(r"^(.+?)\s+contains exactly\s+([\s\S]*)$",
+                     text, re.IGNORECASE)
+    if match:
+        name, expected = _relative_name(workdir, match.group(1)), match.group(2)
+        path = resolve_in_workdir(workdir, match.group(1))
+        if path is None or not path.is_file():
+            return False, f"{name} missing"
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return False, f"{name} not readable as text"
+        # A single terminal line ending is conventional for text files;
+        # ignore it while preserving any other differences.
+        actual = content.removesuffix("\n").removesuffix("\r")
+        ok = actual == expected
+        return ok, (f"{name} contains the exact requested text" if ok else
+                    f"{name} content mismatch: expected exact requested text")
     match = re.match(r"^(.+?)\s+does not contain\s+(.+)$", text, re.IGNORECASE)
     if match:
         # Absence check, for allergy and dietary criteria ("menu.md does
@@ -626,6 +643,61 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
         return ok, (f"output link target {name} available" if ok else
                     f"output link target {name} missing")
     return False, f"unverified criterion: {criterion}"
+
+
+def requested_exact_content_criteria(goal: str,
+                                     deliverables: list[str]) -> list[str]:
+    """Derive exact-text file checks from explicit user instructions.
+
+    The planner can omit or weaken criteria, so a simple request such as
+    ``file.txt containing exactly hello`` must remain verifiable by code.
+    This deliberately handles only a directly named deliverable and a
+    plain or quoted single-line literal; ambiguous prose is left to the
+    planner and model verifier.
+    """
+    source = str(goal or "")
+    clause = re.search(
+        r"\b(?:contain(?:ing|s)?|contents?\s+(?:of|are|is))\s+exactly\s+",
+        source, re.IGNORECASE)
+    if clause is None:
+        return []
+    tail = source[clause.end():].lstrip()
+    if not tail:
+        return []
+    if tail[0] in ("'", '"', "`"):
+        quote = tail[0]
+        end = tail.find(quote, 1)
+        if end < 0:
+            return []
+        expected = tail[1:end]
+    else:
+        expected = re.split(
+            r"(?:\.\s+(?=[A-Z])|[,;]?\s+(?:then|and then|and verify|"
+            r"verify|do not|don't|without)\b)",
+            tail, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+        # Unquoted final periods usually close the sentence. For literal
+        # text ending in punctuation, quote the value to remove ambiguity.
+        expected = expected.rstrip(".").rstrip()
+    if not expected:
+        return []
+
+    # Associate the clause with the closest explicitly named deliverable
+    # before it. This avoids applying one literal to every file in a plan.
+    before = source[:clause.start()]
+    candidates = []
+    for name in deliverables or []:
+        clean_name = str(name or "").replace("\\", "/").rstrip("/")
+        basename = clean_name.rsplit("/", 1)[-1]
+        if not basename:
+            continue
+        matches = list(re.finditer(re.escape(basename), before,
+                                   re.IGNORECASE))
+        if matches:
+            candidates.append((matches[-1].start(), clean_name))
+    if not candidates:
+        return []
+    _, name = max(candidates)
+    return [f"{name} contains exactly {expected}"]
 
 
 def verify_plan(workdir: Path, deliverables: list[str],

@@ -7,6 +7,7 @@ import re
 
 from ..interface.approval import Decision
 from .verify import (budget_currency_criteria,
+                     requested_exact_content_criteria,
                      requested_shopping_item_criteria, verify_plan)
 from .run_types import (
     MAX_ATTEMPTS,
@@ -426,6 +427,8 @@ class PlanRunMixin:
                 goal, current_plan.deliverables, self.sandbox.workdir)
             automatic_criteria.extend(requested_shopping_item_criteria(
                 goal, current_plan.deliverables, self.sandbox.workdir))
+            automatic_criteria.extend(requested_exact_content_criteria(
+                goal, current_plan.deliverables))
             for criterion in automatic_criteria:
                 if criterion not in criteria:
                     criteria.append(criterion)

@@ -17,6 +17,7 @@ from src.agentic.verify import (
     check_criterion,
     read_deliverable,
     resolve_in_workdir,
+    requested_exact_content_criteria,
     verify_plan,
 )
 
@@ -120,3 +121,38 @@ def test_verify_plan_rejects_escaping_deliverable(tmp_path):
     ok, failures, _ = verify_plan(wd, ["../secret.txt"], [])
     assert ok is False
     assert any("missing deliverable" in f for f in failures)
+
+
+def test_explicit_exact_content_goal_creates_code_criterion():
+    goal = ("Create scheduler-recovery.txt containing exactly recovered-ok, "
+            "then verify its contents. Do not use external services.")
+    assert requested_exact_content_criteria(
+        goal, ["scheduler-recovery.txt"]
+    ) == ["scheduler-recovery.txt contains exactly recovered-ok"]
+
+
+def test_exact_content_criterion_rejects_wrong_nonempty_file(tmp_path):
+    wd = _workdir(tmp_path)
+    (wd / "scheduler-recovery.txt").write_text("scheduler-ok", encoding="utf-8")
+    criterion = "scheduler-recovery.txt contains exactly recovered-ok"
+    ok, message = check_criterion(wd, criterion)
+    assert ok is False
+    assert "content mismatch" in message
+    ok, failures, _ = verify_plan(wd, ["scheduler-recovery.txt"], [criterion])
+    assert ok is False
+    assert any("content mismatch" in failure for failure in failures)
+
+
+def test_exact_content_criterion_accepts_requested_text_with_newline(tmp_path):
+    wd = _workdir(tmp_path)
+    (wd / "scheduler-recovery.txt").write_text("recovered-ok\n", encoding="utf-8")
+    ok, _ = check_criterion(
+        wd, "scheduler-recovery.txt contains exactly recovered-ok")
+    assert ok is True
+
+
+def test_exact_content_quoted_literal_is_supported():
+    goal = 'Write result.txt whose contents are exactly "hello, world!".'
+    assert requested_exact_content_criteria(goal, ["result.txt"]) == [
+        "result.txt contains exactly hello, world!"
+    ]

@@ -53,8 +53,16 @@ Final test counts, image activation and runtime evidence are recorded in
   regressions passed locally; Bubblewrap-only cases skipped because this runner
   cannot create the required namespace. On the target Docker host, standalone
   scheduler startup and dispatch were confirmed by a scheduled run that created
-  `/data/workspace/scheduler-smoke.txt` with the expected contents. Restart
-  recovery and actual plugin isolation remain unverified there.
+  `/data/workspace/scheduler-smoke.txt` with the expected contents. A second
+  target-host check observed a persisted pending claim; after the scheduler was
+  restarted, it reclaimed and completed the job. Its artifact contained
+  `scheduler-ok` when the goal required `recovered-ok`, so scheduler recovery
+  was confirmed but goal correctness was not. The trace shows the plan omitted
+  acceptance criteria and the verifier accepted any non-empty file. A local
+  code change now derives an exact-content criterion from explicit requests
+  such as "containing exactly recovered-ok"; focused tests pass, but the
+  target-host regression still needs a rebuilt image and rerun. Actual plugin
+  isolation remains unverified there.
 - Read-only live Slack `auth.test` and `conversations.history` probes: the bot
   token and both configured conversations succeeded. No synthetic chat message
   was posted during these checks.
@@ -66,9 +74,9 @@ and caller contracts and were repaired without an unreviewed consolidation.
 
 ## Remaining work, in priority order
 
-1. **Target-machine runtime checks.** Verify scheduler claim recovery after a
-   restart and the configured sandbox's plugin isolation boundary. Standalone
-   scheduler startup and dispatch now passed a Docker smoke test. The owner's successful Modal tasks show
+1. **Target-machine runtime checks.** Verify the configured sandbox's plugin
+   isolation boundary. Standalone scheduler startup, dispatch, and pending-claim
+   recovery passed Docker smoke tests. The owner's successful Modal tasks show
    that Modal can execute work, but do not exercise every plugin-isolation or
    failure path. Also verify browser refresh/recovery and configured model
    failures. Record the actual backend and evidence; local Bubblewrap tests do
@@ -82,6 +90,12 @@ and caller contracts and were repaired without an unreviewed consolidation.
    and unit coverage confirms router selection, but not their live composition.
    Separately complete a harmless
    goal through planning, approval, execution, and verified result delivery.
+   Rebuild the image and rerun the scheduler smoke with a new exact sentinel to
+   confirm the local verifier fix rejects mismatched contents. The earlier
+   recovery run wrote the previous test's `scheduler-ok` despite the new
+   `recovered-ok` request, while its plan omitted criteria; the local fix now
+   adds a deterministic exact-content criterion for explicit requests. This
+   remains separate from scheduler claim recovery.
    Approval ID handling, bare approval commands, and Slack thread replies have
    fixes, but their complete end-to-end cycle is not yet established. This is
    the core workflow investigation to return to after the other checks;
