@@ -78,7 +78,7 @@ class RunSupportMixin:
                 tokens_out += usage["tokens_out"]
                 thinking_tokens += usage["thinking_tokens"]
         if self.trace is not None:
-            event = self.trace.record(kind, status, detail, run_id=self.run_id)
+            self.trace.record(kind, status, detail, run_id=self.run_id)
             if callable(self.trace_callback):
                 payload = {
                     "phase": kind, "status": status, "title": detail,

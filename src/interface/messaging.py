@@ -4,25 +4,18 @@ Old key names are canonical here, exactly as in Aidon:
 - WhatsApp: AIDON_WHATSAPP_TOKEN, AIDON_WHATSAPP_PHONE_ID,
   AIDON_WHATSAPP_VERIFY_TOKEN, AIDON_WHATSAPP_APP_SECRET,
   AIDON_WHATSAPP_OWNER
-- Slack: SLACK_BOT_TOKEN, plus AIDON_SLACK_SIGNING_SECRET, which is
-  Slack's own name, not an Aidon name, because old Slack
-  was polling, not a webhook, so it had no signing secret.
+- Slack: SLACK_BOT_TOKEN for Web API polling and replies;
+  AIDON_SLACK_SIGNING_SECRET authenticates the optional inbound webhook.
   AIDON_SLACK_INBOUND_CHANNEL, AIDON_SLACK_POLL_SECONDS, and
-  AIDON_SLACK_ACK_AFTER_SECONDS belong to that old polling
-  listener, not to the webhook, and are not used here.
+  AIDON_SLACK_ACK_AFTER_SECONDS configure the WebUI polling listener.
 
 Two-way, both channels:
-- WhatsApp: inbound webhook message from the owner only
-  becomes a goal, replies go back over WhatsApp to that
-  same sender number, with the WhatsApp Cloud API.
-- Slack: inbound webhook message becomes a goal, replies
-  go back over Slack to that same channel, in thread when
-  the incoming message has a thread_ts, with
-  chat.postMessage. Old Slack was polling DMs and channels,
-  new Slack is a webhook, so the Event Subscriptions you
-  choose in the Slack app decide the surface: subscribe to
-  message.im for DMs, message.channels for channels.
-  Bot messages are ignored, never goals, never replies.
+- WhatsApp: an inbound webhook message from the owner becomes a goal;
+  replies return to that number using the WhatsApp Cloud API.
+- Slack: configured polling or a signed webhook receives messages.
+  Both share command and attachment handling. Replies use the bot token
+  and preserve thread identity. Legacy incoming webhooks are used only
+  when no bot token exists. Bot and non-message events are ignored.
 - Approve and reject, both channels: a message
   "approve <id>" or "reject <id>" resolves a pending
   approval card, it does not become a goal. This is the
@@ -60,6 +53,7 @@ import hmac
 import json
 import os
 import re
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -107,7 +101,8 @@ def verify_whatsapp_signature(raw: bytes, app_secret: str, header: str) -> bool:
     return hmac.compare_digest(expected, header)
 
 
-def _post_json(url: str, token: str, payload: dict, post=None) -> dict:
+def _post_json(url: str, token: str, payload: dict, post=None,
+               *, allow_plain_ok: bool = False) -> dict:
     if post is not None:
         return post(url, token, payload)
     data = json.dumps(payload).encode()
@@ -117,7 +112,11 @@ def _post_json(url: str, token: str, payload: dict, post=None) -> dict:
     request = urllib.request.Request(
         url, data=data, method="POST", headers=headers)
     with urllib.request.urlopen(request, timeout=30) as response:
-        return json.loads(response.read())
+        body = response.read()
+        # Slack incoming webhooks return plain text, unlike the Web API.
+        if allow_plain_ok and body.strip() == b"ok":
+            return {"ok": True}
+        return json.loads(body)
 
 
 @dataclass
@@ -202,12 +201,17 @@ def send_whatsapp(config: MessagingConfig, to: str, text: str, post=None) -> dic
 
 def send_slack(config: MessagingConfig, channel: str, text: str,
                thread_ts: str | None = None, post=None) -> dict:
-    webhook = (config.slack_webhooks or {}).get(str(channel), "")
+    # Bot replies preserve the destination and thread. Legacy, destination-
+    # bound webhooks must not override a working bot token (a revoked webhook
+    # otherwise makes every reply fail even while polling succeeds).
+    webhook = ((config.slack_webhooks or {}).get(str(channel), "")
+               if not config.slack_configured() else "")
     if webhook:
         try:
             # Incoming Webhooks are already bound to their destination, so
             # the channel and thread fields are intentionally not sent.
-            result = _post_json(webhook, "", {"text": text}, post=post)
+            result = _post_json(webhook, "", {"text": text}, post=post,
+                                allow_plain_ok=True)
             if isinstance(result, dict) and result.get("error"):
                 return {"ok": False, "error": str(result["error"])}
             return {"ok": True, "webhook": True}
@@ -374,45 +378,85 @@ def send_whatsapp_media(config, to: str, file_path, caption: str = "",
     return {"ok": True, "message_id": messages[0].get("id", ""), "media_id": media_id}
 
 
-def poll_slack_once(config, channel: str, last_ts: str = "", fetch=None) -> tuple[list[dict], str]:
-    """Polling mode, old Slack, for when no public webhook URL exists.
+class SlackRateLimited(RuntimeError):
+    def __init__(self, retry_after=60):
+        try:
+            self.retry_after = max(1, min(3600, int(retry_after)))
+        except (TypeError, ValueError):
+            self.retry_after = 60
+        super().__init__(f"Slack rate limited; retry after {self.retry_after}s")
 
-    fetch is an injected Slack API caller, taking (url, token, params)
-    and returning the JSON response. In production it calls
-    conversations.history with the bot token. It returns
-    (new user messages, newest ts), where a message is a dict
-    with text, channel, and ts. Bot messages are skipped, and
-    messages at or before last_ts are skipped, so a poll never
-    re-dispatches the same message twice.
+
+def poll_slack_once(config, channel: str, last_ts: str = "", fetch=None) -> tuple[list[dict], str]:
+    """Read complete history after the durable cursor, oldest messages first.
+
+    History pages arrive newest first. Advancing straight to the first
+    page's newest timestamp would silently lose messages on later pages.
+    Preserve message metadata so polling and webhook intake share commands
+    and attachments. API failures never acknowledge partial history.
     """
+    from decimal import Decimal
+    from urllib.parse import urlencode
+
     if fetch is None:
-        import urllib.request, json as _json
         def fetch(url, token, params):
             req = urllib.request.Request(
-                f"{url}?channel={params['channel']}&oldest={params.get('oldest', '')}",
+                url + "?" + urlencode(params),
                 headers={"Authorization": f"Bearer {token}"})
-            with urllib.request.urlopen(req, timeout=15) as response:
-                return _json.loads(response.read().decode())
-    result = fetch(f"{SLACK_API_BASE}/conversations.history", config.slack_bot_token,
-                   {"channel": channel, "oldest": last_ts})
-    if isinstance(result, dict) and result.get("ok") is False:
-        code = str(result.get("error", "api_error"))
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", code):
-            code = "api_error"
-        raise RuntimeError(f"Slack conversations.history failed: {code}")
-    messages = []
+            try:
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    return json.loads(response.read().decode())
+            except urllib.error.HTTPError as exc:
+                if exc.code == 429:
+                    raise SlackRateLimited(exc.headers.get("Retry-After", "60")) from None
+                raise RuntimeError(f"Slack history failed: HTTP {exc.code}") from None
+
+    messages = {}
     newest = last_ts
-    for message in result.get("messages", []):
-        ts = str(message.get("ts", ""))
-        if ts > newest:
-            newest = ts
-        if message.get("bot_id") or message.get("subtype") == "bot_message":
-            continue
-        if ts <= last_ts:
-            continue
-        messages.append({"text": str(message.get("text", "")), "channel": channel, "ts": ts})
-    messages.reverse()
-    return messages, newest
+    newest_number = Decimal(last_ts or "0")
+    params = {"channel": channel, "oldest": last_ts, "limit": 100}
+    seen_pages = set()
+    while True:
+        result = fetch(f"{SLACK_API_BASE}/conversations.history", config.slack_bot_token, dict(params))
+        if not isinstance(result, dict):
+            raise RuntimeError("Slack history returned an invalid response")
+        if result.get("ok") is False:
+            code = str(result.get("error", "api_error"))
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", code):
+                code = "api_error"
+            if code in ("ratelimited", "rate_limited"):
+                raise SlackRateLimited()
+            raise RuntimeError(f"Slack conversations.history failed: {code}")
+        page = result.get("messages", [])
+        timestamps = []
+        for message in page:
+            ts = str(message.get("ts", ""))
+            if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", ts):
+                continue
+            number = Decimal(ts)
+            timestamps.append((number, ts))
+            if number > newest_number:
+                newest, newest_number = ts, number
+            if (message.get("bot_id")
+                    or message.get("subtype") not in (None, "", "file_share", "thread_broadcast")
+                    or number <= Decimal(last_ts or "0")):
+                continue
+            messages[ts] = {**message, "text": str(message.get("text", "")),
+                            "channel": channel, "ts": ts}
+        cursor = (result.get("response_metadata") or {}).get("next_cursor", "")
+        if cursor:
+            key = ("cursor", cursor)
+            params["cursor"] = cursor
+        elif result.get("has_more") and timestamps:
+            key = ("latest", min(timestamps)[1])
+            params.pop("cursor", None)
+            params["latest"] = key[1]
+        else:
+            break
+        if key in seen_pages:
+            raise RuntimeError("Slack history pagination did not advance")
+        seen_pages.add(key)
+    return sorted(messages.values(), key=lambda message: Decimal(message["ts"])), newest
 
 
 def download_whatsapp_media(config, media_id: str, get=None) -> bytes:

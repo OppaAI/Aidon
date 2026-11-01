@@ -34,9 +34,13 @@ same file, and the loop reads the same file.
 from __future__ import annotations
 
 import json
+import os
+from contextlib import contextmanager
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+from ..capabilities.outbox import _lock_for, _process_lock
 
 
 def new_run_id() -> str:
@@ -55,75 +59,85 @@ class RunControl:
         safe = "".join(c for c in run_id if c.isalnum() or c in ("-", "_"))[:32]
         return self.runs_dir / f"{safe}.json"
 
+    @contextmanager
+    def _locked(self, run_id):
+        path = self._path(run_id)
+        with _lock_for(path), _process_lock(path):
+            yield
+
+    def _save(self, run_id, record):
+        path = self._path(run_id)
+        temporary = path.with_suffix(".tmp")
+        with temporary.open("w") as handle:
+            json.dump(record, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.replace(path)
+
     def register(self, run_id: str, goal: str, conversation_id: str = "") -> dict:
         record = {"run_id": run_id, "goal": goal, "conversation_id": conversation_id,
                   "status": "running", "steer_notes": [], "cancelled": False,
                   "created_at": datetime.now(timezone.utc).isoformat()}
-        self._path(run_id).write_text(json.dumps(record, indent=2))
+        with self._locked(run_id):
+            self._save(run_id, record)
         return record
 
     def get(self, run_id: str) -> dict | None:
-        path = self._path(run_id)
-        if not path.is_file():
-            return None
-        try:
-            return json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
-            return None
+        with self._locked(run_id):
+            try:
+                record = json.loads(self._path(run_id).read_text())
+            except (ValueError, OSError):
+                return None
+            return record if isinstance(record, dict) else None
 
     def list_runs(self) -> list[dict]:
-        out = []
-        for path in sorted(self.runs_dir.glob("*.json")):
-            try:
-                out.append(json.loads(path.read_text()))
-            except (json.JSONDecodeError, OSError):
-                continue
-        return out
+        return [record for path in sorted(self.runs_dir.glob("*.json"))
+                if (record := self.get(path.stem)) is not None]
+
+    def _update(self, run_id, change):
+        # Cancellation, steering, and progress are read-modify-write operations.
+        # Hold the same lock across all three phases so a progress update cannot
+        # restore a stale cancelled=False or erase another process's notes.
+        with self._locked(run_id):
+            record = self.get(run_id)
+            if record is None:
+                return False
+            change(record)
+            self._save(run_id, record)
+            return True
 
     def cancel(self, run_id: str, gate=None) -> bool:
-        record = self.get(run_id)
-        if record is None:
+        def change(record):
+            record["cancelled"] = True
+            record["status"] = "cancelled"
+        if not self._update(run_id, change):
             return False
-        record["cancelled"] = True
-        record["status"] = "cancelled"
-        self._path(run_id).write_text(json.dumps(record, indent=2))
-        if gate is not None and hasattr(gate, "cancel_all"):
-            gate.cancel_all()
+        if gate is not None:
+            if callable(getattr(gate, "cancel_run", None)):
+                gate.cancel_run(run_id)
+            elif callable(getattr(gate, "cancel_all", None)):
+                gate.cancel_all()
         return True
 
     def steer(self, run_id: str, note: str) -> bool:
-        record = self.get(run_id)
-        if record is None:
-            return False
-        record.setdefault("steer_notes", []).append(note)
-        self._path(run_id).write_text(json.dumps(record, indent=2))
-        return True
+        return self._update(run_id, lambda record: record.setdefault("steer_notes", []).append(note))
 
     def set_status(self, run_id: str, status: str) -> bool:
-        """Record the terminal/current status of a run."""
-        record = self.get(run_id)
-        if record is None:
-            return False
-        record["status"] = str(status)
-        if status in ("done", "failed", "rejected", "cancelled"):
-            record["stage"] = "done"
-        self._path(run_id).write_text(json.dumps(record, indent=2))
-        return True
+        def change(record):
+            record["status"] = "cancelled" if record.get("cancelled") else str(status)
+            if record["status"] in ("done", "failed", "rejected", "cancelled"):
+                record["stage"] = "done"
+        return self._update(run_id, change)
 
     def set_stage(self, run_id: str, stage: str) -> bool:
-        """Publish the current pipeline stage for the WebUI progress bar."""
-        record = self.get(run_id)
-        if record is None:
-            return False
-        record["stage"] = str(stage)
-        self._path(run_id).write_text(json.dumps(record, indent=2))
-        return True
+        return self._update(run_id, lambda record: record.update(stage=str(stage)))
 
     def is_cancelled(self, run_id: str | None) -> bool:
         if not run_id:
             return False
         record = self.get(run_id)
-        return bool(record and record.get("cancelled"))
+        # Existing but unreadable control state cannot safely authorize work.
+        return bool(record.get("cancelled")) if record is not None else self._path(run_id).exists()
 
     def steer_notes(self, run_id: str | None) -> list[str]:
         if not run_id:

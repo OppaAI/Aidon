@@ -204,7 +204,9 @@ class NotificationOutbox:
         delivered, failed, dead = 0, [], []
         for item in self.pending():
             try:
-                sender(item)
+                result = sender(item)
+                if result is False or (isinstance(result, dict) and result.get("ok") is False):
+                    raise RuntimeError("notification sender reported failure")
             except Exception as exc:
                 failed.append(item["id"])
                 attempts = int(item.get("attempts") or 0) + 1

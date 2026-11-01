@@ -1,5 +1,8 @@
 # Repository-wide audit — 2026-10-31
 
+Current status: see [the November 1 review](CODEBASE_REVIEW_2026-11-01.md) and
+[production readiness](PRODUCTION_READINESS.md). Counts below are historical.
+
 Reviewed repair commit `88f91af`. Verdict: **not production-ready for unrestricted autonomous host access**.
 
 ## Status after subsequent repairs

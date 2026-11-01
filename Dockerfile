@@ -32,21 +32,16 @@ COPY pyproject.toml uv.lock README.md ./
 # Source edits then reuse this expensive layer, including the ML packages.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project \
-        --extra embed --extra sparse --extra vision
+        --extra embed --extra sparse --extra vision --extra modal
 
 COPY src ./src
+COPY AGENTS.md ./
 
 # Install Aidon itself into the already populated environment. Keep the
 # production package non-editable; the dev Compose overlay supplies source.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable \
-        --extra embed --extra sparse --extra vision
-
-# Modal is only needed by the remote sandbox backend. Keep it in its own
-# layer so adding/updating it does not invalidate the larger ML dependency
-# install above. Pin it for reproducible Docker builds.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /opt/aidon/.venv/bin/python "modal==1.6.3"
+        --extra embed --extra sparse --extra vision --extra modal
 
 USER aidon:aidon
 EXPOSE 8765

@@ -14,5 +14,12 @@ services:
       - /tmp:rw,noexec,nosuid,size=256m
     cap_drop:
       - ALL
+    # Listener liveness only; model and sandbox readiness need separate probes.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', ${AIDON_WEBUI_PORT:-8765}), timeout=3).close()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
     security_opt:
       - no-new-privileges:true

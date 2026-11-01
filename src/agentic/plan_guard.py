@@ -27,21 +27,22 @@ def validate_plan(plan: dict, available_tools, skill_names=None) -> list[str]:
         return ["plan has no steps"]
     tools = set(available_tools or [])
     skills = set(skill_names or [])
-    ids = []
-    deliverables = []
+    graph = {}
+    seen_deliverables = set()
     for index, step in enumerate(steps):
         where = f"step {index}"
         if not isinstance(step, dict):
             failures.append(f"{where} is not a dict")
             continue
         step_id = step.get("id")
-        if not step_id:
-            failures.append(f"{where} has no id")
-        else:
-            ids.append(step_id)
+        valid_id = isinstance(step_id, str) and bool(step_id.strip())
+        if not valid_id:
+            failures.append(f"{where} has no id or id is not a string")
+        elif step_id in graph:
+            failures.append(f"duplicate step id {step_id!r}")
         tool = step.get("tool")
-        if not tool:
-            failures.append(f"{where} ({step_id or '?'}) has no tool")
+        if not isinstance(tool, str) or not tool:
+            failures.append(f"{where} ({step_id or '?'}) has no tool or tool is not a string")
         elif tool not in tools:
             if tool in skills:
                 failures.append(f"{where} ({step_id}) uses skill {tool!r} "
@@ -55,48 +56,53 @@ def validate_plan(plan: dict, available_tools, skill_names=None) -> list[str]:
         elif not isinstance(args, dict):
             failures.append(f"{where} ({step_id}) args are not a dict")
         deliverable = step.get("deliverable")
-        if deliverable:
-            deliverables.append(deliverable)
-        elif tool in {"write", "write_file", "generate_document"}:
+        if deliverable not in (None, "") and not isinstance(deliverable, str):
+            failures.append(f"{where} deliverable is not a string")
+        elif deliverable:
+            if deliverable in seen_deliverables:
+                failures.append(f"duplicate deliverable {deliverable!r}")
+            seen_deliverables.add(deliverable)
+        elif isinstance(tool, str) and tool in {"write", "write_file", "generate_document"}:
             failures.append(f"{where} ({step_id}) has no deliverable")
-        depends = step.get("depends_on", [])
-        if depends is not None and not isinstance(depends, list):
+        depends = step.get("depends_on")
+        if depends is None:
+            depends = []
+        if not isinstance(depends, list):
             failures.append(f"{where} ({step_id}) depends_on is not a list")
-    seen = set()
-    for deliverable in deliverables:
-        if deliverable in seen:
-            failures.append(f"duplicate deliverable {deliverable!r}")
-        seen.add(deliverable)
-    id_set = set(ids)
-    for step in steps:
-        if not isinstance(step, dict):
-            continue
-        for dep in step.get("depends_on", []) or []:
-            if dep not in id_set:
-                failures.append(
-                    f"step {step.get('id')} depends on unknown step {dep!r}")
-            elif dep == step.get("id"):
-                failures.append(f"step {step.get('id')} depends on itself")
-    # Cycle check: a step reachable from itself through depends_on.
-    graph = {s.get("id"): list(s.get("depends_on", []) or [])
-             for s in steps if isinstance(s, dict) and s.get("id")}
-    visiting, visited = set(), set()
-
-    def _walk(node: str) -> bool:
-        if node in visiting:
-            return True
-        if node in visited or node not in graph:
-            return False
-        visiting.add(node)
-        try:
-            return any(_walk(dep) for dep in graph[node])
-        finally:
-            visiting.discard(node)
-            visited.add(node)
-
-    for node in graph:
-        if _walk(node):
-            failures.append(f"cycle in depends_on involving step {node!r}")
+            depends = []
+        valid_depends = []
+        for dep in depends:
+            if not isinstance(dep, str) or not dep:
+                failures.append(f"{where} ({step_id}) dependency is not a step id")
+            else:
+                valid_depends.append(dep)
+        if valid_id:
+            graph[step_id] = valid_depends
+    for step_id, depends in graph.items():
+        for dep in depends:
+            if dep not in graph:
+                failures.append(f"step {step_id} depends on unknown step {dep!r}")
+            elif dep == step_id:
+                failures.append(f"step {step_id} depends on itself")
+    # Iterative topological validation also handles long, valid DAGs without
+    # overflowing Python's recursion limit on model-supplied input.
+    from collections import deque
+    dependents = {step_id: [] for step_id in graph}
+    counts = {step_id: 0 for step_id in graph}
+    for step_id, depends in graph.items():
+        for dep in depends:
+            if dep in graph:
+                dependents[dep].append(step_id)
+                counts[step_id] += 1
+    ready = deque(step_id for step_id, count in counts.items() if count == 0)
+    while ready:
+        for child in dependents[ready.popleft()]:
+            counts[child] -= 1
+            if counts[child] == 0:
+                ready.append(child)
+    for step_id, count in counts.items():
+        if count:
+            failures.append(f"cycle in depends_on involving step {step_id!r}")
             break
     return failures
 

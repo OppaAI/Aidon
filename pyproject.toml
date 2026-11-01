@@ -29,6 +29,9 @@ memory = [
 sparse = [
     "fastembed>=0.3",
 ]
+modal = [
+    "modal==1.6.3",
+]
 kb = [
     "pypdf",
     "python-docx",
@@ -54,3 +57,6 @@ packages = ["src", "src.system", "src.memory", "src.agentic", "src.interface", "
 [tool.setuptools.package-data]
 "src.interface" = ["static/**/*"]
 "src.capabilities" = ["security_rules/*.yml"]
+
+[tool.setuptools.data-files]
+"share/aidon" = ["AGENTS.md"]

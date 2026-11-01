@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import atexit
 import json
+import heapq
 import math
 import os
 import sqlite3
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 
 from .embedder import sparse_weights
@@ -72,6 +72,28 @@ def _rrf(dense_ranked: list[Point], sparse_ranked: list[Point],
     return [Hit(points[pid], score) for pid, score in ordered[:limit]]
 
 
+def _hybrid_search(points, vector, query_text, limit, sparse=None):
+    """Shared fallback ranking; select only the ranks consumed by RRF."""
+    if limit <= 0:
+        return []
+    points = list(points)
+    over = max(limit * 2, 4)
+    query_sparse = dict(zip(sparse[0], sparse[1])) if sparse else {}
+    if not query_sparse:
+        query_sparse = dict(zip(*_sparse_from_text(query_text)))
+
+    def sparse_score(point):
+        point_sparse = (dict(zip(point.sparse[0], point.sparse[1]))
+                        if point.sparse and point.sparse[0]
+                        else dict(zip(*_sparse_from_text(point.text))))
+        return sum(min(query_sparse.get(i, 0.0), weight)
+                   for i, weight in point_sparse.items())
+
+    dense = heapq.nlargest(over, points, key=lambda point: _cosine(vector, point.vector))
+    keyword = heapq.nlargest(over, points, key=sparse_score)
+    return _rrf(dense, keyword, limit)
+
+
 class InMemoryStore:
     """Qdrant-shaped in-memory store, for tests and fallback."""
 
@@ -122,23 +144,7 @@ class InMemoryStore:
     def search(self, collection: str, vector: list[float],
                query_text: str, limit: int = 5,
                sparse: tuple[list[int], list[float]] | None = None) -> list[Hit]:
-        if limit <= 0:
-            return []
-        points = list(self._data[collection].values())
-        dense_ranked = sorted(
-            points, key=lambda p: _cosine(vector, p.vector), reverse=True)
-        query_sparse = dict(zip(sparse[0], sparse[1])) if sparse else {}
-        if not query_sparse:
-            query_sparse = dict(zip(*_sparse_from_text(query_text)))
-        def sparse_score(point: Point) -> float:
-            point_sparse = dict(zip(point.sparse[0], point.sparse[1])) \
-                if point.sparse and point.sparse[0] else \
-                dict(zip(*_sparse_from_text(point.text)))
-            return sum(min(query_sparse.get(i, 0.0), w)
-                       for i, w in point_sparse.items())
-        sparse_ranked = sorted(points, key=sparse_score, reverse=True)
-        over = max(limit * 2, 4)
-        return _rrf(dense_ranked[:over], sparse_ranked[:over], limit)
+        return _hybrid_search(self._data[collection].values(), vector, query_text, limit, sparse)
 
 
 class SQLiteStore(InMemoryStore):
@@ -206,13 +212,14 @@ class SQLiteStore(InMemoryStore):
 
     def set_payload(self, collection: str, point_id: str,
                     payload: dict) -> None:
-        point = self.get(collection, point_id)
-        if point is None:
-            return
-        point.payload.update(payload)
-        self.upsert(collection, point)
+        with self._lock:
+            point = self.get(collection, point_id)
+            if point is None:
+                return
+            point.payload.update(payload)
+            self.upsert(collection, point)
 
-    def _rows(self, collection: str, limit: int = 100000,
+    def _rows(self, collection: str, limit: int | None = None,
               filters: dict | None = None):
         with self._lock:
             rows = self._db.execute(
@@ -246,29 +253,7 @@ class SQLiteStore(InMemoryStore):
     def search(self, collection: str, vector: list[float], query_text: str,
                limit: int = 5,
                sparse: tuple[list[int], list[float]] | None = None) -> list[Hit]:
-        # Do NOT delegate to InMemoryStore.search: it ranks over
-        # self._data, which SQLiteStore never builds (its __init__
-        # opens SQLite instead). Rank over this store's own rows
-        # with the same dense+sparse + RRF algorithm.
-        if limit <= 0:
-            return []
-        points = self._rows(collection)
-        dense_ranked = sorted(
-            points, key=lambda p: _cosine(vector, p.vector), reverse=True)
-        query_sparse = dict(zip(sparse[0], sparse[1])) if sparse else {}
-        if not query_sparse:
-            query_sparse = dict(zip(*_sparse_from_text(query_text)))
-
-        def sparse_score(point: Point) -> float:
-            point_sparse = dict(zip(point.sparse[0], point.sparse[1])) \
-                if point.sparse and point.sparse[0] else \
-                dict(zip(*_sparse_from_text(point.text)))
-            return sum(min(query_sparse.get(i, 0.0), w)
-                       for i, w in point_sparse.items())
-
-        sparse_ranked = sorted(points, key=sparse_score, reverse=True)
-        over = max(limit * 2, 4)
-        return _rrf(dense_ranked[:over], sparse_ranked[:over], limit)
+        return _hybrid_search(self._rows(collection), vector, query_text, limit, sparse)
 
 
 def _sparse_from_text(text: str):

@@ -166,22 +166,34 @@ class WebUIGate:
         self.whatsapp_sender = whatsapp_sender
         self.cards: dict[str, dict] = {}
         self._events: dict[str, threading.Event] = {}
-        self._counter = 0
+        self._card_lock = threading.RLock()
         # Prefer shared AutonomyPolicy (same file as CLI)
         self.gate = ApprovalGate(self._decide, policy=policy)
 
     def _decide(self, kind: str, title: str, body: str,
                 context: dict | None = None) -> Decision:
         import time as _time
-        self._counter += 1
-        card_id = f"card-{self._counter}"
+        import uuid
         event = threading.Event()
-        self._events[card_id] = event
-        self.cards[card_id] = {
-            "kind": kind, "title": title, "body": body, "verdict": None,
-            "edited_text": "", "context": dict(context or {}),
-        }
+        card_id = "card-" + uuid.uuid4().hex[:16]
+        with self._card_lock:
+            self._events[card_id] = event
+            self.cards[card_id] = {
+                "kind": kind, "title": title, "body": body, "verdict": None,
+                "edited_text": "", "context": dict(context or {}),
+            }
         pending_since = _time.time()
+        slack_channel = (context or {}).get("slack_channel")
+        if slack_channel and self.slack_sender is not None:
+            snippet = body if len(body) <= 1000 else body[:1000] + "…"
+            try:
+                self.slack_sender(
+                    slack_channel,
+                    f"Approval needed [{card_id}]: {title}\n{snippet}\n"
+                    f"Send in the channel: approve {card_id}  or  reject {card_id}",
+                    (context or {}).get("slack_thread_ts"))
+            except Exception:
+                pass
         whatsapp_to = (context or {}).get("whatsapp_to")
         if whatsapp_to and self.whatsapp_sender is not None:
             snippet = body if len(body) <= 1000 else body[:1000] + "…"
@@ -209,10 +221,12 @@ class WebUIGate:
                         pass
             threading.Thread(target=_nudge, daemon=True).start()
         event.wait(timeout=self.timeout_seconds)
-        card = self.cards[card_id]
-        verdict = card["verdict"] or "rejected"
-        card["verdict"] = verdict
-        return Decision(verdict, edited_text=card.get("edited_text", ""))
+        with self._card_lock:
+            card = self.cards[card_id]
+            verdict = card["verdict"] or "rejected"
+            card["verdict"] = verdict
+            return Decision(verdict, edited_text=card.get("edited_text", ""))
+
     def pending_cards(self) -> list[dict]:
         """Cards still awaiting a verdict, in creation order.
 
@@ -220,27 +234,36 @@ class WebUIGate:
         rejected, or when its wait times out (the timeout path
         writes the fail-closed verdict back into the card).
         """
-        return [{"id": card_id, "kind": card["kind"],
-                 "title": card["title"], "body": card["body"]}
-                for card_id, card in self.cards.items()
-                if card["verdict"] is None]
+        with self._card_lock:
+            return [{"id": card_id, "kind": card["kind"],
+                     "title": card["title"], "body": card["body"]}
+                    for card_id, card in self.cards.items()
+                    if card["verdict"] is None]
 
-    def cancel_all(self) -> None:
-        """Resolve every pending card as rejected, for a cancelled run."""
-        for card_id, event in list(self._events.items()):
-            if not event.is_set():
-                self.cards[card_id]["verdict"] = "rejected"
-                event.set()
+    def cancel_run(self, run_id: str) -> None:
+        self.cancel_all(run_id=run_id)
+
+    def cancel_all(self, run_id: str | None = None) -> None:
+        """Reject pending cards, optionally only those belonging to one run."""
+        with self._card_lock:
+            for card_id, event in self._events.items():
+                if run_id is not None and self.cards[card_id].get("context", {}).get("run_id") != run_id:
+                    continue
+                if not event.is_set():
+                    self.cards[card_id]["verdict"] = "rejected"
+                    event.set()
 
     def approve(self, card_id: str, verdict: str, edited_text: str = "") -> bool:
-        if card_id not in self.cards:
-            return False
-        if verdict not in ("approved", "rejected", "edited"):
-            return False
-        self.cards[card_id]["verdict"] = verdict
-        self.cards[card_id]["edited_text"] = str(edited_text or "")
-        self._events[card_id].set()
-        return True
+        with self._card_lock:
+            card = self.cards.get(card_id)
+            if card is None or card["verdict"] is not None:
+                return False
+            if verdict not in ("approved", "rejected", "edited"):
+                return False
+            card["verdict"] = verdict
+            card["edited_text"] = str(edited_text or "")
+            self._events[card_id].set()
+            return True
 
 
 HUB_MAX_EVENTS = 500

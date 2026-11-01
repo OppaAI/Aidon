@@ -116,6 +116,35 @@ def test_slack_http_error_logs_status_and_safe_api_code():
     assert "secret" not in result["error"]
 
 
+def test_slack_bot_replies_ignore_legacy_webhooks_and_preserve_thread():
+    config = MessagingConfig(
+        slack_bot_token="bot-token",
+        slack_webhooks={"C1": "https://hooks.slack.com/services/revoked"})
+    calls = []
+
+    def post(url, token, payload):
+        calls.append((url, token, payload))
+        return {"ok": True, "ts": "2.0"}
+
+    assert send_slack(config, "C1", "reply", thread_ts="1.0", post=post)["ok"]
+    assert calls == [("https://slack.com/api/chat.postMessage", "bot-token",
+                      {"channel": "C1", "text": "reply", "thread_ts": "1.0"})]
+
+
+def test_slack_webhook_accepts_plain_ok_without_a_bot(monkeypatch):
+    config = MessagingConfig(slack_webhooks={"C1": "https://hooks.slack.com/services/test"})
+    requests = []
+
+    def open_request(request, **kwargs):
+        requests.append(request)
+        return io.BytesIO(b"ok")
+
+    monkeypatch.setattr("urllib.request.urlopen", open_request)
+    assert send_slack(config, "C1", "reply") == {"ok": True, "webhook": True}
+    assert "Authorization" not in requests[0].headers
+    assert json.loads(requests[0].data) == {"text": "reply"}
+
+
 def test_slack_poll_advances_cursor_only_after_handling_each_message():
     cursor = {"C1": "1"}
     handled = []
@@ -175,3 +204,36 @@ def test_mcp_client_fake_server(tmp_path):
     client.start()
     assert client.list_tools() == [{"name": "echo"}]
     client.close()
+
+
+def test_slack_history_pagination_keeps_all_messages_and_attachments():
+    config = MessagingConfig(slack_bot_token="x")
+    calls = []
+
+    def fetch(url, token, params):
+        calls.append(params)
+        if params.get("cursor") == "next":
+            return {"ok": True, "messages": [{"ts": "9.0", "text": "older"}]}
+        return {"ok": True, "messages": [
+            {"ts": "11.0", "text": "newest"},
+            {"ts": "10.0", "text": "file", "files": [{"id": "F1"}]}],
+            "response_metadata": {"next_cursor": "next"}}
+
+    messages, newest = poll_slack_once(config, "C1", last_ts="8.0", fetch=fetch)
+    assert [m["ts"] for m in messages] == ["9.0", "10.0", "11.0"]
+    assert messages[1]["files"] == [{"id": "F1"}]
+    assert newest == "11.0"
+    assert calls[1]["oldest"] == "8.0"
+
+
+def test_slack_history_rate_limit_preserves_retry_delay(monkeypatch):
+    from src.interface.messaging import SlackRateLimited
+
+    def limited(*args, **kwargs):
+        raise urllib.error.HTTPError("https://slack.com/api/conversations.history",
+                                     429, "Too Many Requests", {"Retry-After": "90"}, io.BytesIO(b""))
+
+    monkeypatch.setattr("urllib.request.urlopen", limited)
+    with pytest.raises(SlackRateLimited) as error:
+        poll_slack_once(MessagingConfig(slack_bot_token="x"), "C1")
+    assert error.value.retry_after == 90

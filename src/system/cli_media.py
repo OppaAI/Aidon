@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 
 def run_media_command(args, config):
     """Run a media/asset command, returning None when not applicable."""

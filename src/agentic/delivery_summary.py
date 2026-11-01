@@ -27,7 +27,7 @@ def delivery_summary(report: dict) -> str:
     """Render a run report dict as Markdown."""
     report = report or {}
     goal = report.get("goal", "(no goal)")
-    lines = [f"# Delivery summary", "", f"**Goal:** {goal}", ""]
+    lines = ["# Delivery summary", "", f"**Goal:** {goal}", ""]
     rows = _deliverable_rows(report.get("deliverables"))
     if rows:
         lines.append("## Deliverables")

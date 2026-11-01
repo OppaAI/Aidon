@@ -96,7 +96,7 @@ def test_timed_out_card_leaves_pending_list():
     thread.start()
     thread.join(timeout=5)
     assert gate.pending_cards() == []
-    assert gate.cards["card-1"]["verdict"] == "rejected"
+    assert gate.cards[next(iter(gate.cards))]["verdict"] == "rejected"
 
 
 def test_cancel_all_clears_pending_list():
@@ -224,12 +224,12 @@ def test_whatsapp_card_delivery_on_creation():
     assert len(sent) == 1
     to, text = sent[0]
     assert to == "+10000000000"
-    assert "card-1" in text
+    assert next(iter(gate.cards)) in text
     assert "Run the plan" in text
     assert "report.md" in text
-    assert "approve card-1" in text
-    assert "reject card-1" in text
-    assert gate.cards["card-1"]["context"]["run_id"] == "r1"
+    assert f"approve {next(iter(gate.cards))}" in text
+    assert f"reject {next(iter(gate.cards))}" in text
+    assert gate.cards[next(iter(gate.cards))]["context"]["run_id"] == "r1"
 
     sent.clear()
     plain = WebUIGate(timeout_seconds=0.5,
@@ -256,7 +256,7 @@ def test_nudge_fires_before_timeout_with_title():
     assert len(nudges) == 1
     channel, text = nudges[0]
     assert channel == "#owner"
-    assert "card-1" in text
+    assert next(iter(gate.cards)) in text
     assert "Run the plan" in text
 
 
@@ -269,7 +269,7 @@ def test_nudge_skipped_when_card_decided():
         timeout_seconds=4,
         nudge_tracker=NudgeTracker(nudge_minutes=15, channel="#owner"),
         slack_sender=lambda channel, text: nudges.append((channel, text)))
-    threading.Timer(0.5, lambda: gate.approve("card-1", "approved")).start()
+    threading.Timer(0.5, lambda: gate.approve(_wait_for_card(gate), "approved")).start()
     decision = gate.gate.ask("live", "Run the plan", "body")
     assert decision.verdict == "approved"
     time.sleep(2.5)
@@ -315,3 +315,16 @@ def test_transcribe_stream_routes_without_key(live_server):
             assert exc.code == code, (path, exc.code)
         else:
             raise AssertionError(f"expected HTTP {code} for {path}")
+
+
+def test_resolved_card_cannot_be_changed_and_ids_do_not_repeat_after_restart():
+    first = WebUIGate(timeout_seconds=0)
+    second = WebUIGate(timeout_seconds=0)
+    assert first._decide("live", "old", "body").verdict == "rejected"
+    assert second._decide("live", "new", "body").verdict == "rejected"
+    old_id = next(iter(first.cards))
+    new_id = next(iter(second.cards))
+    assert old_id != new_id
+    assert not first.approve(old_id, "approved")
+    assert not second.approve(old_id, "approved")
+    assert first.cards[old_id]["verdict"] == "rejected"

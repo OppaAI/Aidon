@@ -8,12 +8,10 @@ import threading
 def process_polled_messages(messages, handle, checkpoint) -> None:
     """Handle each message before advancing its durable timestamp cursor."""
     for message in messages:
-        try:
-            handle(message)
-        finally:
-            timestamp = str(message.get("ts", ""))
-            if timestamp:
-                checkpoint(timestamp)
+        handle(message)
+        timestamp = str(message.get("ts", ""))
+        if timestamp:
+            checkpoint(timestamp)
 
 
 def dispatch_slack_message(dispatcher, event, *, channel: str, thread_ts: str,
@@ -52,3 +50,43 @@ def dispatch_slack_message(dispatcher, event, *, channel: str, thread_ts: str,
         return
     for reply in replies:
         sender(channel, reply, thread_ts)
+
+
+def load_poll_cursors(path, channels, now=None):
+    """Resume saved history; a new channel starts now, never replays old goals.
+
+    A corrupt file needs owner recovery. Silently resetting it could execute
+    arbitrary historical goals whose effects have already happened.
+    """
+    import json
+    import re
+    import time
+
+    if path.exists():
+        try:
+            cursors = json.loads(path.read_text())
+        except (OSError, ValueError) as exc:
+            raise ValueError("Slack cursor file is unreadable; restore it before polling") from exc
+        if (not isinstance(cursors, dict)
+                or any(not isinstance(value, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value)
+                       for value in cursors.values())):
+            raise ValueError("Slack cursor file is invalid; restore it before polling")
+    else:
+        cursors = {}
+    timestamp = str(time.time() if now is None else now)
+    for channel in channels:
+        cursors.setdefault(channel, timestamp)
+    save_poll_cursors(path, cursors)
+    return cursors
+
+
+def save_poll_cursors(path, cursors):
+    import json
+    import os
+
+    temporary = path.with_suffix(".tmp")
+    with temporary.open("w") as handle:
+        json.dump(cursors, handle, indent=2)
+        handle.flush()
+        os.fsync(handle.fileno())
+    temporary.replace(path)

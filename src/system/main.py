@@ -462,6 +462,13 @@ def main(argv: list[str] | None = None) -> int:
         cfg = MessagingConfig.from_env()
         if args.action == "status":
             print(f"Slack configured: {cfg.slack_configured()}, channel env set: {bool(_os.environ.get('AIDON_SLACK_INBOUND_CHANNEL'))}")
+            transport = ("bot Web API (legacy webhooks ignored)" if cfg.slack_configured()
+                         else "incoming webhook" if cfg.slack_webhooks else "unconfigured")
+            print(f"Reply transport: {transport}")
+            from ..capabilities.outbox import Outbox
+            reply_root = config.home / "messaging" / "slack"
+            if (reply_root / "outbox" / "notifications.json").exists():
+                print(f"Replies awaiting retry: {len(Outbox(reply_root).list())}")
             return 0
         if args.action == "listen":
             if not cfg.slack_configured():
@@ -897,7 +904,7 @@ def main(argv: list[str] | None = None) -> int:
         def slack_sender(channel, text, thread_ts=None):
             result = send_slack(msg, channel, text, thread_ts=thread_ts)
             if not result.get("ok"):
-                print(f"Slack send failed: {result.get('error', 'unknown error')}")
+                print(f"Slack send failed for {channel}: {result.get('error', 'unknown error')}")
             return result
 
         def whatsapp_sender(to, text):

@@ -48,8 +48,15 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
     def slack_sender(channel: str, text: str, thread_ts=None):
         result = send_slack(msg, channel, text, thread_ts=thread_ts)
         if not result["ok"]:
-            print(f"Slack send failed: {result['error']}")
+            print(f"Slack send failed for {channel}: {result['error']}")
         return result
+
+    from ..interface.reply_delivery import ReplySender
+    _whatsapp_transport = whatsapp_sender
+    whatsapp_sender = ReplySender(
+        config.home, "whatsapp",
+        lambda to, text, thread_ts: _whatsapp_transport(to, text))
+    slack_sender = ReplySender(config.home, "slack", slack_sender)
 
     from ..interface.messaging import download_whatsapp_media
     from ..interface.run_control import RunControl
@@ -144,13 +151,16 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         except Exception:
             _clef_client = None
         conversation_context = ""
-        conversation_id = str(event.payload.get("conversation_id", "") or "")
+        conversation_id = str(event.payload.get("conversation_id", "") or event.conversation_id or "")
         if conversation_id:
             try:
                 history = server._conversations_db().history(conversation_id, limit=8)
+                if (history and history[-1].get("role") == "user"
+                        and history[-1].get("text") == event.goal):
+                    history = history[:-1]
                 conversation_context = "\n".join(
                     f"{item.get('role', 'user')}: {str(item.get('text', ''))[:1200]}"
-                    for item in history[:-1]
+                    for item in history
                 )
             except Exception:
                 conversation_context = ""
@@ -282,6 +292,9 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         _gate_context = {"run_id": run_id,
                          "conversation_id": conversation_id,
                          "source": event.source}
+        if event.source == "slack":
+            _gate_context["slack_channel"] = str(event.payload.get("channel", ""))
+            _gate_context["slack_thread_ts"] = event.payload.get("thread_ts")
         if _whatsapp_to:
             _gate_context["whatsapp_to"] = _whatsapp_to
 
@@ -637,73 +650,55 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
     # can poll Slack when explicitly enabled, while the separate
     # webhook-only process does not start a duplicate poller.
     import os as _slack_os
-    if (_slack_os.environ.get("AIDON_SLACK_AUTOSTART", "0") == "1"
+    _slack_inbox = None
+    _slack_stop = threading.Event()
+    if msg.slack_bot_token:
+        from ..interface.slack_inbox import SlackInbox
+        from .config import _env_int as _safe_env_int
+        _slack_inbox = SlackInbox(
+            config.home, dispatcher, slack_sender,
+            ack_after=max(0, _safe_env_int("AIDON_SLACK_ACK_AFTER_SECONDS", 15)),
+            recorder=server._record_surface_exchange)
+        server.slack_message_dispatch = _slack_inbox.enqueue
+    if (not args.webhook_only and _slack_os.environ.get("AIDON_SLACK_AUTOSTART", "0") == "1"
             and msg.slack_bot_token):
         from ..interface.messaging import poll_slack_once as _poll_slack_once
         _channels = [c.strip() for c in _slack_os.environ.get(
             "AIDON_SLACK_INBOUND_CHANNEL", "").split(",") if c.strip()]
         if _channels:
-            _poll_seconds = max(3, int(_slack_os.environ.get(
-                "AIDON_SLACK_POLL_SECONDS", "10")))
-            _ack_after = max(0, int(_slack_os.environ.get(
-                "AIDON_SLACK_ACK_AFTER_SECONDS", "15")))
+            _poll_seconds = max(3, _safe_env_int("AIDON_SLACK_POLL_SECONDS", 10))
             _cursor_path = config.home / "slack_poll_cursors.json"
 
             def _slack_poll_loop():
-                import json as _slack_json
                 import time as _slack_time
+                from ..interface.slack_polling import load_poll_cursors, save_poll_cursors
+                _retry_after = {}
                 try:
-                    _cursors = _slack_json.loads(_cursor_path.read_text()) \
-                        if _cursor_path.is_file() else {}
+                    _cursors = load_poll_cursors(_cursor_path, _channels)
                 except (OSError, ValueError):
-                    _cursors = {}
-                while True:
+                    print("Slack polling stopped: restore the invalid cursor file before restarting")
+                    return
+                while not _slack_stop.is_set():
                     for _channel in _channels:
+                        if _slack_time.monotonic() < _retry_after.get(_channel, 0):
+                            continue
                         try:
                             _messages, _last = _poll_slack_once(
                                 msg, _channel,
                                 last_ts=str(_cursors.get(_channel, "")))
-                            from ..interface.slack_polling import (
-                                dispatch_slack_message, process_polled_messages)
+                            from ..interface.slack_polling import process_polled_messages
 
                             def _handle_polled_message(_message):
-                                _text = _message.get("text", "")
-                                _thread_ts = str(_message.get("ts", ""))
-                                try:
-                                    _decision = server._resolve_decision(_text)
-                                    if _decision is None:
-                                        _decision = server._resolve_control(_text)
-                                    if _decision is not None:
-                                        slack_sender(_channel, _decision, _thread_ts)
-                                    else:
-                                        _event = TriggerEvent(
-                                            source="slack", kind="message",
-                                            goal=_text, conversation_id="slack:" + _channel,
-                                            payload={"channel": _channel},
-                                            reply=None)
-                                        dispatch_slack_message(
-                                            dispatcher, _event,
-                                            channel=_channel,
-                                            thread_ts=_thread_ts,
-                                            sender=slack_sender,
-                                            ack_after=_ack_after)
-                                except Exception as _exc:
-                                    print(f"Slack dispatch error: {_exc}")
-                                    slack_sender(
-                                        _channel,
-                                        "Aidon couldn't process that message because "
-                                        "its run encountered an internal error. Check "
-                                        "the Aidon logs, then send it again.",
-                                        _thread_ts)
+                                server.handle_slack_message(
+                                    {"event": {**_message, "type": "message", "channel": _channel}},
+                                    dispatch=_slack_inbox.enqueue)
 
                             def _save_slack_cursor(_timestamp):
                                 _cursors[_channel] = _timestamp
-                                _cursor_path.write_text(
-                                    _slack_json.dumps(_cursors, indent=2))
+                                save_poll_cursors(_cursor_path, _cursors)
 
-                            # Commit each message only after dispatch has
-                            # returned (or its failure has been reported).
-                            # A restart during a run retries unacknowledged work.
+                            # Persist goals before acknowledging history. Commands
+                            # remain available while the inbox worker runs goals.
                             process_polled_messages(
                                 _messages, _handle_polled_message,
                                 _save_slack_cursor)
@@ -711,11 +706,12 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                             # advance history. Save that cursor after user work.
                             if _last and _last > str(_cursors.get(_channel, "")):
                                 _cursors[_channel] = _last
-                                _cursor_path.write_text(
-                                    _slack_json.dumps(_cursors, indent=2))
+                                save_poll_cursors(_cursor_path, _cursors)
                         except Exception as _exc:
-                            print(f"Slack poll error: {_exc}")
-                    _slack_time.sleep(_poll_seconds)
+                            print(f"Slack poll error for {_channel}: {_exc}")
+                            _retry_after[_channel] = _slack_time.monotonic() + getattr(
+                                _exc, "retry_after", _poll_seconds)
+                    _slack_stop.wait(_poll_seconds)
 
             _slack_thread = threading.Thread(
                 target=_slack_poll_loop, daemon=True, name="slack-inbound")
@@ -756,5 +752,16 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
             _startup_style("info", "External services need a tunnel; localhost is not publicly reachable.")
         else:
             _startup_style("warn", "Non-local bind requested; expose this only on a protected network and configure WebUI token authentication.")
-    server.serve(port=args.port, host=args.host)
+    slack_sender.start()
+    whatsapp_sender.start()
+    if _slack_inbox is not None:
+        _slack_inbox.start()
+    try:
+        server.serve(port=args.port, host=args.host)
+    finally:
+        _slack_stop.set()
+        if _slack_inbox is not None:
+            _slack_inbox.close()
+        slack_sender.close()
+        whatsapp_sender.close()
     return 0

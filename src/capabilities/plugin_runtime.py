@@ -343,8 +343,6 @@ def run_sandbox_tool(plugin, spec: dict, args: dict, sandbox, home: Path,
     values. Network is off unless the manifest declares ``network`` and
     the owner approves this invocation.
     """
-    from .sandbox import Sandbox
-
     plugin_dir = getattr(plugin, "directory", None)
     if plugin_dir is None:
         raise ValueError("sandbox tool has no plugin directory")

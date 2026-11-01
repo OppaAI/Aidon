@@ -197,7 +197,7 @@ class WebUIMessagingMixin:
                                 self.whatsapp_sender(sender, decision_reply)
                             continue
                         local_replies: list[str] = []
-                        _wa_payload = {"from": sender,
+                        _wa_payload = {"from": sender, "conversation_id": wa_key,
                                        "force_web": force_web,
                                        "think_max": wa_think_max or _wa_enabled(self.home, wa_key),
                                        "research_mode": wa_research_mode or _wa_research_enabled(self.home, wa_key),
@@ -209,8 +209,9 @@ class WebUIMessagingMixin:
                         if isinstance(wa_resume_plan, dict):
                             _wa_payload["resume_plan"] = wa_resume_plan
                         event = TriggerEvent(source="whatsapp", kind="message",
-                                             goal=text, payload=_wa_payload,
+                                             goal=text, conversation_id=wa_key, payload=_wa_payload,
                                              reply=local_replies.append)
+                        self._record_surface_exchange(wa_key, "user", text)
                         try:
                             self.dispatcher.dispatch(event)
                         except Exception as exc:
@@ -229,6 +230,7 @@ class WebUIMessagingMixin:
                             continue
                         for reply in local_replies:
                             replies.append(reply)
+                            self._record_surface_exchange(wa_key, "assistant", reply)
                             if self.whatsapp_sender is not None:
                                 self.whatsapp_sender(sender, reply)
         except Exception as exc:
@@ -318,10 +320,19 @@ class WebUIMessagingMixin:
                 return 401, {"error": "bad signature"}
         if body.get("type") == "url_verification":
             return 200, {"challenge": body.get("challenge", "")}
+        return self.handle_slack_message(
+            body, dispatch=getattr(self, "slack_message_dispatch", None))
+
+    def handle_slack_message(self, body: dict, dispatch=None) -> tuple[int, dict]:
+        """Handle a message already authenticated by webhook or bot polling.
+
+        A polling caller supplies durable background dispatch so approvals,
+        questions, and mode commands remain reachable while a goal runs.
+        """
         event_body = body.get("event", {})
         if (event_body.get("type") == "message"
                 and not event_body.get("bot_id")
-                and event_body.get("subtype") != "bot_message"):
+                and event_body.get("subtype") in (None, "", "file_share", "thread_broadcast")):
             text = str(event_body.get("text", ""))
             channel = str(event_body.get("channel", ""))
             thread_ts = event_body.get("thread_ts") or event_body.get("ts")
@@ -527,9 +538,15 @@ class WebUIMessagingMixin:
                 payload["resume_plan"] = sl_resume_plan
             payload["channel"] = channel
             payload["thread_ts"] = thread_ts
+            payload["slack_ts"] = str(event_body.get("ts", ""))
+            payload["conversation_id"] = "slack:" + channel
             event = TriggerEvent(source="slack", kind="message", goal=text,
+                                 conversation_id="slack:" + channel,
                                  payload=payload,
                                  reply=replies.append)
+            if dispatch is not None:
+                dispatch(event)
+                return 200, {"queued": True}
             try:
                 self.dispatcher.dispatch(event)
             except Exception as exc:

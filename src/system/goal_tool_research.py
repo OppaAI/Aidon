@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import os
-from pathlib import Path
 
 
 def _env_int(name, default):

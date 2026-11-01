@@ -147,3 +147,15 @@ Setup and launch, in that order, are the entry points, as in the Aidon guides.
 ```
 
 A VM is not installed or provisioned by setup; the VM backend connects over SSH to a VM you already run, and a disposable VM per run is post-hackathon.
+
+
+The image installs Modal from the same frozen lockfile as the other runtime
+packages. Native installs can opt into it with `uv sync --extra modal`.
+The operating manual is included in the wheel and image. Put owner-maintained
+`SOUL.md`, `USER.md`, or an explicitly approved manual override in `AIDON_HOME`
+(`aidon-data` on the host for the default Compose deployment); these files take
+precedence over packaged defaults and persist across container replacement.
+
+Compose reports container health after checking the local listening port.
+This is a liveness check; confirm the configured model, memory store and sandbox
+with the acceptance checks in `PRODUCTION_READINESS.md`.

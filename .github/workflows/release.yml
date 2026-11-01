@@ -41,7 +41,8 @@ jobs:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
           PYTHONPATH: "src:."
         run: |
-          python3 -m pip install pytest
+          python3 -m pip install pytest ruff
+          python3 -m ruff check --select F821,F822,F823,E9 src scripts
           python3 -m pytest tests/ -q
 
       - name: Check WebUI JavaScript
@@ -50,7 +51,7 @@ jobs:
           node-version: "24"
 
       - name: Validate WebUI JavaScript
-        run: find src/interface/static -name '*.js' -print -exec node --check {} \;
+        run: find src/interface/static -name '*.js' -print0 | xargs -0 -r -n1 node --check
 
       - name: Prepare release notes from changelog
         env:

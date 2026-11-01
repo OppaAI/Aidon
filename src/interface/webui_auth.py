@@ -28,12 +28,16 @@ _LOCALHOSTS = {"127.0.0.1", "::1", "[::1]", "localhost"}
 
 
 def _is_localhost(remote_addr: str) -> bool:
+    import ipaddress
     addr = (remote_addr or "").strip().lower()
     if addr in _LOCALHOSTS:
         return True
-    if addr.startswith("127."):
-        return True
-    return False
+    try:
+        parsed = ipaddress.ip_address(addr)
+    except ValueError:
+        return False
+    mapped = getattr(parsed, "ipv4_mapped", None)
+    return parsed.is_loopback or (mapped is not None and mapped.is_loopback)
 
 
 def _authorization(headers: dict) -> str | None:

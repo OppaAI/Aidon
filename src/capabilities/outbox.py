@@ -136,13 +136,21 @@ class Outbox:
     def _load(self) -> list:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-            return data if isinstance(data, list) else []
-        except (json.JSONDecodeError, OSError):
+        except FileNotFoundError:
             return []
+        except json.JSONDecodeError as exc:
+            raise ValueError("notification outbox is corrupt; restore it before writing") from exc
+        if (not isinstance(data, list)
+                or any(not isinstance(item, dict) or not item.get("id") for item in data)):
+            raise ValueError("notification outbox has invalid records; restore it before writing")
+        return data
 
     def _save(self, items: list) -> None:
         temporary = self.path.with_name(self.path.name + ".tmp")
-        temporary.write_text(json.dumps(items, indent=2), encoding="utf-8")
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump(items, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(temporary, self.path)
 
     def queue(self, to: str, subject: str, body: str) -> dict:
@@ -210,6 +218,8 @@ class Outbox:
                         "next_attempt_at": (moment + timedelta(
                             seconds=60 * attempts)).isoformat(),
                     }
+            if not outcomes:
+                return {"sent": sent, "failed": failed, "remaining": len(items)}
             # Merge against the latest file so enqueues performed by the
             # sender are retained. Items removed by another API remain gone.
             latest = self._load()

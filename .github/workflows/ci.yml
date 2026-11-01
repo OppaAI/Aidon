@@ -1,4 +1,4 @@
-# Minimal CI for Aidon: pytest suite + node --check on WebUI JavaScript.
+# CI: Python correctness checks, regression tests, and WebUI JavaScript.
 # No secrets, no deploys, no Docker, no optional-dependency installs.
 # pytest is not a declared project dependency, so it is installed here;
 # the suite itself needs stdlib + pytest only (qdrant-client is optional
@@ -19,8 +19,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install pytest
-        run: python3 -m pip install pytest
+      - name: Install check tools
+        run: python3 -m pip install pytest ruff
+      - name: Check Python correctness
+        run: python3 -m ruff check --select F821,F822,F823,E9 src scripts
       - name: Run test suite
         env:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
@@ -31,4 +33,4 @@ jobs:
         with:
           node-version: "24"
       - name: Check WebUI JavaScript
-        run: find src/interface/static -name '*.js' -print -exec node --check {} \;
+        run: find src/interface/static -name '*.js' -print0 | xargs -0 -r -n1 node --check

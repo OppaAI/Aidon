@@ -3,6 +3,7 @@ memory is on SQLite/Hash instead of Qdrant, and setup.sh must offer
 the Qdrant Docker install."""
 
 from pathlib import Path
+import re
 from types import SimpleNamespace
 
 from src.interface.webui import CHAT_HTML, WebUIServer
@@ -59,5 +60,6 @@ def test_setup_offers_qdrant_docker():
     assert "aidon-qdrant" in setup
     assert "--with-qdrant" in setup
     assert "healthz" in setup
-    assert "v1.19.1" in setup
+    # Keep the image pinned without coupling this test to release upgrades.
+    assert re.search(r'qver="v\d+\.\d+\.\d+"', setup)
     assert "AIDON_QDRANT_URL" in setup

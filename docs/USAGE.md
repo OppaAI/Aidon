@@ -57,6 +57,34 @@
   records voice input in the browser and is available independently
   of this setting.
 
+## Slack polling and reply recovery
+
+For a private local deployment, polling needs no public URL or signing secret.
+Set `AIDON_SLACK_AUTOSTART=1`, `SLACK_BOT_TOKEN`, and comma-separated channel/DM
+IDs in `AIDON_SLACK_INBOUND_CHANNEL`, then restart Aidon. The bot needs access
+to those conversations and the corresponding history and messaging scopes.
+
+Replies use the bot Web API when a token is configured. Legacy
+`AIDON_SLACK_WEBHOOK_<conversation-id>` settings are used only for webhook-only
+outbound sending. Check configuration and pending replies with:
+
+```sh
+docker exec aidon-aidon-1 aidon slack status
+```
+
+Send polling approvals and question answers as **top-level messages** in the
+same conversation, for example `approve <card-id>`. Polling does not enumerate
+all thread replies. Signed Slack events can receive thread replies when the
+appropriate message events are subscribed.
+
+Goals are persisted before the history cursor advances. Pending goals survive
+restart; interrupted goals require owner review before another attempt. Failed
+Slack and WhatsApp replies are saved under `AIDON_HOME/messaging/` and retried
+without running the goal again. A provider acceptance immediately before a
+process crash can still produce a duplicate reply on retry. A new polling
+channel starts at startup time; a corrupt cursor file stops polling until the
+owner restores it, rather than replaying historical requests.
+
 ## ✅ Pre-approvals, the same on every surface
 
 A pre-approval lets Aidon run **reversible** steps for one

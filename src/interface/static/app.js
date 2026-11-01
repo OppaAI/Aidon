@@ -117,7 +117,7 @@
          .replace(/(^|[\s(])\*([^*\n]+)\*(?=$|[\s.,!?)\]])/g, "$1<em>$2</em>")
          .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s.,!?)\]])/g, "$1<em>$2</em>")
          .replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
-    t = t.replace(/\[([^\]\n]+)\]\(((?:https?:\/\/|file:)\/\/[^\s)]+)\)/g,
+    t = t.replace(/\[([^\]\n]+)\]\(((?:https?:\/\/|file:\/\/|\/(?!\/))[^\s)]+)\)/g,
         '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
     // A file:// link is not clickable from an http page in Chrome, so
     // the WebUI serves the file itself: same-origin, always clickable.
@@ -162,7 +162,7 @@
     }
     t = kept.join("\n");
     t = t.replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>");
-    t = "\x01<p>" + t + "</p>\x01";
+    t = "<p>" + t + "</p>";
     // restore code blocks (outside <p>, which cannot contain <pre>)
     t = t.replace(/\x00CODE(\d+)\x00/g,
         (m, i) => { const b = blocks[Number(i)];

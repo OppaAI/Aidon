@@ -1,5 +1,8 @@
 # Codebase review — 2026-10-31
 
+Current status: see [the November 1 review](CODEBASE_REVIEW_2026-11-01.md) and
+[production readiness](PRODUCTION_READINESS.md). Counts below are historical.
+
 Reviewed commit `4b3ddf9`; code fixes below are in progress in the working tree. This is not a certification that the repository is bug-free.
 
 ## Confirmed findings

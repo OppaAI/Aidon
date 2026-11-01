@@ -250,7 +250,7 @@ install_qdrant_docker() {
   # migrate with data, move that directory's contents up one
   # level into $datadir first.
   # Returns 0 when the server is running, 1 when it cannot be.
-  qver="v1.19.1"
+  qver="v1.20.0"
   if ! command -v docker >/dev/null 2>&1; then
     warn "Docker is not installed; install it, then run ./setup.sh again."
     return 1
