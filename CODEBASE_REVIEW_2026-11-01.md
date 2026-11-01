@@ -64,8 +64,11 @@ Final test counts, image activation and runtime evidence are recorded in
   the explicitly requested filename. Focused tests passed, and after rebuilding
   the image, a target-host scheduled run reported done with the requested file;
   the owner confirmed it contained the exact requested sentinel. That run also
-  produced an extra `exact-content.txt` artifact. Actual plugin isolation
-  remains unverified there.
+  produced an extra `exact-content.txt` artifact. A direct call through the
+  adopted plugin registry and configured Modal backend returned `wrote` for a
+  marker under `/tmp`, while that marker was absent from the Aidon container.
+  This confirms the tested Modal plugin filesystem boundary; it is not a general
+  security audit and does not test Bubblewrap.
 - Read-only live Slack `auth.test` and `conversations.history` probes: the bot
   token and both configured conversations succeeded. No synthetic chat message
   was posted during these checks.
@@ -77,14 +80,13 @@ and caller contracts and were repaired without an unreviewed consolidation.
 
 ## Remaining work, in priority order
 
-1. **Target-machine runtime checks.** Verify the configured sandbox's plugin
-   isolation boundary. Standalone scheduler startup, dispatch, and pending-claim
-   recovery passed Docker smoke tests. The owner's successful Modal tasks show
-   that Modal can execute work, but do not exercise every plugin-isolation or
-   failure path. Also verify browser refresh/recovery and configured model
-   failures. Record the actual backend and evidence; local Bubblewrap tests do
-   not certify Modal, and a host that disallows unprivileged namespaces cannot
-   certify Bubblewrap isolation.
+1. **Target-machine runtime checks.** Standalone scheduler startup, dispatch,
+   pending-claim recovery, and a Modal plugin filesystem-isolation probe passed
+   Docker-host checks. The probe only confirms that this plugin's `/tmp` write
+   was absent from the Aidon container; it does not cover every escape path.
+   Bubblewrap isolation remains unverified because the host disallows
+   unprivileged namespaces. Also verify browser refresh/recovery and configured
+   model failures, recording the actual backend and evidence.
 2. **Full dispatcher wiring and workflow acceptance.** Basic Slack and WhatsApp
    message/reply behavior has been confirmed on the deployed instance. Still
    exercise handler execution through the CLI-created dispatcher with an
