@@ -88,6 +88,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -541,21 +542,31 @@ class ModalBackend(ExecutionBackend):
                          f"{shlex.join(command)}")
             rc, out, err = self._exec(
                 sb, ["sh", "-c", shell_cmd], timeout_seconds)
-            rc_back, out_back, _err_back = self._exec(
-                sb, ["sh", "-c",
-                     f"tar -cf - -C {shlex.quote(self.REMOTE_WORKDIR)} . "
-                     "| base64 -w0"],
-                timeout_seconds)
+            # Do not send the workspace archive through process stdout.
+            # Modal pipes are intended for command output and can be
+            # truncated for large outputs; that used to make a successful
+            # shell step silently lose files before verification. Use the
+            # Sandbox filesystem transfer API for the archive itself.
+            remote_archive = f"/tmp/aidon-workspace-{uuid.uuid4().hex}.tar"
+            rc_back, _out_back, err_back = self._exec(
+                sb, ["tar", "-cf", remote_archive, "-C",
+                     self.REMOTE_WORKDIR, "."], timeout_seconds)
             if rc_back != 0:
                 return ExecutionResult(1, out,
-                                       "workspace sync back from Modal failed",
+                                       "workspace sync back from Modal failed: "
+                                       + str(err_back)[-300:],
                                        isolated=True, backend=self.name)
             try:
-                raw = base64.b64decode("".join(str(out_back).split()))
-                self._untar_bytes(raw, workspace)
-            except Exception:
+                with tempfile.TemporaryDirectory(
+                        prefix="aidon-modal-sync-") as temp_dir:
+                    local_archive = Path(temp_dir) / "workspace.tar"
+                    sb.filesystem.copy_to_local(
+                        remote_archive, local_archive)
+                    self._untar_bytes(local_archive.read_bytes(), workspace)
+            except Exception as exc:
                 return ExecutionResult(1, out,
-                                       "workspace sync back from Modal failed",
+                                       "workspace sync back from Modal failed: "
+                                       + str(exc)[-300:],
                                        isolated=True, backend=self.name)
             return ExecutionResult(rc, out, err,
                                    isolated=True, backend=self.name)

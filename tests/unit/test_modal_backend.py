@@ -1,4 +1,4 @@
-"""Modal backend: tar round-trip over a fake Modal sandbox,
+"""Modal backend: workspace transfer over a fake Modal sandbox,
 failure mapping, and factory wiring."""
 
 import base64
@@ -52,9 +52,12 @@ class _RemoteDir:
         self.root = root
         self.terminated = False
         self.fail_sync_up = False
+        self.filesystem = _RemoteFilesystem(self)
 
     def exec(self, *cmd, timeout=None):
         if cmd[:1] == ("mkdir",):
+            return _Proc(returncode=0)
+        if cmd[:2] == ("tar", "-cf"):
             return _Proc(returncode=0)
         joined = " ".join(cmd)
         if "base64 -d | tar" in joined:
@@ -96,6 +99,17 @@ class _RemoteDir:
 
     def terminate(self):
         self.terminated = True
+
+
+class _RemoteFilesystem:
+    def __init__(self, remote):
+        self.remote = remote
+
+    def copy_to_local(self, remote_path, local_path):
+        # The backend asks the remote tar command to create this archive.
+        # Serialize the fake remote workdir as that archive.
+        with tarfile.open(local_path, mode="w") as tf:
+            tf.add(str(self.remote.root), arcname=".")
 
 
 def _factory(remote):
