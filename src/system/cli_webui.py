@@ -415,11 +415,9 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                         f"File delivery failed for {resolved.name}: {exc}")
 
         def _surface_reply(text, files=None):
-            # The WebUI already displays and polls the run ID. Keep the
-            # ID in Slack/WhatsApp replies where it is needed for
-            # cross-surface control commands, but do not show it in chat.
-            rendered = str(text) if event.source == "webui" \
-                else f"[{run_id}] {text}"
+            # Keep transport messages conversational; run IDs remain in
+            # traces and diagnostics rather than every chat reply.
+            rendered = str(text)
             event.send_reply(rendered)
             # Unified surfaces: a linked surface gets the same
             # result, so WebUI and Slack stay in sync no matter
@@ -547,7 +545,7 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
             if event.source == "webui":
                 _saction = "Tap Proceed below to continue."
             elif event.source in ("slack", "whatsapp"):
-                _saction = f"Reply proceed {_sid} to continue."
+                _saction = "Reply proceed to continue this plan (no ID needed)."
             else:
                 _saction = f"Run /proceed {_sid} to continue."
             _surface_reply(f"{_shead}\n{_saction}\n" + format_run_stats(report))

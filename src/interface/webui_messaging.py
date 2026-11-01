@@ -180,7 +180,10 @@ class WebUIMessagingMixin:
                                                  else _wa_latest_stop(self.home, wa_key))
                                         if _stop is None:
                                             if wa_pcmd["stop_id"]:
-                                                decision_reply = f"No stopped run with id {wa_pcmd['stop_id']}."
+                                                decision_reply = (
+                                                    "I couldn't find that stopped plan. Reply proceed "
+                                                    "without an ID to continue the latest "
+                                                    "stopped plan in this chat.")
                                             else:
                                                 decision_reply = "No stopped run to proceed with."
                                         else:
@@ -434,7 +437,10 @@ class WebUIMessagingMixin:
                                      else _sl_latest_stop(self.home, sl_key))
                             if _stop is None:
                                 if sl_pcmd["stop_id"]:
-                                    decision_reply = f"No stopped run with id {sl_pcmd['stop_id']}."
+                                    decision_reply = (
+                                        "I couldn't find that stopped plan. Reply proceed "
+                                        "without an ID to continue the latest "
+                                        "stopped plan in this channel.")
                                 else:
                                     decision_reply = "No stopped run to proceed with."
                             else:
