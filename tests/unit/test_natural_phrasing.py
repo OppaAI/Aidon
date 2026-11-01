@@ -167,11 +167,14 @@ def _sign(secret, raw):
     return {"x-slack-request-timestamp": ts, "x-slack-signature": sig}
 
 
-def test_slack_answer_is_not_a_new_goal(tmp_path):
+def test_slack_answer_is_not_a_new_goal(tmp_path, monkeypatch):
     sent = []
     server = WebUIServer(tmp_path,
                          slack_sender=lambda c, t, ts=None: sent.append((c, t)))
     server.slack_signing_secret = "secret123"
+    # Answers in channels require an explicit mention; DMs remain direct.
+    monkeypatch.setattr("src.interface.messaging.slack_bot_user_id",
+                        lambda _config: "UBOT")
     answers = []
     thread = threading.Thread(
         target=lambda: answers.append(
@@ -179,7 +182,7 @@ def test_slack_answer_is_not_a_new_goal(tmp_path):
         daemon=True)
     thread.start()
     assert _wait_for_waiter(server, "run-9")
-    body = {"event": {"type": "message", "text": "Plan B",
+    body = {"event": {"type": "message", "text": "<@UBOT> Plan B",
                    "channel": "C1", "ts": "1.0"}}
     raw = json.dumps(body).encode()
     status, payload = server.handle_slack_post(raw, _sign("secret123", raw), body)
