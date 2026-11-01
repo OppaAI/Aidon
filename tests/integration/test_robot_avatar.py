@@ -7,6 +7,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.interface.webui import CHAT_HTML, VRM_HTML
 
+APP_JS = Path(__file__).resolve().parents[2] / "src/interface/static/app.js"
+
 
 def test_robot_avatar_default():
     assert 'id="robot-avatar"' in CHAT_HTML
@@ -26,6 +28,9 @@ def test_mouth_smile_waveform_and_karaoke_sync():
     assert "wave-bars" in CHAT_HTML
     assert "typewriterKaraoke" in CHAT_HTML
     assert "karaoke-word" in CHAT_HTML
+    app_js = APP_JS.read_text(encoding="utf-8")
+    assert "function refreshStreamKaraoke(state)" in app_js
+    assert "feedStreamSpeech(sid, e.delta, false, m)" in app_js
     assert "mouthForChar" in CHAT_HTML
     # Approximate vowel groups, not full phoneme recognition.
     assert "/[aáàâäãå]/i" in CHAT_HTML

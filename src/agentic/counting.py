@@ -18,10 +18,7 @@ out_tokens_actual hold provider-reported usage only, while
 in_tokens_estimated / out_tokens_estimated hold the
 chars//4 split. A finished-run total uses the real counts
 when every call reported real usage, and the estimate
-otherwise, and says which basis it is — so a footer never
-silently mixes an estimate with a real count, and trace
-rows (real when present, estimate otherwise) agree with
-the footer whenever the basis is actual.
+otherwise, and says which basis it is.
 
 Per-step display (the right-bar trace) reads the same data
 through take_phase_usage(): real usage when the backend

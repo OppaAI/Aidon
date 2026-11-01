@@ -260,8 +260,14 @@
   // carried, and HTML collapses whitespace anyway, so neither
   // difference is a second message.
   function sameMessageBody(a, b) {
-    const norm = (s) => String(s || "").replace(/\s+/g, " ").trim();
-    return norm(finalMessageParts(a).body) === norm(finalMessageParts(b).body);
+    const norm = (s) => {
+      const rendered = document.createElement("div");
+      rendered.innerHTML = md(finalMessageParts(s).body);
+      return (rendered.textContent || "").normalize("NFKC")
+        .replace(/[\u200B-\u200D\uFEFF]/g, "")
+        .replace(/\s+/g, " ").trim();
+    };
+    return norm(a) === norm(b);
   }
 
   function renderFinalMessage(text, route) {
@@ -339,7 +345,7 @@
     const nodes = [];
     let n;
     while ((n = walker.nextNode())) {
-      if (n.parentElement && n.parentElement.closest(".run-stats")) continue;
+      if (n.parentElement && n.parentElement.closest(".run-stats, .t")) continue;
       nodes.push(n);
     }
     let offset = 0;
@@ -377,27 +383,44 @@
     return words;
   }
 
-  function karaokeSync(words, audio) {
+  function karaokeSync(words, audio, range = null) {
     // Light the words the voice has passed; the current one glows.
     // The timeline is weighted (see karaokeWords): the voice takes
     // longer over long words and pauses at punctuation, so spreading
     // the words evenly over the audio would drift visibly.
     let raf = 0;
     const spoken = words.filter((w) => w.spoken);
-    const totalW = spoken.reduce((s, w) => s + w.weight, 0) || 1;
+    const start = Math.max(0, Number(range && range.start) || 0);
+    const end = range
+      ? Math.min(spoken.length, start + Math.max(0, Number(range.count) || 0))
+      : spoken.length;
+    const active = spoken.slice(start, end);
+    const totalW = active.reduce((s, w) => s + w.weight, 0) || 1;
     const tick = () => {
       const dur = (audio.duration && isFinite(audio.duration)) ? audio.duration : 0;
       if (dur > 0) {
-        const pos = (audio.currentTime / dur) * totalW;
+        // The voice is heard slightly after its audio playhead, and our
+        // weighted word boundaries are approximate. Build a modest lead
+        // smoothly so playback never jumps across a word at the start.
+        const leadTarget = Math.min(0.4,
+          dur / Math.max(active.length, 1));
+        const rampDuration = Math.max(leadTarget * 4, 0.001);
+        const ramp = Math.min(1, audio.currentTime / rampDuration);
+        const smoothRamp = ramp * ramp * (3 - 2 * ramp);
+        const lead = leadTarget * smoothRamp;
+        const spokenTime = audio.currentTime + lead;
+        const pos = (spokenTime / dur) * totalW;
         let acc = 0;
+        let spokenIndex = 0;
         for (const w of words) {
-          if (!w.spoken) { acc += w.weight; continue; }
+          if (!w.spoken) continue;
           const next = acc + w.weight;
-          const done = pos >= next;
-          const now = !done && pos >= acc;
-          w.node.classList.toggle("kw-done", done);
+          const inRange = spokenIndex >= start && spokenIndex < end;
+          const now = inRange && pos >= acc && pos < next;
+          w.node.classList.remove("kw-done");
           w.node.classList.toggle("kw-now", now);
-          acc = next;
+          if (inRange) acc = next;
+          spokenIndex++;
         }
       }
       raf = requestAnimationFrame(tick);
@@ -652,6 +675,24 @@
   const streamSpeech = new Map();
   let streamSpeechGeneration = 0;
 
+  function streamWordCount(text) {
+    const words = spokenText(text).match(/\S+/g);
+    return words ? words.length : 0;
+  }
+
+  function refreshStreamKaraoke(state) {
+    if (!state || !state.activeAudio || !state.activeItem || !state.message) return;
+    if (state.stopKaraoke) state.stopKaraoke();
+    const message = state.message;
+    const body = message._body && message._body.isConnected
+      ? message._body : message;
+    const words = karaokeWords(body);
+    state.stopKaraoke = karaokeSync(words, state.activeAudio, {
+      start: state.activeItem.wordStart,
+      count: state.activeItem.wordCount,
+    });
+  }
+
   function completeSpeechSentences(buffer, flush = false) {
     const found = [];
     let rest = String(buffer || "");
@@ -708,6 +749,9 @@
       currentAudioUrl = progressive.url;
       currentAudioCancel = progressive.cancel;
       ttsPlaying = true;
+      state.activeAudio = audio;
+      state.activeItem = item;
+      refreshStreamKaraoke(state);
       stopMouthSync = syncMouthToText(item.text, audio);
       startMouthLoop();
       try {
@@ -721,6 +765,12 @@
         audio.addEventListener("error", resolve, { once: true });
       });
       if (progressive.url) URL.revokeObjectURL(progressive.url);
+      if (state.stopKaraoke) {
+        state.stopKaraoke();
+        state.stopKaraoke = null;
+      }
+      state.activeAudio = null;
+      state.activeItem = null;
       if (stopMouthSync) { stopMouthSync(); stopMouthSync = null; }
       currentAudio = null;
       currentAudioUrl = null;
@@ -729,19 +779,29 @@
     } catch (e) {
       ttsPlaying = false;
     } finally {
+      if (state.stopKaraoke) {
+        state.stopKaraoke();
+        state.stopKaraoke = null;
+      }
+      state.activeAudio = null;
+      state.activeItem = null;
       state.playing = false;
       if (state.done && !state.queue.length) streamSpeech.delete(state.id);
       else pumpStreamSpeech(state);
     }
   }
 
-  function feedStreamSpeech(id, delta, done = false) {
+  function feedStreamSpeech(id, delta, done = false, message = null) {
     if (!ttsAvailable) return false;
     let state = streamSpeech.get(id);
     if (!state) {
       state = { id, buffer: "", queue: [], playing: false, done: false,
-                generation: ++streamSpeechGeneration };
+                generation: ++streamSpeechGeneration, wordCursor: 0 };
       streamSpeech.set(id, state);
+    }
+    if (message) {
+      state.message = message;
+      refreshStreamKaraoke(state);
     }
     state.buffer += String(delta || "");
     const split = completeSpeechSentences(state.buffer, done);
@@ -750,7 +810,10 @@
       // Attach the rejection immediately so a cancelled/failed prefetch does
       // not become an unhandled browser promise before the queue reaches it.
       const audio = fetchSpeechAudio(part).catch((error) => ({ error }));
-      state.queue.push({ text: part, audio });
+      const wordCount = streamWordCount(part);
+      state.queue.push({ text: part, audio, wordStart: state.wordCursor,
+                         wordCount });
+      state.wordCursor += wordCount;
     }
     if (done) state.done = true;
     pumpStreamSpeech(state);
@@ -759,6 +822,9 @@
 
   function stopStreamSpeech() {
     streamSpeechGeneration++;
+    for (const state of streamSpeech.values()) {
+      if (state.stopKaraoke) state.stopKaraoke();
+    }
     streamSpeech.clear();
   }
 
@@ -851,7 +917,14 @@
     try {
       // Start the network request immediately. Waiting for the typewriter
       // first made TTS feel several seconds late on long answers.
-      const body = (el && el._body) || null;
+      // Typed messages keep a dedicated body node. Streamed messages replace
+      // their markup at completion, and restored messages never had that
+      // wrapper, so fall back to the message itself when the cached node is
+      // absent or has been detached. karaokeWords skips timestamp and stats
+      // descendants in that case.
+      const body = el
+        ? (el._body && el._body.isConnected ? el._body : el)
+        : null;
       const spoken = spokenText(text || (body ? body.textContent : ""));
       const request = {
         method: "POST",
@@ -1492,7 +1565,10 @@
         }
         else if (e.kind === "aidon-stream" || e.kind === "aidon" || e.kind === "aidon-final") {
           const sid = e.stream_id || "";
-          let m = sid ? streamMessages[sid] : null;
+          let streamKey = sid;
+          if (!streamMessages[streamKey] && e.kind === "aidon-final" &&
+              streamMessages[polledRun]) streamKey = polledRun;
+          let m = streamMessages[streamKey] || null;
           if (e.kind === "aidon-stream") {
             if (!m) {
               m = addMsg("aidon", "", e.t);
@@ -1503,14 +1579,17 @@
               streamMessages[sid] = m;
             }
             m._streamText += String(e.delta || "");
-            feedStreamSpeech(sid, e.delta, false);
+            feedStreamSpeech(sid, e.delta, false, m);
             m._body.innerHTML = md(m._streamText);
+            refreshStreamKaraoke(streamSpeech.get(sid));
             scrollThreadToLatest();
             return;
           }
           if (m) {
+            const isPlainChat = lastRoute &&
+              (lastRoute.group === "chat" || lastRoute.group === "webchat");
             if (e.kind === "aidon-final" && m._streamText && e.text &&
-                !sameMessageBody(e.text, m._streamText)) {
+                !sameMessageBody(e.text, m._streamText) && !isPlainChat) {
               // Streamed intermediate prose genuinely differs from
               // the final summary (agentic runs stream fast-node
               // prose, then finish with an assembled summary): keep
@@ -1520,13 +1599,13 @@
               // not a difference: the final always appends a ⏱ stats
               // line the stream never carried, and keeping both
               // bubbles then reads as a duplicated reply.
-              delete streamMessages[sid];
+              delete streamMessages[streamKey];
               m = addMsgTyped("aidon", e.text, e.t, true, lastRoute);
             } else {
               m._streamText = String(e.text || m._streamText || "");
               m.innerHTML = e.kind === "aidon-final"
                 ? renderFinalMessage(m._streamText, lastRoute) : md(m._streamText);
-              if (e.kind === "aidon-final") delete streamMessages[sid];
+              if (e.kind === "aidon-final") delete streamMessages[streamKey];
             }
           } else {
             m = addMsgTyped("aidon", e.text, e.t, e.kind === "aidon-final" || !!finalMessageParts(e.text).stats, lastRoute);
@@ -1539,8 +1618,10 @@
             // words lighting up as they are spoken.
             setAvatarMood("happy");
             setTimeout(() => setAvatarMood("idle"), 7000);
-            const hadStreamedVoice = streamSpeech.has(sid);
-            const streamedVoice = hadStreamedVoice && feedStreamSpeech(sid, "", true);
+            const speechId = streamSpeech.has(sid) ? sid : polledRun;
+            const hadStreamedVoice = streamSpeech.has(speechId);
+            const streamedVoice = hadStreamedVoice &&
+              feedStreamSpeech(speechId, "", true, m);
             if (!streamedVoice) announceImportant(m, e.text, btn);
           } else if (e.text) {
             // Running commentary: only when AIDON_VOICE_ANNOUNCE=1.

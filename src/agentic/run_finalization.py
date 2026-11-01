@@ -13,9 +13,8 @@ class RunFinalizationMixin:
         calls count even when the run's client is a plain client
         and only the router holds counting tiers. Basis is
         "actual" when every call reported provider usage — then
-        in/out are the real counts and agree with the trace rows
-        by construction — and "estimated" otherwise, when in/out
-        are the chars//4 split. Think is always the real
+        in/out are the real counts — and "estimated" otherwise,
+        when in/out are the chars//4 split. Think is always the real
         reasoning count: the estimate basis (prompt + reply
         text) never contains thinking text, so adding it cannot
         double-count it. Total is in + out + think on the
