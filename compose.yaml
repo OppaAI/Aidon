@@ -23,3 +23,32 @@ services:
       retries: 3
     security_opt:
       - no-new-privileges:true
+
+  # Tailscale Funnel targets this listener. Keeping it as a Compose
+  # service means the webhook-only process survives container and host
+  # restarts, while the full WebUI stays private on port 8765.
+  aidon-webhooks:
+    build: .
+    restart: unless-stopped
+    # Match the UID/GID used by the main Aidon service so both processes
+    # can access the shared bind-mounted home and outboxes.
+    user: "${AIDON_UID:-1000}:${AIDON_GID:-1000}"
+    network_mode: host
+    environment:
+      AIDON_HOME: /data
+    command: ["webui", "serve", "--webhook-only", "--port", "8766"]
+    volumes:
+      - ./aidon-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8766), timeout=3).close()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
