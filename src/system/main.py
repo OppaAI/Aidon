@@ -662,7 +662,7 @@ def main(argv: list[str] | None = None) -> int:
         Repl(_repl_handler, on_remember=_remember, on_think=_on_think).run()
         return 0
     if args.command == "webui":
-        return run_webui(args, config, memory)
+        return run_webui(args, config, memory, client, model_router)
     if args.command == "v1":
         from ..interface.v1 import AuthStore, GoalStore, handle
         # Live v1 and MCP execute callback, wired here, not 501:
@@ -788,7 +788,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.action == "schedule":
             scheduler = Scheduler(config.home)
-            for job in scheduler.check_due(datetime.now()):
+            for job in scheduler.due_jobs(datetime.now()):
                 print(f"scheduled trigger: {job.name}: {job.goal}")
             return 0
         if args.action == "webhook":
@@ -878,17 +878,31 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{item['spec_id']} {item['action_kind']}: undo: {item['undo']}")
             return 0
         # serve: poll due jobs every 60 seconds, run each via GoalRunner.
-        # KNOWN BUG, documented, not fixed (decision 2026-10-28: keep
-        # the live timer/WebUI path, fix this post-hackathon): this
-        # branch references server and msg, which are only assigned
-        # in the webui serve branch, so they are unbound locals
-        # here. The branch crashes at startup on
-        # server.practice_session_runner, and the practice-runner
-        # and practice-delivery uses would crash or silently drop
-        # after it. Do not run schedule serve until the WebUI
-        # construction is shared with this branch (see ROADMAP).
         from datetime import datetime
         from ..interface.triggers import Scheduler
+        from ..interface.messaging import MessagingConfig, send_slack, send_whatsapp
+        msg = MessagingConfig.from_env()
+        msg.whatsapp_token = config.whatsapp_token or msg.whatsapp_token
+        msg.whatsapp_phone_id = config.whatsapp_phone_id or msg.whatsapp_phone_id
+        msg.whatsapp_verify_token = config.whatsapp_verify_token or msg.whatsapp_verify_token
+        msg.whatsapp_app_secret = config.whatsapp_app_secret or msg.whatsapp_app_secret
+        msg.whatsapp_owner = config.whatsapp_owner or msg.whatsapp_owner
+        msg.slack_bot_token = config.slack_bot_token or msg.slack_bot_token
+        msg.slack_signing_secret = config.slack_signing_secret or msg.slack_signing_secret
+        msg.slack_outbound_channel = (config.slack_outbound_channel
+                                      or msg.slack_outbound_channel)
+
+        def slack_sender(channel, text, thread_ts=None):
+            result = send_slack(msg, channel, text, thread_ts=thread_ts)
+            if not result.get("ok"):
+                print(f"Slack send failed: {result.get('error', 'unknown error')}")
+            return result
+
+        def whatsapp_sender(to, text):
+            result = send_whatsapp(msg, to, text)
+            if not result.get("ok"):
+                print(f"WhatsApp send failed: {result.get('error', 'unknown error')}")
+            return result
         print("Scheduler daemon, polling every 60 seconds, Ctrl-C to stop.")
         print("Scheduler daemon also watches ingest and polls Slack, when configured, same loop.")
         def _full_scheduler_runner(session: str = ""):
@@ -925,7 +939,10 @@ def main(argv: list[str] | None = None) -> int:
             from ..interface.practice import (PRACTICE_TOOL_NAMES, PracticeGate,
                                               coerce_preapprove, practice_tools)
             import os as _os3
-            practice_dir = config.home / "practice" / server._safe_name(schedule["name"])
+            practice_name = "".join(
+                c for c in str(schedule["name"])
+                if c.isalnum() or c in ("-", "_", ".")).strip(".") or "item"
+            practice_dir = config.home / "practice" / practice_name
             practice_dir.mkdir(parents=True, exist_ok=True)
             _psandbox = _S3(practice_dir, config.sandbox_timeout_seconds,
                             mem_mb=config.sandbox_mem_mb, nproc=config.sandbox_nproc,
@@ -945,7 +962,9 @@ def main(argv: list[str] | None = None) -> int:
                 _gate = PracticeGate(
                     practice_dir, sandboxed=backend_is_sandboxed(_be, _psandbox))
             else:
-                _gate = server.webui_gate.gate
+                from ..capabilities.execution import backend_is_sandboxed
+                _gate = _scheduled_gate(
+                    sandboxed=backend_is_sandboxed(_be, _psandbox))
             return GoalRunner(client, _psandbox, _gate, config.home, memory=memory,
                               conversation_id="practice:" + schedule["name"], plugins=_pl, execution_backend=_be,
                               budget=_B3(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
@@ -1014,7 +1033,6 @@ def main(argv: list[str] | None = None) -> int:
             _rec(config.home, schedule["name"], summary)
             print(f"Practice session {schedule['name']}: "
                   f"{'passed' if summary['passed'] else 'no pass'}")
-        server.practice_session_runner = _practice_session_sync
         while True:
             scheduler = Scheduler(config.home)
             # Tick wiring: SchedulerLoop carries the outbox drain

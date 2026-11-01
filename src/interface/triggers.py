@@ -188,13 +188,16 @@ def _next_cron(expr: str, after: datetime) -> datetime | None:
 
     candidate = (after + timedelta(minutes=1)).replace(
         second=0, microsecond=0)
-    limit = candidate + timedelta(days=366)
+    # Every valid yearly calendar pattern occurs within this span; an
+    # eight-year horizon covers the full leap-day gap without scanning
+    # the entire 400-year Gregorian cycle.
+    limit = candidate + timedelta(days=8 * 366)
     while candidate <= limit:
         if candidate.month not in months:
             year, month = (candidate.year + 1, 1) \
                 if candidate.month == 12 else (candidate.year,
                                                candidate.month + 1)
-            candidate = datetime(year, month, 1)
+            candidate = datetime(year, month, 1, tzinfo=after.tzinfo)
             continue
         weekday = (candidate.weekday() + 1) % 7  # cron: Sunday = 0
         if dom_any and dow_any:
@@ -416,12 +419,19 @@ class Scheduler:
         self.jobs.append(job)
         self.save()
 
+    def due_jobs(self, now: datetime) -> list[SchedulerJob]:
+        """Return due jobs without changing their persisted last-run time."""
+        return self._due_jobs(now, mark=False)
+
     def check_due(self, now: datetime) -> list[SchedulerJob]:
-        """Jobs due now, with last run updated so they do not double-fire.
+        """Return due jobs and record them as claimed for this tick.
 
         A zoned job's next run is timezone-aware; a naive `now`
         reads as server-local for the comparison.
         """
+        return self._due_jobs(now, mark=True)
+
+    def _due_jobs(self, now: datetime, *, mark: bool) -> list[SchedulerJob]:
         due: list[SchedulerJob] = []
         for job in self.jobs:
             after = datetime.fromisoformat(job.last_run) if job.last_run else datetime(2000, 1, 1)
@@ -433,8 +443,9 @@ class Scheduler:
                 now_cmp = now.astimezone(nxt.tzinfo)
             if nxt <= now_cmp:
                 due.append(job)
-                job.last_run = now.isoformat(timespec="seconds")
-        if due:
+                if mark:
+                    job.last_run = now.isoformat(timespec="seconds")
+        if due and mark:
             self.save()
         return due
 

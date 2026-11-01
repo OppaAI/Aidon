@@ -5,10 +5,18 @@ from __future__ import annotations
 import os
 import threading
 
-from .runtime import _startup_style
+from .runtime import (
+    _make_governor,
+    _make_web_researcher,
+    _network_available,
+    _run_sandbox,
+    _startup_style,
+    make_deep_researcher,
+)
 
 
-def run_webui(args, config, memory) -> int:
+def run_webui(args, config, memory, client, model_router=None) -> int:
+    from .goal_tools import _goal_extra_tools
     from ..interface.messaging import MessagingConfig, send_slack, send_whatsapp
     from ..interface.triggers import TriggerDispatcher, TriggerEvent
     from ..interface.v1 import AuthStore

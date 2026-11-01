@@ -141,7 +141,7 @@ def register_research_tools(config, workdir, researcher, confined):
         """Upload a workdir file to a Slack channel (bytes, not a localhost link)."""
         try:
             from ..interface.messaging import send_slack_file
-            target = _confined(str(file))
+            target = confined(str(file))
             if not target.is_file():
                 return f"slack send file failed: not found in workdir: {file}"
             result = send_slack_file(_msg_config(), str(channel), target, str(title))
@@ -155,7 +155,7 @@ def register_research_tools(config, workdir, researcher, confined):
         """Send a workdir file over WhatsApp via the media API (bytes, not a link)."""
         try:
             from ..interface.messaging import send_whatsapp_media
-            target = _confined(str(file))
+            target = confined(str(file))
             if not target.is_file():
                 return f"whatsapp send media failed: not found in workdir: {file}"
             result = send_whatsapp_media(_msg_config(), str(to), target, str(caption))

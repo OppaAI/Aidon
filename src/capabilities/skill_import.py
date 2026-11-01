@@ -26,10 +26,6 @@ _TRIVIAL_PATTERNS = (
 _CHAIN_CHARS = "|;&><"
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
 def _norm_license(spdx: str | None) -> str:
     return (spdx or "").strip().lower()
 
@@ -66,7 +62,7 @@ def check_code_sources(sources: list[dict]) -> None:
             raise PermissionError(f"code source {name!r} blocked: {reason}")
 
 
-def import_skill_file(home, source_path, name: str | None = None) -> Skill:
+def import_skill_file(home, source_path, name: str | None = None):
     """Import a Markdown skill file as a library candidate.
 
     The file is copied to <home>/skills/<sanitized-name>.md,
