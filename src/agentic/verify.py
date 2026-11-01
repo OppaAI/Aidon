@@ -681,8 +681,9 @@ def requested_exact_content_criteria(goal: str,
     if not expected:
         return []
 
-    # Associate the clause with the closest explicitly named deliverable
-    # before it. This avoids applying one literal to every file in a plan.
+    # Prefer the closest planner deliverable named before the clause. If the
+    # planner omitted the requested filename, recover it directly from the
+    # goal so its absence still fails verification.
     before = source[:clause.start()]
     candidates = []
     for name in deliverables or []:
@@ -694,6 +695,13 @@ def requested_exact_content_criteria(goal: str,
                                    re.IGNORECASE))
         if matches:
             candidates.append((matches[-1].start(), clean_name))
+    if not candidates:
+        file_pattern = re.compile(
+            r"(?<![A-Za-z0-9_.-])"
+            r"([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*"
+            r"\.[A-Za-z0-9]{1,12})(?![A-Za-z0-9_.-])")
+        candidates = [(match.start(1), match.group(1))
+                      for match in file_pattern.finditer(before)]
     if not candidates:
         return []
     _, name = max(candidates)

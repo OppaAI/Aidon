@@ -60,9 +60,10 @@ Final test counts, image activation and runtime evidence are recorded in
   was confirmed but goal correctness was not. The trace shows the plan omitted
   acceptance criteria and the verifier accepted any non-empty file. A local
   code change now derives an exact-content criterion from explicit requests
-  such as "containing exactly recovered-ok"; focused tests pass, but the
-  target-host regression still needs a rebuilt image and rerun. Actual plugin
-  isolation remains unverified there.
+  such as "containing exactly recovered-ok," including when the planner omits
+  the explicitly requested filename; focused tests pass, but the target-host
+  regression still needs a rebuilt image and rerun. Actual plugin isolation
+  remains unverified there.
 - Read-only live Slack `auth.test` and `conversations.history` probes: the bot
   token and both configured conversations succeeded. No synthetic chat message
   was posted during these checks.
@@ -91,10 +92,12 @@ and caller contracts and were repaired without an unreviewed consolidation.
    Separately complete a harmless
    goal through planning, approval, execution, and verified result delivery.
    Rebuild the image and rerun the scheduler smoke with a new exact sentinel to
-   confirm the local verifier fix rejects mismatched contents. The earlier
-   recovery run wrote the previous test's `scheduler-ok` despite the new
-   `recovered-ok` request, while its plan omitted criteria; the local fix now
-   adds a deterministic exact-content criterion for explicit requests. This
+   confirm the local verifier fix rejects mismatched contents and missing
+   explicitly named files. The earlier recovery run wrote the previous test's
+   `scheduler-ok` despite the new `recovered-ok` request, while its plan omitted
+   criteria. A subsequent smoke reported `done` with `exact_test.py` instead
+   of the requested `exact-content-check.txt`; the local fix now derives the
+   expected filename and exact-content criterion from the goal itself. This
    remains separate from scheduler claim recovery.
    Approval ID handling, bare approval commands, and Slack thread replies have
    fixes, but their complete end-to-end cycle is not yet established. This is

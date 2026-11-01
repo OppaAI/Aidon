@@ -131,6 +131,20 @@ def test_explicit_exact_content_goal_creates_code_criterion():
     ) == ["scheduler-recovery.txt contains exactly recovered-ok"]
 
 
+def test_exact_content_goal_enforces_filename_omitted_by_planner(tmp_path):
+    goal = ("Create exact-content-check.txt in your workspace containing "
+            "exactly cedar-742. Then verify its contents.")
+    criteria = requested_exact_content_criteria(goal, ["exact_test.py"])
+    assert criteria == ["exact-content-check.txt contains exactly cedar-742"]
+
+    wd = _workdir(tmp_path)
+    (wd / "exact_test.py").write_text("some script", encoding="utf-8")
+    ok, failures, _ = verify_plan(wd, ["exact_test.py"], criteria)
+    assert ok is False
+    assert any("exact-content-check.txt missing" in failure
+               for failure in failures)
+
+
 def test_exact_content_criterion_rejects_wrong_nonempty_file(tmp_path):
     wd = _workdir(tmp_path)
     (wd / "scheduler-recovery.txt").write_text("scheduler-ok", encoding="utf-8")
