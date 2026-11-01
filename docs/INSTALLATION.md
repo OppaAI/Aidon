@@ -45,6 +45,27 @@ export AIDON_UID="$(id -u)" AIDON_GID="$(id -g)"
 docker compose up --build -d
 ```
 
+For code development, use the development overlay after the image has been
+built once:
+
+```sh
+export AIDON_UID="$(id -u)" AIDON_GID="$(id -g)"
+docker compose -f compose.yaml -f compose.dev.yaml up -d
+```
+
+The overlay mounts `./src` read-only into the container and points Python at
+the mounted package. After editing Python code, restart the service to load
+the changes:
+
+```sh
+docker compose -f compose.yaml -f compose.dev.yaml restart aidon
+```
+
+This avoids rebuilding for ordinary source edits. Changes to dependencies,
+`pyproject.toml`, or the `Dockerfile` still require rebuilding with
+`docker compose -f compose.yaml -f compose.dev.yaml up --build -d`. Use the
+same `aidon-data` directory in either mode.
+
 The Docker image includes the dense and sparse embedding packages so memory
 uses semantic embeddings instead of the test-only hash fallback. On first
 use, the embedding models are downloaded into `aidon-data`; allow extra disk

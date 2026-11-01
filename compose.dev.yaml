@@ -1,0 +1,6 @@
+services:
+  aidon:
+    environment:
+      PYTHONPATH: /opt/aidon
+    volumes:
+      - ./src:/opt/aidon/src:ro

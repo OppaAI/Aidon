@@ -243,15 +243,24 @@
   function finalMessageParts(text) {
     const value = String(text || "");
     const lines = value.split("\n");
-    const index = lines.findIndex((line) => /^\s*⏱️?\s/.test(line));
-    if (index < 0) return { body: value, stats: "" };
+    const statsIndexes = [];
+    lines.forEach((line, index) => {
+      if (/^\s*⏱️?\s/.test(line)) statsIndexes.push(index);
+    });
+    if (!statsIndexes.length) return { body: value, stats: "" };
+    // Some live replies carry a preliminary usage line as well as the
+    // finished-run footer. Show one compact footer, using the last line
+    // (the completed run's totals), and never leave the earlier line in
+    // the answer body as an apparent duplicate.
+    const statsIndexSet = new Set(statsIndexes);
+    const finalStatsIndex = statsIndexes[statsIndexes.length - 1];
     return {
       // Older server versions appended artifact links after the stats line.
       // Keep only that line in compact metadata and put any trailing content
       // back in the message body so those links remain visible and clickable.
-      body: lines.slice(0, index).concat(lines.slice(index + 1))
+      body: lines.filter((_line, index) => !statsIndexSet.has(index))
         .join("\n").replace(/^\s+|\s+$/g, ""),
-      stats: lines[index].replace(/^\s*⏱️?\s*/, "").trim(),
+      stats: lines[finalStatsIndex].replace(/^\s*⏱️?\s*/, "").trim(),
     };
   }
 
