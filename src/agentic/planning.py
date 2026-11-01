@@ -14,6 +14,25 @@ _SKILL_FULL_CHARS = 20000
 
 
 class PlanningMixin:
+    @staticmethod
+    def _memory_query_variants(query: str) -> list[str]:
+        """Keep the original wording and add a compact fact-retrieval query."""
+        import re
+
+        original = str(query or "").strip()
+        stopwords = {
+            "a", "an", "the", "and", "or", "to", "of", "for", "in",
+            "on", "with", "is", "it", "be", "i", "me", "my", "you",
+            "your", "what", "which", "who", "where", "when", "why",
+            "how", "was", "were", "do", "does", "did", "can", "could",
+            "would", "should", "please", "tell", "remember", "about",
+        }
+        words = re.findall(r"[a-z0-9]+", original.lower())
+        words = ["name" if word in ("called", "named") else word
+                 for word in words if word not in stopwords]
+        compact = " ".join(words).strip()
+        return list(dict.fromkeys(q for q in (original, compact) if q))
+
     def _memory_context(self, query: str) -> str:
         """Return a bounded, reference-only memory block for a user query."""
         if self.memory is None:
@@ -27,19 +46,40 @@ class PlanningMixin:
                 "AIDON_SEMANTIC_RECALL_LIMIT", "3") or "3"))
             recall_tokens = max(0, int(os.environ.get(
                 "AIDON_RECALL_MAX_TOKENS", "2000") or "2000"))
-            episodes, knowledge = self.memory.recall_both(
-                query, episode_limit, knowledge_limit)
-            # General facts (extracted + promoted semantic points) are a
-            # third recall leg, recalled with the same hybrid search as plans.
-            semantic = (self.memory.recall(
-                "semantic", query, limit=semantic_limit)
-                if semantic_limit else [])
+            recalled = {"Earlier experiences": {},
+                        "Relevant knowledge": {}, "General facts": {}}
+            for search_query in self._memory_query_variants(query):
+                episodes, knowledge = self.memory.recall_both(
+                    search_query, episode_limit, knowledge_limit)
+                semantic = (self.memory.recall(
+                    "semantic", search_query, limit=semantic_limit)
+                    if semantic_limit else [])
+                for label, hits in (("Earlier experiences", episodes),
+                                    ("Relevant knowledge", knowledge),
+                                    ("General facts", semantic)):
+                    ranked = recalled[label]
+                    for rank, hit in enumerate(hits, start=1):
+                        point = getattr(hit, "point", None)
+                        point_id = getattr(point, "id", None)
+                        if point_id is None:
+                            payload = getattr(point, "payload", {}) or {}
+                            point_id = (label, str(getattr(point, "text", "") or
+                                                   payload.get("text", "")))
+                        # Reciprocal-rank fusion rewards facts found by both
+                        # phrasings and preserves a strong hit from either one.
+                        score = 1.0 / (60 + rank)
+                        previous = ranked.get(point_id)
+                        ranked[point_id] = (hit, score +
+                                            (previous[1] if previous else 0.0))
             sections = []
-            for label, hits in (("Earlier experiences", episodes),
-                                ("Relevant knowledge", knowledge),
-                                ("General facts", semantic)):
+            for label, ranked in recalled.items():
                 texts = []
-                for hit in hits:
+                ordered = sorted(ranked.values(), key=lambda item: item[1],
+                                 reverse=True)
+                limit = {"Earlier experiences": episode_limit,
+                         "Relevant knowledge": knowledge_limit,
+                         "General facts": semantic_limit}[label]
+                for hit, _score in ordered[:limit]:
                     point = getattr(hit, "point", None)
                     payload = getattr(point, "payload", {}) or {}
                     text = str(getattr(point, "text", "") or
