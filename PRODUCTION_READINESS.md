@@ -1,5 +1,12 @@
 # Production readiness review
 
+> Historical snapshot: the test counts and pending runtime checklist below were
+> recorded for the acquisition/lab review on 2026-10-31. For current repository
+> status, later fixes, and owner-confirmed Slack/WhatsApp behavior, see
+> [CODEBASE_REVIEW_2026-11-01.md](CODEBASE_REVIEW_2026-11-01.md). The complete
+> agentic workflow has not yet passed an end-to-end target-runtime acceptance
+> run.
+
 Reviewed against the requested chat → capability inventory → Tool Crafting Lab → tested acquisition → original goal workflow. This is a code review and local test record, not certification for deployment.
 
 ## Implemented and locally validated

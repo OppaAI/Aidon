@@ -4,7 +4,10 @@ This is a repository-wide automated review with targeted manual inspection,
 confirmed repairs, and runtime checks on the owner's Docker host. It is not a
 claim that every path is bug-free or that deployment is production-certified.
 This review supersedes the current-status counts in the October 31 documents;
-those documents retain their historical evidence.
+those documents retain their historical evidence. The owner has since confirmed
+that Slack and WhatsApp are responding in the deployed Docker instance. That is
+useful live evidence for basic messaging, but does not certify end-to-end goal
+completion or recovery.
 
 ## Confirmed problems repaired
 
@@ -51,31 +54,27 @@ and caller contracts and were repaired without an unreviewed consolidation.
 
 ## Remaining work, in priority order
 
-1. **Verify fresh owner messages after activation.** Send a fresh top-level
-   Slack message, then exercise a harmless goal and approval. Confirm an actual
-   reply reaches the channel/DM. Read-only API success and offline transport
-   tests do not prove provider delivery. Check a WhatsApp message through the
-   configured public webhook and inspect Meta's delivery status if it fails.
-2. **Finish provider-specific acceptance checks.** Modal file transfer,
+1. **Finish provider-specific acceptance checks.** Basic Slack and WhatsApp
+   message/reply behavior has been confirmed by the owner on the deployed
+   instance. The stopped-plan approval path has had fixes for ID handling,
+   bare approval commands, and Slack thread replies, but a successful complete
+   approval-to-finished-goal cycle is not yet established. Modal file transfer,
    meaningful result verification, browser refresh/recovery and model failures
-   need the configured services. Earlier successful `pwd`/file-transfer checks
-   are useful evidence, but are not a complete release acceptance run.
-3. **Slack polling scope:** `conversations.history` observes top-level messages;
-   send polling approvals and answers in the main conversation. Receiving all
-   thread replies requires the signed events webhook or additional thread
-   polling. File-download work still happens before webhook acknowledgement.
-   WhatsApp webhook goals remain synchronous and do not yet have a durable,
-   provider-message-ID inbox; review retry deduplication before unattended use.
-4. **One full WebUI/poller per Aidon home.** The inbox worker, reply queues and
+   also need target-runtime checks. This end-to-end workflow is the next
+   focused investigation; transport is not currently the reported blocker.
+2. **WhatsApp durability and delivery recovery.** WhatsApp webhook goals remain
+   synchronous and do not yet have a durable provider-message-ID inbox. Review
+   retry deduplication and interruption behavior before unattended use.
+3. **One full WebUI/poller per Aidon home.** The inbox worker, reply queues and
    run controls coordinate across processes, but this does not establish safe
    concurrent full WebUI servers sharing all files. Cursor files, conversation
    artifact publication and other file-backed stores need a separate supported
    deployment/concurrency contract and stress testing.
-5. **Operational assurance:** enforce required CI checks in repository settings,
+4. **Operational assurance:** enforce required CI checks in repository settings,
    establish backups/restore testing, resource and queue alerts, load testing,
    and image/OS vulnerability checks. The Compose healthcheck confirms listener
    liveness only; it does not certify model, memory or sandbox readiness.
-6. **Quality and maintenance:** evaluate ordinary tasks on the intended small
+5. **Quality and maintenance:** evaluate ordinary tasks on the intended small
    models, including semantic completeness and computed budgets. Deterministic
    checks and an optional model verifier cannot prove all content correct.
    Incremental typing, wider lint rules, remaining module decomposition and
