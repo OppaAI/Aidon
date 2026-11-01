@@ -15,6 +15,9 @@ from src.social.youtube_transcript import fetch_transcript
 from src.interface.messaging import poll_slack_once, MessagingConfig
 from src.interface.webui import WebUIServer
 from src.interface.triggers import TriggerDispatcher
+from src.interface.triggers import TriggerEvent
+from src.interface.slack_polling import (
+    dispatch_slack_message, process_polled_messages)
 
 
 def test_gmail_sender_fake(tmp_path):
@@ -78,10 +81,50 @@ def test_youtube_transcript_fake():
 def test_slack_polling_skips_bots_and_old():
     config = MessagingConfig(slack_bot_token="x")
     def fake_fetch(url, token, params):
-        return {"messages": [{"ts": "3", "text": "new"}, {"ts": "2", "text": "bot", "bot_id": "B1"}, {"ts": "1", "text": "old"}]}
+        return {"messages": [{"ts": "4", "text": "bot", "bot_id": "B1"},
+                              {"ts": "3", "text": "new"},
+                              {"ts": "2", "text": "bot", "bot_id": "B1"},
+                              {"ts": "1", "text": "old"}]}
     messages, newest = poll_slack_once(config, "C1", last_ts="1", fetch=fake_fetch)
     assert [m["text"] for m in messages] == ["new"]
-    assert newest == "3"
+    assert newest == "4"
+
+
+def test_slack_poll_advances_cursor_only_after_handling_each_message():
+    cursor = {"C1": "1"}
+    handled = []
+
+    def handle(message):
+        assert cursor["C1"] < message["ts"]
+        handled.append(message["ts"])
+
+    def checkpoint(timestamp):
+        assert handled[-1] == timestamp
+        cursor["C1"] = timestamp
+
+    process_polled_messages(
+        [{"ts": "2"}, {"ts": "3"}], handle, checkpoint)
+    assert cursor["C1"] == "3"
+
+
+def test_slack_dispatch_replies_when_handler_raises():
+    dispatcher = TriggerDispatcher()
+
+    def fail(_event):
+        raise RuntimeError("private detail must not reach Slack")
+
+    dispatcher.register("slack", fail)
+    event = TriggerEvent(source="slack", goal="hello")
+    sent = []
+    dispatch_slack_message(
+        dispatcher, event, channel="C1", thread_ts="123.4",
+        sender=lambda channel, text, thread_ts=None:
+            sent.append((channel, text, thread_ts)), ack_after=1)
+    assert len(sent) == 1
+    assert sent[0][0] == "C1"
+    assert sent[0][2] == "123.4"
+    assert "internal error" in sent[0][1]
+    assert "private detail" not in sent[0][1]
 
 
 def test_factory_stages_from_trace(tmp_path):

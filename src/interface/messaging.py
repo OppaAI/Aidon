@@ -382,14 +382,14 @@ def poll_slack_once(config, channel: str, last_ts: str = "", fetch=None) -> tupl
     messages = []
     newest = last_ts
     for message in result.get("messages", []):
+        ts = str(message.get("ts", ""))
+        if ts > newest:
+            newest = ts
         if message.get("bot_id") or message.get("subtype") == "bot_message":
             continue
-        ts = str(message.get("ts", ""))
         if ts <= last_ts:
             continue
         messages.append({"text": str(message.get("text", "")), "channel": channel, "ts": ts})
-        if ts > newest:
-            newest = ts
     messages.reverse()
     return messages, newest
 

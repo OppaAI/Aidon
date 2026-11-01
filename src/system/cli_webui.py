@@ -663,37 +663,56 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                             _messages, _last = _poll_slack_once(
                                 msg, _channel,
                                 last_ts=str(_cursors.get(_channel, "")))
-                            if _last:
+                            from ..interface.slack_polling import (
+                                dispatch_slack_message, process_polled_messages)
+
+                            def _handle_polled_message(_message):
+                                _text = _message.get("text", "")
+                                _thread_ts = str(_message.get("ts", ""))
+                                try:
+                                    _decision = server._resolve_decision(_text)
+                                    if _decision is None:
+                                        _decision = server._resolve_control(_text)
+                                    if _decision is not None:
+                                        slack_sender(_channel, _decision, _thread_ts)
+                                    else:
+                                        _event = TriggerEvent(
+                                            source="slack", kind="message",
+                                            goal=_text, conversation_id="slack:" + _channel,
+                                            payload={"channel": _channel},
+                                            reply=None)
+                                        dispatch_slack_message(
+                                            dispatcher, _event,
+                                            channel=_channel,
+                                            thread_ts=_thread_ts,
+                                            sender=slack_sender,
+                                            ack_after=_ack_after)
+                                except Exception as _exc:
+                                    print(f"Slack dispatch error: {_exc}")
+                                    slack_sender(
+                                        _channel,
+                                        "Aidon couldn't process that message because "
+                                        "its run encountered an internal error. Check "
+                                        "the Aidon logs, then send it again.",
+                                        _thread_ts)
+
+                            def _save_slack_cursor(_timestamp):
+                                _cursors[_channel] = _timestamp
+                                _cursor_path.write_text(
+                                    _slack_json.dumps(_cursors, indent=2))
+
+                            # Commit each message only after dispatch has
+                            # returned (or its failure has been reported).
+                            # A restart during a run retries unacknowledged work.
+                            process_polled_messages(
+                                _messages, _handle_polled_message,
+                                _save_slack_cursor)
+                            # Bot messages are filtered from dispatch but still
+                            # advance history. Save that cursor after user work.
+                            if _last and _last > str(_cursors.get(_channel, "")):
                                 _cursors[_channel] = _last
                                 _cursor_path.write_text(
                                     _slack_json.dumps(_cursors, indent=2))
-                            for _message in _messages:
-                                _text = _message.get("text", "")
-                                _replies = []
-                                _decision = server._resolve_decision(_text)
-                                if _decision is None:
-                                    _decision = server._resolve_control(_text)
-                                if _decision is not None:
-                                    _replies.append(_decision)
-                                else:
-                                    _event = TriggerEvent(
-                                        source="slack", kind="message",
-                                        goal=_text, conversation_id="slack:" + _channel,
-                                        payload={"channel": _channel},
-                                        reply=_replies.append)
-                                    _run_thread = threading.Thread(
-                                        target=dispatcher.dispatch,
-                                        args=(_event,), daemon=True)
-                                    _run_thread.start()
-                                    _run_thread.join(_ack_after)
-                                    if _run_thread.is_alive():
-                                        slack_sender(
-                                            _channel, "Working on it…",
-                                            _message.get("ts"))
-                                    _run_thread.join()
-                                for _reply in _replies:
-                                    slack_sender(_channel, _reply,
-                                                 _message.get("ts"))
                         except Exception as _exc:
                             print(f"Slack poll error: {_exc}")
                     _slack_time.sleep(_poll_seconds)
