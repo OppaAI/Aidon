@@ -1,10 +1,19 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.12-slim
+
+# Pin the installer so image builds stay reproducible. uv is only needed
+# during the build; the application runs from its virtual environment.
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     AIDON_HOME=/data \
     HF_HOME=/data/.cache/huggingface \
-    FASTEMBED_CACHE_PATH=/data/.cache/fastembed
+    FASTEMBED_CACHE_PATH=/data/.cache/fastembed \
+    UV_PROJECT_ENVIRONMENT=/opt/aidon/.venv \
+    UV_CACHE_DIR=/root/.cache/uv \
+    UV_LINK_MODE=copy \
+    PATH=/opt/aidon/.venv/bin:$PATH
 
 WORKDIR /opt/aidon
 
@@ -17,14 +26,21 @@ RUN apt-get update \
     && mkdir -p /data \
     && chown aidon:aidon /data
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml uv.lock README.md ./
+
+# Install the locked runtime dependencies before copying application source.
+# Source edits then reuse this expensive layer, including the ML packages.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project \
+        --extra embed --extra sparse --extra vision
+
 COPY src ./src
 
-# The WebUI should start with semantic memory available. Installing only the
-# base package makes _make_memory fall back to HashEmbedder, which is useful
-# for offline tests but not real recall. These extras provide the dense and
-# sparse embedding backends plus image support.
-RUN python -m pip install --no-cache-dir '.[embed,sparse,vision]'
+# Install Aidon itself into the already populated environment. Keep the
+# production package non-editable; the dev Compose overlay supplies source.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable \
+        --extra embed --extra sparse --extra vision
 
 USER aidon:aidon
 EXPOSE 8765

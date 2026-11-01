@@ -62,9 +62,13 @@ docker compose -f compose.yaml -f compose.dev.yaml restart aidon
 ```
 
 This avoids rebuilding for ordinary source edits. Changes to dependencies,
-`pyproject.toml`, or the `Dockerfile` still require rebuilding with
-`docker compose -f compose.yaml -f compose.dev.yaml up --build -d`. Use the
-same `aidon-data` directory in either mode.
+`pyproject.toml`, `uv.lock`, or the `Dockerfile` still require rebuilding
+with `docker compose -f compose.yaml -f compose.dev.yaml up --build -d`.
+Dependency versions are locked in `uv.lock`; after changing dependency
+metadata in `pyproject.toml`, run `uv lock` before rebuilding. The Dockerfile
+uses a BuildKit cache for downloaded packages and installs dependencies in a
+separate layer, so ordinary source rebuilds reuse the heavy ML dependencies.
+Use the same `aidon-data` directory in either mode.
 
 The Docker image includes the dense and sparse embedding packages so memory
 uses semantic embeddings instead of the test-only hash fallback. On first
