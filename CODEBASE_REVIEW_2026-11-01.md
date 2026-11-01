@@ -101,7 +101,11 @@ and caller contracts and were repaired without an unreviewed consolidation.
    create `dispatcher-webui-check.txt`, Aidon stopped at Plan ready but proposed
    `exact-dispatcher.txt` and `dispatcher_test.py` instead. The owner has not
    proceeded with that mismatched plan; repeat with a clean conversation and
-   require the requested filename before approval.
+   require the requested filename before approval. A second attempt dropped
+   the date suffix from an explicitly named filename. A deterministic plan
+   check and regression now reject this mismatch before a plan can be shown
+   for approval; rebuild the Docker image and confirm the repaired plan retains
+   the exact requested filename before proceeding.
    Scheduler startup, dispatch, pending-claim recovery, and exact-content
    verification now passed target-host checks. The exact-content regression
    first exposed a false success with `exact_test.py`; after rebuilding, a new

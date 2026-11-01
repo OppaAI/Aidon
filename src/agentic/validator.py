@@ -5,6 +5,8 @@ A plan is checked by code, not by the model that proposed it:
 - file-producing steps have a deliverable, while result-only steps may
   return their tool output directly to the user;
 - plan deliverables match step deliverables,
+- filenames the user explicitly introduced as "file named X" are preserved
+  exactly in the plan's deliverables,
 - no absolute path, no parent-directory escape, in any
   file argument or deliverable,
 - no duplicate deliverable from two different tools, which
@@ -17,11 +19,32 @@ called for, in code, not as a model opinion.
 
 from __future__ import annotations
 
+import re
+
 ALLOWED_TOOLS = {"write", "read", "list", "shell", "calculate"}
 
 
+def _explicit_named_files(goal: str) -> list[str]:
+    """Return filenames the user explicitly introduces with ``file named``.
+
+    These are task contracts, not suggestions from the planner. Keep this
+    intentionally narrow so ordinary mentions of filenames remain flexible.
+    """
+    pattern = re.compile(
+        r"\bfile\s+named\s+[`\"']?"
+        r"([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)",
+        re.IGNORECASE)
+    found = []
+    for match in pattern.finditer(str(goal or "")):
+        name = match.group(1).strip(".`\"'")
+        if name and name not in found:
+            found.append(name)
+    return found
+
+
 def validate_plan(plan, allowed_tools: set[str] | None = None,
-                  skill_names: set[str] | None = None) -> list[str]:
+                  skill_names: set[str] | None = None,
+                  goal: str = "") -> list[str]:
     allowed = set(allowed_tools) if allowed_tools is not None else ALLOWED_TOOLS
     skills = set(skill_names or [])
     failures = []
@@ -79,4 +102,9 @@ def validate_plan(plan, allowed_tools: set[str] | None = None,
     missing = set(plan_deliverables) - deliverables
     if missing:
         failures.append(f"plan deliverables with no step: {', '.join(sorted(missing))}")
+    for required in _explicit_named_files(goal):
+        if required not in plan_deliverables or required not in deliverables:
+            failures.append(
+                f"explicitly requested filename {required!r} must appear "
+                "exactly in plan and step deliverables")
     return failures

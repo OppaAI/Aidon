@@ -95,7 +95,7 @@ class PlanRunMixin:
             except Exception:
                 pass
         plan_failures = validate_plan(plan, allowed_tools=_allowed,
-                                      skill_names=_skill_names)
+                                      skill_names=_skill_names, goal=goal)
         if plan_failures:
             # A model can describe desired outputs while omitting executable
             # steps. Give it a bounded repair pass before rejecting the run.
@@ -112,7 +112,8 @@ class PlanRunMixin:
                                          "each deliverable must match a step."))
                     candidate_failures = validate_plan(candidate,
                                                        allowed_tools=_allowed,
-                                                       skill_names=_skill_names)
+                                                       skill_names=_skill_names,
+                                                       goal=goal)
                     if not candidate_failures:
                         repaired = candidate
                         break
@@ -164,7 +165,7 @@ class PlanRunMixin:
                                          "; ".join(issues)))
                     candidate_failures = validate_plan(
                         candidate, allowed_tools=_allowed,
-                        skill_names=_skill_names)
+                        skill_names=_skill_names, goal=goal)
                 except Exception as exc:
                     self._trace("critic", "failed",
                                 f"critic repair failed: {exc}"[:100])
@@ -360,7 +361,7 @@ class PlanRunMixin:
                                         name.rsplit("/", 1)[-1] for name in _texts}
                                 plan_failures = validate_plan(
                                     current_plan, allowed_tools=_allowed,
-                                    skill_names=_skill_names)
+                                    skill_names=_skill_names, goal=goal)
                                 if plan_failures:
                                     raise ValueError("; ".join(plan_failures) or
                                                      "replanned goal has no valid steps")
