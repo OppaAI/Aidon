@@ -65,6 +65,22 @@ def test_report_text_includes_result_without_file_deliverable():
     assert "Nothing was delivered" not in text
 
 
+def test_report_text_renders_markdown_readback_as_markdown():
+    text = report_text(
+        "done", ["grocery-plan.md"], "", "run-markdown", "stats",
+        result_text="read_file:\n# Grocery plan\n\n## Meal Plan\n- Oatmeal")
+    assert "**read_file:**" in text
+    assert "# Grocery plan" in text
+    assert "## Meal Plan" in text
+    assert "```text" not in text
+
+
+def test_report_text_keeps_plain_readback_in_code_block():
+    text = report_text("done", [], "", "run-plain", "stats",
+                       result_text="read_file:\nplain output")
+    assert "```text\nread_file:" in text
+
+
 def test_approval_lead_ins_rotate_and_acks_vary():
     first = approval_lead_in()
     second = approval_lead_in()
