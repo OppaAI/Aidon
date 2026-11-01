@@ -29,6 +29,24 @@ def test_plan_accepts_exact_explicit_filename():
         plan, goal=f"Create exactly one file named {requested}.") == []
 
 
+def test_plan_rejects_unrelated_deliverables_when_one_file_requested():
+    requested = "dispatcher-slack-check-20261101.txt"
+    plan = SimpleNamespace(
+        steps=[
+            {"tool": "write", "args": {"file": requested},
+             "deliverable": requested},
+            {"tool": "write", "args": {"file": "old-check.txt"},
+             "deliverable": "old-check.txt"},
+        ],
+        deliverables=[requested, "old-check.txt"])
+
+    failures = validate_plan(
+        plan, goal=f"Create exactly one file named {requested}.")
+
+    assert any("remove unrelated deliverables" in failure
+               for failure in failures)
+
+
 def test_unmentioned_filenames_remain_allowed():
     plan = SimpleNamespace(
         steps=[{"tool": "write", "args": {"file": "result.txt"},

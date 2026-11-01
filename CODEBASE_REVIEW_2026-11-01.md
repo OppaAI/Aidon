@@ -109,7 +109,13 @@ and caller contracts and were repaired without an unreviewed consolidation.
    WebUI retry proposed `dispatcher-webui-check-20261101.txt` exactly, ran the
    plan, and reported the file read back with the requested contents. The
    owner confirmed `webui-dispatch-ok`; the WebUI goal-to-verified-artifact leg
-   now passes on the target host.
+   now passes on the target host. Slack likewise accepted a top-level mention,
+   planned and completed the goal, and reported the requested artifact, but the
+   Slack file upload failed with `invalid_arguments`. Its plan also included two
+   unrelated earlier artifacts. Validation now rejects extra deliverables when
+   a goal requests exactly one named file, and Slack upload failures identify
+   which upload stage returned the error; rebuild and repeat the Slack test to
+   finish delivery verification.
    Scheduler startup, dispatch, pending-claim recovery, and exact-content
    verification now passed target-host checks. The exact-content regression
    first exposed a false success with `exact_test.py`; after rebuilding, a new

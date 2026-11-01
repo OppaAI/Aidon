@@ -297,13 +297,16 @@ def send_slack_file(config, channel: str, file_path, title: str = "",
                               config.slack_bot_token,
                               {"filename": path.name, "length": len(data)}, post=post)
     except Exception as exc:
-        return {"ok": False, "error": type(exc).__name__}
+        return {"ok": False, "error":
+                f"files.getUploadURLExternal: {type(exc).__name__}"}
     if not reserved.get("ok"):
-        return {"ok": False, "error": str(reserved.get("error", "upload URL failed"))}
+        return {"ok": False, "error": "files.getUploadURLExternal: "
+                + str(reserved.get("error", "upload URL failed"))}
     try:
         _post_multipart(reserved["upload_url"], "", {}, data, path.name, upload=upload)
     except Exception as exc:
-        return {"ok": False, "error": type(exc).__name__}
+        return {"ok": False, "error":
+                f"upload bytes: {type(exc).__name__}"}
     try:
         done = _post_json(f"{SLACK_API_BASE}/files.completeUploadExternal",
                           config.slack_bot_token,
@@ -311,9 +314,11 @@ def send_slack_file(config, channel: str, file_path, title: str = "",
                                       "title": title or path.name}],
                            "channel_id": channel}, post=post)
     except Exception as exc:
-        return {"ok": False, "error": type(exc).__name__}
+        return {"ok": False, "error":
+                f"files.completeUploadExternal: {type(exc).__name__}"}
     if not done.get("ok"):
-        return {"ok": False, "error": str(done.get("error", "upload completion failed"))}
+        return {"ok": False, "error": "files.completeUploadExternal: "
+                + str(done.get("error", "upload completion failed"))}
     return {"ok": True, "file_id": reserved["file_id"]}
 
 

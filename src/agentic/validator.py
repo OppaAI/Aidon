@@ -107,4 +107,10 @@ def validate_plan(plan, allowed_tools: set[str] | None = None,
             failures.append(
                 f"explicitly requested filename {required!r} must appear "
                 "exactly in plan and step deliverables")
+        if (re.search(r"\bexactly\s+one\s+(?:file|artifact)\b",
+                      str(goal or ""), re.IGNORECASE)
+                and set(str(name) for name in plan_deliverables) != {required}):
+            failures.append(
+                f"goal requires exactly one deliverable, {required!r}; "
+                "remove unrelated deliverables")
     return failures
