@@ -36,6 +36,15 @@ def test_month_is_not_ignored():
     assert _job("0 0 1 6 *").next_due(after) == datetime(2027, 6, 1, 0, 0)
 
 
+def test_leap_day_skips_non_leap_years():
+    # February 29 is a valid yearly schedule even when the next year is
+    # not leap; it should advance to the next real occurrence.
+    assert _job("0 9 29 2 *").next_due(
+        datetime(2025, 3, 1, 0, 0)) == datetime(2028, 2, 29, 9, 0)
+    assert _job("0 9 29 2 *").next_due(
+        datetime(2028, 2, 29, 10, 0)) == datetime(2032, 2, 29, 9, 0)
+
+
 def test_weekday_uses_cron_sunday_zero():
     after = datetime(2026, 10, 26, 10, 0)  # Monday
     assert _job("0 9 * * 0").next_due(after) == datetime(2026, 11, 1, 9, 0)

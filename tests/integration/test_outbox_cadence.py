@@ -143,10 +143,57 @@ def test_on_due_called_before_dispatch(tmp_path):
                      ("notify", "job two"), ("dispatch", "job two")]
 
 
+def test_schedule_inspection_then_dispatch_does_not_consume_occurrence(tmp_path):
+    from src.interface.triggers import Scheduler, SchedulerJob
+
+    now = datetime(2026, 10, 31, 10, 0)
+    scheduler = Scheduler(tmp_path)
+    scheduler.add_job(SchedulerJob(name="daily", schedule="daily 09:00",
+                                   goal="do the thing"))
+
+    # Inspection must be read-only; the execution path still needs to claim
+    # and dispatch that same occurrence.
+    inspected = scheduler.due_jobs(now)
+    assert [job.name for job in inspected] == ["daily"]
+    assert scheduler.jobs[0].pending_run == ""
+
+    order = []
+
+    class _Dispatcher:
+        def dispatch(self, event):
+            order.append(("dispatch", event.goal))
+
+    loop = SchedulerLoop(scheduler, _Dispatcher())
+    assert [job.name for job in loop.run_once(now)] == ["daily"]
+    assert order == [("dispatch", "do the thing")]
+    assert Scheduler(tmp_path).claim_due(now) == []
+
+
 def test_loop_without_outbox_still_runs(tmp_path):
     loop = SchedulerLoop(_FakeScheduler([{"goal": "x"}]), _RecordingDispatcher([]))
     assert loop.run_once() == [{"goal": "x"}]
     assert loop.last_outbox_drain is None
+
+
+def test_scheduler_loop_runs_initial_tick_before_waiting(tmp_path):
+    from src.interface.triggers import Scheduler, SchedulerJob
+
+    scheduler = Scheduler(tmp_path)
+    scheduler.add_job(SchedulerJob(name="daily", schedule="daily 09:00",
+                                   goal="startup goal"))
+    order = []
+    loop = None
+
+    class _StopAfterFirstDispatch:
+        def dispatch(self, event):
+            order.append(event.goal)
+            loop.stop()
+
+    loop = SchedulerLoop(scheduler, _StopAfterFirstDispatch(),
+                         interval_seconds=60)
+    loop.run()
+    assert order == ["startup goal"]
+    assert Scheduler(tmp_path).claim_due(datetime.now()) == []
 
 
 def test_concurrent_processes_queue_without_lost_updates(tmp_path):
