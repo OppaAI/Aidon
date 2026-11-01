@@ -355,6 +355,42 @@ def _currency_list(workdir: Path, name: str) -> tuple[int | None, int | None]:
     return item_total, stated_totals[0]
 
 
+def budget_currency_criteria(goal: str, deliverables: list[str],
+                             workdir: Path) -> list[str]:
+    """Add deterministic price checks for explicitly budgeted food plans.
+
+    The planner is asked to include these criteria, but model-generated
+    criteria are not authoritative: omitting one must not turn a budget
+    claim into a pass. Require itemized prices and one recomputable total
+    for budgeted grocery, shopping, or meal-plan deliverables.
+    """
+    goal_text = str(goal or "")
+    if not re.search(r"\b(?:grocery|groceries|shopping list|meal plan|"
+                     r"meal planning|food plan|menu)\b",
+                     goal_text, re.IGNORECASE):
+        return []
+    budget_match = re.search(
+        rf"\b(?:under|below|at most|no more than|less than|"
+        rf"budget(?:\s+(?:of|is|up to|under))?|maximum(?:\s+of)?)\s*"
+        rf"(?:(?:CAD|USD|EUR|GBP|AUD|NZD)\s*)?\$?\s*"
+        rf"({_CURRENCY_AMOUNT})\b",
+        goal_text, re.IGNORECASE)
+    if not budget_match:
+        return []
+    amount = budget_match.group(1)
+    criteria: list[str] = []
+    for raw_name in deliverables or []:
+        name = _relative_name(workdir, raw_name)
+        path = resolve_in_workdir(workdir, raw_name)
+        if path is None or path.suffix.lower() not in {".md", ".txt", ".csv"}:
+            continue
+        criteria.extend((
+            f"currency items in {name} total at most ${amount}",
+            f"currency items in {name} match stated total",
+        ))
+    return criteria
+
+
 def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
     text = str(criterion).strip()
     # Models hedge with trailing parentheticals ("... (or ... if ...)").

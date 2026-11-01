@@ -6,7 +6,7 @@ import json
 import re
 
 from ..interface.approval import Decision
-from .verify import verify_plan
+from .verify import budget_currency_criteria, verify_plan
 from .run_types import (
     MAX_ATTEMPTS,
     MAX_PLAN_REPAIRS,
@@ -419,6 +419,10 @@ class PlanRunMixin:
             for step in current_plan.normalized_steps():
                 if step.criteria and step.criteria not in criteria:
                     criteria.append(step.criteria)
+            for criterion in budget_currency_criteria(
+                    goal, current_plan.deliverables, self.sandbox.workdir):
+                if criterion not in criteria:
+                    criteria.append(criterion)
             criteria_note = "; ".join(str(item) for item in criteria)
             checked_names = ", ".join(str(item)
                                        for item in current_plan.deliverables)

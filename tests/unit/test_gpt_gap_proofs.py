@@ -132,6 +132,32 @@ def test_currency_itemized_total_checks_budget_and_stated_total(tmp_path):
     assert ok, failures
 
 
+def test_budgeted_meal_plan_gets_currency_checks_even_if_plan_omits_them(tmp_path):
+    from src.agentic.verify import budget_currency_criteria
+
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    plan = workdir / "grocery-plan.md"
+    plan.write_text(
+        "## Shopping List\n"
+        "- Produce - $13.10\n"
+        "- Pantry - $21.40\n"
+        "- Dairy and eggs - $9.00\n"
+        "Estimated Total: $38.20\n"
+    )
+    goal = "Make a 3-day vegetarian meal plan with a shopping list under $40."
+    criteria = budget_currency_criteria(goal, ["grocery-plan.md"], workdir)
+
+    assert criteria == [
+        "currency items in grocery-plan.md total at most $40",
+        "currency items in grocery-plan.md match stated total",
+    ]
+    ok, failures, _ = verify_plan(workdir, ["grocery-plan.md"], criteria)
+    assert not ok
+    assert any("exceeds $40.00" in failure for failure in failures)
+    assert any("!= stated $38.20" in failure for failure in failures)
+
+
 def test_invented_tool_plan_is_rejected_not_executed(tmp_path, monkeypatch):
     monkeypatch.setenv("AIDON_MAX_PLAN_REPAIRS", "0")
     monkeypatch.setenv("AIDON_CRITIC_ENABLED", "0")
