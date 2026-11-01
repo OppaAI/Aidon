@@ -343,10 +343,9 @@ class WebUIMessagingMixin:
             text = str(event_body.get("text", ""))
             channel = str(event_body.get("channel", ""))
             thread_ts = event_body.get("thread_ts") or event_body.get("ts")
-            # DMs remain conversational. In channels, require the exact bot
-            # mention before parsing commands, answering questions, or
-            # accepting attachments. Never fall back to another user's
-            # mention or to a filename-only post.
+            # DMs remain conversational. In channels, accept general posts
+            # and exact Aidon mentions, but ignore posts addressed only to
+            # another teammate before parsing commands or attachments.
             bot_user_id = ""
             if not channel.startswith("D"):
                 try:

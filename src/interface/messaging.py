@@ -640,17 +640,18 @@ def slack_bot_user_id(config, fetch=None) -> str:
 def slack_message_for_bot(text, channel, bot_user_id: str = "") -> bool:
     """Whether a Slack message should trigger Aidon.
 
-    DMs (channel id starts with D) always trigger. In channels, only
-    the bot's own Slack mention token triggers; plain name mentions,
-    mentions of other users, and unknown bot identity fail closed.
+    DMs always trigger. In channels, ordinary messages trigger unless
+    they explicitly mention another user. An explicit mention of Aidon
+    also triggers; when Aidon's identity is unavailable, any mention is
+    treated as addressed elsewhere and ignored.
     """
     channel = str(channel or "")
     if channel.startswith("D"):
         return True
-    if not bot_user_id:
-        return False
-    mention = re.compile(r"<@" + re.escape(bot_user_id) + r"(?:\|[^>]+)?>")
-    return bool(mention.search(str(text or "")))
+    mentions = re.findall(r"<@([A-Z0-9]+)(?:\|[^>]+)?>", str(text or ""))
+    if not mentions:
+        return True
+    return bool(bot_user_id and bot_user_id in mentions)
 
 
 def strip_slack_bot_mention(text: str, bot_user_id: str) -> str:
@@ -841,17 +842,18 @@ def slack_bot_user_id(config, fetch=None) -> str:
 def slack_message_for_bot(text, channel, bot_user_id: str = "") -> bool:
     """Whether a Slack message should trigger Aidon.
 
-    DMs (channel id starts with D) always trigger. In channels, only
-    the bot's own Slack mention token triggers; plain name mentions,
-    mentions of other users, and unknown bot identity fail closed.
+    DMs always trigger. In channels, ordinary messages trigger unless
+    they explicitly mention another user. An explicit mention of Aidon
+    also triggers; when Aidon's identity is unavailable, any mention is
+    treated as addressed elsewhere and ignored.
     """
     channel = str(channel or "")
     if channel.startswith("D"):
         return True
-    if not bot_user_id:
-        return False
-    mention = re.compile(r"<@" + re.escape(bot_user_id) + r"(?:\|[^>]+)?>")
-    return bool(mention.search(str(text or "")))
+    mentions = re.findall(r"<@([A-Z0-9]+)(?:\|[^>]+)?>", str(text or ""))
+    if not mentions:
+        return True
+    return bool(bot_user_id and bot_user_id in mentions)
 
 
 def strip_slack_bot_mention(text: str, bot_user_id: str) -> str:

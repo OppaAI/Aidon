@@ -178,7 +178,7 @@ def test_signed_slack_webhook_queues_once_and_returns_before_goal_runs(tmp_path)
     assert not inbox.process_once()
 
 
-def test_slack_channel_requires_exact_aidon_mention_but_dm_does_not(tmp_path):
+def test_slack_channel_accepts_general_messages_but_ignores_other_people(tmp_path):
     config = MessagingConfig(slack_bot_token="xoxb-test")
     config._slack_bot_user_id = "UAIDON"
     server = WebUIServer(tmp_path, messaging_config=config)
@@ -188,8 +188,8 @@ def test_slack_channel_requires_exact_aidon_mention_but_dm_does_not(tmp_path):
         {"event": {"type": "message", "channel": "C1",
                    "text": "Aidon, can you help?", "ts": "1.0"}},
         dispatch=dispatched.append)
-    assert status == 200 and result["ignored"] == "not_mentioned"
-    assert dispatched == []
+    assert status == 200 and result["queued"] is True
+    assert dispatched[-1].goal == "Aidon, can you help?"
 
     status, result = server.handle_slack_message(
         {"event": {"type": "message", "channel": "C1",
@@ -197,35 +197,39 @@ def test_slack_channel_requires_exact_aidon_mention_but_dm_does_not(tmp_path):
                    "files": [{"id": "F1", "mimetype": "image/png"}]}},
         dispatch=dispatched.append)
     assert status == 200 and result["ignored"] == "not_mentioned"
-    assert dispatched == []
+    assert len(dispatched) == 1
 
     status, result = server.handle_slack_message(
         {"event": {"type": "message", "channel": "C1",
                    "text": "<@UAIDON> help me", "ts": "3.0"}},
         dispatch=dispatched.append)
     assert status == 200 and result["queued"] is True
-    assert dispatched[0].goal == "help me"
+    assert dispatched[1].goal == "help me"
 
     status, result = server.handle_slack_message(
         {"event": {"type": "message", "channel": "D1",
                    "text": "hello", "ts": "4.0"}},
         dispatch=dispatched.append)
     assert status == 200 and result["queued"] is True
-    assert dispatched[1].goal == "hello"
+    assert dispatched[2].goal == "hello"
 
 
 def test_slack_mention_detection_fails_closed_without_bot_identity():
     assert slack_message_for_bot("<@UOTHER> hello", "C1", "") is False
-    assert slack_message_for_bot("Aidon, hello", "C1", "UAIDON") is False
+    assert slack_message_for_bot("Aidon, hello", "C1", "UAIDON") is True
     assert slack_message_for_bot("<@UOTHER> hello", "C1", "UAIDON") is False
     assert slack_message_for_bot("<@UAIDON|Aidon> hello", "C1", "UAIDON") is True
+    assert slack_message_for_bot("general channel message", "C1", "UAIDON") is True
     assert slack_message_for_bot("hello", "D1", "") is True
 
 
-def test_slack_event_parser_uses_exact_mention_and_keeps_dm_behavior():
+def test_slack_event_parser_accepts_general_channel_messages_and_keeps_dm_behavior():
     channel_event = {"event": {"type": "message", "channel": "C1",
                                "text": "Aidon, hi", "files": [
                                    {"id": "F1", "mimetype": "image/png"}]}}
+    parsed = parse_slack_event(channel_event, bot_user_id="UAIDON")
+    assert parsed.goal == "Aidon, hi [image slack_file_id=F1 mimetype=image/png name=]"
+    channel_event["event"]["text"] = "<@UOTHER> hi"
     assert parse_slack_event(channel_event, bot_user_id="UAIDON") is None
     channel_event["event"]["text"] = "<@UAIDON> hi"
     assert parse_slack_event(channel_event, bot_user_id="UAIDON").goal == (
