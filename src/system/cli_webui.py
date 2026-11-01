@@ -83,6 +83,11 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         # the user-visible artifact path contextual instead of exposing
         # a generic ``workdir`` directory.
         run_sandbox = _run_sandbox(config, run_id)
+        from ..agentic.conversation_workspace import ConversationWorkspace
+        workspace_store = (ConversationWorkspace(config.home, event.conversation_id)
+                           if event.conversation_id else None)
+        prior_workspace = (workspace_store.stage(run_sandbox.workdir)
+                           if workspace_store is not None else {})
         # Full runner, same as the CLI goal run, not a thin runner:
         # budget, trace, model verifier, plugins, execution backend,
         # semantic router skip, and autonomy plus nudge trackers
@@ -149,6 +154,27 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                 )
             except Exception:
                 conversation_context = ""
+        if prior_workspace:
+            prior_artifacts = prior_workspace.get("artifacts", [])
+            prior_flow = prior_workspace.get("workflow", {})
+        else:
+            prior_artifacts, prior_flow = [], {}
+        if prior_artifacts or prior_flow.get("goal"):
+            lines = ["Prior completed work for this conversation is reference context only."]
+            if prior_flow.get("goal"):
+                lines.append(f"Previous goal: {prior_flow['goal']}")
+            if prior_flow.get("summary"):
+                lines.append(f"Previous workflow summary: {prior_flow['summary']}")
+            if prior_flow.get("steps"):
+                lines.append("Previous workflow steps: " + "; ".join(
+                    str(step.get("description") or step.get("tool") or "step")
+                    for step in prior_flow["steps"][:12]))
+            if prior_artifacts:
+                lines.append("Previously verified artifacts available in this run's workspace: "
+                             + ", ".join(prior_artifacts))
+            lines.append("Follow the current request; use or change prior artifacts only as requested.")
+            conversation_context = (conversation_context + "\n\n"
+                                    + "\n".join(lines)).strip()
         try:
             from ..interface.preapproval import PreapprovalStore
             from ..interface.preapproval_gate import PreapprovalGate
@@ -442,6 +468,20 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         if callable(route_callback):
             route_callback(runner.last_route)
         run_control.set_status(run_id, report.status)
+        if workspace_store is not None and report.status == "done":
+            plan = report.plan
+            workflow = {
+                "goal": event.goal,
+                "summary": getattr(plan, "summary", ""),
+                "criteria": list(getattr(plan, "criteria", []) or []),
+                "steps": [
+                    {"tool": getattr(step, "tool", ""),
+                     "description": getattr(step, "description", "")}
+                    for step in getattr(plan, "normalized_steps", lambda: [])()
+                ],
+            }
+            workspace_store.publish(run_sandbox.workdir,
+                                    report.files or [], workflow)
         # A stopped run hands the frontend its Proceed button
         # through the run record (the poll returns the record),
         # and a finished proceed consumes the stop record so a
