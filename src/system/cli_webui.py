@@ -185,6 +185,12 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
             lines.append("Follow the current request; use or change prior artifacts only as requested.")
             conversation_context = (conversation_context + "\n\n"
                                     + "\n".join(lines)).strip()
+        if event.payload.get("image_paths"):
+            from ..agentic.context_policy import explicitly_refers_to_prior_context
+            if not explicitly_refers_to_prior_context(event.goal):
+                # Keep old turns out of both the goal runner and the
+                # researcher closure for a standalone image question.
+                conversation_context = ""
         try:
             from ..interface.preapproval import PreapprovalStore
             from ..interface.preapproval_gate import PreapprovalGate

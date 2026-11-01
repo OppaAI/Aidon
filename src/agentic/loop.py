@@ -440,10 +440,9 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
         # An attached image is the subject of this request. Keep unrelated
         # old chat turns and recalled episodes out unless the user explicitly
         # asks to connect the image to earlier conversation.
-        self._image_context_isolated = bool(self.image_paths) and not re.search(
-            r"\b(?:previous|earlier|before|yesterday|last time|we discussed|"
-            r"as discussed|remember|same (?:image|photo|picture|offer|one))\b",
-            str(goal or ""), re.IGNORECASE)
+        from .context_policy import explicitly_refers_to_prior_context
+        self._image_context_isolated = (bool(self.image_paths)
+                                        and not explicitly_refers_to_prior_context(goal))
         if self._image_context_isolated:
             self.conversation_context = ""
         if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
@@ -770,7 +769,7 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
             plan = self._research_and_replan(plan, goal, spec=spec)
             return self._finalize(self._execute_plan(goal, plan))
         failure_note = ""
-        if self.memory is not None:
+        if self.memory is not None and not self._image_context_isolated:
             try:
                 from ..memory.experience import recall_experiences, matching_failure
                 try:

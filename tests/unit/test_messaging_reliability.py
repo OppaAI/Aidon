@@ -251,6 +251,7 @@ def test_slack_bot_identity_retries_after_temporary_lookup_failure():
 def test_image_question_uses_current_image_without_stale_context_or_memory(tmp_path):
     from types import SimpleNamespace
     from src.agentic.capability_interview import CapabilityInterviewMixin
+    from src.agentic.context_policy import explicitly_refers_to_prior_context
     from src.agentic.planning import PlanningMixin
 
     image = tmp_path / "offer.png"
@@ -266,3 +267,6 @@ def test_image_question_uses_current_image_without_stale_context_or_memory(tmp_p
     assert "Can you tell me what this offer is?" in message.content[0]["text"]
     assert message.content[1]["type"] == "image_url"
     assert PlanningMixin._memory_context(runner, "offer availability") == ""
+    assert not explicitly_refers_to_prior_context(
+        "Can you tell me what this offer is and if it's still available?")
+    assert explicitly_refers_to_prior_context("Is this the same offer we discussed yesterday?")

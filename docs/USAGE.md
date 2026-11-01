@@ -63,6 +63,10 @@ For a private local deployment, polling needs no public URL or signing secret.
 Set `AIDON_SLACK_AUTOSTART=1`, `SLACK_BOT_TOKEN`, and comma-separated channel/DM
 IDs in `AIDON_SLACK_INBOUND_CHANNEL`, then restart Aidon. The bot needs access
 to those conversations and the corresponding history and messaging scopes.
+In channels, Aidon responds only to its actual Slack mention (`@Aidon`); plain
+chatter and file-only posts are ignored. Direct messages still work without a
+mention. In a channel, include `@Aidon` with approvals, answers, or control
+commands too.
 
 Replies use the bot Web API when a token is configured. Legacy
 `AIDON_SLACK_WEBHOOK_<conversation-id>` settings are used only for webhook-only
