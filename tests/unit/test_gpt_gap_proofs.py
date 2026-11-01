@@ -100,6 +100,38 @@ def test_verification_catches_wrong_content_and_wrong_totals(tmp_path):
     assert ok
 
 
+def test_currency_itemized_total_checks_budget_and_stated_total(tmp_path):
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    plan = workdir / "grocery-plan.md"
+    plan.write_text(
+        "## Shopping List\n"
+        "- Produce box - $13.10\n"
+        "- Pantry items - $21.40\n"
+        "- Dairy and eggs - $9.00\n"
+        "Estimated Total: $38.20\n"
+    )
+
+    criteria = [
+        "currency items in grocery-plan.md total at most $40.00",
+        "currency items in grocery-plan.md match stated total",
+    ]
+    ok, failures, _ = verify_plan(workdir, ["grocery-plan.md"], criteria)
+    assert not ok
+    assert any("exceeds $40.00" in failure for failure in failures)
+    assert any("!= stated $38.20" in failure for failure in failures)
+
+    plan.write_text(
+        "## Shopping List\n"
+        "- Produce box - $13.10\n"
+        "- Pantry items - $21.40\n"
+        "- Dairy and eggs - $5.00\n"
+        "Estimated Total: $39.50\n"
+    )
+    ok, failures, _ = verify_plan(workdir, ["grocery-plan.md"], criteria)
+    assert ok, failures
+
+
 def test_invented_tool_plan_is_rejected_not_executed(tmp_path, monkeypatch):
     monkeypatch.setenv("AIDON_MAX_PLAN_REPAIRS", "0")
     monkeypatch.setenv("AIDON_CRITIC_ENABLED", "0")

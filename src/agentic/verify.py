@@ -14,6 +14,10 @@ Criteria, simple and checkable, in plain words:
 - "ledger X total is N" -> recomputed total for X equals N,
   where N is in cents for a JSON ledger, or in the file's
   own units for a text ledger.
+- "currency items in X total at most N" -> sum of bullet-list
+  prices in X is at most N dollars.
+- "currency items in X match stated total" -> computed item
+  prices match the dollar amount on its Estimated Total line.
 Anything else is not a checkable criterion: it is
 reported as unverified, not passed, so a model cannot
 pass itself by writing a vague criterion.
@@ -47,6 +51,7 @@ import json
 import re
 import zipfile
 import zlib
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 # Extraction is best-effort and bounded: a huge binary must
@@ -299,6 +304,57 @@ def _ledger_total(workdir: Path, name: str) -> int | None:
         return None
 
 
+_CURRENCY_AMOUNT = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?"
+
+
+def _currency_cents(amount: str) -> int | None:
+    try:
+        value = Decimal(amount.replace(",", ""))
+        return int(value * 100)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _currency_list(workdir: Path, name: str) -> tuple[int | None, int | None]:
+    """Return itemized and stated totals in cents for a Markdown price list."""
+    path = resolve_in_workdir(workdir, name)
+    if path is None or not path.is_file():
+        return None, None
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None, None
+
+    item_total = 0
+    item_count = 0
+    item_pattern = re.compile(
+        rf"^\s*[-*+]\s+(.+?)\s+(?:[-–—:]\s*)?\$\s*({_CURRENCY_AMOUNT})\s*$"
+    )
+    total_pattern = re.compile(
+        rf"^\s*(?:estimated|grand|shopping)?\s*total\s*[:=]\s*"
+        rf"\$\s*({_CURRENCY_AMOUNT})\b",
+        re.IGNORECASE,
+    )
+    stated_totals: list[int] = []
+    for line in content.splitlines():
+        total_match = total_pattern.match(line)
+        if total_match:
+            cents = _currency_cents(total_match.group(1))
+            if cents is not None:
+                stated_totals.append(cents)
+            continue
+        item_match = item_pattern.match(line)
+        if item_match and not re.search(r"\btotal\b", item_match.group(1), re.IGNORECASE):
+            cents = _currency_cents(item_match.group(2))
+            if cents is None:
+                return None, None
+            item_total += cents
+            item_count += 1
+    if item_count == 0 or len(stated_totals) != 1:
+        return None, stated_totals[0] if len(stated_totals) == 1 else None
+    return item_total, stated_totals[0]
+
+
 def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
     text = str(criterion).strip()
     # Models hedge with trailing parentheticals ("... (or ... if ...)").
@@ -420,6 +476,35 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
         return total == expected, \
             f"ledger {name} total {total}" if total == expected else \
             f"ledger {name} total {total} != {expected}"
+    match = re.match(
+        rf"^currency items in\s+(.+?)\s+total at most\s+\$?({_CURRENCY_AMOUNT})$",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        name = _relative_name(workdir, match.group(1))
+        item_total, _stated_total = _currency_list(workdir, name)
+        expected = _currency_cents(match.group(2))
+        if item_total is None or expected is None:
+            return False, f"currency items in {name} total not computable"
+        ok = item_total <= expected
+        if ok:
+            return True, f"currency items in {name} total ${item_total / 100:.2f} within budget"
+        return False, f"currency items in {name} total ${item_total / 100:.2f} exceeds ${expected / 100:.2f}"
+    match = re.match(
+        r"^currency items in\s+(.+?)\s+match stated total$",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        name = _relative_name(workdir, match.group(1))
+        item_total, stated_total = _currency_list(workdir, name)
+        if item_total is None or stated_total is None:
+            return False, f"currency items in {name} or stated total not computable"
+        ok = item_total == stated_total
+        if ok:
+            return True, f"currency items in {name} match stated total ${item_total / 100:.2f}"
+        return False, f"currency items in {name} total ${item_total / 100:.2f} != stated ${stated_total / 100:.2f}"
     match = re.match(
         r"^(?:the )?(?:final )?output message provides link to (?:the )?(.+)$",
         text, re.IGNORECASE)

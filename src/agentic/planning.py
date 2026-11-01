@@ -179,8 +179,15 @@ class PlanningMixin:
                    "'NAME exists in the workspace folder', 'NAME is "
                    "non-empty', 'NAME contains TEXT', 'NAME does not "
                    "contain TEXT', 'ledger NAME total is "
-                   "CENTS'. Anything else fails verification even when the "
-                   "files exist.")
+                   "CENTS'. For a file with itemized dollar prices and a "
+                   "budget, add both criteria 'currency items in NAME total "
+                   "at most AMOUNT' and 'currency items in NAME match stated "
+                   "total'. Format each price as a bullet ending in '- $N.NN' "
+                   "and include exactly one 'Estimated Total: $N.NN' line. "
+                   "The code verifier sums those item lines in cents and "
+                   "compares the stated total; do not rely on a shell grep "
+                   "of the stated total. Anything else fails verification "
+                   "even when the files exist.")
         system += (" Allergy and dietary restrictions: when the goal or "
                    "spec names an allergy, intolerance, or dietary "
                    "restriction, criteria must check the deliverable text "
