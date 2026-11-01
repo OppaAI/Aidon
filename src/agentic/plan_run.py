@@ -6,7 +6,8 @@ import json
 import re
 
 from ..interface.approval import Decision
-from .verify import budget_currency_criteria, verify_plan
+from .verify import (budget_currency_criteria,
+                     requested_shopping_item_criteria, verify_plan)
 from .run_types import (
     MAX_ATTEMPTS,
     MAX_PLAN_REPAIRS,
@@ -419,8 +420,11 @@ class PlanRunMixin:
             for step in current_plan.normalized_steps():
                 if step.criteria and step.criteria not in criteria:
                     criteria.append(step.criteria)
-            for criterion in budget_currency_criteria(
-                    goal, current_plan.deliverables, self.sandbox.workdir):
+            automatic_criteria = budget_currency_criteria(
+                goal, current_plan.deliverables, self.sandbox.workdir)
+            automatic_criteria.extend(requested_shopping_item_criteria(
+                goal, current_plan.deliverables, self.sandbox.workdir))
+            for criterion in automatic_criteria:
                 if criterion not in criteria:
                     criteria.append(criterion)
             criteria_note = "; ".join(str(item) for item in criteria)

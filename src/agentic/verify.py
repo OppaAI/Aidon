@@ -392,6 +392,33 @@ def budget_currency_criteria(goal: str, deliverables: list[str],
     return criteria
 
 
+def requested_shopping_item_criteria(goal: str, deliverables: list[str],
+                                     workdir: Path) -> list[str]:
+    """Require an explicitly requested item in the shopping-list section."""
+    goal_text = str(goal or "")
+    if not re.search(r"\b(?:shopping list|grocery list|produce section|"
+                     r"produce list)\b", goal_text, re.IGNORECASE):
+        return []
+    match = re.search(
+        r"\badd\s+(?:the\s+)?([A-Za-z][A-Za-z -]*?)"
+        r"(?=\s+(?:to\b|with\b|and\b)|[,.;!?]|$)",
+        goal_text, re.IGNORECASE)
+    if not match:
+        return []
+    item = re.sub(r"\s+", " ", match.group(1)).strip(" -")
+    if not item:
+        return []
+    candidates = [name for name in (deliverables or [])
+                  if Path(str(name)).suffix.lower() in {".md", ".txt", ".csv"}]
+    if len(candidates) > 1:
+        named = [name for name in candidates
+                 if re.search(r"grocery|shopping|meal|food|menu",
+                              Path(str(name)).name, re.IGNORECASE)]
+        candidates = named or candidates
+    return [f"shopping list in {_relative_name(workdir, name)} contains {item}"
+            for name in candidates]
+
+
 def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
     text = str(criterion).strip()
     # Models hedge with trailing parentheticals ("... (or ... if ...)").
@@ -406,6 +433,42 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
         if stripped == text:
             break
         text = stripped
+    match = re.match(
+        r"^shopping list in\s+(.+?)\s+contains\s+(.+)$",
+        text, re.IGNORECASE)
+    if match:
+        name = _relative_name(workdir, match.group(1))
+        path = resolve_in_workdir(workdir, match.group(1))
+        item = match.group(2).strip()
+        if path is None or not path.is_file():
+            return False, f"{name} missing"
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return False, f"{name} not readable as text"
+        lines = content.splitlines()
+        section: list[str] = []
+        in_section = False
+        for line in lines:
+            heading = re.match(r"^\s*(#{1,6})\s+(.+?)\s*#*\s*$", line)
+            if heading:
+                level = len(heading.group(1))
+                title = heading.group(2).strip().lower()
+                is_list = bool(re.search(
+                    r"\b(?:shopping|grocery)\s+list\b", title))
+                if in_section and level <= 2:
+                    break
+                if is_list:
+                    in_section = True
+                    continue
+            if in_section:
+                section.append(line)
+        item_re = re.compile(
+            rf"^\s*[-*+]\s+.*\b{re.escape(item)}\b.*"
+            rf"\$\s*{_CURRENCY_AMOUNT}\s*$", re.IGNORECASE)
+        ok = any(item_re.search(line) for line in section)
+        return ok, (f"{name} shopping list includes priced {item}"
+                    if ok else f"{name} shopping list missing priced {item}")
     # Models often describe the evidence instead of naming the generated
     # file. The file-producing tool is the source of truth in this case.
     if re.search(r"(?:pdf|document|file)\s+(?:file\s+)?(?:is\s+)?(?:created|exists)\s+inside\s+(?:the\s+)?(?:workdir|workspace folder)(?:\b|$)",
