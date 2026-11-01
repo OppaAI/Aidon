@@ -140,9 +140,28 @@ def test_budgeted_meal_plan_gets_currency_checks_even_if_plan_omits_them(tmp_pat
     plan = workdir / "grocery-plan.md"
     plan.write_text(
         "## Shopping List\n"
-        "- Produce - $13.10\n"
-        "- Pantry - $21.40\n"
-        "- Dairy and eggs - $9.00\n"
+        "- Bananas - $1.50\n"
+        "- Apples - $3.00\n"
+        "- Spinach - $2.50\n"
+        "- Lettuce - $1.80\n"
+        "- Carrots - $1.50\n"
+        "- Onion - $0.80\n"
+        "- Frozen vegetables - $2.00\n"
+        "- Oats - $3.50\n"
+        "- Tortillas - $2.50\n"
+        "- Rice - $1.50\n"
+        "- Pasta - $1.20\n"
+        "- Marinara - $2.00\n"
+        "- Black beans - $1.80\n"
+        "- White beans - $0.90\n"
+        "- Salsa - $2.50\n"
+        "- Peanut butter - $2.50\n"
+        "- Hummus - $2.00\n"
+        "- Soy sauce - $1.00\n"
+        "- Eggs - $2.50\n"
+        "- Milk - $2.00\n"
+        "- Cheese - $2.00\n"
+        "- Yogurt - $2.50\n"
         "Estimated Total: $38.20\n"
     )
     goal = "Make a 3-day vegetarian meal plan with a shopping list under $40."
@@ -154,7 +173,7 @@ def test_budgeted_meal_plan_gets_currency_checks_even_if_plan_omits_them(tmp_pat
     ]
     ok, failures, _ = verify_plan(workdir, ["grocery-plan.md"], criteria)
     assert not ok
-    assert any("exceeds $40.00" in failure for failure in failures)
+    assert any("total $43.50 exceeds $40.00" in failure for failure in failures)
     assert any("!= stated $38.20" in failure for failure in failures)
 
 
