@@ -1,8 +1,7 @@
 """Durable notification outbox, Aidon outbox concept, rebuilt, file-based.
 
 Notifications are queued in <home>/outbox/notifications.json, one JSON list, and survive normal
-process restarts. Operations are serialized within one process, while independent processes sharing
-the same home are not coordinated.
+process restarts. Operations are serialized within and across processes sharing the same home.
 list() returns queued notifications, drain(sender) sends each through the caller-supplied sender,
 and only removes notifications the sender reports as sent, failed sends stay queued, with their
 error recorded, so a failed send is not silently dropped. No sender is built in here, the caller
@@ -12,8 +11,9 @@ Cadence: each queued item carries attempts (default 0) and next_attempt_at (ISO 
 now). drain() attempts only items whose next_attempt_at is due at the drain time, so a failed
 send is not retried back-to-back in the same second: a failed attempt increments attempts and
 pushes next_attempt_at out by 60 * attempts seconds (60s, then 120s, then 180s, ...). An item
-already marked sent is skipped. A process crash after the external sender accepts a message but
-before the local queue is saved can cause a retry, so delivery is at-least-once across that window.
+already marked sent is skipped. Each item has a stable idempotency_key for senders to pass to
+providers that support deduplication. A crash after provider acceptance but before the local queue
+is saved can still cause a retry if the provider does not deduplicate it.
 """
 
 from __future__ import annotations
@@ -21,17 +21,74 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
+import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Iterator
 
 _LOCKS_GUARD = threading.Lock()
 _PATH_LOCKS: dict[str, threading.RLock] = {}
+_PROCESS_LOCK_STATE = threading.local()
 
 
 def _lock_for(path: Path) -> threading.RLock:
     key = str(path.resolve())
     with _LOCKS_GUARD:
         return _PATH_LOCKS.setdefault(key, threading.RLock())
+
+
+@contextmanager
+def _process_lock(path: Path) -> Iterator[None]:
+    """Lock a data file across processes, reentrantly within the current thread."""
+    key = str(path.resolve())
+    held = getattr(_PROCESS_LOCK_STATE, "held", None)
+    if held is None:
+        held = _PROCESS_LOCK_STATE.held = {}
+    if held.get(key, 0):
+        held[key] += 1
+        try:
+            yield
+        finally:
+            held[key] -= 1
+        return
+
+    lock_path = path.with_name(path.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as lock_file:
+        if os.name == "nt":
+            import msvcrt
+
+            lock_file.seek(0)
+            if not lock_file.read(1):
+                lock_file.seek(0)
+                lock_file.write(b"0")
+                lock_file.flush()
+            while True:
+                try:
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.05)
+
+            def unlock() -> None:
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+            def unlock() -> None:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        held[key] = 1
+        try:
+            yield
+        finally:
+            held.pop(key, None)
+            unlock()
 
 
 def _now_iso(now: datetime | None = None) -> str:
@@ -66,9 +123,15 @@ class Outbox:
         self.path = self.home / "outbox" / "notifications.json"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = _lock_for(self.path)
-        with self._lock:
+        with self._locked():
             if not self.path.exists():
                 self._save([])
+
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        with self._lock:
+            with _process_lock(self.path):
+                yield
 
     def _load(self) -> list:
         try:
@@ -83,12 +146,10 @@ class Outbox:
         os.replace(temporary, self.path)
 
     def queue(self, to: str, subject: str, body: str) -> dict:
-        with self._lock:
+        with self._locked():
             items = self._load()
-            numeric_ids = [int(x["id"]) for x in items
-                           if isinstance(x, dict)
-                           and str(x.get("id", "")).isdigit()]
-            item = {"id": str(max(numeric_ids, default=0) + 1), "to": to,
+            item_id = uuid.uuid4().hex
+            item = {"id": item_id, "idempotency_key": item_id, "to": to,
                     "subject": subject, "body": body, "status": "queued",
                     "attempts": 0, "next_attempt_at": _now_iso()}
             items.append(item)
@@ -96,7 +157,7 @@ class Outbox:
             return item
 
     def list(self) -> list:
-        with self._lock:
+        with self._locked():
             return self._load()
 
     def drain(self, sender, now: datetime | None = None) -> dict:
@@ -110,11 +171,19 @@ class Outbox:
         and remaining counts, same shape as before.
         """
         moment = _as_now(now)
-        # Serialize drains for this path. The reentrant lock lets a sender
+        # Serialize drains across processes. The reentrant lock lets a sender
         # enqueue another notification on this thread; the final merge reads
         # that new item before updating the items from this drain's snapshot.
-        with self._lock:
+        with self._locked():
             items = self._load()
+            # Give older queued records a stable key before their next send.
+            changed = False
+            for item in items:
+                if not item.get("idempotency_key"):
+                    item["idempotency_key"] = uuid.uuid4().hex
+                    changed = True
+            if changed:
+                self._save(items)
             outcomes: dict[str, dict | None] = {}
             sent = failed = 0
             for item in items:

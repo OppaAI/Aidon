@@ -1,12 +1,33 @@
 """Outbox cadence, tick draining, and scheduled-run notification."""
 
 import json
+import multiprocessing
+import queue
+import time
 from datetime import datetime, timedelta, timezone
 
 from src.capabilities.outbox import Outbox
 from src.interface.scheduler_loop import SchedulerLoop
 
 T0 = datetime(2026, 10, 26, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _queue_many(home, count):
+    outbox = Outbox(home)
+    for index in range(count):
+        outbox.queue("a@example.com", str(index), "body")
+
+
+def _drain_after_barrier(home, barrier, sent_ids):
+    outbox = Outbox(home)
+    barrier.wait()
+
+    def sender(item):
+        sent_ids.put(item["id"])
+        time.sleep(0.05)
+        return True
+
+    outbox.drain(sender)
 
 
 def _set_next_attempt_at(outbox, item_id, when):
@@ -81,6 +102,22 @@ def test_sent_item_removed_and_never_resent(tmp_path):
     assert calls == [] and result["sent"] == 0
 
 
+def test_sender_can_enqueue_during_drain(tmp_path):
+    outbox = Outbox(tmp_path)
+    original = outbox.queue("a@example.com", "original", "body")
+    _set_next_attempt_at(outbox, original["id"], T0)
+    enqueued = []
+
+    def sender(item):
+        assert item["idempotency_key"] == original["id"]
+        enqueued.append(outbox.queue("b@example.com", "new", "body"))
+        return True
+
+    result = outbox.drain(sender, now=T0)
+    assert result == {"sent": 1, "failed": 0, "remaining": 1}
+    assert outbox.list() == enqueued
+
+
 def test_tick_drains_outbox(tmp_path):
     outbox = Outbox(tmp_path)
     outbox.queue("a@example.com", "notice", "body")
@@ -110,3 +147,44 @@ def test_loop_without_outbox_still_runs(tmp_path):
     loop = SchedulerLoop(_FakeScheduler([{"goal": "x"}]), _RecordingDispatcher([]))
     assert loop.run_once() == [{"goal": "x"}]
     assert loop.last_outbox_drain is None
+
+
+def test_concurrent_processes_queue_without_lost_updates(tmp_path):
+    context = multiprocessing.get_context("spawn")
+    workers = [context.Process(target=_queue_many, args=(tmp_path, 15))
+               for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+        assert worker.exitcode == 0
+
+    items = Outbox(tmp_path).list()
+    ids = [item["id"] for item in items]
+    assert len(items) == 30
+    assert len(ids) == len(set(ids))
+    assert all(item["idempotency_key"] == item["id"] for item in items)
+
+
+def test_concurrent_process_drains_send_an_item_once(tmp_path):
+    context = multiprocessing.get_context("spawn")
+    outbox = Outbox(tmp_path)
+    queued = outbox.queue("a@example.com", "once", "body")
+    barrier = context.Barrier(2)
+    sent_ids = context.Queue()
+    workers = [context.Process(target=_drain_after_barrier,
+                               args=(tmp_path, barrier, sent_ids))
+               for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+        assert worker.exitcode == 0
+
+    sent = [sent_ids.get(timeout=1)]
+    try:
+        sent.append(sent_ids.get(timeout=0.1))
+    except queue.Empty:
+        pass
+    assert sent == [queued["id"]]
+    assert outbox.list() == []
