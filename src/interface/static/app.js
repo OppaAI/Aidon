@@ -1599,6 +1599,10 @@
       }
       if (run.status !== "running") {
         waitingForLab = false;
+        // Lazy capabilities (especially memory) can initialize during a
+        // run. Refresh their dashboard labels now instead of leaving the
+        // startup-time "on demand" snapshot stale until page reload.
+        loadDashboardStatus();
         try {
           const key = currentConversationId
             ? "aidon-run-state-" + currentConversationId : "";
