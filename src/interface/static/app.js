@@ -175,7 +175,8 @@
     const d = document.createElement("div");
     d.className = "msg " + kind;
     d.innerHTML = (t ? '<div class="t">' + esc(t) + "</div>" : "") + md(text);
-    if (kind === "user") appendMessageCopyButton(d, text);
+    if (kind === "user" || kind === "aidon")
+      appendMessageCopyButton(d, text);
     thread.appendChild(d);
     scrollThreadToLatest();
     return d;

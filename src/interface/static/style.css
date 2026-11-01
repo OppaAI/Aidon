@@ -251,6 +251,17 @@ html[data-theme="light"] .msg.user { background: #eee4f3; color: #302b35; }
 .run-stats > span { font-size: 9px; font-weight: 400; line-height: 1.4; }
 .run-stats .run-stats-play { flex: 0 0 auto; min-width: 26px; height: 22px;
   margin: 0 0 0 auto; padding: 0 6px; font-size: 12px; }
+.msg-actions { display: flex; justify-content: flex-end; margin-top: 5px; }
+.msg-copy { display: inline-flex; align-items: center; justify-content: center;
+  width: 23px; height: 21px; padding: 0; border: 1px solid transparent;
+  border-radius: 6px; background: transparent; color: currentColor;
+  opacity: .62; cursor: pointer; font: 14px/1 var(--font-display); }
+.msg-copy:hover, .msg-copy:focus-visible { opacity: 1; border-color: var(--border);
+  outline: none; }
+.run-stats .msg-copy { flex: 0 0 auto; margin-left: 0; height: 22px;
+  color: var(--muted); opacity: .8; }
+.run-stats .msg-copy:hover, .run-stats .msg-copy:focus-visible {
+  color: var(--text); border-color: var(--border); }
 .run-stats-icon { display: inline-flex; flex: 0 0 12px; width: 12px; height: 12px;
   color: var(--muted); }
 .run-stats-icon svg { display: block; width: 12px; height: 12px; fill: none;
