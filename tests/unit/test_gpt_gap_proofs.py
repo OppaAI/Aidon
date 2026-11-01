@@ -210,6 +210,20 @@ def test_requested_shopping_item_must_be_priced_in_shopping_section(tmp_path):
     assert ok, failures
 
 
+def test_budget_recalculation_is_not_mistaken_for_adding_a_shopping_item(tmp_path):
+    from src.agentic.verify import requested_shopping_item_criteria
+
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    goal = (
+        "Create a vegetarian grocery plan under $40 and make sure the prices "
+        "add up correctly."
+    )
+
+    assert requested_shopping_item_criteria(
+        goal, ["grocery-plan.md"], workdir) == []
+
+
 def test_invented_tool_plan_is_rejected_not_executed(tmp_path, monkeypatch):
     monkeypatch.setenv("AIDON_MAX_PLAN_REPAIRS", "0")
     monkeypatch.setenv("AIDON_CRITIC_ENABLED", "0")

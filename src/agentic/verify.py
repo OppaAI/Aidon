@@ -408,7 +408,7 @@ def requested_shopping_item_criteria(goal: str, deliverables: list[str],
     if not food_context:
         return []
     match = re.search(
-        r"\badd\s+(?:the\s+)?([A-Za-z][A-Za-z -]*?)"
+        r"\badd\s+(?!up\b)(?:the\s+)?([A-Za-z][A-Za-z -]*?)"
         r"(?=\s+(?:to\b|with\b|and\b)|[,.;!?]|$)",
         goal_text, re.IGNORECASE)
     if not match:
