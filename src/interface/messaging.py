@@ -659,3 +659,204 @@ def strip_slack_bot_mention(text: str, bot_user_id: str) -> str:
         return str(text or "").strip()
     mention = re.compile(r"<@" + re.escape(bot_user_id) + r"(?:\|[^>]+)?>(?:\s*)")
     return mention.sub("", str(text or "")).strip()
+
+
+def poll_slack_thread_once(config, channel: str, thread_ts: str,
+                           last_ts: str = "", fetch=None) -> tuple[list[dict], str]:
+    """Fetch new replies in one known Slack thread, oldest first.
+
+    ``conversations.history`` omits thread replies. This is intentionally
+    scoped to threads attached to active Aidon stops, rather than scanning
+    every thread in a channel on every poll.
+    """
+    from decimal import Decimal
+    from urllib.parse import urlencode
+
+    if fetch is None:
+        def fetch(url, token, params):
+            req = urllib.request.Request(
+                url + "?" + urlencode(params),
+                headers={"Authorization": f"Bearer {token}"})
+            try:
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    return json.loads(response.read().decode())
+            except urllib.error.HTTPError as exc:
+                if exc.code == 429:
+                    raise SlackRateLimited(exc.headers.get("Retry-After", "60")) from None
+                raise RuntimeError(f"Slack thread history failed: HTTP {exc.code}") from None
+
+    messages: dict[str, dict] = {}
+    newest = str(last_ts or thread_ts)
+    newest_number = Decimal(newest)
+    params = {"channel": channel, "ts": thread_ts, "limit": 100}
+    seen_cursors = set()
+    while True:
+        result = fetch(f"{SLACK_API_BASE}/conversations.replies",
+                       config.slack_bot_token, dict(params))
+        if not isinstance(result, dict):
+            raise RuntimeError("Slack thread history returned an invalid response")
+        if result.get("ok") is False:
+            code = str(result.get("error", "api_error"))
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", code):
+                code = "api_error"
+            if code in ("ratelimited", "rate_limited"):
+                raise SlackRateLimited()
+            raise RuntimeError(f"Slack conversations.replies failed: {code}")
+        for message in result.get("messages", []):
+            ts = str(message.get("ts", ""))
+            if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", ts):
+                continue
+            number = Decimal(ts)
+            if number > newest_number:
+                newest, newest_number = ts, number
+            if (ts == str(thread_ts) or number <= Decimal(last_ts or thread_ts)
+                    or message.get("bot_id")
+                    or message.get("subtype") not in
+                    (None, "", "file_share", "thread_broadcast")):
+                continue
+            messages[ts] = {**message, "text": str(message.get("text", "")),
+                            "channel": channel, "ts": ts,
+                            "thread_ts": str(thread_ts)}
+        cursor = (result.get("response_metadata") or {}).get("next_cursor", "")
+        if not cursor:
+            break
+        if cursor in seen_cursors:
+            raise RuntimeError("Slack thread pagination did not advance")
+        seen_cursors.add(cursor)
+        params["cursor"] = cursor
+    return sorted(messages.values(), key=lambda message: Decimal(message["ts"])), newest
+
+
+def download_whatsapp_media(config, media_id: str, get=None) -> bytes:
+    """Download WhatsApp media bytes, via the Graph API, two steps.
+
+    Step 1: GET /<media_id> with the WhatsApp token, returns a
+    download URL. Step 2: GET that URL with the same token,
+    returns the bytes. get is injectable for tests, taking
+    (url, token) and returning bytes or a dict with a url.
+    """
+    if get is None:
+        import urllib.request, json as _json
+        def get(url, token):
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+            with urllib.request.urlopen(req, timeout=15) as response:
+                raw = response.read()
+            try:
+                return _json.loads(raw.decode())
+            except Exception:
+                return raw
+    info = get(f"https://graph.facebook.com/v21.0/{media_id}", config.whatsapp_token)
+    url = info.get("url", "") if isinstance(info, dict) else ""
+    if not url:
+        raise ValueError("WhatsApp media lookup did not return a download URL")
+    data = get(url, config.whatsapp_token)
+    if isinstance(data, dict):
+        raise ValueError("WhatsApp media download did not return bytes")
+    return data
+
+
+def download_slack_file(token: str, file_url_or_id: str, get=None,
+                        timeout_seconds: int = 15) -> bytes:
+    """Download a Slack shared file's bytes, via its private URL.
+
+    file_url_or_id is either the file's url_private (as carried in
+    an event payload) or a bare file id, resolved first through
+    files.info. The token travels only in the Authorization
+    header, never in a URL, a log line, or an error message;
+    only https URLs are fetched, and every request is
+    timeout-bounded. get is injectable for tests, taking
+    (url, token) and returning bytes or a dict. Returns the file
+    bytes; raises ValueError on any refusal or failed lookup or
+    download. This helper is not wired into any handler: a caller
+    that holds a bot token uses it explicitly.
+    """
+    if not token or not file_url_or_id:
+        raise ValueError("Slack file download needs a token and a file URL or id")
+    if get is None:
+        import urllib.request, json as _json
+        def get(url, token, _timeout=timeout_seconds):
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+            with urllib.request.urlopen(req, timeout=_timeout) as response:
+                raw = response.read()
+            try:
+                return _json.loads(raw.decode())
+            except Exception:
+                return raw
+    url = str(file_url_or_id)
+    if "://" not in url:
+        # Bare file id: resolve through files.info, Bearer header
+        # only, never a token query parameter.
+        info = get(f"https://slack.com/api/files.info?file={url}", token)
+        if not isinstance(info, dict):
+            raise ValueError("Slack files.info did not return file metadata")
+        file_info = info.get("file", {}) if isinstance(info.get("file"), dict) else {}
+        url = file_info.get("url_private", "") or ""
+        if not url:
+            raise ValueError("Slack files.info did not return a private URL")
+    from urllib.parse import urlparse
+    if urlparse(url).scheme != "https":
+        raise ValueError("Slack file download refuses non-https URLs")
+    data = get(url, token)
+    if isinstance(data, dict):
+        raise ValueError("Slack file download did not return bytes")
+    return data
+
+
+def slack_bot_user_id(config, fetch=None) -> str:
+    """Resolve (and cache) the bot's Slack user id via auth.test.
+
+    Returns "" when the token is missing or the lookup fails, so callers
+    can fall back to a mention-token heuristic.
+    """
+    cached = getattr(config, "_slack_bot_user_id", None)
+    checked_at = getattr(config, "_slack_bot_user_id_checked_at", None)
+    now = time.monotonic()
+    # A successful identity is stable for the lifetime of this process. A
+    # failed lookup is cached briefly to avoid hammering auth.test for every
+    # ordinary channel message, then retried automatically.
+    if cached:
+        return cached
+    if checked_at is not None and now - checked_at < 60:
+        return ""
+    if not getattr(config, "slack_configured", lambda: False)():
+        return ""
+    if fetch is None:
+        import urllib.request, json as _json
+        def fetch(url, token):
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                return _json.loads(response.read().decode())
+    try:
+        result = fetch("https://slack.com/api/auth.test", config.slack_bot_token)
+    except Exception:
+        result = {}
+    uid = ""
+    if isinstance(result, dict) and result.get("ok"):
+        uid = str(result.get("user_id") or "")
+    config._slack_bot_user_id = uid
+    config._slack_bot_user_id_checked_at = now
+    return uid
+
+
+def slack_message_for_bot(text, channel, bot_user_id: str = "") -> bool:
+    """Whether a Slack message should trigger Aidon.
+
+    DMs (channel id starts with D) always trigger. In channels, only
+    the bot's own Slack mention token triggers; plain name mentions,
+    mentions of other users, and unknown bot identity fail closed.
+    """
+    channel = str(channel or "")
+    if channel.startswith("D"):
+        return True
+    if not bot_user_id:
+        return False
+    mention = re.compile(r"<@" + re.escape(bot_user_id) + r"(?:\|[^>]+)?>")
+    return bool(mention.search(str(text or "")))
+
+
+def strip_slack_bot_mention(text: str, bot_user_id: str) -> str:
+    """Remove only Aidon's Slack mention token before command/goal parsing."""
+    if not bot_user_id:
+        return str(text or "").strip()
+    mention = re.compile(r"<@" + re.escape(bot_user_id) + r"(?:\|[^>]+)?>(?:\s*)")
+    return mention.sub("", str(text or "")).strip()
