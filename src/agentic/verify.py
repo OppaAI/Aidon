@@ -370,8 +370,9 @@ def budget_currency_criteria(goal: str, deliverables: list[str],
                      goal_text, re.IGNORECASE):
         return []
     budget_match = re.search(
-        rf"\b(?:under|below|at most|no more than|less than|"
-        rf"budget(?:\s+(?:of|is|up to|under))?|maximum(?:\s+of)?)\s*"
+        rf"\b(?:under|below|up to|at most|no more than|less than|"
+        rf"budget(?:\s+(?:of|is|up to|under)|\s*[:=])?|"
+        rf"maximum(?:\s+of)?)\s*"
         rf"(?:(?:CAD|USD|EUR|GBP|AUD|NZD)\s*)?\$?\s*"
         rf"({_CURRENCY_AMOUNT})\b",
         goal_text, re.IGNORECASE)
