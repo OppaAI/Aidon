@@ -916,7 +916,10 @@ def main(argv: list[str] | None = None) -> int:
                 _be = _mb2(config.execution_backend, sandbox, image=config.docker_image, allow_network=config.docker_network)
             except Exception:
                 _be = None
-            return GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds), config.home, memory=memory, conversation_id=session, plugins=_pl, execution_backend=_be, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, conversation_id=session), model_verifier=_M2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_be, sandbox))
+            from ..capabilities.execution import backend_is_sandboxed
+            _gate = _scheduled_gate(
+                sandboxed=backend_is_sandboxed(_be, sandbox))
+            return GoalRunner(client, sandbox, _gate, config.home, memory=memory, conversation_id=session, plugins=_pl, execution_backend=_be, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, conversation_id=session), model_verifier=_M2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_be, sandbox))
 
         import os as _os
         _slack_last_ts = ""
@@ -927,8 +930,8 @@ def main(argv: list[str] | None = None) -> int:
         # and the report delivery. Each schedule gets its own
         # practice folder in the sandbox, and a runner built for
         # it: core tools live in that folder, the gate is the
-        # PracticeGate for pre-approved schedules (the WebUI
-        # gate otherwise, so it stops for approval), and the
+        # PracticeGate for pre-approved schedules (the scheduled
+        # gate otherwise, so unsafe actions fail closed), and the
         # only extra tools are the owner-only practice tools.
         def _practice_runner(schedule):
             from ..agentic.budgets import Budget as _B3

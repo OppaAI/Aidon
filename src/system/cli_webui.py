@@ -75,7 +75,6 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         from ..agentic.trace import TraceRecorder
         from ..agentic.verifier_model import ModelVerifier
         from ..capabilities.plugins import PluginRegistry
-        from ..agentic.semantic_router import SemanticRouter
         from ..interface.scheduler_loop import NudgeTracker
         run_id = str(event.payload.get("run_id", "")) or new_run_id()
         run_control.register(run_id, event.goal, event.conversation_id)

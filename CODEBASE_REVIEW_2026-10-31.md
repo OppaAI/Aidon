@@ -60,6 +60,10 @@ Cron searching stops after 366 days, so `0 0 29 2 *` after March 1, 2025 returns
 
 Cron search now spans eight years, which covers the longest gap between valid leap-day occurrences without scanning a full Gregorian cycle. Validate leap years and truly impossible dates.
 
+### 8. Scheduler-triggered Slack and ingest goals can block on stdin — fixed in code, runtime validation pending
+
+`src/system/main.py` scheduler daemon's `_full_scheduler_runner` handled Slack poll and ingest goals with `_cli_gate`, whose approval callback calls `input()`. In an unattended daemon this can block the loop indefinitely when a run reaches an approval. It now uses `_scheduled_gate` with the configured backend's sandbox status; unsafe actions fail closed without waiting for terminal input.
+
 ## Dead code, duplication, and improvement candidates
 
 - `src/capabilities/skill_import.py`: the unused `_now` helper and unresolved return annotation were removed. The pyflakes undefined-name warnings for these symbols should be rechecked.
@@ -71,9 +75,10 @@ Cron search now spans eight years, which covers the longest gap between valid le
 
 ## Verification and scope
 
-- Repository-wide `compileall` passed for Python under `src` and `scripts`. Pyflakes scanned the Python source and identified the undefined names above, among other warnings.
+- Repository-wide `compileall` passed for Python under `src` and `scripts`. The second Pyflakes scan found no undefined names; remaining output is mostly unused imports, including compatibility re-exports.
 - `node --check` passed for non-vendored WebUI JavaScript.
-- System-Python pytest run: 1,363 passed, 7 skipped, 36 failed, 19 errors. Many failed tests attempted socket operations forbidden by this execution environment; not every failure was individually classified. The project `.venv` does not have pytest. Repeat on the home PC or CI before attributing the remainder to code.
+- Pre-fix system-Python pytest run: 1,363 passed, 7 skipped, 36 failed, 19 errors. Many failures attempted socket operations forbidden by this execution environment; not every failure was individually classified. The project `.venv` does not have pytest.
+- After the fixes, 49 focused existing tests for triggers, scheduled jobs, outbox cadence, extra tools and tool wiring passed. This does not cover the live WebUI dispatcher or daemon startup; repeat the full suite and live smoke checks on the home PC or CI.
 - The repository contains 206 Python source files and 175 Python test files. The static checks covered source broadly; manual review and reproductions were targeted. This review does not establish that every function, JavaScript behavior, dependency, integration, or security boundary has been manually checked. Browser, real provider, Modal, SSH and X11 checks remain pending as described in `PRODUCTION_READINESS.md`.
 
 Remaining priority: add durable scheduler claim/acknowledgement and cross-process outbox locking if multiple Aidon processes share one home; then add CI coverage and review cleanup candidates. Runtime behavior for all code fixes remains unverified in this environment.
