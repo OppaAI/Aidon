@@ -90,6 +90,7 @@ def test_plain_chat_route_includes_recalled_cross_chat_fact(tmp_path, monkeypatc
                       for message in call)
     assert "Cedar Lantern" in sent
     assert "Keep the answer concise." in sent
+    assert "Do not reinterpret a word from the question" in sent
 
 
 def test_ask_mode_webchat_route_skips_interview(tmp_path):

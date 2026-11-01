@@ -419,6 +419,10 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
         except Exception:
             context = ""
         if context:
+            parts.append(
+                "When a recalled fact directly answers the question, state "
+                "the fact plainly. Do not reinterpret a word from the question "
+                "as a competing answer or narrate the retrieval.")
             parts.append(context)
         return "\n\n".join(parts)
 
