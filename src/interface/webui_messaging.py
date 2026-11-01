@@ -483,6 +483,7 @@ class WebUIMessagingMixin:
                 pass
             if payload.get("images") and self.messaging_config.slack_bot_token:
                 from .messaging import download_slack_file as _dl_slack
+                image_paths: list[str] = []
                 for image in payload["images"]:
                     url = image.get("url_private", "")
                     if not url:
@@ -499,13 +500,19 @@ class WebUIMessagingMixin:
                         tmp = self.home / "library" / f"slack-{image['id']}.{ext}"
                         tmp.parent.mkdir(parents=True, exist_ok=True)
                         tmp.write_bytes(data)
+                        # The downloaded file must be passed as a real vision
+                        # attachment to GoalRunner. A library/vision marker in
+                        # goal text alone neither sends image bytes to the model
+                        # nor activates the runner's image-context isolation.
+                        image_paths.append(str(tmp))
                         library = Library(self.home)
                         saved = library.add_file(tmp, kind="image", description="Slack image")
                         marker = (f"[image slack_file_id={image['id']} "
                                   f"mimetype={image['mimetype']} name={image['name']}]")
                         try:
                             from ..capabilities.whatsapp_vision import prepare_vision_message
-                            vision = prepare_vision_message(str(tmp), caption)
+                            vision = prepare_vision_message(
+                                str(tmp), caption or "Analyze the attached image.")
                             replacement = (f"[image library_id={saved['id']} "
                                            f"vision_image={vision['image_path']}]")
                         except Exception:
@@ -514,6 +521,8 @@ class WebUIMessagingMixin:
                         image["downloaded"] = True
                     except Exception:
                         continue
+                if image_paths:
+                    payload["image_paths"] = image_paths
             # Non-image files: same download, no vision step — the
             # document lands in the library and the marker carries
             # its library id, so the run can read it.
