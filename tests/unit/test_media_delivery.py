@@ -8,14 +8,14 @@ from src.interface.slack_inbound import parse_slack_event
 def test_slack_parse_keeps_non_image_files():
     payload = {"event": {
         "type": "message", "channel": "C1", "user": "U1",
-        "text": "read this",
+        "text": "<@UBOT> read this",
         "files": [
             {"id": "F1", "name": "plan.pdf", "mimetype": "application/pdf",
              "url_private": "https://files.slack.com/F1"},
             {"id": "F2", "name": "pic.png", "mimetype": "image/png",
              "url_private": "https://files.slack.com/F2"},
         ]}}
-    event = parse_slack_event(payload)
+    event = parse_slack_event(payload, bot_user_id="UBOT")
     assert event is not None
     assert "[file slack_file_id=F1" in event.goal
     assert "[image slack_file_id=F2" in event.goal
@@ -23,9 +23,10 @@ def test_slack_parse_keeps_non_image_files():
     assert len(event.payload["images"]) == 1
     # A file alone, no text, still becomes a goal.
     alone = parse_slack_event({"event": {
-        "type": "message", "channel": "C1", "user": "U1", "text": "",
+        "type": "message", "channel": "C1", "user": "U1", "text": "<@UBOT>",
         "files": [{"id": "F9", "name": "doc.txt", "mimetype": "text/plain",
-                   "url_private": "https://files.slack.com/F9"}]}})
+                   "url_private": "https://files.slack.com/F9"}]}},
+        bot_user_id="UBOT")
     assert alone is not None and "F9" in alone.goal
 
 
