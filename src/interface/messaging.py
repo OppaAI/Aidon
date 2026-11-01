@@ -532,3 +532,53 @@ def download_slack_file(token: str, file_url_or_id: str, get=None,
     if isinstance(data, dict):
         raise ValueError("Slack file download did not return bytes")
     return data
+
+
+def slack_bot_user_id(config, fetch=None) -> str:
+    """Resolve (and cache) the bot's Slack user id via auth.test.
+
+    Returns "" when the token is missing or the lookup fails, so callers
+    can fall back to a mention-token heuristic.
+    """
+    cached = getattr(config, "_slack_bot_user_id", None)
+    if cached is not None:
+        return cached
+    if not getattr(config, "slack_configured", lambda: False)():
+        config._slack_bot_user_id = ""
+        return ""
+    if fetch is None:
+        import urllib.request, json as _json
+        def fetch(url, token):
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                return _json.loads(response.read().decode())
+    try:
+        result = fetch("https://slack.com/api/auth.test", config.slack_bot_token)
+    except Exception:
+        result = {}
+    uid = ""
+    if isinstance(result, dict) and result.get("ok"):
+        uid = str(result.get("user_id") or "")
+    config._slack_bot_user_id = uid
+    return uid
+
+
+def slack_message_for_bot(text, channel, bot_user_id: str = "") -> bool:
+    """Whether a Slack message should trigger Aidon.
+
+    DMs (channel id starts with D) always trigger. In channels, only
+    messages that mention Aidon (a Slack mention token or the name)
+    trigger; plain chatter is ignored.
+    """
+    channel = str(channel or "")
+    if channel.startswith("D"):
+        return True
+    text = text or ""
+    low = text.lower()
+    if "aidon" in low:
+        return True
+    if bot_user_id and f"<@{bot_user_id}>" in text:
+        return True
+    if not bot_user_id and re.search(r"<@[A-Za-z0-9]+>", text):
+        return True
+    return False

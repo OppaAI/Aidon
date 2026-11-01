@@ -784,7 +784,8 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                     except Exception as exc:
                         self._trace("dag", "rank-skipped", str(exc)[:100])
                 failure = matching_failure(self.memory, goal)
-                if failure is None:
+                _skip_adapt = bool(self.image_paths) and not self._is_image_edit_goal(goal)
+                if failure is None and not _skip_adapt:
                     # DAG composition first: when the goal spans
                     # distinct known workflows, sequencing them
                     # beats adapting any single one and silently
@@ -807,7 +808,8 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                         f"(failed tools: {', '.join(failure.failed_tools) or 'none'}; "
                         f"failed deliverables: {', '.join(failure.failed_deliverables) or 'none'}). "
                         f"Do not repeat that approach.")
-                if failure is None and experiences and experiences[0].dag_nodes:
+                if (failure is None and experiences and experiences[0].dag_nodes
+                        and not _skip_adapt):
                     # Adaptive DAG first: add, remove, modify, reorder,
                     # validated, with rollback to the saved graph on failure.
                     # A sequential adapt is the fallback, never a broken graph.
@@ -921,6 +923,13 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                 deliverable=str(first["deliverable"]))
         except Exception:
             return None
+
+    def _is_image_edit_goal(self, goal: str) -> bool:
+        low = (goal or "").lower()
+        return any(w in low for w in (
+            "edit", "modify", "transform", "retouch", "adjust", "enhance",
+            "filter", "crop", "resize", "recolor", "remove background",
+            "background removal", "inpaint", "outpaint"))
 
     def _composed_plan(self, experiences, goal):
         """Build a plan by combining distinct recalled workflows, or None.

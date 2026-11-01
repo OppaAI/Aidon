@@ -99,7 +99,7 @@ def test_slack_poll_commands_can_approve_a_goal_while_worker_waits(tmp_path):
     server.dispatcher.register("slack", goal)
     inbox = SlackInbox(tmp_path, server.dispatcher, server.slack_sender)
     status, result = server.handle_slack_message(
-        {"event": {"type": "message", "channel": "C1", "ts": "1.0", "text": "run"}},
+        {"event": {"type": "message", "channel": "D1", "ts": "1.0", "text": "run"}},
         dispatch=inbox.enqueue)
     assert result == {"queued": True}
     worker = threading.Thread(target=inbox.process_once)
@@ -113,7 +113,7 @@ def test_slack_poll_commands_can_approve_a_goal_while_worker_waits(tmp_path):
     card_id = next(iter(server.webui_gate.cards))
     assert f"Approval needed [{card_id}]" in sent[0][1]
     status, result = server.handle_slack_message(
-        {"event": {"type": "message", "channel": "C1", "ts": "2.0", "text": f"approve {card_id}"}},
+        {"event": {"type": "message", "channel": "D1", "ts": "2.0", "text": f"approve {card_id}"}},
         dispatch=inbox.enqueue)
     worker.join(3)
     assert not worker.is_alive()
@@ -125,14 +125,14 @@ def test_polled_slack_uses_shared_commands_and_conversation_identity(tmp_path):
     server = WebUIServer(tmp_path)
     events = []
     status, result = server.handle_slack_message(
-        {"event": {"type": "message", "channel": "C1", "ts": "1.0", "text": "/help"}},
+        {"event": {"type": "message", "channel": "D1", "ts": "1.0", "text": "/help"}},
         dispatch=events.append)
     assert result["replies"] and not events
     server.handle_slack_message(
-        {"event": {"type": "message", "channel": "C1", "ts": "2.0", "text": "hello"}},
+        {"event": {"type": "message", "channel": "D1", "ts": "2.0", "text": "hello"}},
         dispatch=events.append)
-    assert events[0].conversation_id == "slack:C1"
-    assert events[0].payload["conversation_id"] == "slack:C1"
+    assert events[0].conversation_id == "slack:D1"
+    assert events[0].payload["conversation_id"] == "slack:D1"
 
 
 def test_new_slack_channel_does_not_replay_historical_goals(tmp_path):
@@ -162,7 +162,7 @@ def test_signed_slack_webhook_queues_once_and_returns_before_goal_runs(tmp_path)
     server.dispatcher.register("slack", lambda event: goals.append(event.goal))
     inbox = SlackInbox(tmp_path, server.dispatcher, lambda *args: {"ok": True})
     server.slack_message_dispatch = inbox.enqueue
-    body = {"event": {"type": "message", "channel": "C1", "ts": "1.0", "text": "run"}}
+    body = {"event": {"type": "message", "channel": "D1", "ts": "1.0", "text": "run"}}
     raw = json.dumps(body).encode()
     stamp = str(int(time.time()))
     signature = "v0=" + hmac.new(b"secret", f"v0:{stamp}:".encode()+raw, hashlib.sha256).hexdigest()

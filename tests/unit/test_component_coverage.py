@@ -102,7 +102,7 @@ def test_intake_lifecycle_planner_eval_governor():
     assert result["ok"] and result["score"] == 1.0
 
 def test_slack_whatsapp_inbound():
-    assert parse_slack_event({"event": {"type": "message", "text": "hi", "channel": "C1"}}).goal == "hi"
+    assert parse_slack_event({"event": {"type": "message", "text": "hi", "channel": "D1"}}).goal == "hi"
     assert parse_slack_event({"event": {"type": "reaction_added"}}) is None
     payload = {"entry": [{"changes": [{"value": {"messages": [{"type": "text", "text": {"body": "hello"}, "from": "123"}]}}]}]}
     assert parse_whatsapp_message(payload).goal == "hello"

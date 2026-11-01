@@ -181,7 +181,7 @@ def test_whatsapp_approve_resolves_card(tmp_path):
 def test_slack_signature_verified_before_parse(tmp_path):
     server, httpd, base, _, _, replies = _start_server(tmp_path)
     try:
-        payload = {"event": {"type": "message", "text": "Hello Slack", "channel": "C1", "ts": "10.0"}}
+        payload = {"event": {"type": "message", "text": "Hello Slack", "channel": "D1", "ts": "10.0"}}
         raw = json.dumps(payload).encode()
         timestamp = str(int(time.time()))
         signature = "v0=" + hmac.new(b"secret123", f"v0:{timestamp}:".encode() + raw, hashlib.sha256).hexdigest()
@@ -190,7 +190,7 @@ def test_slack_signature_verified_before_parse(tmp_path):
                                         "X-Slack-Signature": signature})
         assert status == 200
         assert result["replies"] == ["Slack got: Hello Slack"]
-        assert replies == [("C1", "Slack got: Hello Slack", "10.0")]
+        assert replies == [("D1", "Slack got: Hello Slack", "10.0")]
         # Bad signature is 401, never dispatched.
         status = None
         try:

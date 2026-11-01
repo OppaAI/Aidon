@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import time
 
 from .triggers import TriggerEvent
@@ -76,8 +77,15 @@ def parse_slack_event(payload: dict) -> TriggerEvent | None:
     if event.get("type") != "message" or event.get("bot_id"):
         return None
     text = event.get("text", "")
+    channel = str(event.get("channel", "") or "")
     images, files = _shared_files(event)
     if not text and not images and not files:
+        return None
+    # In a public (non-DM) channel, only messages that mention Aidon
+    # become goals. DMs keep the old "every message" behavior.
+    is_dm = channel.startswith("D")
+    mentions = bool(re.search(r"<@[A-Za-z0-9]+>", text or "")) or "aidon" in (text or "").lower()
+    if not is_dm and not mentions and not images and not files:
         return None
     # Same downstream shape as the WhatsApp path: the image rides
     # with the goal text as an [image ...] marker, a document

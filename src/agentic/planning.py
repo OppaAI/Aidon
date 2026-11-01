@@ -260,7 +260,7 @@ class PlanningMixin:
                        "['relative/output.png']}; only those files are copied into "
                        "the goal workspace. Keep paths relative and create outputs "
                        "inside the sandbox run directory.")
-            if self.image_paths:
+            if self.image_paths and self._is_image_edit_goal(goal):
                 system += (" For an image-editing goal with attached images, no "
                            "built-in image editor is available: if the Toolbox has "
                            "no suitable adopted tool, author the reusable image "
@@ -275,6 +275,14 @@ class PlanningMixin:
                            "live approval card will show the prompt and attached "
                            "filenames; the API may spend image credits. Return the "
                            "edited image through the sandbox plugin files contract.")
+            if self.image_paths and not self._is_image_edit_goal(goal):
+                system += (" The user attached image(s) to this goal for analysis "
+                           "or answering a question about them. Do not treat this "
+                           "as an image-editing request and do not replay any prior "
+                           "image-editing workflow. Inspect the attached image(s) "
+                           "directly (they are available to vision-capable phases) "
+                           "and answer the user's question; only produce files if "
+                           "the user explicitly asked for an artifact.")
             skill_texts = self.plugins.skill_texts()
             if skill_texts:
                 system += " Skills, follow them when relevant: " + " ".join(

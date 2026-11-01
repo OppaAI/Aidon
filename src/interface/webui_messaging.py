@@ -330,7 +330,7 @@ class WebUIMessagingMixin:
         questions, and mode commands remain reachable while a goal runs.
         """
         event_body = body.get("event", {})
-        if (event_body.get("type") == "message"
+        if (event_body.get("type") in ("message", "app_mention")
                 and not event_body.get("bot_id")
                 and event_body.get("subtype") in (None, "", "file_share", "thread_broadcast")):
             text = str(event_body.get("text", ""))
@@ -442,6 +442,17 @@ class WebUIMessagingMixin:
                 if self.slack_sender is not None:
                     self.slack_sender(channel, decision_reply, thread_ts)
                 return 200, {"replies": [decision_reply]}
+            # In a public (non-DM) channel, only messages that mention Aidon
+            # become goals; plain chatter is ignored (still acknowledged).
+            try:
+                from .messaging import slack_bot_user_id as _sbuid, slack_message_for_bot as _smfb
+                _bot_uid = _sbuid(self.messaging_config)
+            except Exception:
+                _bot_uid = ""
+            _has_attachments = bool(event_body.get("files") or event_body.get("file_shares")
+                                    or event_body.get("attachments"))
+            if not _has_attachments and not _smfb(text, channel, _bot_uid):
+                return 200, {"ok": True, "ignored": "not_mentioned"}
             caption = text
             replies: list[str] = []
             # Image intake, same shape as parse_slack_event: image

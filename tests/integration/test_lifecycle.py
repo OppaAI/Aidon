@@ -310,16 +310,16 @@ def test_slack_handler_plain_text_unchanged(tmp_path):
     server = WebUIServer(tmp_path, dispatcher=_Dispatcher())
     server.slack_signing_secret = "secret123"
     body = {"event": {"type": "message", "text": "hello",
-                      "channel": "C1", "user": "U1"}}
+                      "channel": "D1", "user": "U1"}}
     raw = json.dumps(body).encode()
     status, _payload = server.handle_slack_post(raw, _sign("secret123", raw), body)
     assert status == 200
     assert seen[0].goal == "hello"
     assert seen[0].payload == {"force_web": False, "think_max": False,
                                "research_mode": False, "mode": "plan",
-                               "channel": "C1",
+                               "channel": "D1",
                                "thread_ts": None,
-                               "conversation_id": "slack:C1", "slack_ts": ""}
+                               "conversation_id": "slack:D1", "slack_ts": ""}
 
 
 # --- next lifecycle test module ---
@@ -441,7 +441,7 @@ def test_research_excerpt_keeps_rows_and_claims_still_match():
 # -- Slack image intake -------------------------------------------------
 
 def _slack_payload(text="", files=None, file_shares=None):
-    event = {"type": "message", "channel": "C1", "user": "U1", "text": text}
+    event = {"type": "message", "channel": "D1", "user": "U1", "text": text}
     if files is not None:
         event["files"] = files
     if file_shares is not None:
