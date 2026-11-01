@@ -288,10 +288,13 @@ def test_whatsapp_goal_handler_failure_is_replied_to_owner(tmp_path):
     assert result["replies"] == [replies[0][1]]
 
 
-def test_slack_command_grants_and_confirms(tmp_path):
+def test_slack_command_grants_and_confirms(tmp_path, monkeypatch):
     server, _, replies = _server(tmp_path)
+    # Channel commands are handled only when the message addresses Aidon.
+    monkeypatch.setattr("src.interface.messaging.slack_bot_user_id",
+                        lambda _config: "UBOT")
     body = {"type": "event", "event": {
-        "type": "message", "text": "preapprove dinner live 4",
+        "type": "message", "text": "<@UBOT> preapprove dinner live 4",
         "channel": "C123", "ts": "1700000000.000100"}}
     raw = json.dumps(body).encode()
     status, result = server.handle_slack_post(raw, _sign("secret123", raw), body)
