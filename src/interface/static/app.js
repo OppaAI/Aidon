@@ -2722,6 +2722,8 @@
       '<div class="brief-hint">Standing instructions for this ' +
       'chat. Every run in this chat starts from this ' +
       'brief. Leave it empty to clear it.</div>' +
+      '<div id="brief-status" class="brief-status" role="status" ' +
+      'aria-live="polite"></div>' +
       '<textarea id="brief-text" rows="14" spellcheck="false" ' +
       'placeholder="e.g. Hard budget cap: CAD $100 for the shopping ' +
       'basket. Ledger: basket.json in the workspace — totals come ' +
@@ -2749,35 +2751,74 @@
       window.alert("Start a chat first, then set its brief.");
       return;
     }
-    briefConversationId = currentConversationId;
+    const conversationId = currentConversationId;
+    briefConversationId = conversationId;
     const overlay = ensureBriefModal();
     overlay.querySelector("#brief-title").textContent = "Chat brief";
     const ta = overlay.querySelector("#brief-text");
+    const status = overlay.querySelector("#brief-status");
     ta.value = "";
     ta.placeholder = "Loading…";
+    ta.disabled = true;
+    status.textContent = "Loading this chat’s brief…";
     overlay.hidden = false;
     try {
-      const r = await (await fetch(
-        "/api/conversations/" + encodeURIComponent(currentConversationId) +
-        "/brief")).json();
-      ta.value = r.brief || "";
-    } catch (e) { ta.value = ""; }
-    ta.focus();
+      const response = await fetch(
+        "/api/conversations/" + encodeURIComponent(conversationId) +
+        "/brief");
+      if (briefConversationId !== conversationId ||
+          currentConversationId !== conversationId) return;
+      if (response.status === 404) {
+        ta.value = ""; // a chat without a saved brief is normal
+        status.textContent = "No brief saved for this chat yet.";
+      } else if (!response.ok) {
+        throw new Error("Loading failed (HTTP " + response.status + ")");
+      } else {
+        const data = await response.json();
+        ta.value = typeof data.brief === "string"
+          ? data.brief : (data.brief ? JSON.stringify(data.brief, null, 2) : "");
+        status.textContent = "";
+      }
+    } catch (e) {
+      if (briefConversationId !== conversationId ||
+          currentConversationId !== conversationId) return;
+      ta.value = "";
+      status.textContent = "Could not load this chat’s brief. Check the Aidon connection and try again.";
+    } finally {
+      if (briefConversationId === conversationId &&
+          currentConversationId === conversationId) {
+        ta.placeholder = "e.g. Hard budget cap: CAD $100 for the shopping basket.";
+        ta.disabled = false;
+        ta.focus();
+      }
+    }
   }
   const chatBriefBtn = document.getElementById("chat-brief");
   if (chatBriefBtn) chatBriefBtn.addEventListener("click", openBrief);
   async function saveBrief() {
-    const ta = document.getElementById("brief-text");
+    const overlay = document.getElementById("brief-overlay");
+    const ta = overlay.querySelector("#brief-text");
+    const status = overlay.querySelector("#brief-status");
+    const save = overlay.querySelector("#brief-save");
+    save.disabled = true;
+    status.textContent = "Saving brief…";
     try {
-      await fetch(
+      const response = await fetch(
         "/api/conversations/" + encodeURIComponent(briefConversationId) +
         "/brief", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ brief: ta.value }),
         });
-    } catch (e) { /* the modal simply stays as it was */ }
-    closeBrief();
+      if (!response.ok) {
+        throw new Error("Saving failed (HTTP " + response.status + ")");
+      }
+      closeBrief();
+    } catch (e) {
+      status.textContent = "Could not save this brief. Check the Aidon connection and try again.";
+    } finally {
+      save.disabled = false;
+    }
   }
 
   // ---- history: persistent conversations ----
