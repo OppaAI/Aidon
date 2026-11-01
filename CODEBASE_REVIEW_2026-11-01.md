@@ -105,7 +105,11 @@ and caller contracts and were repaired without an unreviewed consolidation.
    the date suffix from an explicitly named filename. A deterministic plan
    check and regression now reject this mismatch before a plan can be shown
    for approval; rebuild the Docker image and confirm the repaired plan retains
-   the exact requested filename before proceeding.
+   the exact requested filename before proceeding. After the rebuild, the
+   WebUI retry proposed `dispatcher-webui-check-20261101.txt` exactly, ran the
+   plan, and reported the file read back with the requested contents. The
+   owner confirmed `webui-dispatch-ok`; the WebUI goal-to-verified-artifact leg
+   now passes on the target host.
    Scheduler startup, dispatch, pending-claim recovery, and exact-content
    verification now passed target-host checks. The exact-content regression
    first exposed a false success with `exact_test.py`; after rebuilding, a new
