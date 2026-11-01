@@ -238,6 +238,7 @@ class PlanRunMixin:
                 self.home, mode="plan", goal=goal, plan=plan_to_dict(plan),
                 conversation_key=getattr(self, "conversation_key", ""),
                 conversation_id=self.conversation_id,
+                thread_ts=getattr(self, "conversation_thread_id", ""),
                 budget_key=getattr(
                     getattr(self, "acquisition_governor", None),
                     "budget_key", None) or "")
@@ -383,6 +384,7 @@ class PlanRunMixin:
                                     plan=plan_to_dict(current_plan),
                                     conversation_key=getattr(self, "conversation_key", ""),
                                     conversation_id=self.conversation_id,
+                                    thread_ts=getattr(self, "conversation_thread_id", ""),
                                     budget_key=getattr(
                                         getattr(self, "acquisition_governor", None),
                                         "budget_key", None) or "")

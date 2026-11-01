@@ -16,7 +16,8 @@ from src.memory.memory_extras import backup, export_points, redact, rolling_summ
 from src.interface.preapproval import PreapprovalStore
 from src.agentic.research_allow import is_allowed, load_allowlist, research_multiround
 from src.social.youtube_transcript import fetch_transcript
-from src.interface.messaging import poll_slack_once, MessagingConfig, send_slack
+from src.interface.messaging import (
+    poll_slack_once, poll_slack_thread_once, MessagingConfig, send_slack)
 from src.interface.webui import WebUIServer
 from src.interface.triggers import TriggerDispatcher
 from src.interface.triggers import TriggerEvent
@@ -92,6 +93,28 @@ def test_slack_polling_skips_bots_and_old():
     messages, newest = poll_slack_once(config, "C1", last_ts="1", fetch=fake_fetch)
     assert [m["text"] for m in messages] == ["new"]
     assert newest == "4"
+
+
+def test_slack_thread_polling_returns_only_new_human_replies():
+    config = MessagingConfig(slack_bot_token="x")
+    calls = []
+
+    def fake_fetch(url, token, params):
+        calls.append((url, params))
+        return {"ok": True, "messages": [
+            {"ts": "10.0", "text": "original", "user": "U1"},
+            {"ts": "11.0", "text": "Aidon plan", "bot_id": "B1"},
+            {"ts": "12.0", "text": "proceed", "user": "U1"},
+            {"ts": "13.0", "text": "later bot response", "bot_id": "B1"},
+        ]}
+
+    messages, newest = poll_slack_thread_once(
+        config, "D1", "10.0", last_ts="11.5", fetch=fake_fetch)
+    assert [message["text"] for message in messages] == ["proceed"]
+    assert messages[0]["thread_ts"] == "10.0"
+    assert newest == "13.0"  # checkpoint even bot replies to avoid rescanning
+    assert calls[0][0].endswith("/conversations.replies")
+    assert calls[0][1]["ts"] == "10.0"
 
 
 def test_slack_polling_surfaces_api_permission_errors():

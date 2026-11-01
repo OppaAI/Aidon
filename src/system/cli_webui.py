@@ -365,7 +365,7 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                             clef_client=_clef_client,
                             use_semantic_router_skip=True,
                             run_id=run_id, run_control=run_control,
-                            researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins, gate_context=_gate_context, test_backend_factory=lambda: make_backend(config.execution_backend, run_sandbox, image=config.docker_image, allow_network=False, modal_app=config.modal_app, modal_cpu=config.modal_cpu, modal_memory_mb=config.modal_memory_mb), allow_skill_adoption=_allow_skill_adoption), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, guidance=str(event.payload.get("guidance", "") or ""), route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor, resume_interview=bool(event.payload.get("resume_interview")))
+                            researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins, gate_context=_gate_context, test_backend_factory=lambda: make_backend(config.execution_backend, run_sandbox, image=config.docker_image, allow_network=False, modal_app=config.modal_app, modal_cpu=config.modal_cpu, modal_memory_mb=config.modal_memory_mb), allow_skill_adoption=_allow_skill_adoption), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, guidance=str(event.payload.get("guidance", "") or ""), route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor, resume_interview=bool(event.payload.get("resume_interview")), conversation_thread_id=str(event.payload.get("thread_ts", "") or ""))
         def _deliver_files(files, target):
             """Upload run deliverables as bytes to a Slack/WhatsApp target.
 
@@ -711,6 +711,57 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                             if _last and _last > str(_cursors.get(_channel, "")):
                                 _cursors[_channel] = _last
                                 save_poll_cursors(_cursor_path, _cursors)
+                            # conversations.history does not include thread
+                            # replies. While a stopped plan exists, poll only
+                            # its originating thread so "proceed" can resume
+                            # from a Slack reply instead of requiring a new
+                            # top-level message.
+                            from ..interface.mode_stops import (
+                                mode_stops_for_conversation)
+                            from ..interface.messaging import (
+                                poll_slack_thread_once)
+                            from decimal import Decimal as _Decimal
+                            from datetime import datetime as _datetime
+                            for _stop in mode_stops_for_conversation(
+                                    config.home, "slack:" + _channel):
+                                _thread_ts = str(_stop.get("thread_ts", "") or "")
+                                if not _thread_ts:
+                                    continue
+                                _thread_key = f"thread:{_channel}:{_thread_ts}"
+                                _thread_cursor = _cursors.get(_thread_key)
+                                if not _thread_cursor:
+                                    try:
+                                        _created = _datetime.fromisoformat(
+                                            str(_stop.get("created_at", "")))
+                                        _created_epoch = _created.timestamp()
+                                        _thread_cursor = (
+                                            f"{int(_created_epoch)}."
+                                            f"{int((_created_epoch % 1) * 1_000_000):06d}")
+                                    except (TypeError, ValueError, OverflowError):
+                                        _thread_cursor = _thread_ts
+                                    _cursors[_thread_key] = _thread_cursor
+                                    save_poll_cursors(_cursor_path, _cursors)
+                                _thread_messages, _thread_last = poll_slack_thread_once(
+                                    msg, _channel, _thread_ts,
+                                    last_ts=str(_thread_cursor))
+
+                                def _handle_thread_reply(_message):
+                                    server.handle_slack_message(
+                                        {"event": {**_message, "type": "message",
+                                                    "channel": _channel}},
+                                        dispatch=_slack_inbox.enqueue)
+
+                                def _save_thread_cursor(_timestamp):
+                                    _cursors[_thread_key] = _timestamp
+                                    save_poll_cursors(_cursor_path, _cursors)
+
+                                process_polled_messages(
+                                    _thread_messages, _handle_thread_reply,
+                                    _save_thread_cursor)
+                                if (_thread_last and _Decimal(_thread_last)
+                                        > _Decimal(str(_cursors.get(_thread_key, "0")))):
+                                    _cursors[_thread_key] = _thread_last
+                                    save_poll_cursors(_cursor_path, _cursors)
                         except Exception as _exc:
                             print(f"Slack poll error for {_channel}: {_exc}")
                             _retry_after[_channel] = _slack_time.monotonic() + getattr(

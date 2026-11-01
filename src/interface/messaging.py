@@ -460,6 +460,72 @@ def poll_slack_once(config, channel: str, last_ts: str = "", fetch=None) -> tupl
     return sorted(messages.values(), key=lambda message: Decimal(message["ts"])), newest
 
 
+def poll_slack_thread_once(config, channel: str, thread_ts: str,
+                           last_ts: str = "", fetch=None) -> tuple[list[dict], str]:
+    """Fetch new replies in one known Slack thread, oldest first.
+
+    ``conversations.history`` omits thread replies. This is intentionally
+    scoped to threads attached to active Aidon stops, rather than scanning
+    every thread in a channel on every poll.
+    """
+    from decimal import Decimal
+    from urllib.parse import urlencode
+
+    if fetch is None:
+        def fetch(url, token, params):
+            req = urllib.request.Request(
+                url + "?" + urlencode(params),
+                headers={"Authorization": f"Bearer {token}"})
+            try:
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    return json.loads(response.read().decode())
+            except urllib.error.HTTPError as exc:
+                if exc.code == 429:
+                    raise SlackRateLimited(exc.headers.get("Retry-After", "60")) from None
+                raise RuntimeError(f"Slack thread history failed: HTTP {exc.code}") from None
+
+    messages: dict[str, dict] = {}
+    newest = str(last_ts or thread_ts)
+    newest_number = Decimal(newest)
+    params = {"channel": channel, "ts": thread_ts, "limit": 100}
+    seen_cursors = set()
+    while True:
+        result = fetch(f"{SLACK_API_BASE}/conversations.replies",
+                       config.slack_bot_token, dict(params))
+        if not isinstance(result, dict):
+            raise RuntimeError("Slack thread history returned an invalid response")
+        if result.get("ok") is False:
+            code = str(result.get("error", "api_error"))
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", code):
+                code = "api_error"
+            if code in ("ratelimited", "rate_limited"):
+                raise SlackRateLimited()
+            raise RuntimeError(f"Slack conversations.replies failed: {code}")
+        for message in result.get("messages", []):
+            ts = str(message.get("ts", ""))
+            if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", ts):
+                continue
+            number = Decimal(ts)
+            if number > newest_number:
+                newest, newest_number = ts, number
+            if (ts == str(thread_ts) or number <= Decimal(last_ts or thread_ts)
+                    or message.get("bot_id")
+                    or message.get("subtype") not in
+                    (None, "", "file_share", "thread_broadcast")):
+                continue
+            messages[ts] = {**message, "text": str(message.get("text", "")),
+                            "channel": channel, "ts": ts,
+                            "thread_ts": str(thread_ts)}
+        cursor = (result.get("response_metadata") or {}).get("next_cursor", "")
+        if not cursor:
+            break
+        if cursor in seen_cursors:
+            raise RuntimeError("Slack thread pagination did not advance")
+        seen_cursors.add(cursor)
+        params["cursor"] = cursor
+    return sorted(messages.values(), key=lambda message: Decimal(message["ts"])), newest
+
+
 def download_whatsapp_media(config, media_id: str, get=None) -> bytes:
     """Download WhatsApp media bytes, via the Graph API, two steps.
 

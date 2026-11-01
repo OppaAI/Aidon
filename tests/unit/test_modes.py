@@ -90,7 +90,8 @@ def test_mode_stops_save_load_delete_latest(tmp_path):
 
 def test_mode_stops_update_spec_and_latest_for_conversation(tmp_path):
     from src.interface.mode_stops import (
-        latest_mode_stop_for_conversation, update_mode_stop_spec)
+        latest_mode_stop_for_conversation, mode_stops_for_conversation,
+        update_mode_stop_spec)
     stop_id = save_mode_stop(tmp_path, "ask", "plan dinner",
                              spec={"goal": "plan dinner"},
                              conversation_key="conv-1",
@@ -104,6 +105,18 @@ def test_mode_stops_update_spec_and_latest_for_conversation(tmp_path):
     assert latest_mode_stop_for_conversation(tmp_path, "conv-1")["stop_id"] == stop_id
     assert latest_mode_stop_for_conversation(tmp_path, "nobody") is None
     assert latest_mode_stop_for_conversation(tmp_path, "") is None
+
+
+def test_mode_stop_keeps_originating_slack_thread(tmp_path):
+    from src.interface.mode_stops import mode_stops_for_conversation
+    stop_id = save_mode_stop(
+        tmp_path, "plan", "make a PDF", plan={"steps": []},
+        conversation_key="slack:D1", conversation_id="slack:D1",
+        thread_ts="1700000000.123456")
+    stops = mode_stops_for_conversation(tmp_path, "slack:D1")
+    assert [stop["stop_id"] for stop in stops] == [stop_id]
+    assert stops[0]["thread_ts"] == "1700000000.123456"
+    assert mode_stops_for_conversation(tmp_path, "slack:D2") == []
 
 
 def test_mode_stop_spec_save_round_trip(tmp_path):
@@ -329,6 +342,7 @@ def _plan_runner(tmp_path, mode):
 def test_plan_mode_stops_before_execution(tmp_path, monkeypatch):
     monkeypatch.setenv("AIDON_CRITIC_ENABLED", "0")
     runner = _plan_runner(tmp_path, "plan")
+    runner.conversation_thread_id = "1700000000.123456"
     plan = Plan(steps=[Step(tool="write", args={"file": "a.md", "text": "x\n"},
                             deliverable="a.md")],
                 deliverables=["a.md"], criteria=[])
@@ -339,6 +353,7 @@ def test_plan_mode_stops_before_execution(tmp_path, monkeypatch):
     assert not (tmp_path / "work" / "a.md").exists()
     stop = load_mode_stop(tmp_path, report.mode_stop["stop_id"])
     assert stop["plan"]["deliverables"] == ["a.md"]
+    assert stop["thread_ts"] == "1700000000.123456"
 
 
 def test_proceed_plan_executes_saved_plan(tmp_path, monkeypatch):
