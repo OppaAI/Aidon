@@ -249,6 +249,20 @@ def test_whatsapp_command_grants_and_confirms(tmp_path):
     assert PreapprovalStore(server.home).is_preapproved("dinner", "spec")
 
 
+def test_whatsapp_bad_signature_is_logged_without_request_content(tmp_path, capsys):
+    config = MessagingConfig(whatsapp_app_secret="app-secret")
+    server = WebUIServer(tmp_path, messaging_config=config)
+    status, result = server.handle_whatsapp_post(
+        {"private": "message body"}, raw=b"private message body",
+        headers={"x-hub-signature-256": "sha256=invalid"})
+
+    assert status == 401
+    assert result == {"error": "bad signature"}
+    output = capsys.readouterr().out
+    assert "signature verification failed" in output
+    assert "private" not in output
+
+
 def test_whatsapp_goal_handler_failure_is_replied_to_owner(tmp_path):
     dispatcher = TriggerDispatcher()
 

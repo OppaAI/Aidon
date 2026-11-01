@@ -26,6 +26,10 @@ class WebUIMessagingMixin:
         if not verify_whatsapp_signature(
                 raw, self.messaging_config.whatsapp_app_secret,
                 headers.get("x-hub-signature-256", "")):
+            # Do not echo the signature, request body, or credentials. This
+            # marker distinguishes Meta delivery/signing failures from a
+            # webhook URL or subscription that receives no POSTs at all.
+            print("WhatsApp webhook rejected: signature verification failed")
             return 401, {"error": "bad signature"}
         # Owner gate, fail closed: only the owner number
         # becomes a goal, empty owner means inbound disabled.
