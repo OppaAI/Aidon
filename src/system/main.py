@@ -1207,6 +1207,11 @@ def main(argv: list[str] | None = None) -> int:
                                         execution_backend=_backend, budget=_Budget(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds),
                                         trace=_Trace(config.home, conversation_id=_serve_session), model_verifier=_MV(client),
                                         kernel_mode=config.kernel_mode, semantic_router=_router2,
+                                        # Scheduled jobs have no interactive surface
+                                        # to receive a later Proceed. Do not let the
+                                        # semantic mode detector pause them at a
+                                        # Plan-ready stop.
+                                        mode="execute",
                                         use_semantic_router_skip=True, network_available=_network_available(_backend, sandbox), run_id=_serve_run_id, run_control=_serve_control,
                                         extra_tools=_job_tools,
                                         acquisition_governor=_job_governor,

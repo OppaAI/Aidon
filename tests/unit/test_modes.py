@@ -385,6 +385,38 @@ def test_proceed_ask_runs_with_frozen_spec(tmp_path, monkeypatch):
     assert (tmp_path / "work" / "a.md").read_text() == "x\n"
 
 
+def test_explicit_execute_prevents_semantic_plan_stop(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIDON_CRITIC_ENABLED", "0")
+
+    class _PlanDetectingRouter:
+        mode_calls = 0
+
+        def classify(self, text, judge=None):
+            return ("agentic", 1.0)
+
+        def mode_for(self, text):
+            self.mode_calls += 1
+            return "plan"
+
+    router = _PlanDetectingRouter()
+    plan_json = ('{"steps": [{"tool": "write", "args": '
+                 '{"file": "scheduler-smoke.txt", '
+                 '"text": "scheduler-ok\\n"}, '
+                 '"deliverable": "scheduler-smoke.txt"}], '
+                 '"deliverables": ["scheduler-smoke.txt"], '
+                 '"criteria": ["scheduler-smoke.txt exists"]}')
+    runner = GoalRunner(
+        FakeClient(plan_json), Sandbox(tmp_path / "work", 120),
+        ApprovalGate(lambda kind, title, body: Decision("approved")),
+        tmp_path, semantic_router=router, mode="execute")
+
+    report = runner.run("Create scheduler-smoke.txt in the workspace")
+
+    assert router.mode_calls == 0
+    assert report.status == "done"
+    assert (tmp_path / "work" / "scheduler-smoke.txt").read_text() == "scheduler-ok\n"
+
+
 # --- WebUI /proceed dispatch ---
 
 def test_webui_proceed_dispatches_resume(tmp_path):
