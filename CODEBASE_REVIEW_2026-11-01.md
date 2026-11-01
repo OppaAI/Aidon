@@ -119,12 +119,12 @@ and caller contracts and were repaired without an unreviewed consolidation.
    (`invalid_arguments`), before any bytes were uploaded. Its request now uses
    documented form fields, as does completion; upload bytes remain raw
    `application/octet-stream`. After rebuilding, the owner uploaded the same
-   verified artifact through `send_slack_file` successfully. However, a later
-   automatic delivery from a Slack-triggered run still failed with generic
-   `invalid_arguments`, while this code prefixes failures with the API stage.
-   The direct transport is verified; the automatic path remains unresolved,
-   possibly due to a stale service/container. Focused tests cover both form
-   requests.
+   verified artifact through `send_slack_file` successfully. An earlier
+   automatic retry still failed with generic `invalid_arguments`; after the
+   services were rebuilt, the next Slack-triggered run completed and its
+   `dispatcher-slack-check-retry-20261101_5.txt` artifact appeared in the
+   channel with the expected contents. Direct and automatic Slack file delivery
+   are now verified. Focused tests cover both form requests.
    Scheduler startup, dispatch, pending-claim recovery, and exact-content
    verification now passed target-host checks. The exact-content regression
    first exposed a false success with `exact_test.py`; after rebuilding, a new
