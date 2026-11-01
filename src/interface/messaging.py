@@ -62,7 +62,7 @@ from pathlib import Path
 WHATSAPP_API_BASE = "https://graph.facebook.com/v21.0"
 SLACK_API_BASE = "https://slack.com/api"
 
-_DECISION_RE = re.compile(r"^\s*(approve|reject)\s+([A-Za-z0-9-]+)\s*$", re.IGNORECASE)
+_DECISION_RE = re.compile(r"^\s*(approve|reject)(?:\s+([A-Za-z0-9-]+))?\s*$", re.IGNORECASE)
 
 
 def normalize_number(value: str) -> str:
@@ -85,7 +85,7 @@ def _transport_error(exc: Exception) -> str:
     return type(exc).__name__
 
 
-def parse_decision(text: str) -> tuple[str, str] | None:
+def parse_decision(text: str) -> tuple[str, str | None] | None:
     match = _DECISION_RE.match(text or "")
     if not match:
         return None

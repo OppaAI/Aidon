@@ -136,6 +136,7 @@ def test_messaging_old_keys_senders_and_decisions():
     assert config.whatsapp_owner == "+1 (604) 555-1234"
     assert normalize_number(config.whatsapp_owner) == "16045551234"
     assert parse_decision("approve card-1") == ("approve", "card-1")
+    assert parse_decision("Approve") == ("approve", None)
     assert parse_decision("Hello") is None
     calls = []
 
@@ -176,6 +177,43 @@ def test_whatsapp_approve_resolves_card(tmp_path):
         assert replies == [("+16045551234", "Approved card-1")]
     finally:
         httpd.shutdown()
+
+
+def test_bare_approve_resolves_the_only_pending_card(tmp_path):
+    import threading
+
+    server = WebUIServer(tmp_path)
+    card_id = "card-only"
+    event = threading.Event()
+    server.webui_gate.cards[card_id] = {
+        "kind": "install", "title": "Create Python virtual environment",
+        "body": "Create the isolated environment", "verdict": None,
+        "edited_text": "", "context": {},
+    }
+    server.webui_gate._events[card_id] = event
+
+    assert server._resolve_decision("Approve") == "Approved card-only"
+    assert event.is_set()
+    assert server.webui_gate.cards[card_id]["verdict"] == "approved"
+
+
+def test_bare_approve_does_not_guess_when_multiple_cards_are_pending(tmp_path):
+    import threading
+
+    server = WebUIServer(tmp_path)
+    for card_id, title in (("card-a", "Install package"),
+                           ("card-b", "Publish post")):
+        server.webui_gate.cards[card_id] = {
+            "kind": "live", "title": title, "body": "", "verdict": None,
+            "edited_text": "", "context": {},
+        }
+        server.webui_gate._events[card_id] = threading.Event()
+
+    reply = server._resolve_decision("approve")
+    assert "2 approvals pending" in reply
+    assert "Install package" in reply and "Publish post" in reply
+    assert all(card["verdict"] is None
+               for card in server.webui_gate.cards.values())
 
 
 def test_slack_signature_verified_before_parse(tmp_path):

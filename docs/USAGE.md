@@ -25,7 +25,8 @@
   webhook. WhatsApp is owner only, empty owner means
   inbound disabled, never open to everyone. Slack
   replies go to the same channel, in thread. A message
-  `approve <id>` or `reject <id>` on either channel
+  `approve` or `reject` on either channel when only one approval is pending;
+  explicit `approve <id>` and `reject <id>` are also supported
   resolves a pending approval card, it does not become
   a goal. WhatsApp webhook at `/webhook/whatsapp`,
   with hub verification and, when an app secret is set,
@@ -63,10 +64,10 @@ For a private local deployment, polling needs no public URL or signing secret.
 Set `AIDON_SLACK_AUTOSTART=1`, `SLACK_BOT_TOKEN`, and comma-separated channel/DM
 IDs in `AIDON_SLACK_INBOUND_CHANNEL`, then restart Aidon. The bot needs access
 to those conversations and the corresponding history and messaging scopes.
-In channels, Aidon responds only to its actual Slack mention (`@Aidon`); plain
-chatter and file-only posts are ignored. Direct messages still work without a
-mention. In a channel, include `@Aidon` with approvals, answers, or control
-commands too.
+In channels, Aidon responds to general messages and messages mentioning
+`@Aidon`; messages addressed only to another teammate are ignored. Direct
+messages still work without a mention. Include `@Aidon` with approvals,
+answers, or control commands when posting in a channel.
 
 Replies use the bot Web API when a token is configured. Legacy
 `AIDON_SLACK_WEBHOOK_<conversation-id>` settings are used only for webhook-only
@@ -77,9 +78,12 @@ docker exec aidon-aidon-1 aidon slack status
 ```
 
 Send polling approvals and question answers as **top-level messages** in the
-same conversation, for example `approve <card-id>`. Polling does not enumerate
-all thread replies. Signed Slack events can receive thread replies when the
-appropriate message events are subscribed.
+same conversation. `approve` or `reject` works when exactly one approval is
+pending; if several are pending, choose the intended card in the WebUI. You can
+also use `approve <card-id>` or `reject <card-id>` explicitly. Polling watches
+replies only in threads attached to active stopped plans. Signed Slack events
+can receive other thread replies when the appropriate message events are
+subscribed.
 
 Goals are persisted before the history cursor advances. Pending goals survive
 restart; interrupted goals require owner review before another attempt. Failed

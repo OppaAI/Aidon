@@ -214,6 +214,29 @@ def test_slack_channel_accepts_general_messages_but_ignores_other_people(tmp_pat
     assert dispatched[2].goal == "hello"
 
 
+def test_slack_bare_approve_resolves_the_only_pending_card(tmp_path):
+    import threading
+
+    config = MessagingConfig(slack_bot_token="xoxb-test")
+    config._slack_bot_user_id = "UAIDON"
+    server = WebUIServer(tmp_path, messaging_config=config)
+    card_id = "card-only"
+    event = threading.Event()
+    server.webui_gate.cards[card_id] = {
+        "kind": "install", "title": "Create Python virtual environment",
+        "body": "", "verdict": None, "edited_text": "", "context": {},
+    }
+    server.webui_gate._events[card_id] = event
+
+    status, result = server.handle_slack_message({
+        "event": {"type": "message", "channel": "C1",
+                  "text": "<@UAIDON> Approve", "ts": "5.0"}})
+
+    assert status == 200
+    assert result["replies"] == ["Approved card-only"]
+    assert event.is_set()
+
+
 def test_slack_mention_detection_fails_closed_without_bot_identity():
     assert slack_message_for_bot("<@UOTHER> hello", "C1", "") is False
     assert slack_message_for_bot("Aidon, hello", "C1", "UAIDON") is True

@@ -355,6 +355,19 @@ class WebUIServer(WebUIRunMixin, WebUIMessagingMixin, WebUISettingsMixin, WebUID
         if not decision:
             return None
         verb, card_id = decision
+        if card_id is None:
+            pending = self.webui_gate.pending_cards()
+            if not pending:
+                return "No approval is currently pending."
+            if len(pending) > 1:
+                titles = [str(card.get("title", "Untitled approval"))
+                          for card in pending[:5]]
+                detail = "; ".join(titles)
+                if len(pending) > len(titles):
+                    detail += f"; and {len(pending) - len(titles)} more"
+                return (f"There are {len(pending)} approvals pending ({detail}). "
+                        "Choose the intended approval in the WebUI.")
+            card_id = pending[0]["id"]
         verdict = "approved" if verb == "approve" else "rejected"
         ok = self.webui_gate.approve(card_id, verdict)
         if ok:
