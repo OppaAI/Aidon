@@ -50,13 +50,15 @@ def test_send_slack_file_three_steps(tmp_path):
         if url.endswith("/files.completeUploadExternal"):
             assert payload["channel_id"] == "C1"
             assert payload["files"][0]["id"] == "F123"
+            assert payload["thread_ts"] == "123.456"
             return {"ok": True}
         raise AssertionError(url)
 
     def upload(url, token, fields, data, filename):
         uploads.append((url, token, data, filename))
 
-    result = send_slack_file(_slack_config(), "C1", target, post=post, upload=upload)
+    result = send_slack_file(_slack_config(), "C1", target, post=post,
+                             upload=upload, thread_ts="123.456")
     assert result == {"ok": True, "file_id": "F123"}
     assert uploads == [("https://upload.slack.test/x", "", b"%PDF-fake", "report.pdf")]
     assert len(calls) == 2

@@ -322,7 +322,7 @@ def _post_multipart(url: str, token: str, fields: dict, file_bytes: bytes,
 
 
 def send_slack_file(config, channel: str, file_path, title: str = "",
-                    post=None, upload=None) -> dict:
+                    post=None, upload=None, *, thread_ts: str = "") -> dict:
     """Upload a file to a Slack channel, files.uploadV2 three steps.
 
     Step 1 files.getUploadURLExternal reserves the upload,
@@ -359,12 +359,16 @@ def send_slack_file(config, channel: str, file_path, title: str = "",
         return {"ok": False, "error":
                 f"upload bytes: {type(exc).__name__}"}
     try:
+        completion = {
+            "files": [{"id": reserved["file_id"],
+                       "title": title or path.name}],
+            "channel_id": channel,
+        }
+        if thread_ts:
+            completion["thread_ts"] = str(thread_ts)
         done = _post_form_json(
             f"{SLACK_API_BASE}/files.completeUploadExternal",
-            config.slack_bot_token,
-            {"files": [{"id": reserved["file_id"],
-                        "title": title or path.name}],
-             "channel_id": channel}, post=post)
+            config.slack_bot_token, completion, post=post)
     except Exception as exc:
         return {"ok": False, "error":
                 f"files.completeUploadExternal: {type(exc).__name__}"}

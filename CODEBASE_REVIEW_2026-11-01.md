@@ -124,7 +124,10 @@ and caller contracts and were repaired without an unreviewed consolidation.
    services were rebuilt, the next Slack-triggered run completed and its
    `dispatcher-slack-check-retry-20261101_5.txt` artifact appeared in the
    channel with the expected contents. Direct and automatic Slack file delivery
-   are now verified. Focused tests cover both form requests.
+   are verified. The owner asked for the upload to appear as a paperclip-style
+   file in Aidon's thread; file completion now receives the originating
+   thread timestamp. Focused tests cover form requests and thread placement;
+   verify the thread placement on the target container after rebuilding.
    Scheduler startup, dispatch, pending-claim recovery, and exact-content
    verification now passed target-host checks. The exact-content regression
    first exposed a false success with `exact_test.py`; after rebuilding, a new
