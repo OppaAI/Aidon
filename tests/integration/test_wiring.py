@@ -1,8 +1,12 @@
 """Wiring tests: Gmail, MCP client, pre-approval, memory extras, research, transcript, factory, polling."""
 
 import json
+import io
 import sys
+import urllib.error
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -12,7 +16,7 @@ from src.memory.memory_extras import backup, export_points, redact, rolling_summ
 from src.interface.preapproval import PreapprovalStore
 from src.agentic.research_allow import is_allowed, load_allowlist, research_multiround
 from src.social.youtube_transcript import fetch_transcript
-from src.interface.messaging import poll_slack_once, MessagingConfig
+from src.interface.messaging import poll_slack_once, MessagingConfig, send_slack
 from src.interface.webui import WebUIServer
 from src.interface.triggers import TriggerDispatcher
 from src.interface.triggers import TriggerEvent
@@ -88,6 +92,28 @@ def test_slack_polling_skips_bots_and_old():
     messages, newest = poll_slack_once(config, "C1", last_ts="1", fetch=fake_fetch)
     assert [m["text"] for m in messages] == ["new"]
     assert newest == "4"
+
+
+def test_slack_polling_surfaces_api_permission_errors():
+    config = MessagingConfig(slack_bot_token="x")
+
+    with pytest.raises(RuntimeError, match="conversations.history failed: missing_scope"):
+        poll_slack_once(
+            config, "D1",
+            fetch=lambda *_args: {"ok": False, "error": "missing_scope"})
+
+
+def test_slack_http_error_logs_status_and_safe_api_code():
+    config = MessagingConfig(slack_bot_token="x")
+
+    def fail_post(*_args):
+        raise urllib.error.HTTPError(
+            "https://slack.com/api/chat.postMessage", 403, "Forbidden", {},
+            io.BytesIO(b'{"error":"missing_scope","token":"secret"}'))
+
+    result = send_slack(config, "C1", "hello", post=fail_post)
+    assert result == {"ok": False, "error": "HTTP 403: missing_scope"}
+    assert "secret" not in result["error"]
 
 
 def test_slack_poll_advances_cursor_only_after_handling_each_message():

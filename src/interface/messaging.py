@@ -74,6 +74,22 @@ def normalize_number(value: str) -> str:
     return re.sub(r"\D", "", value or "")
 
 
+def _transport_error(exc: Exception) -> str:
+    """Return a useful, secret-safe HTTP diagnostic for messaging failures."""
+    import urllib.error as _urlerror
+    if isinstance(exc, _urlerror.HTTPError):
+        detail = ""
+        try:
+            payload = json.loads(exc.read(8192).decode("utf-8", errors="replace"))
+            code = str(payload.get("error", "")) if isinstance(payload, dict) else ""
+            if re.fullmatch(r"[A-Za-z0-9_-]{1,80}", code):
+                detail = f": {code}"
+        except Exception:
+            pass
+        return f"HTTP {exc.code}{detail}"
+    return type(exc).__name__
+
+
 def parse_decision(text: str) -> tuple[str, str] | None:
     match = _DECISION_RE.match(text or "")
     if not match:
@@ -177,7 +193,7 @@ def send_whatsapp(config: MessagingConfig, to: str, text: str, post=None) -> dic
     try:
         result = _post_json(url, config.whatsapp_token, payload, post=post)
     except Exception as exc:
-        return {"ok": False, "error": type(exc).__name__}
+        return {"ok": False, "error": _transport_error(exc)}
     if result.get("error"):
         return {"ok": False, "error": str(result["error"])}
     messages = result.get("messages") or [{}]
@@ -196,7 +212,7 @@ def send_slack(config: MessagingConfig, channel: str, text: str,
                 return {"ok": False, "error": str(result["error"])}
             return {"ok": True, "webhook": True}
         except Exception as exc:
-            return {"ok": False, "error": type(exc).__name__}
+            return {"ok": False, "error": _transport_error(exc)}
     if not config.slack_configured():
         return {"ok": False, "error": "SLACK_BOT_TOKEN not set"}
     if not channel:
@@ -208,7 +224,7 @@ def send_slack(config: MessagingConfig, channel: str, text: str,
     try:
         result = _post_json(url, config.slack_bot_token, payload, post=post)
     except Exception as exc:
-        return {"ok": False, "error": type(exc).__name__}
+        return {"ok": False, "error": _transport_error(exc)}
     if not result.get("ok"):
         return {"ok": False, "error": str(result.get("error", "unknown error"))}
     return {"ok": True, "ts": result.get("ts", "")}
@@ -379,6 +395,11 @@ def poll_slack_once(config, channel: str, last_ts: str = "", fetch=None) -> tupl
                 return _json.loads(response.read().decode())
     result = fetch(f"{SLACK_API_BASE}/conversations.history", config.slack_bot_token,
                    {"channel": channel, "oldest": last_ts})
+    if isinstance(result, dict) and result.get("ok") is False:
+        code = str(result.get("error", "api_error"))
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", code):
+            code = "api_error"
+        raise RuntimeError(f"Slack conversations.history failed: {code}")
     messages = []
     newest = last_ts
     for message in result.get("messages", []):
