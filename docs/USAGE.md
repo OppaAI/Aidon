@@ -396,6 +396,13 @@ verification arena they will run in.
    to use Docker, `AIDON_EXECUTION_BACKEND=modal` for
    Modal, `AIDON_DOCKER_IMAGE` for the pinned image,
    `AIDON_DOCKER_NETWORK=1` only when a task needs network.
+   Each run keeps a fresh isolated workdir. In the same WebUI,
+   WhatsApp, or Slack conversation, later runs receive copies of
+   files verified from earlier successful runs, plus a short summary
+   of the last workflow. Only verified deliverables carry forward;
+   scratch files and failed-run outputs do not. The carried files are
+   copied into the new run, so edits stay isolated until that run
+   succeeds.
 4. **Verify** — a result is verified by evidence, not by
    assertion. File deliverables must exist and be non-empty;
    output-only steps must complete successfully,
