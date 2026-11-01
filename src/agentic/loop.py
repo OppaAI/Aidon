@@ -181,7 +181,8 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                  deep_researcher=None, deadline_seconds: float | None = None,
                  mode: str | None = None, question_ask=None,
                  conversation_key: str = "", resume_plan=None,
-                 clef_client=None, acquisition_governor=None, resume_interview=False):
+                 clef_client=None, acquisition_governor=None, resume_interview=False,
+                 conversation_thread_id: str = ""):
         self.client = client
         # Optional phase router (duck-typed RouterClient): fast
         # phases interpret/learn/respond go through it, every
@@ -193,6 +194,7 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
         self.home = Path(home)
         self.memory = memory
         self.conversation_id = conversation_id
+        self.conversation_thread_id = str(conversation_thread_id or "")
         self.network_available = network_available
         # Optional human guidance, binding on the planner: carried
         # into the plan prompt as a guidance block (the same block
@@ -585,6 +587,7 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                 self.home, mode="ask", goal=goal, spec=spec_dict,
                 conversation_key=getattr(self, "conversation_key", ""),
                 conversation_id=self.conversation_id,
+                thread_ts=getattr(self, "conversation_thread_id", ""),
                 budget_key=getattr(
                     getattr(self, "acquisition_governor", None),
                     "budget_key", None) or "")
