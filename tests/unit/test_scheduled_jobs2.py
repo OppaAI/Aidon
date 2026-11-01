@@ -8,7 +8,7 @@ the loop deadline machinery, and the scheduled gate's shell rule.
 
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.agentic.loop import GoalRunner, Plan, Step
 from src.capabilities.sandbox import Sandbox
 from src.interface.approval import ApprovalGate, Decision
+from src.interface.scheduler_loop import SchedulerLoop
 from src.interface.triggers import Scheduler, SchedulerJob
 from src.system.main import _goal_extra_tools, _scheduled_gate
 from src.system.model_client import FakeClient
@@ -64,6 +65,72 @@ def test_tz_job_returns_zoned_candidate_and_fires_via_check_due(tmp_path):
     scheduler.add_job(_job(tz="America/Vancouver"))
     due = scheduler.check_due(datetime(2026, 10, 28, 12, 0))
     assert [j.name for j in due] == ["j"]
+
+
+def test_claimed_due_jobs_survive_restart_until_acknowledged(tmp_path):
+    now = datetime(2026, 10, 31, 10, 0)
+    home = tmp_path / "home"
+    scheduler = Scheduler(home)
+    for name in ("job-one", "job-two"):
+        scheduler.add_job(_job(name=name, schedule="daily 09:00"))
+
+    claimed = scheduler.claim_due(now)
+    assert [job.name for job in claimed] == ["job-one", "job-two"]
+
+    # Simulate dispatching job one and acknowledging it, then a process crash.
+    assert scheduler.complete(claimed[0]) is True
+    restarted = Scheduler(home)
+    recovered = restarted.claim_due(now + timedelta(minutes=1))
+    assert [job.name for job in recovered] == ["job-two"]
+    assert recovered[0].pending_run == claimed[1].pending_run
+
+    assert restarted.complete(recovered[0]) is True
+    assert Scheduler(home).claim_due(now + timedelta(minutes=2)) == []
+
+
+def test_unacknowledged_dispatch_is_retried_after_restart(tmp_path):
+    now = datetime(2026, 10, 31, 10, 0)
+    home = tmp_path / "home"
+    scheduler = Scheduler(home)
+    scheduler.add_job(_job(name="daily", schedule="daily 09:00"))
+
+    first_claim = scheduler.claim_due(now)[0]
+    # No complete() call models a crash while dispatching.
+    recovered = Scheduler(home).claim_due(now + timedelta(minutes=1))
+    assert [job.name for job in recovered] == ["daily"]
+    assert recovered[0].pending_run == first_claim.pending_run
+
+
+def test_scheduler_loop_acknowledges_only_after_dispatch(tmp_path):
+    now = datetime(2026, 10, 31, 10, 0)
+    home = tmp_path / "home"
+    scheduler = Scheduler(home)
+    scheduler.add_job(_job(name="daily", schedule="daily 09:00"))
+
+    class _Dispatcher:
+        def dispatch(self, event):
+            raise RuntimeError("simulated process interruption")
+
+    loop = SchedulerLoop(scheduler, _Dispatcher())
+    with pytest.raises(RuntimeError, match="simulated process interruption"):
+        loop.run_once(now)
+
+    recovered = Scheduler(home).claim_due(now + timedelta(minutes=1))
+    assert [job.name for job in recovered] == ["daily"]
+
+
+def test_scheduler_loop_completes_successful_dispatch(tmp_path):
+    now = datetime(2026, 10, 31, 10, 0)
+    home = tmp_path / "home"
+    scheduler = Scheduler(home)
+    scheduler.add_job(_job(name="daily", schedule="daily 09:00"))
+
+    class _Dispatcher:
+        def dispatch(self, event):
+            return "done"
+
+    assert SchedulerLoop(scheduler, _Dispatcher()).run_once(now)
+    assert Scheduler(home).claim_due(now + timedelta(minutes=1)) == []
 
 
 def _partial_runner(tmp_path):

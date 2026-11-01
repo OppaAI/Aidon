@@ -513,7 +513,7 @@ def main(argv: list[str] | None = None) -> int:
         from datetime import datetime
         from ..interface.triggers import Scheduler
         scheduler = Scheduler(config.home)
-        due = scheduler.check_due(datetime.now())
+        due = scheduler.claim_due(datetime.now())
         if not due:
             print("Tick: no jobs due")
             return 0
@@ -540,6 +540,7 @@ def main(argv: list[str] | None = None) -> int:
             runner = GoalRunner(client, sandbox, _cli_gate(config.home, config.approval_timeout_seconds, _tick_session), config.home, memory=memory, conversation_id=_tick_session, plugins=_plugins, execution_backend=_backend, budget=_B(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T(config.home, conversation_id=_tick_session), model_verifier=_MV(client), kernel_mode=config.kernel_mode, network_available=_network_available(_backend, sandbox), run_id=_tick_run_id, run_control=_tick_control)
             report = runner.run(job.goal)
             print(f"Tick job {job.name}: {report.status}, files: {', '.join(report.files)}")
+            scheduler.complete(job)
         return 0
     if args.command == "repl":
         from ..interface.repl import Repl
@@ -1057,7 +1058,7 @@ def main(argv: list[str] | None = None) -> int:
                                     f"Scheduled run due: {getattr(event, 'goal', event)}")
             _serve_loop = _ServeLoop(scheduler, dispatcher=None, outbox=_serve_outbox,
                                      outbox_sender=_serve_sender, on_due=_serve_on_due)
-            for job in scheduler.check_due(datetime.now()):
+            for job in scheduler.claim_due(datetime.now()):
                 _serve_on_due(job)
                 print(f"Due job: {job.name}: {job.goal}")
                 from ..agentic.budgets import Budget as _Budget
@@ -1119,6 +1120,7 @@ def main(argv: list[str] | None = None) -> int:
                     if _chain_failures:
                         print(f"Job {job.name}: chain rejected: {_chain_failures}")
                         _handled = True
+                        scheduler.complete(job)
                         continue
                     _chain_decision = _cli_gate(
                         config.home, config.approval_timeout_seconds,
@@ -1128,6 +1130,7 @@ def main(argv: list[str] | None = None) -> int:
                     if _chain_decision.verdict not in ("approved", "auto_approved"):
                         print(f"Job {job.name}: chain rejected by approval")
                         _handled = True
+                        scheduler.complete(job)
                         continue
                     if isinstance(_chain, list):
                         def _invoke(name, args):
@@ -1213,6 +1216,7 @@ def main(argv: list[str] | None = None) -> int:
                             print(f"Job {job.name}: failure notification {_sent}")
                         except Exception as exc:
                             print(f"Job {job.name}: failure notification failed: {exc}")
+                scheduler.complete(job)
             # Tick drain: once per tick, due notifications only,
             # cadence-spaced by the Outbox itself.
             _serve_loop.drain_outbox()

@@ -20,13 +20,13 @@ The configured model, router and runtime helpers are now passed into the extract
 
 The file outbox now serializes in-process operations by path, writes atomically, and merges drain results into the latest file so notifications queued by a sender are retained. Cross-process locking and exactly-once delivery after a crash between external send and local save remain unresolved; validate concurrent use and document the at-least-once boundary.
 
-### 3. Inspecting due schedules consumes them without running them — fixed for inspection, execution recovery remains open
+### 3. Scheduler crashes could consume due jobs before dispatch — fixed with durable claims; at-least-once retry remains
 
 `src/system/main.py:788`, `src/interface/triggers.py:419`.
 
 `aidon trigger schedule` calls `check_due`, which immediately persists `last_run`, and then only prints the jobs. A subsequent scheduler tick sees those occurrences as already processed. The same early acknowledgement also means a crash or failure after `check_due` and before dispatch can lose a scheduled occurrence.
 
-The CLI inspection path now uses a read-only `due_jobs` query. `check_due` still records an occurrence before dispatch, so a crash after that point can lose the occurrence; a durable claim/acknowledgement design remains open. Validate inspection followed by tick.
+The CLI inspection path uses a read-only `due_jobs` query. Runtime dispatch now uses durable per-job claims: claims are atomically saved before dispatch, completed jobs are acknowledged after dispatch returns, and unacknowledged claims are returned after restart. This prevents a crash after claiming a batch from consuming later jobs. A crash after an external side effect but before acknowledgement can repeat that action, so delivery is at-least-once. The JSON store also assumes one scheduler process; concurrent processes sharing the same home still need coordination.
 
 ### 4. Zoned cron schedules can be rejected or stop firing at a month boundary — fixed in code, runtime validation pending
 
@@ -81,4 +81,4 @@ Cron search now spans eight years, which covers the longest gap between valid le
 - After the fixes, 49 focused existing tests for triggers, scheduled jobs, outbox cadence, extra tools and tool wiring passed. This does not cover the live WebUI dispatcher or daemon startup; repeat the full suite and live smoke checks on the home PC or CI.
 - The repository contains 206 Python source files and 175 Python test files. The static checks covered source broadly; manual review and reproductions were targeted. This review does not establish that every function, JavaScript behavior, dependency, integration, or security boundary has been manually checked. Browser, real provider, Modal, SSH and X11 checks remain pending as described in `PRODUCTION_READINESS.md`.
 
-Remaining priority: add durable scheduler claim/acknowledgement and cross-process outbox locking if multiple Aidon processes share one home; then add CI coverage and review cleanup candidates. Runtime behavior for all code fixes remains unverified in this environment.
+Remaining priority: validate scheduler recovery on the target runtime; add cross-process coordination for scheduler/outbox state if multiple Aidon processes share one home; then add CI coverage and review cleanup candidates. Runtime behavior for all code fixes remains unverified in this environment.

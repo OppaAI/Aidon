@@ -5,7 +5,7 @@ AIDON_APPROVAL_NUDGE_MIN, AIDON_APPROVAL_NUDGE_CHANNEL,
 AIDON_AUTONOMY_ENABLED, AIDON_AUTONOMY_THRESHOLD,
 AIDON_AUTONOMY_DECAY_DAYS, AIDON_OWNER_EMAIL,
 AIDON_CORRECTED_SUBJECT. No new duplicate.
-SchedulerLoop polls Scheduler.check_due, it does not
+SchedulerLoop polls durable scheduler claims, it does not
 invent a new scheduler, and it stops on a threading
 Event, so tests run it for a fraction of a second.
 Daily report reads trace files and learned/last_run.json
@@ -67,13 +67,19 @@ class SchedulerLoop:
         self.last_outbox_drain = self.outbox.drain(self.outbox_sender)
         return self.last_outbox_drain
 
-    def run_once(self) -> list:
-        due = self.scheduler.check_due(datetime.now())
+    def run_once(self, now: datetime | None = None) -> list:
+        now = now or datetime.now()
+        claim_due = getattr(self.scheduler, "claim_due", None)
+        due = (claim_due(now) if callable(claim_due)
+               else self.scheduler.check_due(now))
         for event in due:
             if self.on_due is not None:
                 self.on_due(event)
             if self.dispatcher is not None:
                 self.dispatcher.dispatch(event)
+                complete = getattr(self.scheduler, "complete", None)
+                if callable(complete):
+                    complete(event)
         self.drain_outbox()
         return due
 

@@ -43,10 +43,9 @@ conversation id. Schedule strings supported:
 - "monthly HH:MM day D" (day of month, 1 to 28)
 - "cron M H DOM MON DOW" (5 fields, * or a single number)
 next_due(after) returns the next occurrence after a
-time, in local time, or in the job's tz when one is set. check_due(now) returns jobs whose
-next occurrence after their last run is at or before
-now, and updates last run, so a job does not fire
-twice for the same occurrence.
+time, in local time, or in the job's tz when one is set. claim_due(now)
+persists pending occurrences; callers acknowledge each with complete(job)
+after dispatch. Unacknowledged occurrences return after restart.
 
 n8n triggers, mapping to Aidon:
 - Schedule -> scheduler, above.
@@ -68,6 +67,8 @@ n8n triggers, mapping to Aidon:
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 from pathlib import Path
@@ -240,6 +241,9 @@ class SchedulerJob:
     tz: str = ""
     # Wall-clock time limit per run, seconds; 0 = unlimited.
     time_limit: int = 0
+    # A durable occurrence claimed for dispatch but not yet acknowledged.
+    # Non-empty values survive process restarts and are retried.
+    pending_run: str = ""
 
     def next_due(self, after: datetime) -> datetime | None:
         """Next run after `after`, capped by expiry (until).
@@ -361,9 +365,22 @@ class Scheduler:
 
     def save(self) -> None:
         self.home.mkdir(parents=True, exist_ok=True)
-        self.state_path.write_text(
-            json.dumps({"jobs": [job.__dict__ for job in self.jobs]}, indent=2),
-            encoding="utf-8")
+        payload = json.dumps(
+            {"jobs": [job.__dict__ for job in self.jobs]}, indent=2)
+        fd, temporary = tempfile.mkstemp(
+            prefix=f".{self.state_path.name}.", suffix=".tmp",
+            dir=self.home)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.state_path)
+        finally:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
 
     def add_job(self, job: SchedulerJob) -> None:
         if job.kind not in self.KINDS:
@@ -420,20 +437,52 @@ class Scheduler:
         self.save()
 
     def due_jobs(self, now: datetime) -> list[SchedulerJob]:
-        """Return due jobs without changing their persisted last-run time."""
-        return self._due_jobs(now, mark=False)
+        """Return due or previously claimed jobs without changing state."""
+        pending = [job for job in self.jobs if job.pending_run]
+        pending_ids = {id(job) for job in pending}
+        return pending + [job for job in self._due_jobs(now)
+                          if id(job) not in pending_ids]
+
+    def claim_due(self, now: datetime) -> list[SchedulerJob]:
+        """Claim due occurrences durably; unacknowledged claims are retried.
+
+        The whole claim batch is persisted before returning. Each returned
+        job must be passed to ``complete`` after dispatch finishes. If Aidon
+        stops first, the pending claim is returned again after restart.
+        """
+        due = [job for job in self.jobs if job.pending_run]
+        changed = False
+        for job in self._due_jobs(now):
+            job.pending_run = now.isoformat(timespec="seconds")
+            job.last_run = now.isoformat(timespec="seconds")
+            due.append(job)
+            changed = True
+        if changed:
+            self.save()
+        return due
+
+    def complete(self, job: SchedulerJob) -> bool:
+        """Acknowledge one dispatched occurrence, matching its claim token."""
+        current = next((item for item in self.jobs
+                        if item.name == job.name), None)
+        if current is None or not current.pending_run:
+            return False
+        if not job.pending_run or current.pending_run != job.pending_run:
+            return False
+        current.pending_run = ""
+        self.save()
+        job.pending_run = ""
+        return True
 
     def check_due(self, now: datetime) -> list[SchedulerJob]:
-        """Return due jobs and record them as claimed for this tick.
+        """Compatibility alias for durable claims; complete after dispatch."""
+        return self.claim_due(now)
 
-        A zoned job's next run is timezone-aware; a naive `now`
-        reads as server-local for the comparison.
-        """
-        return self._due_jobs(now, mark=True)
-
-    def _due_jobs(self, now: datetime, *, mark: bool) -> list[SchedulerJob]:
+    def _due_jobs(self, now: datetime) -> list[SchedulerJob]:
         due: list[SchedulerJob] = []
         for job in self.jobs:
+            if job.pending_run:
+                continue
             after = datetime.fromisoformat(job.last_run) if job.last_run else datetime(2000, 1, 1)
             nxt = job.next_due(after)
             if nxt is None:
@@ -443,10 +492,6 @@ class Scheduler:
                 now_cmp = now.astimezone(nxt.tzinfo)
             if nxt <= now_cmp:
                 due.append(job)
-                if mark:
-                    job.last_run = now.isoformat(timespec="seconds")
-        if due and mark:
-            self.save()
         return due
 
 
