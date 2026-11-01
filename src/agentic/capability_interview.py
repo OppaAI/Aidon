@@ -13,6 +13,14 @@ class CapabilityInterviewMixin:
     def _attachment_message(self, text: str) -> Message:
         """Attach recent chat context and WebUI images when present."""
         conversation_context = getattr(self, "conversation_context", "")
+        if self.image_paths:
+            text = ("The current user request and attached image(s) are the source "
+                    "for this task. Inspect the attached image(s) directly. Do not "
+                    "reuse an older image-editing request or infer the image content "
+                    "from memory. Use earlier conversation only when the current "
+                    "request explicitly refers to it.\n\n" + str(text))
+            if getattr(self, "_image_context_isolated", False):
+                conversation_context = ""
         if conversation_context.strip():
             text = ("Recent conversation context:\n"
                     + conversation_context.strip()

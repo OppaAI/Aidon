@@ -268,7 +268,8 @@ def test_slack_handler_attaches_image_markers(tmp_path):
 
     server = WebUIServer(tmp_path, dispatcher=_Dispatcher())
     server.slack_signing_secret = "secret123"
-    body = {"event": {"type": "message", "text": "what is this",
+    server.messaging_config._slack_bot_user_id = "UAIDON"
+    body = {"event": {"type": "message", "text": "<@UAIDON> what is this",
                       "channel": "C1", "user": "U1",
                       "files": [{"id": "F1", "mimetype": "image/png",
                                  "name": "photo.png", "filetype": "png"}]}}

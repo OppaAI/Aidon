@@ -53,6 +53,7 @@ import hmac
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -541,10 +542,16 @@ def slack_bot_user_id(config, fetch=None) -> str:
     can fall back to a mention-token heuristic.
     """
     cached = getattr(config, "_slack_bot_user_id", None)
-    if cached is not None:
+    checked_at = getattr(config, "_slack_bot_user_id_checked_at", None)
+    now = time.monotonic()
+    # A successful identity is stable for the lifetime of this process. A
+    # failed lookup is cached briefly to avoid hammering auth.test for every
+    # ordinary channel message, then retried automatically.
+    if cached:
         return cached
+    if checked_at is not None and now - checked_at < 60:
+        return ""
     if not getattr(config, "slack_configured", lambda: False)():
-        config._slack_bot_user_id = ""
         return ""
     if fetch is None:
         import urllib.request, json as _json
@@ -560,6 +567,7 @@ def slack_bot_user_id(config, fetch=None) -> str:
     if isinstance(result, dict) and result.get("ok"):
         uid = str(result.get("user_id") or "")
     config._slack_bot_user_id = uid
+    config._slack_bot_user_id_checked_at = now
     return uid
 
 
@@ -567,18 +575,21 @@ def slack_message_for_bot(text, channel, bot_user_id: str = "") -> bool:
     """Whether a Slack message should trigger Aidon.
 
     DMs (channel id starts with D) always trigger. In channels, only
-    messages that mention Aidon (a Slack mention token or the name)
-    trigger; plain chatter is ignored.
+    the bot's own Slack mention token triggers; plain name mentions,
+    mentions of other users, and unknown bot identity fail closed.
     """
     channel = str(channel or "")
     if channel.startswith("D"):
         return True
-    text = text or ""
-    low = text.lower()
-    if "aidon" in low:
-        return True
-    if bot_user_id and f"<@{bot_user_id}>" in text:
-        return True
-    if not bot_user_id and re.search(r"<@[A-Za-z0-9]+>", text):
-        return True
-    return False
+    if not bot_user_id:
+        return False
+    mention = re.compile(r"<@" + re.escape(bot_user_id) + r"(?:\|[^>]+)?>")
+    return bool(mention.search(str(text or "")))
+
+
+def strip_slack_bot_mention(text: str, bot_user_id: str) -> str:
+    """Remove only Aidon's Slack mention token before command/goal parsing."""
+    if not bot_user_id:
+        return str(text or "").strip()
+    mention = re.compile(r"<@" + re.escape(bot_user_id) + r"(?:\|[^>]+)?>(?:\s*)")
+    return mention.sub("", str(text or "")).strip()

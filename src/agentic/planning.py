@@ -35,7 +35,8 @@ class PlanningMixin:
 
     def _memory_context(self, query: str) -> str:
         """Return a bounded, reference-only memory block for a user query."""
-        if self.memory is None:
+        if (self.memory is None
+                or getattr(self, "_image_context_isolated", False)):
             return ""
         try:
             episode_limit = max(0, int(os.environ.get(

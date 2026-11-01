@@ -336,6 +336,23 @@ class WebUIMessagingMixin:
             text = str(event_body.get("text", ""))
             channel = str(event_body.get("channel", ""))
             thread_ts = event_body.get("thread_ts") or event_body.get("ts")
+            # DMs remain conversational. In channels, require the exact bot
+            # mention before parsing commands, answering questions, or
+            # accepting attachments. Never fall back to another user's
+            # mention or to a filename-only post.
+            bot_user_id = ""
+            if not channel.startswith("D"):
+                try:
+                    from .messaging import (slack_bot_user_id as _bot_id,
+                                            slack_message_for_bot as _addressed,
+                                            strip_slack_bot_mention as _strip_mention)
+                    bot_user_id = _bot_id(self.messaging_config)
+                    if (event_body.get("type") != "app_mention"
+                            and not _addressed(text, channel, bot_user_id)):
+                        return 200, {"ok": True, "ignored": "not_mentioned"}
+                    text = _strip_mention(text, bot_user_id)
+                except Exception:
+                    return 200, {"ok": True, "ignored": "not_mentioned"}
             decision_reply = self._resolve_decision(text)
             if decision_reply is None:
                 decision_reply = self._resolve_control(text)
@@ -442,17 +459,6 @@ class WebUIMessagingMixin:
                 if self.slack_sender is not None:
                     self.slack_sender(channel, decision_reply, thread_ts)
                 return 200, {"replies": [decision_reply]}
-            # In a public (non-DM) channel, only messages that mention Aidon
-            # become goals; plain chatter is ignored (still acknowledged).
-            try:
-                from .messaging import slack_bot_user_id as _sbuid, slack_message_for_bot as _smfb
-                _bot_uid = _sbuid(self.messaging_config)
-            except Exception:
-                _bot_uid = ""
-            _has_attachments = bool(event_body.get("files") or event_body.get("file_shares")
-                                    or event_body.get("attachments"))
-            if not _has_attachments and not _smfb(text, channel, _bot_uid):
-                return 200, {"ok": True, "ignored": "not_mentioned"}
             caption = text
             replies: list[str] = []
             # Image intake, same shape as parse_slack_event: image
@@ -468,7 +474,7 @@ class WebUIMessagingMixin:
             payload: dict = {}
             try:
                 from .slack_inbound import parse_slack_event as _parse_slack
-                _parsed = _parse_slack(body)
+                _parsed = _parse_slack(body, bot_user_id=bot_user_id)
                 if _parsed is not None and (_parsed.payload.get("images")
                                            or _parsed.payload.get("files")):
                     text = _parsed.goal

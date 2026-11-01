@@ -8,6 +8,9 @@ import pytest
 from src.interface.reply_delivery import ReplySender
 from src.interface.slack_inbox import SlackInbox
 from src.interface.slack_polling import process_polled_messages
+from src.interface.messaging import (MessagingConfig, slack_message_for_bot,
+                                     slack_bot_user_id)
+from src.interface.slack_inbound import parse_slack_event
 from src.interface.triggers import TriggerDispatcher, TriggerEvent
 from src.interface.webui import WebUIServer
 
@@ -173,3 +176,93 @@ def test_signed_slack_webhook_queues_once_and_returns_before_goal_runs(tmp_path)
     assert inbox.process_once()
     assert goals == ["run"]
     assert not inbox.process_once()
+
+
+def test_slack_channel_requires_exact_aidon_mention_but_dm_does_not(tmp_path):
+    config = MessagingConfig(slack_bot_token="xoxb-test")
+    config._slack_bot_user_id = "UAIDON"
+    server = WebUIServer(tmp_path, messaging_config=config)
+    dispatched = []
+
+    status, result = server.handle_slack_message(
+        {"event": {"type": "message", "channel": "C1",
+                   "text": "Aidon, can you help?", "ts": "1.0"}},
+        dispatch=dispatched.append)
+    assert status == 200 and result["ignored"] == "not_mentioned"
+    assert dispatched == []
+
+    status, result = server.handle_slack_message(
+        {"event": {"type": "message", "channel": "C1",
+                   "text": "<@UOTHER> can you help?", "ts": "2.0",
+                   "files": [{"id": "F1", "mimetype": "image/png"}]}},
+        dispatch=dispatched.append)
+    assert status == 200 and result["ignored"] == "not_mentioned"
+    assert dispatched == []
+
+    status, result = server.handle_slack_message(
+        {"event": {"type": "message", "channel": "C1",
+                   "text": "<@UAIDON> help me", "ts": "3.0"}},
+        dispatch=dispatched.append)
+    assert status == 200 and result["queued"] is True
+    assert dispatched[0].goal == "help me"
+
+    status, result = server.handle_slack_message(
+        {"event": {"type": "message", "channel": "D1",
+                   "text": "hello", "ts": "4.0"}},
+        dispatch=dispatched.append)
+    assert status == 200 and result["queued"] is True
+    assert dispatched[1].goal == "hello"
+
+
+def test_slack_mention_detection_fails_closed_without_bot_identity():
+    assert slack_message_for_bot("<@UOTHER> hello", "C1", "") is False
+    assert slack_message_for_bot("Aidon, hello", "C1", "UAIDON") is False
+    assert slack_message_for_bot("<@UOTHER> hello", "C1", "UAIDON") is False
+    assert slack_message_for_bot("<@UAIDON|Aidon> hello", "C1", "UAIDON") is True
+    assert slack_message_for_bot("hello", "D1", "") is True
+
+
+def test_slack_event_parser_uses_exact_mention_and_keeps_dm_behavior():
+    channel_event = {"event": {"type": "message", "channel": "C1",
+                               "text": "Aidon, hi", "files": [
+                                   {"id": "F1", "mimetype": "image/png"}]}}
+    assert parse_slack_event(channel_event, bot_user_id="UAIDON") is None
+    channel_event["event"]["text"] = "<@UAIDON> hi"
+    assert parse_slack_event(channel_event, bot_user_id="UAIDON").goal == (
+        "hi [image slack_file_id=F1 mimetype=image/png name=]")
+    dm_event = {"event": {"type": "message", "channel": "D1", "text": "hello"}}
+    assert parse_slack_event(dm_event).goal == "hello"
+
+
+def test_slack_bot_identity_retries_after_temporary_lookup_failure():
+    config = MessagingConfig(slack_bot_token="xoxb-test")
+    calls = []
+
+    def lookup(_url, _token):
+        calls.append(True)
+        return {"ok": True, "user_id": "UAIDON"}
+
+    assert slack_bot_user_id(config, fetch=lambda *_: {}) == ""
+    config._slack_bot_user_id_checked_at -= 61
+    assert slack_bot_user_id(config, fetch=lookup) == "UAIDON"
+    assert calls == [True]
+
+
+def test_image_question_uses_current_image_without_stale_context_or_memory(tmp_path):
+    from types import SimpleNamespace
+    from src.agentic.capability_interview import CapabilityInterviewMixin
+    from src.agentic.planning import PlanningMixin
+
+    image = tmp_path / "offer.png"
+    image.write_bytes(b"image bytes")
+    runner = SimpleNamespace(
+        image_paths=[image], conversation_context="old request: edit two photos",
+        _image_context_isolated=True, memory=object())
+
+    message = CapabilityInterviewMixin._attachment_message(
+        runner, "Can you tell me what this offer is?")
+    assert "old request" not in message.content[0]["text"]
+    assert "attached image(s) directly" in message.content[0]["text"]
+    assert "Can you tell me what this offer is?" in message.content[0]["text"]
+    assert message.content[1]["type"] == "image_url"
+    assert PlanningMixin._memory_context(runner, "offer availability") == ""

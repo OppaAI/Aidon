@@ -279,6 +279,7 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
         self.deadline_seconds = deadline_seconds
         self.stream_callback = stream_callback
         self.conversation_context = str(conversation_context or "")
+        self._image_context_isolated = False
         self.route_callback = route_callback
         self.trace_callback = trace_callback
 
@@ -436,6 +437,15 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
     def run(self, goal: str, spec=None, research_report=None,
             live_actions=None) -> RunReport:
         self._elapsed_timer = ElapsedTimer().start()
+        # An attached image is the subject of this request. Keep unrelated
+        # old chat turns and recalled episodes out unless the user explicitly
+        # asks to connect the image to earlier conversation.
+        self._image_context_isolated = bool(self.image_paths) and not re.search(
+            r"\b(?:previous|earlier|before|yesterday|last time|we discussed|"
+            r"as discussed|remember|same (?:image|photo|picture|offer|one))\b",
+            str(goal or ""), re.IGNORECASE)
+        if self._image_context_isolated:
+            self.conversation_context = ""
         if self.run_control is not None and self.run_control.is_cancelled(self.run_id):
             return self._finalize(RunReport(
                 "cancelled", goal, Plan(), False, False,
@@ -538,6 +548,7 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
             return self._finalize(report)
         if (not getattr(self, "resume_interview", False) and getattr(self, "use_semantic_router_skip", False) and _route
                 and _route[0] == "webchat" and spec is None and not _write_intent
+                and not self.image_paths
                 and self.researcher is not None
                 and not getattr(self, "research_mode", False)
                 and not getattr(self, "force_web", False)):
@@ -625,7 +636,9 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                                 f"deep research: {len(sources)} source(s)")
                 except Exception as exc:
                     self._trace("research", "failed", str(exc)[:100])
-        if not getattr(self, "resume_interview", False) and self.force_web and self.researcher is not None and spec is None and not _write_intent:
+        if (not getattr(self, "resume_interview", False) and self.force_web
+                and self.researcher is not None and spec is None
+                and not _write_intent and not self.image_paths):
             from ..capabilities.webchat import webchat_reply
             reply = webchat_reply(goal, self.researcher, self.client,
                                   on_token=self.stream_callback,
@@ -640,7 +653,11 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
-        if not getattr(self, "resume_interview", False) and self.use_semantic_router_skip and self.last_route and self.last_route[0] == "webchat" and spec is None and not _write_intent and self.researcher is not None:
+        if (not getattr(self, "resume_interview", False)
+                and self.use_semantic_router_skip and self.last_route
+                and self.last_route[0] == "webchat" and spec is None
+                and not _write_intent and self.researcher is not None
+                and not self.image_paths):
             from ..capabilities.webchat import webchat_reply
             reply = webchat_reply(goal, self.researcher, self.client,
                                   on_token=self.stream_callback,
