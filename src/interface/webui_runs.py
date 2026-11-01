@@ -353,7 +353,9 @@ class WebUIRunMixin:
                                      "stream_id": run_id if stream_state["active"] else ""})
             if conversation_db is not None:
                 try:
-                    conversation_db.record_exchange(conversation_id, "assistant", str(text))
+                    conversation_db.record_exchange(
+                        conversation_id, "assistant", str(text),
+                        route=record.get("route"))
                 except Exception:
                     pass
             if self.memory is not None:

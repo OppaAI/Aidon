@@ -59,7 +59,16 @@
         let value = data[key] || "Unavailable";
         if (key === "model") value = String(value).split("/").pop();
         node.textContent = value;
-        node.classList.toggle("status-ready", ["Online", "Ready", "bubblewrap", "docker", "Semantic memory (on demand)", "EmbeddingGemma2Embedder"].includes(value));
+        const memoryWarning = key === "memory"
+          ? String(data.memory_warning || "").trim() : "";
+        node.title = memoryWarning;
+        node.classList.toggle("status-warning", !!memoryWarning);
+        node.classList.toggle("status-ready", !memoryWarning && [
+          "Online", "Ready", "bubblewrap", "docker",
+          "Semantic memory (on demand)", "EmbeddingGemma2Embedder",
+          "HybridEmbedder · QdrantStore",
+          "EmbeddingGemma2Embedder · QdrantStore",
+        ].includes(value));
       });
     }).catch(() => {
       document.querySelectorAll("[data-status]").forEach((node) => { node.textContent = "Unavailable"; });
@@ -69,6 +78,7 @@
 
   let currentRun = null;
   let pollTimer = null;
+  let pollInFlight = false;
   let lastEventCount = 0;
   let lastTraceCount = 0;
   let lastTracePhase = null;
@@ -171,11 +181,14 @@
   }
 
   // Stored and live messages must share escaping and Markdown rendering.
-  window.aidonRenderStoredMessage = (role, text) => {
+  window.aidonRenderStoredMessage = (role, text, route = null) => {
     const node = document.createElement("div");
     node.className = "msg " + (role === "assistant" ? "aidon" : "user");
     node.innerHTML = role === "assistant"
-      ? renderFinalMessage(String(text || ""), null) : md(String(text || ""));
+      ? renderFinalMessage(String(text || ""), route) : md(String(text || ""));
+    if (role === "assistant") {
+      node.appendChild(playButton(String(text || ""), node));
+    }
     return node;
   };
 
@@ -1437,12 +1450,18 @@
   }
 
   async function poll() {
-    if (!currentRun) return;
+    if (!currentRun || pollInFlight) return;
+    const polledRun = currentRun;
+    pollInFlight = true;
     try {
-      const r = await fetch("/api/runs/" + currentRun +
+      const r = await fetch("/api/runs/" + polledRun +
         "?since=" + lastEventCount + "&trace_since=" + lastTraceCount);
       if (!r.ok) return;
       const run = await r.json();
+      // A run may have been replaced while this request was in flight.
+      // Its events belong to the old conversation and must not be drawn
+      // into the newly selected chat.
+      if (currentRun !== polledRun) return;
       renderRoute(run.route);
       renderStages(run.stage);
       setStatus(run.status === "running" ? "busy" : "ok",
@@ -1605,6 +1624,8 @@
       }
     } catch (e) {
       console.error("poll failed:", e);
+    } finally {
+      pollInFlight = false;
     }
   }
 
@@ -2693,12 +2714,25 @@
     };
     const turns = conv.turns || [];
     if (turns.length) {
-      turns.forEach((turn) => {
+      let savedRoute = null;
+      try {
+        const state = JSON.parse(localStorage.getItem(
+          "aidon-run-state-" + conv.id) || "null");
+        if (state && state.route && state.route.group) savedRoute = state.route;
+      } catch (e) {}
+      let lastAssistantTurn = -1;
+      turns.forEach((turn, index) => {
+        if ((turn.role || "user") === "assistant") lastAssistantTurn = index;
+      });
+      turns.forEach((turn, index) => {
         const role = turn.role || "user";
         if (role === "user") {
           thread.appendChild(window.aidonRenderStoredMessage("user", turn.text));
         } else if (role === "assistant") {
-          thread.appendChild(window.aidonRenderStoredMessage("assistant", turn.text));
+          const route = turn.route ||
+            (index === lastAssistantTurn ? savedRoute : null);
+          thread.appendChild(window.aidonRenderStoredMessage(
+            "assistant", turn.text, route));
         }
       });
       atts.forEach(renderAtt);

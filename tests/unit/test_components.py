@@ -646,6 +646,21 @@ def test_conversations_db_history_summary_delete(tmp_path):
     store.close()
 
 
+def test_conversation_route_metadata_survives_store_reopen(tmp_path):
+    store = ConversationStoreDB(tmp_path)
+    conv = store.create_conversation()
+    store.record_exchange(conv["id"], "user", "Tell me the current time.")
+    store.record_exchange(
+        conv["id"], "assistant", "It is 19:37.",
+        route={"group": "chat", "confidence": 0.164})
+    store.close()
+
+    reopened = ConversationStoreDB(tmp_path)
+    history = reopened.history(conv["id"])
+    assert history[-1]["route"] == {"group": "chat", "confidence": 0.164}
+    reopened.close()
+
+
 # -- registry DB --------------------------------------------------------------
 
 def test_registry_db_run_and_skill_version_round_trip(tmp_path):

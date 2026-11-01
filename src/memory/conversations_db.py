@@ -26,6 +26,7 @@ another round trip.
 from __future__ import annotations
 
 import sqlite3
+import json
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -83,6 +84,7 @@ class ConversationStoreDB:
                     exchange_no INTEGER NOT NULL,
                     role TEXT NOT NULL,
                     text TEXT NOT NULL,
+                    route_json TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     UNIQUE (conversation_id, exchange_no)
                 );
@@ -106,6 +108,16 @@ class ConversationStoreDB:
                 );
                 """
             )
+            # Existing conversation databases predate persisted routing
+            # metadata. Keep their transcripts intact and add the nullable
+            # detail needed to restore route badges after a reload.
+            exchange_columns = {
+                row["name"] for row in self._conn.execute(
+                    "PRAGMA table_info(exchanges)").fetchall()
+            }
+            if "route_json" not in exchange_columns:
+                self._conn.execute(
+                    "ALTER TABLE exchanges ADD COLUMN route_json TEXT NOT NULL DEFAULT ''")
             self._conn.commit()
 
     # -- conversations -------------------------------------------------
@@ -172,8 +184,17 @@ class ConversationStoreDB:
     # -- exchanges -----------------------------------------------------
 
     def record_exchange(self, conversation_id: str, role: str,
-                        text: str) -> dict:
+                        text: str, route: dict | None = None) -> dict:
         """Append one exchange, numbered under a serialised transaction."""
+        route_data = ""
+        if isinstance(route, dict) and route.get("group"):
+            try:
+                route_data = json.dumps({
+                    "group": str(route["group"]),
+                    "confidence": max(0.0, min(1.0, float(route["confidence"]))),
+                }, separators=(",", ":"))
+            except (KeyError, TypeError, ValueError):
+                route_data = ""
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
@@ -184,16 +205,17 @@ class ConversationStoreDB:
                 number = int(row["m"]) + 1
                 self._conn.execute(
                     "INSERT INTO exchanges"
-                    " (conversation_id, exchange_no, role, text, created_at)"
-                    " VALUES (?, ?, ?, ?, ?)",
-                    (conversation_id, number, role, text, _now()))
+                    " (conversation_id, exchange_no, role, text, route_json, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (conversation_id, number, role, text, route_data, _now()))
                 self._conn.commit()
             except Exception:
                 self._conn.rollback()
                 raise
         self._refresh_summary(conversation_id)
         return {"conversation_id": conversation_id, "exchange_no": number,
-                "role": role, "text": text}
+                "role": role, "text": text,
+                "route": json.loads(route_data) if route_data else None}
 
     def history(self, conversation_id: str, limit: int = 50) -> list[dict]:
         # Reads take the same lock as writes: one sqlite3 connection is
@@ -202,10 +224,21 @@ class ConversationStoreDB:
         # ("bad parameter or other API misuse") on the connection.
         with self._lock:
             rows = self._conn.execute(
-                "SELECT exchange_no, role, text, created_at FROM exchanges"
+                "SELECT exchange_no, role, text, route_json, created_at FROM exchanges"
                 " WHERE conversation_id = ? ORDER BY exchange_no DESC LIMIT ?",
                 (conversation_id, limit)).fetchall()
-        return [dict(row) for row in reversed(rows)]
+        history = []
+        for row in reversed(rows):
+            item = dict(row)
+            route_data = item.pop("route_json", "")
+            try:
+                route = json.loads(route_data) if route_data else None
+            except (TypeError, ValueError):
+                route = None
+            if isinstance(route, dict):
+                item["route"] = route
+            history.append(item)
+        return history
 
     # -- summary -------------------------------------------------------
 
