@@ -177,6 +177,39 @@ def test_budgeted_meal_plan_gets_currency_checks_even_if_plan_omits_them(tmp_pat
     assert any("!= stated $38.20" in failure for failure in failures)
 
 
+def test_requested_shopping_item_must_be_priced_in_shopping_section(tmp_path):
+    from src.agentic.verify import requested_shopping_item_criteria
+
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    plan = workdir / "grocery-plan.md"
+    plan.write_text(
+        "## Meal Plan\nDinner uses zucchini.\n"
+        "## Categorized Shopping List\n"
+        "### Produce\n- Spinach - $2.49\n"
+    )
+    goal = "Add zucchini with a price to the produce section of the shopping list."
+    criteria = requested_shopping_item_criteria(
+        goal, ["grocery-plan.md"], workdir)
+
+    assert criteria == [
+        "shopping list in grocery-plan.md contains zucchini",
+    ]
+    ok, failures, _ = verify_plan(workdir, ["grocery-plan.md"], criteria)
+    assert not ok
+    assert any("shopping list missing priced zucchini" in item
+               for item in failures)
+
+    plan.write_text(
+        "## Meal Plan\nDinner uses zucchini.\n"
+        "## Categorized Shopping List\n"
+        "### Produce\n- Zucchini (1) - $1.30\n"
+        "- Spinach - $2.49\n"
+    )
+    ok, failures, _ = verify_plan(workdir, ["grocery-plan.md"], criteria)
+    assert ok, failures
+
+
 def test_invented_tool_plan_is_rejected_not_executed(tmp_path, monkeypatch):
     monkeypatch.setenv("AIDON_MAX_PLAN_REPAIRS", "0")
     monkeypatch.setenv("AIDON_CRITIC_ENABLED", "0")

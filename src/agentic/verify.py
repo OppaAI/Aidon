@@ -396,8 +396,16 @@ def requested_shopping_item_criteria(goal: str, deliverables: list[str],
                                      workdir: Path) -> list[str]:
     """Require an explicitly requested item in the shopping-list section."""
     goal_text = str(goal or "")
-    if not re.search(r"\b(?:shopping list|grocery list|produce section|"
-                     r"produce list)\b", goal_text, re.IGNORECASE):
+    food_context = re.search(
+        r"\b(?:shopping list|grocery list|produce section|produce list|"
+        r"grocery|groceries|meal plan|food plan|menu)\b",
+        goal_text, re.IGNORECASE)
+    if not food_context:
+        food_context = any(re.search(
+            r"grocery|shopping|meal|food|menu",
+            Path(str(name)).name, re.IGNORECASE)
+            for name in (deliverables or []))
+    if not food_context:
         return []
     match = re.search(
         r"\badd\s+(?:the\s+)?([A-Za-z][A-Za-z -]*?)"
