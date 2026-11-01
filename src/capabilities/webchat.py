@@ -189,7 +189,7 @@ def read_only_tools(workdir) -> dict:
 
 
 def webchat_reply(goal: str, researcher, client, on_token=None,
-                  context: str = "") -> str:
+                  context: str = "", guidance: str = "") -> str:
     """Return a webchat reply for a goal, from researcher facts only."""
     if not goal or not str(goal).strip():
         raise ValueError("goal is required")
@@ -210,8 +210,13 @@ def webchat_reply(goal: str, researcher, client, on_token=None,
         "Recent conversation context (use only to resolve references such as "
         "'this' or 'the rules'; it is not a source of facts):\n"
         f"{context.strip()}\n\n" if str(context).strip() else "")
+    guidance_block = (
+        "Owner guidance (follow for scope and presentation, but it is not "
+        "a source of factual claims):\n"
+        f"{str(guidance).strip()}\n\n" if str(guidance).strip() else "")
     prompt = (
         f"{context_block}"
+        f"{guidance_block}"
         f"Goal: {goal}\n"
         f"Research facts:\n{facts_text}\n\n"
         "Use the conversation context only to understand what the goal refers "

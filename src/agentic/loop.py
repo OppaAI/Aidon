@@ -405,6 +405,23 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
         except TypeError:
             return self.client.chat(messages)
 
+    def _chat_goal_with_memory(self, goal: str) -> str:
+        """Add binding guidance and relevant memory to plain chat."""
+        parts = [goal]
+        if str(getattr(self, "guidance", "") or "").strip():
+            try:
+                from .prompts import guidance_block
+                parts.append(guidance_block(self.guidance))
+            except Exception:
+                parts.append(str(self.guidance).strip())
+        try:
+            context = self._memory_context(goal)
+        except Exception:
+            context = ""
+        if context:
+            parts.append(context)
+        return "\n\n".join(parts)
+
     def _backend_name(self) -> str:
         if self.execution_backend is not None:
             return self.execution_backend.name
@@ -510,7 +527,8 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                 and _route[0] == "chat" and spec is None and not _write_intent
                 and not getattr(self, "research_mode", False)
                 and not getattr(self, "force_web", False)):
-            reply = self._chat("respond", [self._attachment_message(goal)])
+            reply = self._chat("respond", [self._attachment_message(
+                self._chat_goal_with_memory(goal))])
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
@@ -522,7 +540,8 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
             from ..capabilities.webchat import webchat_reply
             reply = webchat_reply(goal, self.researcher, self.client,
                                   on_token=self.stream_callback,
-                                  context=self.conversation_context)
+                                  context=self.conversation_context,
+                                  guidance=self.guidance)
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
@@ -606,12 +625,14 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
             from ..capabilities.webchat import webchat_reply
             reply = webchat_reply(goal, self.researcher, self.client,
                                   on_token=self.stream_callback,
-                                  context=self.conversation_context)
+                                  context=self.conversation_context,
+                                  guidance=self.guidance)
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
         if not getattr(self, "resume_interview", False) and self.use_semantic_router_skip and self.last_route and self.last_route[0] == "chat" and spec is None and not _write_intent:
-            reply = self._chat("respond", [self._attachment_message(goal)])
+            reply = self._chat("respond", [self._attachment_message(
+                self._chat_goal_with_memory(goal))])
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)
@@ -619,7 +640,8 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
             from ..capabilities.webchat import webchat_reply
             reply = webchat_reply(goal, self.researcher, self.client,
                                   on_token=self.stream_callback,
-                                  context=self.conversation_context)
+                                  context=self.conversation_context,
+                                  guidance=self.guidance)
             report = RunReport("chat", goal, Plan(steps=[], deliverables=[], criteria=[]),
                                False, False, chat_reply=reply)
             return self._finalize(report)

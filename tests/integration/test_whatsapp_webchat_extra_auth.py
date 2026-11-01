@@ -61,10 +61,13 @@ def test_webchat_reply_uses_context_to_resolve_followup():
         client,
         context="user: We joined the Meta Global AI Hackathon.\n"
                 "assistant: I will help verify it.",
+        guidance="Keep the answer concise.",
     )
     sent = client.calls[0][0].content
     assert "Meta Global AI Hackathon" in sent
     assert "use only to resolve references" in sent
+    assert "Keep the answer concise." in sent
+    assert "not a source of factual claims" in sent
 
 
 def test_webchat_reply_empty_facts_says_not_found_and_does_not_call_model():

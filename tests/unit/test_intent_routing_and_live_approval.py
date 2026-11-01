@@ -9,6 +9,7 @@ for an empty set (and bypass even an Auto-Approve grant).
 """
 
 import json
+from types import SimpleNamespace
 
 from src.interface.approval import ApprovalGate, Decision
 from src.agentic.loop import GoalRunner
@@ -46,6 +47,47 @@ def test_ask_mode_chat_route_skips_interview(tmp_path):
     assert report.status == "chat"
     assert report.chat_reply
     assert not report.mode_stop
+
+
+def test_plain_chat_route_includes_recalled_cross_chat_fact(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIDON_MEMORY_EXTRACT", "0")
+
+    class _Memory:
+        def recall_both(self, query, episode_limit, knowledge_limit):
+            return [], []
+
+        def recall(self, collection, query, limit=5):
+            assert collection == "semantic"
+            assert "test project" in query
+            point = SimpleNamespace(
+                text="The user's test project is named Cedar Lantern.",
+                payload={})
+            return [SimpleNamespace(point=point)]
+
+        def record_episodic(self, *args, **kwargs):
+            return object()
+
+        def promote_to_ltm(self, *args, **kwargs):
+            return None
+
+    home = tmp_path / "home"
+    home.mkdir()
+    client = FakeClient("Your test project is Cedar Lantern.")
+    runner = GoalRunner(
+        client, Sandbox(home / "work"),
+        ApprovalGate(lambda kind, title, body: Decision("approved")), home,
+        memory=_Memory(), semantic_router=_Route("chat"),
+        use_semantic_router_skip=True, conversation_id="new-chat",
+        guidance="Keep the answer concise.")
+
+    report = runner.run("What was my test project called?")
+
+    assert report.status == "chat"
+    assert "Cedar Lantern" in report.chat_reply
+    sent = "\n".join(message.content for call in client.calls
+                      for message in call)
+    assert "Cedar Lantern" in sent
+    assert "Keep the answer concise." in sent
 
 
 def test_ask_mode_webchat_route_skips_interview(tmp_path):

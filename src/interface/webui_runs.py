@@ -9,6 +9,26 @@ from .triggers import TriggerEvent
 
 
 class WebUIRunMixin:
+    def _chat_guidance(self, conversation_id: str, run_guidance="") -> str:
+        """Combine a conversation's saved brief with this run's guidance."""
+        parts = []
+        if conversation_id:
+            try:
+                saved = self.handle_brief_get(conversation_id) or {}
+                brief = saved.get("brief", "") if isinstance(saved, dict) else ""
+                if isinstance(brief, (dict, list)):
+                    import json
+                    brief = json.dumps(brief, ensure_ascii=False, indent=2)
+                brief = str(brief or "").strip()
+                if brief:
+                    parts.append("Standing instructions for this chat:\n" + brief)
+            except Exception:
+                pass
+        run_guidance = str(run_guidance or "").strip()
+        if run_guidance:
+            parts.append("Additional guidance for this run:\n" + run_guidance)
+        return "\n\n".join(parts)
+
     def handle_chat(self, body: dict) -> dict:
         message = str(body.get("message", ""))
         control_reply = self._resolve_control(message)
@@ -28,11 +48,14 @@ class WebUIRunMixin:
         # A plain chat is global/unassigned unless a conversation id
         # is supplied with it.
         conversation_id = str(body.get("conversation_id", "") or "")
+        guidance = self._chat_guidance(
+            conversation_id, body.get("guidance", ""))
         replies: list[str] = []
         event = TriggerEvent(source="webui", kind="chat", goal=message,
                              conversation_id=conversation_id,
                              payload={**({"result_delivery": delivery.__dict__}
                                          if delivery else {}),
+                                      "guidance": guidance,
                                       "force_web": force_web},
                              reply=replies.append)
         try:
@@ -371,7 +394,8 @@ class WebUIRunMixin:
                     pass
 
         payload = {"run_id": run_id,
-                   "guidance": str(body.get("guidance", "")),
+                   "guidance": self._chat_guidance(
+                       conversation_id, body.get("guidance", "")),
                    "force_web": force_web,
                    "think_max": think_max,
                    "research_mode": research_mode,
