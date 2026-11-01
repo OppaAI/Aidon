@@ -75,6 +75,16 @@ def test_report_text_renders_markdown_readback_as_markdown():
     assert "```text" not in text
 
 
+def test_report_text_renders_markdown_after_descriptive_tool_label():
+    text = report_text(
+        "done", ["grocery-plan.md"], "", "run-described-readback", "stats",
+        result_text=("Read current grocery-plan.md before editing:\n"
+                     "# Grocery plan\n\n## Shopping List\n- Zucchini"))
+    assert "**Read current grocery-plan.md before editing:**" in text
+    assert "# Grocery plan" in text
+    assert "```text" not in text
+
+
 def test_report_text_keeps_plain_readback_in_code_block():
     text = report_text("done", [], "", "run-plain", "stats",
                        result_text="read_file:\nplain output")

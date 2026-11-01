@@ -208,17 +208,18 @@ def report_text(status: str, files: list[str], error: str,
     result_text = str(result_text or "").strip()
     if result_text:
         output = result_text[:8000]
-        # A Markdown document returned by read_file is already formatted
-        # content, not source code. Leaving it inside a fenced block makes
-        # headings and lists appear as literal characters in the WebUI.
-        # The WebUI escapes raw HTML before rendering Markdown, so this path
-        # does not enable HTML injection from tool output.
-        readback = re.match(r"^read_file:\s*\n([\s\S]*)$", output)
-        markdown_body = readback.group(1).lstrip() if readback else ""
+        # A Markdown document returned by a readback step is already
+        # formatted content, not source code. Its step label may be the
+        # tool name or a natural-language description, so recognize a
+        # short label followed by a Markdown document. The WebUI escapes
+        # raw HTML before rendering Markdown.
+        readback = re.match(r"^([^:\n]{1,240}):\s*\n([\s\S]*)$", output)
+        markdown_body = readback.group(2).lstrip() if readback else ""
         if markdown_body and re.search(
                 r"(?m)^\s*(?:#{1,6}\s|[-*+]\s|>\s|\d+\.\s)",
                 markdown_body):
-            head += f"\n\nTool result:\n\n**read_file:**\n\n{markdown_body}"
+            head += (f"\n\nTool result:\n\n**{readback.group(1)}:**"
+                     f"\n\n{markdown_body}")
         else:
             longest = max((len(run) for run in re.findall(r"`+", output)),
                           default=0)
