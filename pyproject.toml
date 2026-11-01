@@ -45,6 +45,9 @@ office = [
     "pytesseract",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.setuptools]
 packages = ["src", "src.system", "src.memory", "src.agentic", "src.interface", "src.capabilities", "src.social"]
 

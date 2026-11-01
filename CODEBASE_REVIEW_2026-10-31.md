@@ -64,6 +64,18 @@ Cron search now spans eight years, which covers the longest gap between valid le
 
 `src/system/main.py` scheduler daemon's `_full_scheduler_runner` handled Slack poll and ingest goals with `_cli_gate`, whose approval callback calls `input()`. In an unattended daemon this can block the loop indefinitely when a run reaches an approval. It now uses `_scheduled_gate` with the configured backend's sandbox status; unsafe actions fail closed without waiting for terminal input.
 
+### 9. Sandbox plugin runner imported a moved path validator — fixed; Bubblewrap validation pending
+
+`src/capabilities/plugin_runtime.py:361`.
+
+After plugin scanning moved to `plugin_scan.py`, the sandbox runtime still imported `_module_path` from `plugins.py`. On a host with Bubblewrap, sandbox tool calls failed before execution with `ImportError`. The runtime now imports the path validator from its current module. The end-to-end secret-capability test also now checks that missing or rejected per-call approval fails closed, and that an approved call succeeds. The current workspace lacks Bubblewrap, so those four end-to-end cases skip here and need a rerun on the home PC.
+
+### 10. Bubblewrap inherited writable host paths outside the workdir — fixed in code; host validation pending
+
+`src/capabilities/sandbox.py:198`, `tests/unit/test_plugin_sandbox_tools.py:192`.
+
+The Bubblewrap builder bound system directories and the workdir but did not replace the inherited root filesystem. A sandboxed plugin could write to a host path beside its run directory; the home-PC test reproduced this (`wrote` instead of `blocked`). Bubblewrap now starts from a private tmpfs root, mounts `/tmp` privately, mounts only the selected system paths and workdir, and makes recreated workdir ancestors read-only. Static argv coverage passes here, but this workspace cannot create Bubblewrap namespaces, so rerun the end-to-end isolation test on the home PC.
+
 ## Dead code, duplication, and improvement candidates
 
 - `src/capabilities/skill_import.py`: the unused `_now` helper and unresolved return annotation were removed. The pyflakes undefined-name warnings for these symbols should be rechecked.

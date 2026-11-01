@@ -201,6 +201,10 @@ class Sandbox:
             self.bwrap,
             "--unshare-pid", "--die-with-parent",
             "--clearenv",
+            # Start from an empty root. Binding only selected system
+            # paths prevents the sandbox from inheriting the host's
+            # /home, /tmp, and other writable locations.
+            "--tmpfs", "/",
             "--setenv", "PATH", f"{sys.prefix}/bin:/usr/local/bin:/usr/bin:/bin",
             "--setenv", "HOME", wd,
             "--setenv", "TMPDIR", "/tmp",
@@ -221,13 +225,35 @@ class Sandbox:
             else:
                 argv += ["--ro-bind-try", sysdir, sysdir]
         argv += ["--proc", "/proc", "--dev", "/dev"]
+        # Temporary files belong to this run and never share the host's
+        # /tmp. The workdir is mounted separately below.
+        argv += ["--dir", "/tmp", "--tmpfs", "/tmp"]
         # The interpreter may live outside /usr (a uv-managed venv
         # points into ~/.local/share/uv/python/...), so bind its tree
         # read-only, or `python3` inside the sandbox is a dangling
         # symlink and every generated script fails to start.
         for extra in self._interpreter_exposes():
             argv += ["--ro-bind-try", extra, extra]
-        argv += ["--bind", wd, wd, "--chdir", wd, "--", *command]
+        workdir = Path(wd)
+        protected = (Path("/usr"), Path("/bin"), Path("/sbin"),
+                     Path("/lib"), Path("/lib64"), Path("/etc"),
+                     Path("/proc"), Path("/dev"))
+        if any(workdir == root or root in workdir.parents
+               for root in protected):
+            raise ValueError(
+                "sandbox workdir cannot be inside a system mount")
+        # Recreate only the workdir's parent names in the fresh root and
+        # make them read-only. Otherwise a workdir under /tmp or /home
+        # would leave its host siblings writable inside the sandbox.
+        parents = [parent for parent in workdir.parents
+                   if parent not in (Path("/"), Path("/tmp"))]
+        for parent in reversed(parents):
+            argv += ["--dir", str(parent)]
+        argv += ["--dir", wd]
+        argv += ["--bind", wd, wd]
+        for parent in parents:
+            argv += ["--chmod", "0555", str(parent)]
+        argv += ["--chdir", wd, "--", *command]
         return argv
 
     @staticmethod

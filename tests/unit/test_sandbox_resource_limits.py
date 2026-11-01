@@ -21,3 +21,19 @@ def test_timeout_kills_child_process(tmp_path):
     assert result.returncode == 124
     time.sleep(1.2)
     assert not (tmp_path / "escaped").exists()
+
+
+def test_bubblewrap_uses_private_root_and_read_only_workdir_parents(tmp_path):
+    workdir = tmp_path / "home" / "work"
+    sandbox = Sandbox(workdir, backend="bubblewrap")
+    argv = sandbox._bwrap_argv(["true"])
+
+    tmpfs_args = [argv[index:index + 2]
+                  for index, value in enumerate(argv)
+                  if value == "--tmpfs"]
+    assert ["--tmpfs", "/"] in tmpfs_args
+    assert ["--tmpfs", "/tmp"] in tmpfs_args
+    assert ["--bind", str(workdir), str(workdir)] in [
+        argv[index:index + 3] for index in range(len(argv) - 2)]
+    assert ["--chmod", "0555", str(tmp_path)] in [
+        argv[index:index + 3] for index in range(len(argv) - 2)]

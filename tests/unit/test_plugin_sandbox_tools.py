@@ -136,11 +136,27 @@ def test_run_sandbox_tool_end_to_end(tmp_path, monkeypatch, require_bubblewrap):
                    tool_posture="developer", test_backend_factory=passing_backend_factory)
     registry.load_all()
     template = Sandbox(tmp_path / "template_work")
-    result = registry.call("heavy", {"city": "Kyiv"}, sandbox=template)
+    args = {"city": "Kyiv"}
+    with pytest.raises(PermissionError, match="fresh live approval"):
+        registry.call("heavy", args, sandbox=template)
+    with pytest.raises(PermissionError, match="invocation was rejected"):
+        registry.call("heavy", args, sandbox=template,
+                      approval_callback=lambda *_: False)
+
+    approvals = []
+
+    def approve_invocation(plugin, spec, approved_args, attachments):
+        approvals.append((plugin.name, spec["name"], approved_args, attachments))
+        return True
+
+    result = registry.call(
+        "heavy", args, sandbox=template,
+        approval_callback=approve_invocation)
     city, pid, secret = result.split(":")
     assert city == "Kyiv"
     assert int(pid) != os.getpid(), "tool must run in a separate process"
     assert secret == "tier2-secret"
+    assert approvals == [("heavy", "heavy", args, [])]
 
 
 @pytest.mark.skipif(shutil.which("bwrap") is None,

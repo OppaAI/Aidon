@@ -358,7 +358,7 @@ def run_sandbox_tool(plugin, spec: dict, args: dict, sandbox, home: Path,
     func_name = str(spec.get("function", ""))
     if not module_name or not func_name:
         raise ValueError("sandbox tool needs module and function")
-    from .plugins import _module_path
+    from .plugin_scan import _module_path
     module_path = _module_path(Path(plugin_dir), module_name)
     if not module_path.is_file():
         raise ValueError("sandbox tool module is missing")
