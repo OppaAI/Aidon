@@ -2746,6 +2746,15 @@
     const o = document.getElementById("brief-overlay");
     if (o) o.hidden = true;
   }
+  async function briefFetch(url, options) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    try {
+      return await fetch(url, { ...(options || {}), signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   async function openBrief() {
     if (!currentConversationId) {
       window.alert("Start a chat first, then set its brief.");
@@ -2763,7 +2772,7 @@
     status.textContent = "Loading this chat’s brief…";
     overlay.hidden = false;
     try {
-      const response = await fetch(
+      const response = await briefFetch(
         "/api/conversations/" + encodeURIComponent(conversationId) +
         "/brief");
       if (briefConversationId !== conversationId ||
@@ -2803,7 +2812,7 @@
     save.disabled = true;
     status.textContent = "Saving brief…";
     try {
-      const response = await fetch(
+      const response = await briefFetch(
         "/api/conversations/" + encodeURIComponent(briefConversationId) +
         "/brief", {
           method: "PUT",
