@@ -2,7 +2,9 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    AIDON_HOME=/data
+    AIDON_HOME=/data \
+    HF_HOME=/data/.cache/huggingface \
+    FASTEMBED_CACHE_PATH=/data/.cache/fastembed
 
 WORKDIR /opt/aidon
 
@@ -18,7 +20,11 @@ RUN apt-get update \
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-RUN python -m pip install --no-cache-dir .
+# The WebUI should start with semantic memory available. Installing only the
+# base package makes _make_memory fall back to HashEmbedder, which is useful
+# for offline tests but not real recall. These extras provide the dense and
+# sparse embedding backends plus image support.
+RUN python -m pip install --no-cache-dir '.[embed,sparse,vision]'
 
 USER aidon:aidon
 EXPOSE 8765

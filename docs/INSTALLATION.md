@@ -45,6 +45,30 @@ export AIDON_UID="$(id -u)" AIDON_GID="$(id -g)"
 docker compose up --build -d
 ```
 
+The Docker image includes the dense and sparse embedding packages so memory
+uses semantic embeddings instead of the test-only hash fallback. On first
+use, the embedding models are downloaded into `aidon-data`; allow extra disk
+space and network access for that initial download. If the dashboard still
+shows `HashEmbedder`, check that `.env` does not set `AIDON_EMBEDDER=hash`.
+
+If you already started an earlier Docker image and its dashboard showed
+`HashEmbedder · QdrantStore`, its local Qdrant collections were created with
+128-dimensional hash vectors. The semantic embedder uses 768 dimensions, so
+back up and move that database before switching. Stop the container, then run
+this from the repository root (the timestamped directory preserves the old
+database; `.env` is untouched):
+
+```sh
+docker compose down
+mv aidon-data/qdrant "aidon-data/qdrant-hash-backup-$(date +%Y%m%d-%H%M%S)"
+export AIDON_UID="$(id -u)" AIDON_GID="$(id -g)"
+docker compose up --build -d
+```
+
+The new Qdrant collections are created with the semantic embedder's dimension.
+Keep the backup until you have confirmed the new memory works; hash vectors
+cannot be reused as semantic vectors.
+
 Open `http://127.0.0.1:8765/`. Choose another local port by setting
 `AIDON_WEBUI_PORT` before `docker compose up`. Stop the service with
 `docker compose down`; the `aidon-data` directory remains on the host. The
