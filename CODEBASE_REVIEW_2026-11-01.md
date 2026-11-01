@@ -43,6 +43,10 @@ Final test counts, image activation and runtime evidence are recorded in
 - Dependency vulnerability audit of the frozen Docker runtime extras
   (`embed`, `sparse`, `vision`, `modal`), without installing those runtime
   dependencies into the audit environment.
+- The real CLI WebUI factory is covered by a regression that verifies WebUI,
+  WhatsApp, and Slack register the same goal handler; fast-model routing has
+  focused router tests. These checks do not replace a live configured-provider
+  smoke test.
 - Read-only live Slack `auth.test` and `conversations.history` probes: the bot
   token and both configured conversations succeeded. No synthetic chat message
   was posted during these checks.
@@ -64,8 +68,11 @@ and caller contracts and were repaired without an unreviewed consolidation.
    certify Bubblewrap isolation.
 2. **Full dispatcher wiring and workflow acceptance.** Basic Slack and WhatsApp
    message/reply behavior has been confirmed on the deployed instance. Still
-   exercise the CLI-created dispatcher with an isolated test home, all three
-   registered sources, and fast-model routing. Separately complete a harmless
+   exercise handler execution through the CLI-created dispatcher with an
+   isolated test home, all three registered sources, and configured
+   fast-model routing. Current regression checks confirm handler registration
+   and unit coverage confirms router selection, but not their live composition.
+   Separately complete a harmless
    goal through planning, approval, execution, and verified result delivery.
    Approval ID handling, bare approval commands, and Slack thread replies have
    fixes, but their complete end-to-end cycle is not yet established. This is
