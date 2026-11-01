@@ -88,13 +88,20 @@ and caller contracts and were repaired without an unreviewed consolidation.
    unprivileged namespaces. Also verify browser refresh/recovery and configured
    model failures, recording the actual backend and evidence.
 2. **Full dispatcher wiring and workflow acceptance.** Basic Slack and WhatsApp
-   message/reply behavior has been confirmed on the deployed instance. Still
-   exercise handler execution through the CLI-created dispatcher with an
-   isolated test home, all three registered sources, and configured
-   fast-model routing. Current regression checks confirm handler registration
-   and unit coverage confirms router selection, but not their live composition.
-   Separately complete a harmless
+   message/reply behavior has been confirmed on the deployed instance. Focused
+   local tests passed (51) across the actual CLI WebUI factory, registration of
+   the shared WebUI/WhatsApp/Slack handler, trigger dispatch, and fast/strong
+   model routing. The configured-provider/live composition is still unverified;
+   the broader integration selection also hit this runner's socket restriction
+   (7 socket-dependent tests could not start). On the Docker host, exercise a
+   harmless goal from each of the three sources with the configured fast model,
+   and separately complete a harmless
    goal through planning, approval, execution, and verified result delivery.
+   The first target WebUI acceptance attempt is not complete: for a request to
+   create `dispatcher-webui-check.txt`, Aidon stopped at Plan ready but proposed
+   `exact-dispatcher.txt` and `dispatcher_test.py` instead. The owner has not
+   proceeded with that mismatched plan; repeat with a clean conversation and
+   require the requested filename before approval.
    Scheduler startup, dispatch, pending-claim recovery, and exact-content
    verification now passed target-host checks. The exact-content regression
    first exposed a false success with `exact_test.py`; after rebuilding, a new
