@@ -3,6 +3,7 @@ failure mapping, and factory wiring."""
 
 import base64
 import io
+import shutil
 import subprocess
 import tarfile
 
@@ -57,8 +58,6 @@ class _RemoteDir:
     def exec(self, *cmd, timeout=None):
         if cmd[:1] == ("mkdir",):
             return _Proc(returncode=0)
-        if cmd[:2] == ("tar", "-cf"):
-            return _Proc(returncode=0)
         joined = " ".join(cmd)
         if "base64 -d | tar" in joined:
             if self.fail_sync_up:
@@ -105,11 +104,25 @@ class _RemoteFilesystem:
     def __init__(self, remote):
         self.remote = remote
 
+    def list_files(self, remote_path):
+        base = self.remote.root / remote_path.removeprefix("/work").lstrip("/")
+        return [_RemoteFileInfo(path) for path in base.iterdir()]
+
     def copy_to_local(self, remote_path, local_path):
-        # The backend asks the remote tar command to create this archive.
-        # Serialize the fake remote workdir as that archive.
-        with tarfile.open(local_path, mode="w") as tf:
-            tf.add(str(self.remote.root), arcname=".")
+        source = self.remote.root / remote_path.removeprefix("/work").lstrip("/")
+        shutil.copyfile(source, local_path)
+
+
+class _RemoteFileInfo:
+    def __init__(self, path):
+        self.name = path.name
+        self._path = path
+
+    def is_dir(self):
+        return self._path.is_dir()
+
+    def is_file(self):
+        return self._path.is_file()
 
 
 def _factory(remote):
@@ -128,12 +141,14 @@ def test_round_trip_writes_back_new_files(tmp_path):
     remote_dir = tmp_path / "remote"
     remote_dir.mkdir()
     backend = ModalBackend(sandbox_factory=_factory(_RemoteDir(remote_dir)))
-    result = backend.run(["sh", "-c", "echo world > b.txt"], work)
+    result = backend.run(
+        ["sh", "-c", "mkdir -p nested && printf world > nested/b.txt"],
+        work)
     assert result.returncode == 0
     assert result.isolated is True
     assert result.backend == "modal"
     assert (work / "a.txt").read_text() == "hello"
-    assert (work / "b.txt").read_text().strip() == "world"
+    assert (work / "nested" / "b.txt").read_text() == "world"
 
 
 def test_command_failure_still_syncs_back(tmp_path):

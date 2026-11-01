@@ -88,7 +88,6 @@ import re
 import shlex
 import shutil
 import subprocess
-import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -514,6 +513,44 @@ class ModalBackend(ExecutionBackend):
             # and the run reports a sync-back failure.
             tf.extractall(path=str(workspace), filter="data")
 
+    def _sync_from_modal(self, sb, workspace: Path) -> None:
+        """Copy the remote workdir tree back through Modal's filesystem API.
+
+        Listing and copying each entry avoids relying on a tar command's
+        output stream or on an archive staged elsewhere in the sandbox.
+        Reject links and special files rather than allowing remote paths to
+        escape the local run workspace.
+        """
+        pending = [(self.REMOTE_WORKDIR, Path())]
+        root = workspace.resolve()
+        while pending:
+            remote_dir, relative_dir = pending.pop()
+            for entry in sb.filesystem.list_files(remote_dir):
+                name = str(entry.name)
+                if (not name or name in (".", "..")
+                        or "/" in name or "\\" in name):
+                    raise ValueError(
+                        f"invalid Modal workspace entry name: {name!r}")
+                relative = relative_dir / name
+                local_path = workspace / relative
+                try:
+                    local_path.resolve().relative_to(root)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Modal workspace path escapes run directory: "
+                        f"{relative}") from exc
+                remote_path = posixpath.join(remote_dir, name)
+                if entry.is_dir():
+                    local_path.mkdir(parents=True, exist_ok=True)
+                    pending.append((remote_path, relative))
+                elif entry.is_file():
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                    sb.filesystem.copy_to_local(remote_path, local_path)
+                else:
+                    raise ValueError(
+                        f"unsupported Modal workspace entry type: "
+                        f"{relative}")
+
     def run(self, command: list[str], workspace: Path,
             timeout_seconds: int = 120) -> ExecutionResult:
         import base64
@@ -542,27 +579,8 @@ class ModalBackend(ExecutionBackend):
                          f"{shlex.join(command)}")
             rc, out, err = self._exec(
                 sb, ["sh", "-c", shell_cmd], timeout_seconds)
-            # Do not send the workspace archive through process stdout.
-            # Modal pipes are intended for command output and can be
-            # truncated for large outputs; that used to make a successful
-            # shell step silently lose files before verification. Use the
-            # Sandbox filesystem transfer API for the archive itself.
-            remote_archive = f"/tmp/aidon-workspace-{uuid.uuid4().hex}.tar"
-            rc_back, _out_back, err_back = self._exec(
-                sb, ["tar", "-cf", remote_archive, "-C",
-                     self.REMOTE_WORKDIR, "."], timeout_seconds)
-            if rc_back != 0:
-                return ExecutionResult(1, out,
-                                       "workspace sync back from Modal failed: "
-                                       + str(err_back)[-300:],
-                                       isolated=True, backend=self.name)
             try:
-                with tempfile.TemporaryDirectory(
-                        prefix="aidon-modal-sync-") as temp_dir:
-                    local_archive = Path(temp_dir) / "workspace.tar"
-                    sb.filesystem.copy_to_local(
-                        remote_archive, local_archive)
-                    self._untar_bytes(local_archive.read_bytes(), workspace)
+                self._sync_from_modal(sb, workspace)
             except Exception as exc:
                 return ExecutionResult(1, out,
                                        "workspace sync back from Modal failed: "
