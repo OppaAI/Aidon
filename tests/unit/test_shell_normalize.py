@@ -1,5 +1,6 @@
 """Shell command normalization: string commands must reach the backend as lists."""
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,11 +16,14 @@ from src.system.model_client import FakeClient
 
 
 def test_normalize_shell_args_table():
-    assert _normalize_shell_args({"command": "echo hi"}) == {"command": ["echo", "hi"]}
+    assert _normalize_shell_args({"command": "echo hi"}) == {
+        "command": ["sh", "-c", "echo hi"]}
     assert _normalize_shell_args({"command": ["echo", "hi"]}) == {"command": ["echo", "hi"]}
-    assert _normalize_shell_args({"cmd": "ls -la"}) == {"cmd": "ls -la", "command": ["ls", "-la"]}
+    assert _normalize_shell_args({"cmd": "ls -la"}) == {
+        "cmd": "ls -la", "command": ["sh", "-c", "ls -la"]}
     assert _normalize_shell_args({"command": ""}) == {"command": []}
-    assert _normalize_shell_args({"command": "echo 'a b'"}) == {"command": ["echo", "a b"]}
+    assert _normalize_shell_args({"command": "echo 'a b'"}) == {
+        "command": ["sh", "-c", "echo 'a b'"]}
     assert _normalize_shell_args("not-a-dict") == "not-a-dict"
 
 
@@ -45,8 +49,30 @@ def _runner(tmp_path, backend):
 def test_call_tool_shell_string_command_reaches_backend_as_list(tmp_path):
     backend = _FakeBackend()
     runner = _runner(tmp_path, backend)
-    assert runner._call_tool("shell", {"command": "echo hi"}) == "ok:echo hi"
-    assert backend.seen == ["echo", "hi"]
+    assert runner._call_tool("shell", {"command": "echo hi"}) == (
+        "ok:sh -c echo hi")
+    assert backend.seen == ["sh", "-c", "echo hi"]
+
+
+class _ExecutingBackend:
+    name = "fake"
+
+    def run(self, command, workspace, timeout_seconds=None):
+        proc = subprocess.run(command, cwd=workspace, capture_output=True,
+                              text=True)
+        return ExecutionResult(proc.returncode, proc.stdout, proc.stderr,
+                               False)
+
+
+def test_shell_string_redirection_creates_file(tmp_path):
+    backend = _ExecutingBackend()
+    runner = _runner(tmp_path, backend)
+    result = runner._call_tool(
+        "shell",
+        {"command": "printf 'transfer-ok' > transfer-check.txt"})
+    assert result == ""
+    assert (runner.sandbox.workdir / "transfer-check.txt").read_text() == (
+        "transfer-ok")
 
 
 def test_call_tool_shell_empty_command_still_rejected(tmp_path):

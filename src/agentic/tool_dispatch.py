@@ -7,14 +7,13 @@ from pathlib import Path
 
 
 def _normalize_shell_args(args: dict) -> dict:
-    """Coerce a shell step's command to the backend's list form.
+    """Normalize shell strings while preserving their shell semantics.
 
-    The planner emits commands as strings and plan validation accepts
-    them (it only rejects empty commands), but the execution-backend
-    branch requires a non-empty list — and it ran before the shlex
-    normalization further down, so every string command died on
-    backend runs while the sandbox path worked. Normalize up front
-    so validation, backend, and sandbox all agree on the form.
+    A planner command written as shell text may contain redirection,
+    pipes, or chaining. Splitting it with shlex and passing the tokens
+    as argv turns those operators into literal arguments. Wrap string
+    commands in an explicit shell invocation; caller-supplied lists
+    remain argv and are never reinterpreted as shell source.
     """
     if not isinstance(args, dict):
         return args
@@ -22,8 +21,8 @@ def _normalize_shell_args(args: dict) -> dict:
     if "command" not in out and "cmd" in out:
         out["command"] = out["cmd"]
     if isinstance(out.get("command"), str):
-        import shlex
-        out["command"] = shlex.split(out["command"])
+        command = out["command"].strip()
+        out["command"] = ["sh", "-c", command] if command else []
     return out
 
 
