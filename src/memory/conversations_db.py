@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import sqlite3
 import json
+import re
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -118,7 +119,36 @@ class ConversationStoreDB:
             if "route_json" not in exchange_columns:
                 self._conn.execute(
                     "ALTER TABLE exchanges ADD COLUMN route_json TEXT NOT NULL DEFAULT ''")
+            self._restore_orphaned_webui_conversations()
             self._conn.commit()
+
+    def _restore_orphaned_webui_conversations(self) -> None:
+        """Restore valid chat IDs whose exchange rows outlived their parent.
+
+        Older WebUI sessions could append turns for an ID supplied by the
+        browser without first ensuring that its conversation row existed.
+        The transcript then remained in ``exchanges`` but disappeared from
+        the history list, which is built from ``conversations``. Recover
+        UUID-style WebUI IDs during normal store initialization; channel IDs
+        such as ``slack:C123`` remain outside this WebUI conversation list.
+        """
+        rows = self._conn.execute(
+            "SELECT e.conversation_id, MIN(e.created_at) AS created_at "
+            "FROM exchanges AS e "
+            "LEFT JOIN conversations AS c ON c.id = e.conversation_id "
+            "WHERE c.id IS NULL "
+            "GROUP BY e.conversation_id"
+        ).fetchall()
+        recovered = []
+        for row in rows:
+            conversation_id = str(row["conversation_id"] or "")
+            if (len(conversation_id) <= 128
+                    and re.fullmatch(r"[0-9a-fA-F-]+", conversation_id)):
+                recovered.append((conversation_id, "", row["created_at"] or _now()))
+        if recovered:
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO conversations (id, project_id, created_at) "
+                "VALUES (?, ?, ?)", recovered)
 
     # -- conversations -------------------------------------------------
 

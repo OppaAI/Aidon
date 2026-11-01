@@ -177,8 +177,12 @@ class WebUIRunMixin:
             answering_lab = bool(pending_waiter and pending_waiter.get("lab"))
         try:
             conversation_db = self._conversations_db()
-            if not conversation_id:
-                conversation_id = conversation_db.create_conversation()["id"]
+            # The browser can retain an ID that has no server-side row
+            # (for example after switching homes or restoring old local
+            # storage). Ensure supplied IDs are registered too, so history
+            # listing and refresh restore the turns written below.
+            conversation_id = conversation_db.create_conversation(
+                conversation_id or None)["id"]
             prior_history = conversation_db.history(conversation_id, limit=8)
             if not answering_lab:
                 conversation_db.record_exchange(conversation_id, "user", raw_goal)
