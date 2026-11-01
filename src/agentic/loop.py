@@ -748,7 +748,10 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                         "failed", goal, Plan(), False, False,
                         error="I couldn’t check the capabilities needed for this goal. Please try again.",
                         backend=self._backend_name()))
-        _lessons_note = self._failure_lessons_note(goal)
+        # A prior failed image workflow can be just as misleading as a
+        # recalled episode; don't leak it into a standalone image request.
+        _lessons_note = ("" if self._image_context_isolated
+                         else self._failure_lessons_note(goal))
         if _lessons_note:
             self._triage_note = ((self._triage_note + "\n") if self._triage_note else "") + _lessons_note
             self._trace("capability", "failure-lessons", "recalled past failure lessons")
