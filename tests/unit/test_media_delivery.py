@@ -108,6 +108,56 @@ def test_slack_completion_posts_files_as_json_form_field(tmp_path, monkeypatch):
     assert fields["channel_id"] == ["C1"]
 
 
+def test_slack_upload_reservation_uses_form_fields(tmp_path, monkeypatch):
+    import json
+    from urllib.parse import parse_qs
+    from src.interface import messaging
+
+    target = tmp_path / "note.txt"
+    target.write_text("hello")
+    requests = []
+
+    class Response:
+        status = 200
+
+        def __init__(self, body):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return self.body
+
+    def urlopen(request, timeout):
+        requests.append(request)
+        if request.full_url.endswith("files.getUploadURLExternal"):
+            return Response(b'{"ok":true,"upload_url":"https://upload.slack.test/x",'
+                            b'"file_id":"F1"}')
+        return Response(b'{"ok":true}')
+
+    monkeypatch.setattr(messaging.urllib.request, "urlopen", urlopen)
+    result = messaging.send_slack_file(
+        _slack_config(), "C1", target,
+        upload=lambda *_args: None)
+
+    assert result == {"ok": True, "file_id": "F1"}
+    assert len(requests) == 2
+    request = requests[0]
+    assert request.get_header("Content-type").startswith(
+        "application/x-www-form-urlencoded")
+    fields = parse_qs(request.data.decode())
+    assert fields["filename"] == ["note.txt"]
+    assert fields["length"] == ["5"]
+    completion = parse_qs(requests[1].data.decode())
+    assert json.loads(completion["files"][0]) == [
+        {"id": "F1", "title": "note.txt"}]
+    assert completion["channel_id"] == ["C1"]
+
+
 def test_slack_completion_preserves_api_validation_details(tmp_path):
     target = tmp_path / "note.txt"
     target.write_text("hello")

@@ -115,11 +115,13 @@ and caller contracts and were repaired without an unreviewed consolidation.
    unrelated earlier artifacts. Validation now rejects extra deliverables when
    a goal requests exactly one named file. On the latest retry the plan had one
    deliverable and the artifact contents were read back correctly, but Slack
-   still rejected file sharing with `invalid_arguments` after the documented
-   form-encoded completion and raw `application/octet-stream` upload. Delivery
-   errors now preserve Slack's safe validation details when present. Target
-   verification is still required; confirm the running container has this code,
-   then retry and capture the expanded error if Slack rejects it again.
+   still rejected file delivery. A direct transport probe localized the
+   rejection to `files.getUploadURLExternal` (`invalid_arguments`), before any
+   bytes were uploaded. Its request now uses documented form fields, as does
+   completion; upload bytes remain raw `application/octet-stream`. Delivery
+   errors preserve Slack's safe validation details when present. Focused tests
+   cover both form requests. Target verification is still required after
+   rebuilding the image.
    Scheduler startup, dispatch, pending-claim recovery, and exact-content
    verification now passed target-host checks. The exact-content regression
    first exposed a false success with `exact_test.py`; after rebuilding, a new

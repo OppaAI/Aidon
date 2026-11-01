@@ -342,9 +342,10 @@ def send_slack_file(config, channel: str, file_path, title: str = "",
         return {"ok": False, "error": f"file not found: {path}"}
     data = path.read_bytes()
     try:
-        reserved = _post_json(f"{SLACK_API_BASE}/files.getUploadURLExternal",
-                              config.slack_bot_token,
-                              {"filename": path.name, "length": len(data)}, post=post)
+        reserved = _post_form_json(
+            f"{SLACK_API_BASE}/files.getUploadURLExternal",
+            config.slack_bot_token,
+            {"filename": path.name, "length": len(data)}, post=post)
     except Exception as exc:
         return {"ok": False, "error":
                 f"files.getUploadURLExternal: {type(exc).__name__}"}
