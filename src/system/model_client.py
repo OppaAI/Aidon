@@ -473,11 +473,38 @@ class NativeModelClient(ModelClient):
             body["options"] = {"num_ctx": self.num_ctx}
         return body
 
+    def _post_chat(self, body: dict):
+        """Post a native chat request, retrying unsupported thinking once.
+
+        Ollama returns HTTP 400 when ``think: true`` is sent to a model
+        that does not expose thinking. Aidon's phase effort is advisory,
+        so preserve the request and retry without that optional hint. Other
+        errors remain visible to the caller.
+        """
+        url = f"{self.base}/api/chat"
+        payload = json.dumps(body).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        resp, origin = _post(url, payload, headers, self.timeout)
+        if resp.status < 400:
+            return resp, origin
+
+        data = resp.read()
+        status = resp.status
+        _release(resp, origin)
+        detail = data.decode("utf-8", "replace")
+        if (body.get("think") is True and
+                "does not support thinking" in detail.lower()):
+            retry_body = dict(body)
+            retry_body["think"] = False
+            return _post(url, json.dumps(retry_body).encode("utf-8"),
+                         headers, self.timeout)
+        raise RuntimeError(
+            f"Native model endpoint {self.base} returned {status}: {detail[:300]}"
+        )
+
     def _request(self, body: dict) -> dict:
         url = f"{self.base}/api/chat"
-        resp, origin = _post(url, json.dumps(body).encode("utf-8"),
-                             {"Content-Type": "application/json"},
-                             self.timeout)
+        resp, origin = self._post_chat(body)
         try:
             return _read_json(resp, origin, url)
         except urllib.error.HTTPError as exc:
@@ -531,9 +558,7 @@ class NativeModelClient(ModelClient):
                 if sampling.get(key) is not None:
                     body["options"][key] = sampling[key]
         url = f"{self.base}/api/chat"
-        resp, origin = _post(url, json.dumps(body).encode("utf-8"),
-                             {"Content-Type": "application/json"},
-                             self.timeout)
+        resp, origin = self._post_chat(body)
         emitted = False
         try:
             if resp.status >= 400:
