@@ -366,7 +366,7 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                             use_semantic_router_skip=True,
                             run_id=run_id, run_control=run_control,
                             researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins, gate_context=_gate_context, test_backend_factory=lambda: make_backend(config.execution_backend, run_sandbox, image=config.docker_image, allow_network=False, modal_app=config.modal_app, modal_cpu=config.modal_cpu, modal_memory_mb=config.modal_memory_mb), allow_skill_adoption=_allow_skill_adoption), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, guidance=str(event.payload.get("guidance", "") or ""), route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor, resume_interview=bool(event.payload.get("resume_interview")), conversation_thread_id=str(event.payload.get("thread_ts", "") or ""))
-        def _deliver_files(files, target, *, thread_ts=""):
+        def _deliver_files(files, target):
             """Upload run deliverables as bytes to a Slack/WhatsApp target.
 
             target is ("slack", channel) or ("whatsapp", number).
@@ -398,8 +398,7 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                     from ..interface.messaging import (
                         send_slack_file as _ssf, send_whatsapp_media as _swm)
                     if kind == "slack":
-                        result = _ssf(msg, recipient, resolved,
-                                      thread_ts=thread_ts)
+                        result = _ssf(msg, recipient, resolved)
                     else:
                         result = _swm(msg, recipient, resolved)
                     if not result.get("ok"):
@@ -621,10 +620,7 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         if report.status == "done" and report.files:
             if event.source == "slack":
                 _deliver_files(report.files,
-                               ("slack", str(event.payload.get("channel", ""))),
-                               thread_ts=str(event.payload.get("thread_ts")
-                                             or event.payload.get("slack_ts", "")
-                                             or ""))
+                               ("slack", str(event.payload.get("channel", ""))))
             elif event.source == "whatsapp":
                 _deliver_files(report.files,
                                ("whatsapp", str(event.payload.get("from", ""))))
