@@ -188,7 +188,7 @@ def test_requested_shopping_item_must_be_priced_in_shopping_section(tmp_path):
         "## Categorized Shopping List\n"
         "### Produce\n- Spinach - $2.49\n"
     )
-    goal = "Add zucchini with a price to the produce section of the shopping list."
+    goal = "Add zucchini with a price and recalculate the total."
     criteria = requested_shopping_item_criteria(
         goal, ["grocery-plan.md"], workdir)
 
