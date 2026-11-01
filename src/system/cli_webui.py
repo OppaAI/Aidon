@@ -504,7 +504,8 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
             _final_text = _report_text(
                 report.status, report.files, report.error, run_id,
                 "", phrase=_phrase,
-                blocked=report.blocked)
+                blocked=report.blocked,
+                result_text=report.result_text)
             if (event.source == "webui" and report.status == "done"
                     and event.payload.get("skill_source_run_id")):
                 from urllib.parse import quote as _quote_skill

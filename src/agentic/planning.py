@@ -25,7 +25,7 @@ class PlanningMixin:
                       "an object mapping every deliverable filename to a short, "
                       "human-readable explanation of what that file contains "
                       "and how it is used. Each step is an object with tool, "
-                      "args, deliverable, and a short human-facing description "
+                      "args, optional deliverable, and a short human-facing description "
                       "of its purpose (never private chain-of-thought). "
                       "Tools: write, read, "
                       "list, shell only, kernel mode, no calculate, "
@@ -40,7 +40,7 @@ class PlanningMixin:
                       "deliverable filename to a short, human-readable "
                       "explanation of what that file contains and how it is "
                       "used. Each step is an object with tool, args, "
-                      "deliverable, and a short human-facing description "
+                      "optional deliverable, and a short human-facing description "
                       "of its purpose (never private chain-of-thought). "
                       "Tools: write, read, "
                       "list, shell, calculate. Keep every file inside "
@@ -49,6 +49,17 @@ class PlanningMixin:
                    "one step; never return deliverables with an empty or "
                    "missing steps array. For GUI requests, use the "
                    "computer_use tool when it is listed as available.")
+        system += (" Deliverables are files, not tool calls. If the user asks "
+                   "for an answer or action result and no file, use an "
+                   "output-only step: omit its deliverable (or use an empty "
+                   "string), leave it out of plan deliverables, and rely on "
+                   "successful tool execution as evidence. Aidon will show "
+                   "the tool's returned text to the user. Do not create a "
+                   "file just to hold command output. If the user asks for "
+                   "an artifact, keep its deliverable and file checks.")
+        system += (" For output-only steps, do not add file-based criteria; "
+                   "successful tool completion is the check unless the tool "
+                   "provides a structured result that can be checked.")
         system += (" Produce only the outputs the user requested. Do not add "
                    "deliverable.md, README files, reports, prompt documents, "
                    "or HTML previews unless the user explicitly asked for "
@@ -376,7 +387,11 @@ class PlanningMixin:
                     "no steps were run") from None
         try:
             steps = data.get("steps", [])
-            deliverables = [str(d) for d in data.get("deliverables", [])]
+            raw_deliverables = data.get("deliverables") or []
+            if isinstance(raw_deliverables, str):
+                raw_deliverables = [raw_deliverables]
+            deliverables = ([str(d) for d in raw_deliverables if str(d).strip()]
+                            if isinstance(raw_deliverables, (list, tuple)) else [])
             if not deliverables:
                 deliverables = [str(s.get("deliverable", ""))
                                 for s in steps if isinstance(s, dict)

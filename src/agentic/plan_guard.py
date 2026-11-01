@@ -1,7 +1,7 @@
 """Plan-first guard: validate a plan before it runs.
 
 A plan is a dict with a "steps" list (a "nodes" list is accepted as
-an alias). Each step is a dict with id, tool, args, deliverable,
+an alias). Each step is a dict with id, tool, args, and an optional deliverable,
 and depends_on (a list of step ids that must run first). The guard
 checks the plan the way a runner would fail on it, so a bad plan
 is rejected up front instead of halfway through execution.
@@ -55,10 +55,10 @@ def validate_plan(plan: dict, available_tools, skill_names=None) -> list[str]:
         elif not isinstance(args, dict):
             failures.append(f"{where} ({step_id}) args are not a dict")
         deliverable = step.get("deliverable")
-        if not deliverable:
-            failures.append(f"{where} ({step_id}) has no deliverable")
-        else:
+        if deliverable:
             deliverables.append(deliverable)
+        elif tool in {"write", "write_file", "generate_document"}:
+            failures.append(f"{where} ({step_id}) has no deliverable")
         depends = step.get("depends_on", [])
         if depends is not None and not isinstance(depends, list):
             failures.append(f"{where} ({step_id}) depends_on is not a list")

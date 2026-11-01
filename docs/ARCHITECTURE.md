@@ -37,13 +37,14 @@ flowchart LR
 4. Research: facts verified only if a fetched source
    excerpt contains them, with source, date, and excerpt
    recorded. Unverified claims stay unverified.
-5. Plan: steps, deliverables, and criteria, as JSON,
+5. Plan: steps, optional file deliverables, and criteria, as JSON,
    from the model, bound by the frozen spec.
 6. Sandbox: steps run with sandbox tools, or with
    adopted plugin tools, in a bubblewrap sandbox, a
    Docker container, or on a VM over SSH, chosen by
    the owner, never by the model.
-7. Verify: deliverables must exist and be non-empty,
+7. Verify: file deliverables must exist and be non-empty;
+   output-only steps must complete successfully, and
    criteria are checked by code, ledger totals are
    recomputed by code. An optional model second opinion
    (AIDON_MODEL_VERIFIER, off by default) judges content

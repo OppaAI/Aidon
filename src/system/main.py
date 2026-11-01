@@ -649,7 +649,8 @@ def main(argv: list[str] | None = None) -> int:
                 _sid = (report.mode_stop or {}).get("stop_id", "")
                 _smode = (report.mode_stop or {}).get("mode", "") or "run"
                 return f"[stopped] {_smode} ready — run /proceed {_sid} to continue."
-            return f"[{report.status}] {', '.join(report.files)} {report.error}".strip()
+            return (f"[{report.status}] {', '.join(report.files)} {report.error}"
+                    + (f"\n{report.result_text}" if report.result_text else "")).strip()
         def _remember(text: str) -> str:
             point = memory.remember(text, source="cli-command")
             return f"Remembered in long-term memory: {text} (id {point.id})"
@@ -1554,6 +1555,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"verified: {report.verified}")
     print(f"approved: {report.approved}")
     print(f"files: {', '.join(report.files)}")
+    if report.result_text:
+        print(f"result:\n{report.result_text}")
     print(f"attempts: {report.attempts}")
     print(format_run_stats(report))
     if report.error:

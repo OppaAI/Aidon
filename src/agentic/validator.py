@@ -1,8 +1,9 @@
 """Deterministic plan validation, before execution, no model call.
 
 A plan is checked by code, not by the model that proposed it:
-- every step has a tool in the allowed set, a dict args, and
-  a non-empty deliverable,
+- every step has a tool in the allowed set and dict args;
+- file-producing steps have a deliverable, while result-only steps may
+  return their tool output directly to the user;
 - plan deliverables match step deliverables,
 - no absolute path, no parent-directory escape, in any
   file argument or deliverable,
@@ -25,6 +26,8 @@ def validate_plan(plan, allowed_tools: set[str] | None = None,
     skills = set(skill_names or [])
     failures = []
     steps = plan.normalized_steps() if hasattr(plan, "normalized_steps") else plan.steps
+    if not steps:
+        return ["plan has no steps"]
     deliverables = set()
     for index, step in enumerate(steps):
         tool = step.tool if hasattr(step, "tool") else step.get("tool", "")
@@ -61,18 +64,17 @@ def validate_plan(plan, allowed_tools: set[str] | None = None,
             # the user did not specify one. Requiring a model-invented path
             # here caused otherwise valid document requests to fail before
             # execution and encouraged arbitrary ``workdir/`` names.
-        if not deliverable and tool == "write":
-            failures.append(f"step {index}: write step deliverable is empty")
-        if not deliverable:
-            continue
-        if deliverable in deliverables:
-            failures.append(f"step {index}: duplicate deliverable {deliverable}")
-        deliverables.add(deliverable)
+        if not deliverable and tool in {"write", "write_file", "generate_document"}:
+            failures.append(f"step {index}: {tool} step deliverable is empty")
         for value in (args.values() if isinstance(args, dict) else []):
             if isinstance(value, str) and (value.startswith("/") or ".." in value.split("/")):
                 failures.append(f"step {index}: path escape in args: {value}")
-        if deliverable.startswith("/") or ".." in deliverable.split("/"):
-            failures.append(f"step {index}: path escape in deliverable: {deliverable}")
+        if deliverable:
+            if deliverable in deliverables:
+                failures.append(f"step {index}: duplicate deliverable {deliverable}")
+            deliverables.add(deliverable)
+            if deliverable.startswith("/") or ".." in deliverable.split("/"):
+                failures.append(f"step {index}: path escape in deliverable: {deliverable}")
     plan_deliverables = plan.deliverables if hasattr(plan, "deliverables") else []
     missing = set(plan_deliverables) - deliverables
     if missing:

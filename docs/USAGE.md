@@ -172,11 +172,15 @@ interview.
   interviewed spec.
 - CLI: `python -m src.system.main interview "Plan a dinner" --attach my-spec.md --run`,
   or `python -m src.system.main goal --spec my-spec.md "Plan a dinner"`.
-2. **Plan** — a plan with steps, deliverables, and criteria.
+2. **Plan** — a plan with steps, optional file deliverables, and criteria.
    Steps are tool calls, not strings: write, read, list,
    shell in the sandbox, and calculate, all confined to the
    workdir, with calculation by AST, never eval, plus any
    adopted plugin tools, and any skills as planner context.
+   When a task asks for a tool result rather than a file, the
+   step can omit its deliverable; Aidon returns the successful
+   tool output in the final response. File-producing steps keep
+   their deliverables and file-based verification.
 
 ## 🎛️ Run modes: Ask, Plan, Execute
 
@@ -393,7 +397,8 @@ verification arena they will run in.
    Modal, `AIDON_DOCKER_IMAGE` for the pinned image,
    `AIDON_DOCKER_NETWORK=1` only when a task needs network.
 4. **Verify** — a result is verified by evidence, not by
-   assertion. Deliverables must exist and be non-empty,
+   assertion. File deliverables must exist and be non-empty;
+   output-only steps must complete successfully,
    criteria are checked by code, and a ledger total is
    recomputed from its lines in cents. A vague criterion
    is reported unverified, never passed.

@@ -26,6 +26,41 @@ from .run_types import (
 
 
 class PlanExecutionMixin:
+    def _record_step_output(self, step, value, guard):
+        """Keep bounded output from a successful result-only step in memory."""
+        if step.deliverable:
+            return
+        text = str(value or "").strip()
+        if not text:
+            return
+        try:
+            from ..memory.redaction import redact_text
+            text = redact_text(text)
+        except Exception:
+            pass
+        if len(text) > 4000:
+            text = text[:4000].rstrip() + "\n[output truncated]"
+        if not hasattr(self, "_step_outputs"):
+            self._step_outputs = {}
+        with guard:
+            self._step_outputs[step.id or step.tool] = {
+                "tool": step.tool,
+                "description": str(step.description or "").strip(),
+                "text": text,
+            }
+
+    def _result_text_for_plan(self, plan):
+        """Render successful result-only step output in plan order."""
+        outputs = getattr(self, "_step_outputs", {})
+        blocks = []
+        for step in plan.normalized_steps():
+            item = outputs.get(step.id or step.tool)
+            if not item:
+                continue
+            label = item.get("description") or item.get("tool") or "Tool result"
+            blocks.append(f"{label}:\n{item['text']}")
+        return "\n\n".join(blocks)[:8000]
+
     def _run_plan_step(self, step, goal, current_plan, passed, verified,
                        attempt, lock=None, save_checkpoint=True):
         """Execute one plan step in the sandbox run.
@@ -93,8 +128,12 @@ class PlanExecutionMixin:
                                     usage_phase=usage_phase)
                 if step.deliverable:
                     self._call_tool("write", {"file": step.deliverable, "text": _reply})
+                else:
+                    self._record_step_output(step, _reply, guard)
             else:
                 tool_result = self._call_tool(step.tool, step.args)
+                if not step.deliverable:
+                    self._record_step_output(step, tool_result, guard)
                 skill_trusted = (
                     step.tool == "adopt_skill"
                     and str(tool_result).startswith("Trusted skill "))

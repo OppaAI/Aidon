@@ -16,10 +16,12 @@ from src.agentic.image_guard import (
     allowed_tiers, guard_image_input, image_allowed)
 from src.agentic.plan_guard import (
     guard_plan, plan_first_summary, validate_plan)
+from src.agentic.run_types import Plan
 from src.agentic.resume import (
     list_runs, load_run_state, resume_state, save_run_state)
 from src.agentic.step_lines import (
     StepLine, record_attempt, render_step_lines)
+from src.agentic.validator import validate_plan as validate_execution_plan
 from src.agentic.think_effort import (
     EFFORT_LEVELS, effort_for, resolve_effort, sampling_for)
 
@@ -61,6 +63,15 @@ def test_plan_guard_valid_and_summary():
     assert "write a report" in summary and "2 step" in summary
 
 
+def test_plan_guard_allows_result_only_tool_step():
+    plan = {"goal": "show the current directory", "steps": [
+        {"id": "pwd", "tool": "shell", "args": {"command": "pwd"},
+         "description": "Show the sandbox directory"}],
+        "deliverables": []}
+    assert validate_plan(plan, ["shell"]) == []
+    assert "producing" not in plan_first_summary(plan)
+
+
 def test_plan_guard_each_failure_kind():
     plan = {"steps": [
         {"id": "a", "tool": "nope", "args": {}, "deliverable": "x"},
@@ -87,6 +98,20 @@ def test_plan_guard_cycle():
          "depends_on": ["a"]},
     ]}
     assert any("cycle" in f for f in validate_plan(plan, ["write"]))
+
+
+def test_plan_guard_still_requires_files_for_write_steps():
+    plan = {"steps": [{"id": "save", "tool": "write",
+                       "args": {"file": "out.txt", "text": "x"}}]}
+    assert any("has no deliverable" in item
+               for item in validate_plan(plan, ["write"]))
+
+
+def test_output_only_read_step_keeps_workdir_path_confinement():
+    plan = Plan(steps=[{"tool": "read",
+                        "args": {"file": "../outside.txt"}}])
+    assert any("path escape" in item for item in validate_execution_plan(
+        plan, allowed_tools={"read"}))
 
 
 # --- think effort ---

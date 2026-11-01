@@ -195,7 +195,7 @@ class Plan:
                 out.append(Step(
                     tool=str(step.get("tool", "write")),
                     args=dict(step.get("args", {})),
-                    deliverable=str(step.get("deliverable", "")),
+                    deliverable=str(step.get("deliverable") or ""),
                     criteria=str(step.get("criteria", "")),
                     description=str(step.get("description", "") or
                                     step.get("title", "")),
@@ -232,6 +232,10 @@ class RunReport:
     replan_note: str = ""
     learned_dag: str = ""
     chat_reply: str = ""
+    # Text returned by successful tool steps that intentionally produce
+    # no file. Kept in the transient report and surfaced to the owner;
+    # it is not added to run-state or workflow-memory records.
+    result_text: str = ""
     dag_summary: dict = field(default_factory=dict)
     step_lines: list[str] = field(default_factory=list)
     narration: str = ""

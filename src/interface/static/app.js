@@ -6,7 +6,7 @@
 
   const thread = document.getElementById("thread");
   const input = document.getElementById("goal-input");
-  const defaultGoalPlaceholder = "Start with a goal…\n\nPlan something, research a question, or ask Aidon to build a result for you. Your run stages and deliverables will appear here.";
+  const defaultGoalPlaceholder = "Start with a goal…\n\nPlan something, research a question, or ask Aidon to build a result for you. Your run stages and results will appear here.";
   const guidanceInput = document.getElementById("guidance-input");
   const sendBtn = document.getElementById("send");
   const steerRow = document.getElementById("steer-row");

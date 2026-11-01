@@ -26,6 +26,7 @@ class PlanRunMixin:
     def _execute_plan(self, goal: str, plan: Plan) -> RunReport:
         if self.budget is not None:
             self.budget.start()
+        self._step_outputs = {}
         self._trace("interpret", "done", goal[:100])
         if self.memory is not None:
             self._trace("recall", "done", "experience recall attempted")
@@ -222,9 +223,9 @@ class PlanRunMixin:
                                      error="; ".join(_cycle)[:500])
         except Exception:
             pass
-        if not plan.deliverables:
+        if not plan.steps:
             return RunReport("failed", goal, plan, False, False,
-                             error="plan has no deliverables")
+                             error="plan has no steps")
         # Plan mode stops here: the plan passed validation, the
         # critic pass, the document fallback, and the cycle guard,
         # so the plan shown is the plan that would execute. No step
@@ -357,9 +358,9 @@ class PlanRunMixin:
                                 plan_failures = validate_plan(
                                     current_plan, allowed_tools=_allowed,
                                     skill_names=_skill_names)
-                                if plan_failures or not current_plan.deliverables:
+                                if plan_failures:
                                     raise ValueError("; ".join(plan_failures) or
-                                                     "replanned goal has no deliverables")
+                                                     "replanned goal has no valid steps")
                             except Exception as exc:
                                 return RunReport(
                                     "failed", goal, current_plan, False, False,
@@ -452,7 +453,7 @@ class PlanRunMixin:
             # so the saving is visible.
             model_failed = False
             verifier_mode = _resolve_model_verifier_mode()
-            verifier_wanted = _model_verifier_wanted(
+            verifier_wanted = bool(current_plan.deliverables) and _model_verifier_wanted(
                 verifier_mode, current_plan.deliverables)
             # Clef validate gate, after code verification passes
             # and before the model verifier: accept skips the
@@ -462,7 +463,8 @@ class PlanRunMixin:
             # verifier as today. A gate failure also defers;
             # the gate never blocks a code-passing run.
             gate_skip_verifier = False
-            if ok and getattr(self, "clef_client", None) is not None:
+            if (ok and current_plan.deliverables
+                    and getattr(self, "clef_client", None) is not None):
                 try:
                     from .clef_validate import validate_gate
                     gate = validate_gate(
@@ -663,10 +665,10 @@ class PlanRunMixin:
                                  error=str(exc)[:500],
                                  attempts=attempt,
                                  backend=self._backend_name())
-            if not current_plan.deliverables:
+            if not current_plan.steps:
                 return RunReport("failed", goal, current_plan, False, False,
                                  files=sorted(passed),
-                                 error="repair plan has no deliverables",
+                                 error="repair plan has no steps",
                                  attempts=attempt)
         else:
             attempt = max_attempts
@@ -799,4 +801,5 @@ class PlanRunMixin:
         self._trace("learn", "done", "experience recorded")
         return RunReport("done", goal, current_plan, True, True,
                          files=files, attempts=attempt,
+                         result_text=self._result_text_for_plan(current_plan),
                          backend=self._backend_name())

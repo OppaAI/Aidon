@@ -56,6 +56,15 @@ def test_report_text_variants():
     assert files_sentence(["a.pdf", "b.pdf"]) == "a.pdf and b.pdf are ready."
 
 
+def test_report_text_includes_result_without_file_deliverable():
+    text = report_text("done", [], "", "run-output", "stats",
+                       result_text="/workspace/run-123")
+    assert "The requested action completed." in text
+    assert "Tool result:" in text
+    assert "/workspace/run-123" in text
+    assert "Nothing was delivered" not in text
+
+
 def test_approval_lead_ins_rotate_and_acks_vary():
     first = approval_lead_in()
     second = approval_lead_in()

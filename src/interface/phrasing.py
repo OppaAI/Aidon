@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import re
 
 # Approval cards keep their title and body; only this lead-in varies,
 # so the owner still sees exactly what is being asked.
@@ -180,7 +181,8 @@ def phrase_with_model(kind: str, say, timeout_s: float = 10.0) -> str | None:
 
 def report_text(status: str, files: list[str], error: str,
                 run_id: str, stats_line: str, phrase: str | None = None,
-                blocked: list[str] | None = None) -> str:
+                blocked: list[str] | None = None,
+                result_text: str = "") -> str:
     """Full completion message for a run, in natural language.
 
     The stats line (elapsed, tokens) is kept verbatim as the trailing
@@ -191,7 +193,9 @@ def report_text(status: str, files: list[str], error: str,
     line, so the owner sees what still needs a human.
     """
     if status == "done":
-        head = f"{phrase or report_done_opener(run_id)} {files_sentence(files)}"
+        completion = (files_sentence(files) if files else
+                      "The requested action completed.")
+        head = f"{phrase or report_done_opener(run_id)} {completion}"
     elif status == "rejected":
         head = phrase or report_rejected(run_id)
     elif status == "cancelled":
@@ -201,4 +205,11 @@ def report_text(status: str, files: list[str], error: str,
     if blocked:
         lines = "\n".join(f"- {item}" for item in blocked)
         head = f"{head}\nBlocked actions (need a human):\n{lines}"
+    result_text = str(result_text or "").strip()
+    if result_text:
+        output = result_text[:8000]
+        longest = max((len(run) for run in re.findall(r"`+", output)),
+                      default=0)
+        fence = "`" * max(3, longest + 1)
+        head += f"\n\nTool result:\n{fence}text\n{output}\n{fence}"
     return f"{head}\n{stats_line}" if stats_line else head
