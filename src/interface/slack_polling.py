@@ -5,6 +5,13 @@ from __future__ import annotations
 import threading
 
 
+def configured_slack_channels(value: str) -> tuple[str, ...]:
+    """Parse the comma-separated channel setting, preserving order."""
+    return tuple(dict.fromkeys(
+        channel.strip() for channel in str(value or "").split(",")
+        if channel.strip()))
+
+
 def process_polled_messages(messages, handle, checkpoint) -> None:
     """Handle each message before advancing its durable timestamp cursor."""
     for message in messages:

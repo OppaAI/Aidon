@@ -20,6 +20,7 @@ completion or recovery.
 | P1 | Run-control read/modify/write operations could lose cancellation or steering notes during concurrent progress updates. Cancelling one run rejected every run's cards. | Writes are atomic and synchronized across threads and processes. Cancellation is retained, unreadable existing control state stops work, and approval cancellation is scoped by run. A three-process regression verifies all notes and cancellation survive. |
 | P1 | The localhost guard accepted any string beginning `127.`, including an attacker-controlled hostname. | Only parsed loopback IP addresses and explicit localhost names pass. Regressions reject `127.attacker.example` and related hostnames. |
 | P2 | Slack history ignored pagination and compared timestamps lexically. A new or corrupt cursor could replay historical goals. | History pages are collected before acknowledgement, timestamps are ordered numerically, attachment metadata is retained, and rate-limit retry delays are respected. New channels begin at startup time; corrupt cursors stop polling without overwriting evidence. |
+| P2 | The standalone scheduler passed the whole comma-separated Slack channel setting as one channel ID and could poll the same history as the WebUI. | Channel IDs are parsed individually with per-channel cursors; the scheduler defers history polling to the WebUI when its poller is enabled. A regression covers whitespace and duplicate IDs. |
 | P2 | Messaging events lacked consistent conversation identities and dropped useful prior context. | Slack and WhatsApp carry stable IDs into memory, workflow artifacts and conversation context. Current input is excluded from history only when it is actually the last recorded turn. |
 | P2 | Malformed plan IDs, tools, deliverables or dependencies could crash validation; duplicate IDs were accepted; recursive cycle checks overflowed on long DAGs. Corrupt checkpoint field types could crash restore. | Validation reports failures for bad types and duplicate IDs, uses iterative cycle detection, and ignores malformed checkpoints. |
 | P2 | Docker omitted the operating manual. Installed wheels could not reliably locate it or owner profiles. Modal dependencies bypassed the lockfile. | Wheels include `share/aidon/AGENTS.md`, Docker includes the manual, owner documents load from `AIDON_HOME`, and Modal plus its dependencies are resolved in `uv.lock`. |
@@ -47,6 +48,10 @@ Final test counts, image activation and runtime evidence are recorded in
   WhatsApp, and Slack register the same goal handler; fast-model routing has
   focused router tests. These checks do not replace a live configured-provider
   smoke test.
+- Scheduler, cron, dispatcher-registration, Slack wiring, outbox, and sandbox
+  regressions passed locally; Bubblewrap-only cases skipped because this runner
+  cannot create the required namespace. The standalone scheduler smoke test
+  still requires confirmation on the target Docker host.
 - Read-only live Slack `auth.test` and `conversations.history` probes: the bot
   token and both configured conversations succeeded. No synthetic chat message
   was posted during these checks.

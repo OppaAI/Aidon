@@ -931,10 +931,21 @@ def main(argv: list[str] | None = None) -> int:
             return GoalRunner(client, sandbox, _gate, config.home, memory=memory, conversation_id=session, plugins=_pl, execution_backend=_be, budget=_B2(max_tokens=config.budget_tokens, max_steps=config.max_steps, max_seconds=config.budget_seconds), trace=_T2(config.home, conversation_id=session), model_verifier=_M2(client), kernel_mode=config.kernel_mode, network_available=_network_available(_be, sandbox))
 
         import os as _os
-        _slack_last_ts = ""
-        _slack_ts_path = config.home / "slack_last_ts.txt"
-        if _slack_ts_path.is_file():
-            _slack_last_ts = _slack_ts_path.read_text().strip()
+        from ..interface.slack_polling import configured_slack_channels
+        _slack_channels = configured_slack_channels(
+            _os.environ.get("AIDON_SLACK_INBOUND_CHANNEL", ""))
+        _slack_cursor_path = config.home / "scheduler_slack_poll_cursors.json"
+        _slack_cursors = None
+        if (config.slack_bot_token and _slack_channels
+                and _os.environ.get("AIDON_SLACK_AUTOSTART", "0") != "1"):
+            from ..interface.slack_polling import load_poll_cursors
+            try:
+                _slack_cursors = load_poll_cursors(
+                    _slack_cursor_path, _slack_channels)
+            except (OSError, ValueError) as _cursor_error:
+                print(f"Scheduler Slack polling stopped: {_cursor_error}")
+        elif _slack_channels and _os.environ.get("AIDON_SLACK_AUTOSTART") == "1":
+            print("Scheduler Slack history polling disabled; the WebUI poller is active.")
         # Practice sessions: the serve daemon owns the window tick
         # and the report delivery. Each schedule gets its own
         # practice folder in the sandbox, and a runner built for
@@ -1239,19 +1250,30 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"Ingest job: {ingest_report.status}")
             except Exception as exc:
                 print(f"Ingest watch error: {exc}")
-            # Slack polling daemon, same loop, channel from AIDON_SLACK_INBOUND_CHANNEL.
+            # Poll Slack only when the WebUI history poller is not active.
+            # Both services may run against one Aidon home; using separate
+            # pollers would execute the same human message twice.
             try:
-                _channel = _os.environ.get("AIDON_SLACK_INBOUND_CHANNEL", "")
-                if config.slack_bot_token and _channel:
+                if config.slack_bot_token and _slack_channels and _slack_cursors is not None:
                     from ..interface.messaging import MessagingConfig, poll_slack_once
                     _msg_cfg = MessagingConfig(slack_bot_token=config.slack_bot_token)
-                    _messages, _slack_last_ts = poll_slack_once(_msg_cfg, _channel, last_ts=_slack_last_ts)
-                    _slack_ts_path.write_text(_slack_last_ts)
-                    for _message in _messages:
-                        print(f"Slack poll message: {_message['text'][:100]}")
-                        _poll_runner = _full_scheduler_runner("slack:" + _channel)
-                        _poll_report = _poll_runner.run(_message["text"])
-                        print(f"Slack poll job: {_poll_report.status}")
+                    from ..interface.slack_polling import save_poll_cursors
+                    for _channel in _slack_channels:
+                        _messages, _last = poll_slack_once(
+                            _msg_cfg, _channel,
+                            last_ts=str(_slack_cursors.get(_channel, "")))
+                        for _message in _messages:
+                            print(f"Slack poll message: {_message['text'][:100]}")
+                            _poll_runner = _full_scheduler_runner("slack:" + _channel)
+                            _poll_report = _poll_runner.run(_message["text"])
+                            _timestamp = str(_message.get("ts", ""))
+                            if _timestamp:
+                                _slack_cursors[_channel] = _timestamp
+                                save_poll_cursors(_slack_cursor_path, _slack_cursors)
+                            print(f"Slack poll job: {_poll_report.status}")
+                        if _last and _last != _slack_cursors.get(_channel):
+                            _slack_cursors[_channel] = _last
+                            save_poll_cursors(_slack_cursor_path, _slack_cursors)
             except Exception as exc:
                 print(f"Slack poll error: {exc}")
             # Practice windows, same loop: start at most one session

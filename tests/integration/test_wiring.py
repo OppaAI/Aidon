@@ -22,7 +22,8 @@ from src.interface.webui import WebUIServer
 from src.interface.triggers import TriggerDispatcher
 from src.interface.triggers import TriggerEvent
 from src.interface.slack_polling import (
-    dispatch_slack_message, process_polled_messages)
+    configured_slack_channels, dispatch_slack_message,
+    process_polled_messages)
 
 
 def test_gmail_sender_fake(tmp_path):
@@ -93,6 +94,11 @@ def test_slack_polling_skips_bots_and_old():
     messages, newest = poll_slack_once(config, "C1", last_ts="1", fetch=fake_fetch)
     assert [m["text"] for m in messages] == ["new"]
     assert newest == "4"
+
+
+def test_configured_slack_channels_splits_and_deduplicates_ids():
+    assert configured_slack_channels(" C1, D1, C1 ,, ") == ("C1", "D1")
+    assert configured_slack_channels("") == ()
 
 
 def test_slack_thread_polling_returns_only_new_human_replies():
