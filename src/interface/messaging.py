@@ -120,6 +120,39 @@ def _post_json(url: str, token: str, payload: dict, post=None,
         return json.loads(body)
 
 
+def _post_form_json(url: str, token: str, payload: dict, post=None) -> dict:
+    """POST Slack form fields, JSON-encoding nested array/object values."""
+    if post is not None:
+        return post(url, token, payload)
+    from urllib.parse import urlencode
+    fields = {
+        key: (json.dumps(value, separators=(",", ":"))
+              if isinstance(value, (dict, list)) else str(value))
+        for key, value in payload.items()
+    }
+    data = urlencode(fields).encode("utf-8")
+    headers = {"Content-Type": "application/x-www-form-urlencoded; charset=utf-8"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, data=data, method="POST", headers=headers)
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.loads(response.read())
+
+
+def _post_raw_file(url: str, file_bytes: bytes, *, upload=None,
+                   filename: str = "") -> None:
+    """POST file bytes to Slack's external upload URL."""
+    if upload is not None:
+        upload(url, "", {}, file_bytes, filename)
+        return
+    request = urllib.request.Request(
+        url, data=file_bytes, method="POST",
+        headers={"Content-Type": "application/octet-stream"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        if not 200 <= int(getattr(response, "status", 200)) < 300:
+            raise OSError(f"upload returned HTTP {response.status}")
+
+
 @dataclass
 class MessagingConfig:
     whatsapp_token: str = ""
@@ -303,16 +336,18 @@ def send_slack_file(config, channel: str, file_path, title: str = "",
         return {"ok": False, "error": "files.getUploadURLExternal: "
                 + str(reserved.get("error", "upload URL failed"))}
     try:
-        _post_multipart(reserved["upload_url"], "", {}, data, path.name, upload=upload)
+        _post_raw_file(reserved["upload_url"], data, upload=upload,
+                       filename=path.name)
     except Exception as exc:
         return {"ok": False, "error":
                 f"upload bytes: {type(exc).__name__}"}
     try:
-        done = _post_json(f"{SLACK_API_BASE}/files.completeUploadExternal",
-                          config.slack_bot_token,
-                          {"files": [{"id": reserved["file_id"],
-                                      "title": title or path.name}],
-                           "channel_id": channel}, post=post)
+        done = _post_form_json(
+            f"{SLACK_API_BASE}/files.completeUploadExternal",
+            config.slack_bot_token,
+            {"files": [{"id": reserved["file_id"],
+                        "title": title or path.name}],
+             "channel_id": channel}, post=post)
     except Exception as exc:
         return {"ok": False, "error":
                 f"files.completeUploadExternal: {type(exc).__name__}"}

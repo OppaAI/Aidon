@@ -67,6 +67,47 @@ def test_send_slack_file_failures(tmp_path):
     assert send_slack_file(_slack_config(), "C1", tmp_path / "missing.pdf")["ok"] is False
 
 
+def test_slack_completion_posts_files_as_json_form_field(tmp_path, monkeypatch):
+    import json
+    from urllib.parse import parse_qs
+    from src.interface import messaging
+
+    target = tmp_path / "note.txt"
+    target.write_text("hello")
+    captured = {}
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"ok":true}'
+
+    def urlopen(request, timeout):
+        captured["request"] = request
+        return Response()
+
+    monkeypatch.setattr(messaging.urllib.request, "urlopen", urlopen)
+    result = messaging._post_form_json(
+        "https://slack.test/complete", "token",
+        {"files": [{"id": "F1", "title": "note.txt"}],
+         "channel_id": "C1"})
+
+    assert result == {"ok": True}
+    request = captured["request"]
+    assert request.get_header("Content-type").startswith(
+        "application/x-www-form-urlencoded")
+    fields = parse_qs(request.data.decode())
+    assert json.loads(fields["files"][0]) == [
+        {"id": "F1", "title": "note.txt"}]
+    assert fields["channel_id"] == ["C1"]
+
+
 def _wa_config():
     return MessagingConfig(whatsapp_token="wa-test", whatsapp_phone_id="555")
 
