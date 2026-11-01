@@ -108,6 +108,28 @@ def test_slack_completion_posts_files_as_json_form_field(tmp_path, monkeypatch):
     assert fields["channel_id"] == ["C1"]
 
 
+def test_slack_completion_preserves_api_validation_details(tmp_path):
+    target = tmp_path / "note.txt"
+    target.write_text("hello")
+
+    def post(url, token, payload):
+        if url.endswith("/files.getUploadURLExternal"):
+            return {"ok": True, "upload_url": "https://upload.slack.test/x",
+                    "file_id": "F1"}
+        return {"ok": False, "error": "invalid_arguments",
+                "response_metadata": {"messages": [
+                    "invalid value for channel_id"]}}
+
+    result = send_slack_file(
+        _slack_config(), "C1", target, post=post,
+        upload=lambda *_args: None)
+    assert result == {
+        "ok": False,
+        "error": "files.completeUploadExternal: invalid_arguments "
+                 "(invalid value for channel_id)",
+    }
+
+
 def _wa_config():
     return MessagingConfig(whatsapp_token="wa-test", whatsapp_phone_id="555")
 

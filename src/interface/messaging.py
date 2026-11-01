@@ -153,6 +153,22 @@ def _post_raw_file(url: str, file_bytes: bytes, *, upload=None,
             raise OSError(f"upload returned HTTP {response.status}")
 
 
+def _slack_api_error(result: dict) -> str:
+    """Keep Slack's safe, actionable validation details in delivery errors."""
+    error = str(result.get("error", "unknown error"))
+    metadata = result.get("response_metadata")
+    details = []
+    if isinstance(metadata, dict):
+        messages = metadata.get("messages")
+        if isinstance(messages, list):
+            details.extend(str(item) for item in messages if item)
+    for key in ("needed", "provided"):
+        value = result.get(key)
+        if isinstance(value, str) and value:
+            details.append(f"{key}: {value}")
+    return f"{error} ({'; '.join(details)})" if details else error
+
+
 @dataclass
 class MessagingConfig:
     whatsapp_token: str = ""
@@ -353,7 +369,7 @@ def send_slack_file(config, channel: str, file_path, title: str = "",
                 f"files.completeUploadExternal: {type(exc).__name__}"}
     if not done.get("ok"):
         return {"ok": False, "error": "files.completeUploadExternal: "
-                + str(done.get("error", "upload completion failed"))}
+                + _slack_api_error(done)}
     return {"ok": True, "file_id": reserved["file_id"]}
 
 
