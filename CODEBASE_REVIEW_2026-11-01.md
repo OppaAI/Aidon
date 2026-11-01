@@ -54,31 +54,45 @@ and caller contracts and were repaired without an unreviewed consolidation.
 
 ## Remaining work, in priority order
 
-1. **Finish provider-specific acceptance checks.** Basic Slack and WhatsApp
-   message/reply behavior has been confirmed by the owner on the deployed
-   instance. The stopped-plan approval path has had fixes for ID handling,
-   bare approval commands, and Slack thread replies, but a successful complete
-   approval-to-finished-goal cycle is not yet established. Modal file transfer,
-   meaningful result verification, browser refresh/recovery and model failures
-   also need target-runtime checks. This end-to-end workflow is the next
-   focused investigation; transport is not currently the reported blocker.
-2. **WhatsApp durability and delivery recovery.** WhatsApp webhook goals remain
+1. **Target-machine runtime checks.** Verify scheduler claim recovery after a
+   restart, standalone scheduler startup/dispatch/shutdown, and the configured
+   sandbox's plugin isolation boundary. The owner's successful Modal tasks show
+   that Modal can execute work, but do not exercise every plugin-isolation or
+   failure path. Also verify browser refresh/recovery and configured model
+   failures. Record the actual backend and evidence; local Bubblewrap tests do
+   not certify Modal, and a host that disallows unprivileged namespaces cannot
+   certify Bubblewrap isolation.
+2. **Full dispatcher wiring and workflow acceptance.** Basic Slack and WhatsApp
+   message/reply behavior has been confirmed on the deployed instance. Still
+   exercise the CLI-created dispatcher with an isolated test home, all three
+   registered sources, and fast-model routing. Separately complete a harmless
+   goal through planning, approval, execution, and verified result delivery.
+   Approval ID handling, bare approval commands, and Slack thread replies have
+   fixes, but their complete end-to-end cycle is not yet established. This is
+   the core workflow investigation to return to after the other checks;
+   transport is not currently the reported blocker.
+3. **Shared-home concurrency contract.** Scheduler JSON state assumes one
+   scheduler process. The inbox worker, reply queues, and run controls coordinate
+   across processes, but this does not establish safe concurrent full WebUI
+   servers or schedulers sharing one Aidon home. If multiple processes sharing
+   a home are supported, add coordination and stress tests for scheduler claims,
+   cursors, artifact publication, and other file-backed stores. Otherwise,
+   document and enforce the single-process deployment contract.
+4. **WhatsApp durability and delivery recovery.** WhatsApp webhook goals remain
    synchronous and do not yet have a durable provider-message-ID inbox. Review
    retry deduplication and interruption behavior before unattended use.
-3. **One full WebUI/poller per Aidon home.** The inbox worker, reply queues and
-   run controls coordinate across processes, but this does not establish safe
-   concurrent full WebUI servers sharing all files. Cursor files, conversation
-   artifact publication and other file-backed stores need a separate supported
-   deployment/concurrency contract and stress testing.
-4. **Operational assurance:** enforce required CI checks in repository settings,
-   establish backups/restore testing, resource and queue alerts, load testing,
-   and image/OS vulnerability checks. The Compose healthcheck confirms listener
-   liveness only; it does not certify model, memory or sandbox readiness.
-5. **Quality and maintenance:** evaluate ordinary tasks on the intended small
-   models, including semantic completeness and computed budgets. Deterministic
+5. **Operational assurance.** Enforce required CI checks in repository
+   settings, establish backups/restore testing, resource and queue alerts, load
+   testing, and image/OS vulnerability checks. The Compose healthcheck confirms
+   listener liveness only; it does not certify model, memory, or sandbox
+   readiness.
+6. **Cleanup and maintenance.** Review incremental typing, wider lint rules,
+   remaining module decomposition, SQLite fallback scaling, and cron-search
+   efficiency. The two notification outboxes were inspected and retained
+   because their storage and caller contracts differ; do not consolidate them
+   solely because both are named outboxes. Evaluate ordinary tasks on the
+   intended small models for semantic completeness and compute cost; deterministic
    checks and an optional model verifier cannot prove all content correct.
-   Incremental typing, wider lint rules, remaining module decomposition and
-   SQLite fallback scaling remain follow-up work.
 
 The pre-existing `setup.sh` Qdrant version update and existing `uv.lock`
 upgrades were preserved. The setup regression checks that Qdrant remains pinned
