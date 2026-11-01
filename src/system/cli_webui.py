@@ -686,10 +686,15 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         _startup_style("info", "Qdrant local store available under the Aidon home.")
     _startup_style("section", "WebUI")
     if args.webhook_only:
-        _startup_style("ok", f"Webhook listener: http://127.0.0.1:{args.port}/ (WhatsApp and Slack only)")
+        _startup_style("ok", f"Webhook listener: http://{args.host}:{args.port}/ (WhatsApp and Slack only)")
+        if args.host != "127.0.0.1":
+            _startup_style("warn", "Non-local bind requested; expose this only on a protected network.")
     else:
-        _startup_style("ok", f"WebUI: http://127.0.0.1:{args.port}/ (localhost only)")
+        _startup_style("ok", f"WebUI: http://{args.host}:{args.port}/")
         _startup_style("info", "Webhooks: /webhook/whatsapp and /webhook/slack")
-        _startup_style("info", "External services need a tunnel; localhost is not publicly reachable.")
-    server.serve(port=args.port)
+        if args.host == "127.0.0.1":
+            _startup_style("info", "External services need a tunnel; localhost is not publicly reachable.")
+        else:
+            _startup_style("warn", "Non-local bind requested; expose this only on a protected network and configure WebUI token authentication.")
+    server.serve(port=args.port, host=args.host)
     return 0

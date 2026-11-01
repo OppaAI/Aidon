@@ -1,0 +1,18 @@
+services:
+  aidon:
+    build: .
+    restart: unless-stopped
+    user: "${AIDON_UID:-10001}:${AIDON_GID:-10001}"
+    network_mode: host
+    environment:
+      AIDON_HOME: /data
+    command: ["webui", "serve", "--port", "${AIDON_WEBUI_PORT:-8765}"]
+    volumes:
+      - ./aidon-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

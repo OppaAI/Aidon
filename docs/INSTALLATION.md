@@ -27,6 +27,42 @@ per run is post-hackathon.
 then starts the WebUI server with the same home, backend, and
 ingest path.
 
+## Docker WebUI
+
+Docker Compose runs the WebUI in a container and keeps Aidon's state in
+`./aidon-data`. This Compose setup uses Linux host networking so the WebUI
+can keep its localhost-only bind and localhost authentication behavior. It
+is intended for Docker Engine on Linux. Copy the example configuration into
+the data directory, add your model endpoint and key there, then start the
+service:
+
+```sh
+mkdir -p aidon-data
+cp examples/.env.example aidon-data/.env
+chmod 600 aidon-data/.env
+# Edit aidon-data/.env with your model endpoint, key, and model name.
+export AIDON_UID="$(id -u)" AIDON_GID="$(id -g)"
+docker compose up --build -d
+```
+
+Open `http://127.0.0.1:8765/`. Choose another local port by setting
+`AIDON_WEBUI_PORT` before `docker compose up`. Stop the service with
+`docker compose down`; the `aidon-data` directory remains on the host. The
+container runs as your supplied UID/GID (10001 by default), so the export
+above lets it write files owned by your host user. Keep
+the WebUI bound to localhost; do not change it to `0.0.0.0` or publish the
+full WebUI to the internet. Host networking shares the host network stack,
+so only run this container from a trusted Aidon image. This container
+packaging does not certify that Bubblewrap or any
+other execution backend can run inside your Docker host; validate the actual
+backend separately before using execution features.
+
+For a release, update `pyproject.toml`, move the corresponding notes from
+`[Unreleased]` into a versioned `CHANGELOG.md` section, run CI, then push a
+matching tag such as `v0.4.1`. The release workflow checks the tag against
+the project version and changelog, publishes the GitHub Release, and pushes
+the container image to GitHub Container Registry.
+
 At minimum, configure an endpoint, key, and model. Heavy ML packages and optional features are offered interactively by `./setup.sh`; answer yes only for capabilities you need. Use `--with-optional` to accept every optional package without prompting:
 
 - `AIDON_API_ENDPOINT` — endpoint URL for the model API

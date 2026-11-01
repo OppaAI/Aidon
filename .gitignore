@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .env
+aidon-data/
 .pytest_cache/
 *.egg-info/
 .eggs/

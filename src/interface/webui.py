@@ -939,7 +939,7 @@ class WebUIServer(WebUIRunMixin, WebUIMessagingMixin, WebUISettingsMixin, WebUID
         return make_handler(self)
 
 
-    def serve(self, port: int = 8002) -> None:
+    def serve(self, port: int = 8002, host: str = "127.0.0.1") -> None:
         # Threading, so a goal run waiting on an approval card
         # does not block the /api/approve request that resolves it.
-        ThreadingHTTPServer(("127.0.0.1", port), self.make_handler()).serve_forever()
+        ThreadingHTTPServer((host, port), self.make_handler()).serve_forever()

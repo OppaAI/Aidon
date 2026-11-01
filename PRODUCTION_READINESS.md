@@ -13,6 +13,7 @@ Reviewed against the requested chat → capability inventory → Tool Crafting L
 - Missing executable capability routes to Tool/MCP acquisition; a missing reusable skill does not interrupt planning. Skills are offered only after a verified successful workflow, and the Skill Lab source is bound to that run and conversation.
 - Successful WebUI workflows persist a bounded workflow record and offer a Skill Learning Lab handoff. Skill adoption is exposed only to the WebUI follow-up that validates that successful source; the owner can refine the procedure before drafting.
 - DAG editing now persists dependency edges and node layout, provides graph validation and fit-to-view controls, and exposes the existing node contract in the inspector. This delivers a capable workflow DAG editor; Aidon does not reimplement a cyclic agent runtime such as LangGraph.
+- Docker packaging is available through `Dockerfile` and `compose.yaml`: the WebUI runs as a non-root user, persists state in a host-mounted directory, and binds only to localhost by default. The tagged-release workflow checks tests, JavaScript, package version, and changelog before publishing a GitHub Release and GHCR image. The Python wheel and Compose configuration validate locally; a real image build and tagged publication have not been run in this workspace.
 
 ## Remaining code limitations
 
@@ -32,6 +33,7 @@ The code changes and offline tests are complete for these items. This cloud work
 7. **SSH/PC isolation and cleanup (only if SSH is enabled):** SSH is intentionally unsandboxed. Configure a disposable reachable target using secure configuration (never chat or this Markdown), run a harmless command, confirm unattended shell approval is not bypassed, confirm the workspace is a unique child of the configured root, then confirm cleanup removes only that child and leaves sibling/parent files intact. If Aidon and the desktop are on the same PC, use the local X11 procedure instead of SSH.
 8. **Local X11/computer use:** use procedure 5 below, with a harmless test window. Verify screenshot, focus, click, typing and bounded wheel scroll against the intended DISPLAY/Xauthority. Confirm behavior on the actual desktop session; detecting `DISPLAY` or `xdotool` alone is insufficient.
 9. **Live model and deployment configuration:** submit a harmless acquisition goal through the production-configured model/provider and confirm it returns a valid plan, handles a missing capability interview, and fails clearly when the provider is unavailable. Never use a consequential goal for smoke testing.
+10. **Docker deployment:** build and start the Compose service on the target machine, confirm the WebUI is reachable at localhost, the `/data` volume persists across container recreation, and the configured sandbox backend fails closed or runs with the expected isolation. Do not expose the full WebUI publicly.
 
 ## Release blockers
 
@@ -120,3 +122,4 @@ Record date, commit, backend, browser, outcome, and any error under the checklis
 | Restart during acquisition and resume behavior | Pending | |
 | SSH target/workspace/cleanup checks (only if SSH is enabled) | Pending | |
 | Live model/provider smoke test | Pending | |
+| Docker image build, localhost WebUI, and persistent volume | Pending | |

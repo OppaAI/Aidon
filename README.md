@@ -60,6 +60,7 @@ is a real part of what Aidon runs, not just a build-time choice.
 ## 📚 Guides
 
 - [Installation](docs/INSTALLATION.md) — prerequisites, setup, and launch.
+- [Docker deployment and releases](docs/INSTALLATION.md#docker-webui) — Compose setup and tagged-release process.
 - [Configuration](docs/CONFIGURATION.md) — models, `.env`, and the Aidon home.
 - [Usage](docs/USAGE.md) — WebUI and messaging, core loop, spec sheet, tools and plugins, triggers, research and live execution, budgets, trace, v1 API, and MCP.
 - [Security notes](docs/SECURITY.md) — trust boundaries and safe operation.

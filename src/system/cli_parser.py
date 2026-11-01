@@ -58,6 +58,8 @@ def build_parser() -> argparse.ArgumentParser:
                               help="Serve the WebUI, localhost only")
     webui_parser.add_argument("--port", type=int, default=8765,
                               help="Port for WebUI serve, default 8765, localhost only")
+    webui_parser.add_argument("--host", default="127.0.0.1",
+                              help="Bind address (default 127.0.0.1; use 0.0.0.0 only behind a protected/private network)")
     webui_parser.add_argument("--webhook-only", action="store_true",
                               help="Serve only /webhook/whatsapp and /webhook/slack, no chat, settings, or library, for a tunnel front")
     scheduler_parser = sub.add_parser("scheduler", help="Scheduler daemon and pre-approval")
