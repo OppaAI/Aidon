@@ -307,6 +307,10 @@ class WebUIRunMixin:
                 else:
                     _ptext = "No stopped run to proceed with."
                 return self._simple_command_response(conversation_id, goal, _ptext)
+            if stop.get("state", "pending") != "pending":
+                return self._simple_command_response(
+                    conversation_id, goal,
+                    "That plan has already been proceeded.")
             goal = stop["goal"]
             # Mode chain: Ask -> Plan -> Execute. Ask is for
             # beginners and detail, so its Proceed builds a plan
@@ -421,6 +425,13 @@ class WebUIRunMixin:
                              conversation_id=conversation_id,
                              payload={**payload, "conversation_id": conversation_id},
                              reply=reply)
+
+        # Consume the plan card as soon as its continuation is accepted.
+        # This prevents refreshes or repeated replies from presenting a
+        # second Proceed button while the resumed run is still working.
+        if resume_stop_id:
+            from .mode_stops import set_mode_stop_state
+            set_mode_stop_state(self.home, resume_stop_id, "proceeded")
 
         def dispatch():
             try:

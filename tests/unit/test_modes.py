@@ -107,6 +107,24 @@ def test_mode_stops_update_spec_and_latest_for_conversation(tmp_path):
     assert latest_mode_stop_for_conversation(tmp_path, "") is None
 
 
+def test_proceeded_mode_stop_is_hidden_from_pending_lists_and_can_retry(tmp_path):
+    from src.interface.mode_stops import (
+        latest_mode_stop_for_conversation, mode_stops_for_conversation,
+        set_mode_stop_state)
+    stop_id = save_mode_stop(tmp_path, "plan", "make a file",
+                             plan={"steps": []},
+                             conversation_key="conv-1",
+                             conversation_id="conv-1")
+    assert latest_mode_stop(tmp_path, "conv-1")["stop_id"] == stop_id
+    assert set_mode_stop_state(tmp_path, stop_id, "proceeded") is True
+    assert latest_mode_stop(tmp_path, "conv-1") is None
+    assert latest_mode_stop_for_conversation(tmp_path, "conv-1") is None
+    assert mode_stops_for_conversation(tmp_path, "conv-1") == []
+    # Failed continuation can restore the existing stop for an explicit retry.
+    assert set_mode_stop_state(tmp_path, stop_id, "pending") is True
+    assert latest_mode_stop(tmp_path, "conv-1")["stop_id"] == stop_id
+
+
 def test_mode_stop_keeps_originating_slack_thread(tmp_path):
     from src.interface.mode_stops import mode_stops_for_conversation
     stop_id = save_mode_stop(

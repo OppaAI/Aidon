@@ -520,6 +520,14 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                 delete_mode_stop(config.home, _resume_stop_id)
             except Exception:
                 pass
+        elif _resume_stop_id:
+            # A failed or rejected continuation remains retryable, but
+            # the original Proceed card stays consumed while it runs.
+            try:
+                from ..interface.mode_stops import set_mode_stop_state
+                set_mode_stop_state(config.home, _resume_stop_id, "pending")
+            except Exception:
+                pass
         # The mission is over: done always clears the budget
         # record; a failed run clears it only when no stop
         # survives (a failed proceed keeps its stop, so its

@@ -59,6 +59,7 @@ def save_mode_stop(home: Path, mode: str, goal: str, spec=None, plan=None,
         "conversation_id": str(conversation_id or ""),
         "budget_key": str(budget_key or ""),
         "thread_ts": str(thread_ts or ""),
+        "state": "pending",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     _save(home, stops)
@@ -108,6 +109,19 @@ def update_mode_stop_spec(home: Path, stop_id: str, spec: dict) -> bool:
     return True
 
 
+def set_mode_stop_state(home: Path, stop_id: str, state: str) -> bool:
+    """Set a stop lifecycle state (pending/proceeded); True if it exists."""
+    if state not in {"pending", "proceeded"}:
+        raise ValueError(f"unknown mode stop state: {state}")
+    stops = _load(home)
+    record = stops.get(str(stop_id))
+    if not isinstance(record, dict):
+        return False
+    record["state"] = state
+    _save(home, stops)
+    return True
+
+
 def latest_mode_stop_for_conversation(home: Path, conversation_id: str) -> dict | None:
     """Newest stop for a chat, matching key or id.
 
@@ -121,6 +135,7 @@ def latest_mode_stop_for_conversation(home: Path, conversation_id: str) -> dict 
         return None
     candidates = [r for r in _load(home).values()
                   if isinstance(r, dict)
+                  and r.get("state", "pending") == "pending"
                   and (r.get("conversation_key") == key
                        or r.get("conversation_id") == key)]
     if not candidates:
@@ -140,6 +155,7 @@ def mode_stops_for_conversation(home: Path, conversation_id: str) -> list[dict]:
         return []
     candidates = [dict(record) for record in _load(home).values()
                   if isinstance(record, dict)
+                  and record.get("state", "pending") == "pending"
                   and (record.get("conversation_key") == key
                        or record.get("conversation_id") == key)]
     candidates.sort(key=lambda record: str(record.get("created_at", "")))
@@ -161,6 +177,7 @@ def latest_mode_stop(home: Path, conversation_key: str) -> dict | None:
     key = str(conversation_key or "")
     candidates = [r for r in _load(home).values()
                   if isinstance(r, dict)
+                  and r.get("state", "pending") == "pending"
                   and r.get("conversation_key") == key]
     if not candidates:
         return None

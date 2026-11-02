@@ -1456,6 +1456,12 @@
       const el = shell.querySelector(".spec-save-status");
       if (el) el.textContent = text;
     }
+    function markProceeded() {
+      shell.innerHTML =
+        '<div class="kind">' + esc(stop.mode) + ' proceeded</div>' +
+        '<h3>' + (isAsk ? 'Interview proceeded' : 'Plan proceeded') + '</h3>' +
+        '<p class="spec-note">Aidon is continuing the run.</p>';
+    }
     function render() {
       if (isAsk && spec && editing) {
         shell.innerHTML =
@@ -1526,6 +1532,10 @@
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok || !data.run_id) throw new Error((data && data.detail) || "no run");
+        // The stop is now a historical note, not an active decision.
+        // Replace both buttons immediately; the resumed run can take
+        // time and may pause at a separate live approval gate.
+        markProceeded();
         proceedShownFor = null;
         cardShownFor = null;
         currentRun = data.run_id;
