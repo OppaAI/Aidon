@@ -97,6 +97,27 @@ def test_image_edit_plan_normalizes_only_current_upload_paths(tmp_path):
                          goal="Change the attached image background to a cafe") == []
 
 
+def test_image_edit_uses_reviewable_fallback_when_model_returns_unusable_json(tmp_path):
+    runner = _runner(tmp_path, False,
+                     extra_tools={"edit_image": lambda **kw: "ok"})
+    runner.plugins = SimpleNamespace(plugins={}, skill_texts=lambda: {})
+    image = tmp_path / "uploads" / "my-photo.jpg"
+    image.parent.mkdir()
+    image.write_bytes(b"current image")
+    runner.image_paths = [image]
+    runner._chat = lambda *_args: "The model did not return a usable plan."
+
+    goal = "Change the scene of the attached image to inside a cafe"
+    plan = runner._plan(goal)
+
+    assert plan.deliverables == ["edited_my-photo.jpg"]
+    assert plan.steps[0]["tool"] == "edit_image"
+    assert plan.steps[0]["args"] == {
+        "prompt": goal, "image": image.name, "output": "edited_my-photo.jpg"}
+    from src.agentic.validator import validate_plan
+    assert validate_plan(plan, allowed_tools={"edit_image"}, goal=goal) == []
+
+
 def test_kernel_guard_points_at_ladder_not_missing_tool(tmp_path):
     runner = _runner(tmp_path, True,
                      extra_tools={"generate_document": lambda **kw: "ok"})

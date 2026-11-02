@@ -14,6 +14,41 @@ _SKILL_FULL_CHARS = 20000
 
 
 class PlanningMixin:
+    def _fallback_image_edit_plan(self, goal: str, *, spec=None,
+                                  failure_context: str = "") -> Plan | None:
+        """Build a minimal reviewable plan when JSON planning fails for a direct edit.
+
+        This is intentionally limited to one attached image, an available
+        built-in editor, and a fresh image-edit request. The plan still goes
+        through the normal approval and verification flow.
+        """
+        if (spec is not None or failure_context or not self.image_paths
+                or len(self.image_paths) != 1
+                or "edit_image" not in self.extra_tools
+                or not self._is_image_edit_goal(goal)):
+            return None
+        from pathlib import Path
+        import re
+
+        source = Path(self.image_paths[0]).name
+        suffix = Path(source).suffix.lower()
+        if suffix not in (".png", ".jpg", ".jpeg", ".webp"):
+            suffix = ".png"
+        stem = re.sub(r"[^A-Za-z0-9_-]+", "_", Path(source).stem).strip("_")
+        output = "edited_" + (stem[:80] or "image") + suffix
+        return Plan(
+            steps=[{"tool": "edit_image",
+                    "args": {"prompt": str(goal).strip(),
+                             "image": source, "output": output},
+                    "deliverable": output,
+                    "description": "Edit the attached image according to your request"}],
+            deliverables=[output],
+            criteria=[f"{output} exists in the workspace folder",
+                      f"{output} is non-empty"],
+            summary="Edit the attached image according to your request.",
+            deliverable_descriptions={
+                output: "Edited copy of the attached image; the original remains unchanged."})
+
     @staticmethod
     def _memory_query_variants(query: str) -> list[str]:
         """Keep the original wording and add a compact fact-retrieval query."""
@@ -443,6 +478,13 @@ class PlanningMixin:
                 from .planner import _extract_json
                 data = _extract_json(reply)
             except (ValueError, json.JSONDecodeError):
+                fallback = self._fallback_image_edit_plan(
+                    goal, spec=spec, failure_context=failure_context)
+                if fallback is not None:
+                    self._trace(
+                        "plan", "recovered",
+                        "Used a one-step image-edit plan after unusable model JSON.")
+                    return fallback
                 self._trace(
                     "plan", "failed",
                     "The model did not return a usable plan; no steps were run.")
