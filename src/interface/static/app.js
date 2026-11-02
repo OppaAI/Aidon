@@ -1457,20 +1457,18 @@
       if (el) el.textContent = text;
     }
     function markProceeded() {
-      const planSteps = stop.plan && Array.isArray(stop.plan.steps)
-        ? stop.plan.steps : [];
-      const includesImageEdit = planSteps.some((step) =>
-        step && typeof step === "object" && step.tool === "edit_image");
-      shell.innerHTML =
-        '<div class="kind">' + esc(stop.mode) + ' proceeded</div>' +
-        '<h3>' + (isAsk ? 'Interview proceeded' : 'Plan proceeded') + '</h3>' +
-        '<p class="spec-note">Aidon is continuing the run. The approved plan is shown below.</p>' +
-        (includesImageEdit
-          ? '<p class="spec-note">This plan sends the attached image(s) to the configured Muse Image endpoint and spends image credits.</p>'
-          : "") +
-        ((spec || stop.plan)
-          ? '<div class="spec-detail">' +
-            renderStopDetail({ spec: spec, plan: stop.plan }) + "</div>" : "");
+      // Keep the already-rendered approved plan intact. Rebuilding the card
+      // from stop data here can lose plan details when the stop payload has
+      // been normalized by the server.
+      const kind = shell.querySelector(".kind");
+      if (kind) kind.textContent = stop.mode + " proceeded";
+      const heading = shell.querySelector("h3");
+      if (heading) heading.textContent = isAsk ? "Interview proceeded" : "Plan proceeded";
+      const note = shell.querySelector(".spec-note");
+      if (note) note.textContent =
+        "Aidon is continuing the run. The approved plan is shown below.";
+      shell.querySelector(".spec-save-status")?.remove();
+      shell.querySelector(".row")?.remove();
     }
     function render() {
       if (isAsk && spec && editing) {
