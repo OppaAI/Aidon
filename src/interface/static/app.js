@@ -1488,12 +1488,19 @@
           }
         });
       } else {
+        const planSteps = stop.plan && Array.isArray(stop.plan.steps)
+          ? stop.plan.steps : [];
+        const includesImageEdit = planSteps.some((step) =>
+          step && typeof step === "object" && step.tool === "edit_image");
         shell.innerHTML =
           '<div class="kind">stopped — ' + esc(stop.mode) + " ready</div>" +
           "<h3>" + (isAsk ? "Spec ready" : "Plan ready") + "</h3>" +
           (isAsk
             ? '<p class="spec-note">Proceeding builds a plan for your approval — nothing runs yet.</p>'
             : '<p class="spec-note">Proceeding runs the plan.</p>') +
+          (!isAsk && includesImageEdit
+            ? '<p class="spec-note">This plan sends the attached image(s) to the configured Muse Image endpoint and spends image credits. Proceed authorizes the image edit shown here; no second approval is needed for that step.</p>'
+            : "") +
           ((spec || stop.plan)
             ? '<div class="spec-detail">' +
               renderStopDetail({ spec: spec, plan: stop.plan }) + "</div>" : "") +

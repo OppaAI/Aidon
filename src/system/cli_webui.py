@@ -326,6 +326,20 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         if isinstance(event.payload.get("resume_spec"), dict):
             from ..agentic.interview import Spec as _ResumeSpec
             _resume_spec = _ResumeSpec.from_dict(event.payload["resume_spec"])
+        _approved_image_edits = []
+        if _resume_plan is not None:
+            for _step in _resume_plan.normalized_steps():
+                if getattr(_step, "tool", "") != "edit_image":
+                    continue
+                _args = dict(getattr(_step, "args", {}) or {})
+                _allowed = {"prompt", "image", "images", "output", "size"}
+                if "prompt" not in _args or set(_args) - _allowed:
+                    continue
+                _approved_image_edits.append({
+                    "prompt": _args["prompt"], "image": _args.get("image", ""),
+                    "images": _args.get("images"), "output": _args.get("output", ""),
+                    "size": _args.get("size", "1024x1024"),
+                })
         # Mission budget key: a proceed rejoins the stopped
         # run's record via the stop; a fresh run gets a fresh
         # key, so a later mission never inherits an earlier
@@ -365,7 +379,7 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                             clef_client=_clef_client,
                             use_semantic_router_skip=True,
                             run_id=run_id, run_control=run_control,
-                            researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins, gate_context=_gate_context, test_backend_factory=lambda: make_backend(config.execution_backend, run_sandbox, image=config.docker_image, allow_network=False, modal_app=config.modal_app, modal_cpu=config.modal_cpu, modal_memory_mb=config.modal_memory_mb), allow_skill_adoption=_allow_skill_adoption), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, guidance=str(event.payload.get("guidance", "") or ""), route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor, resume_interview=bool(event.payload.get("resume_interview")), conversation_thread_id=str(event.payload.get("thread_ts", "") or ""))
+                            researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins, gate_context=_gate_context, test_backend_factory=lambda: make_backend(config.execution_backend, run_sandbox, image=config.docker_image, allow_network=False, modal_app=config.modal_app, modal_cpu=config.modal_cpu, modal_memory_mb=config.modal_memory_mb), allow_skill_adoption=_allow_skill_adoption, approved_image_edits=_approved_image_edits), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, guidance=str(event.payload.get("guidance", "") or ""), route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor, resume_interview=bool(event.payload.get("resume_interview")), conversation_thread_id=str(event.payload.get("thread_ts", "") or ""))
         def _deliver_files(files, target):
             """Upload run deliverables as bytes to a Slack/WhatsApp target.
 
@@ -550,6 +564,15 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                 _shead = ("Plan ready" + (f" ({len(_delivs)} deliverable(s): "
                                           + ", ".join(str(d) for d in _delivs[:5])
                                           + ")" if _delivs else "") + ".")
+                _plan_steps = (_stopped.get("plan") or {}).get("steps", [])
+                if any(isinstance(_step, dict)
+                       and _step.get("tool") == "edit_image"
+                       for _step in _plan_steps):
+                    _shead += ("\nThis plan sends the attached image(s) to the "
+                               "configured Muse Image endpoint and spends image "
+                               "credits. Proceed authorizes the image edit shown "
+                               "in this plan; no second approval is needed for "
+                               "that exact step.")
             if event.source == "webui":
                 _saction = "Tap Proceed below to continue."
             elif event.source in ("slack", "whatsapp"):
