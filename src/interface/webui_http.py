@@ -155,7 +155,7 @@ def make_handler(server):
                 self._send_static('index.html')
             elif parsed.path == '/documents':
                 self._send_static('docs.html')
-            elif parsed.path in ('/dag', '/capabilities', '/labs', '/memory', '/knowledge', '/reports', '/practice', '/graph'):
+            elif parsed.path in ('/dag', '/capabilities', '/labs', '/scheduler', '/memory', '/knowledge', '/reports', '/practice', '/graph'):
                 self._send_static(parsed.path.lstrip('/') + '.html')
             elif parsed.path == '/settings':
                 from .webui_settings_page import render_settings_page

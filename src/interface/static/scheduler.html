@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aidon — Scheduler</title>
+<link rel="stylesheet" href="/static/style.css?v=__ASSET_V__">
+<style>
+  .scheduler-wrap { max-width:1120px; margin:0 auto; padding:16px 18px 36px; font-size:14px; line-height:1.45; }
+  .scheduler-head { display:flex; align-items:baseline; gap:10px; margin-bottom:3px; }
+  .scheduler-head a { color:var(--olive); text-decoration:none; font:700 19px var(--font-display); }
+  .scheduler-head span { color:var(--muted); font-size:13px; }
+  .scheduler-intro { color:var(--muted); max-width:82ch; margin:4px 0 14px; font-size:13px; }
+  .scheduler-toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:12px 0; }
+  .scheduler-count { min-height:18px; color:var(--muted); font-size:12px; }
+  .scheduler-toolbar button { background:var(--moss); color:var(--moss-contrast); border:0; border-radius:8px; padding:8px 13px; cursor:pointer; font:inherit; }
+  .scheduler-toolbar button:disabled { opacity:.6; cursor:wait; }
+  .scheduler-list { display:grid; gap:10px; }
+  .scheduler-card { border:1px solid var(--border); border-radius:10px; background:var(--surface); padding:13px 14px; }
+  .scheduler-card-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .scheduler-card-head h2 { margin:0; font:700 17px var(--font-display); overflow-wrap:anywhere; }
+  .scheduler-badge { border:1px solid var(--border); border-radius:999px; padding:3px 9px; color:var(--muted); font-size:11px; white-space:nowrap; }
+  .scheduler-goal { margin:8px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .scheduler-meta { display:flex; flex-wrap:wrap; gap:6px 16px; color:var(--muted); font-size:12px; }
+  .scheduler-meta strong { color:var(--text); font-weight:600; }
+  .scheduler-empty { padding:24px; border:1px dashed var(--border); border-radius:10px; background:var(--surface); color:var(--muted); text-align:center; }
+  @media(max-width:640px) { .scheduler-wrap{padding:12px 10px 22px}.scheduler-card-head{align-items:flex-start;flex-direction:column} }
+</style>
+</head>
+<body>
+<main class="scheduler-wrap">
+  <div class="scheduler-head"><a href="/">◈ Aidon</a><span>Scheduler</span></div>
+  <p class="scheduler-intro">Scheduled tasks Aidon has saved. Review what each task does and when it is due to run.</p>
+  <div class="scheduler-toolbar"><span class="scheduler-count" id="scheduler-count" role="status" aria-live="polite">Loading scheduled tasks…</span><button id="scheduler-refresh" type="button">Refresh</button></div>
+  <section class="scheduler-list" id="scheduler-list" aria-live="polite"><div class="scheduler-empty">Loading…</div></section>
+</main>
+<script src="/static/scheduler.js?v=__ASSET_V__"></script>
+</body>
+</html>
