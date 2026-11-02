@@ -18,6 +18,22 @@ from ..capabilities.sandbox import Sandbox
 
 _SELF_MODIFY_LOCK = threading.Lock()
 
+# AIDON_OPTIONAL_TOOLS controls convenience built-ins. These tools expose
+# specialized formats, model-backed media, indexed knowledge, or external
+# services that core read/write/shell tools cannot provide alone. Their
+# individual approval, credential, and publication boundaries still apply.
+CAPABILITY_TOOLS_WHEN_OPTIONAL_DISABLED = frozenset({
+    "edit_image", "sam_segment", "read_document", "generate_document",
+    "build_ebook", "make_docx", "make_latex", "make_slides",
+    "make_spreadsheet", "transcribe_audio", "tts_speak",
+    "email_make_draft", "email_send", "slack_send", "slack_send_file",
+    "whatsapp_send", "whatsapp_send_media", "threads_publish",
+    "threads_post", "instagram_publish", "instagram_post",
+    "youtube_learn", "youtube_upload", "fetch_feed", "search_document",
+    "search_research_cache", "schedule_job", "list_schedule",
+    "cancel_schedule", "self_modify",
+})
+
 
 def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None, governor=None, optional_tools=None,
                       plugin_registry=None, gate_context=None, test_backend_factory=None,
@@ -737,15 +753,11 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         optional_tools = bool(getattr(config, "optional_tools", True))
     if not optional_tools:
         from ..agentic.kernel import CORE_LADDER_TOOLS
-        # Image editing is a core, user-requested capability rather than
-        # an ambient optional tool. Its host-side API call remains gated by
-        # a fresh live approval because it spends credits and sends images.
-        ALWAYS_AVAILABLE_TOOLS = {"edit_image"}
         # Keep the same dictionary captured by mcp_connect and disconnect:
         # they register and remove tools dynamically during this goal.
         for name in list(tools):
             if (name not in CORE_LADDER_TOOLS
                     and name not in ("read_file", "write_file")
-                    and name not in ALWAYS_AVAILABLE_TOOLS):
+                    and name not in CAPABILITY_TOOLS_WHEN_OPTIONAL_DISABLED):
                 del tools[name]
     return tools

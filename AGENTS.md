@@ -240,12 +240,19 @@ repair.
 
 ## Optional tools
 
-Non-core built-in tools ship behind a flip, off by
-default: `AIDON_OPTIONAL_TOOLS=0` exposes only the core
+Non-core built-in convenience tools ship behind a flip,
+off by default: `AIDON_OPTIONAL_TOOLS=0` exposes the core
 ladder — fetch, ask, installs, MCP connect, plugin
-adoption, plus read/write. Flipping it on restores the
-full built-in set (web search, documents, social, media,
-email, webcam, YouTube). The flip never gates adopted
+adoption, plus read/write — and specialized capabilities
+that core file/shell tools cannot provide alone. These
+include AI image editing and segmentation, document/office
+and ebook formats, audio transcription/speech, external
+messaging and publishing, indexed document/feed search,
+YouTube tools, schedule management, and self-modification.
+Their existing approval and credential gates still apply.
+Flipping the setting on restores convenience tools too,
+such as chart wrappers, versioned writes, and
+deep-research orchestration. The flip never gates adopted
 plugins or trusted skills: earned tools stay usable.
 
 ## Model routing
