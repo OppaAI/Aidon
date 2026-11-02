@@ -179,7 +179,7 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
     if not description or not str(description).strip():
         return {"ok": False, "error": "guided computer task needs a description",
                 "actions_taken": history}
-    for round_no in range(max(0, int(max_actions))):
+    for round_no in range(min(30, max(0, int(max_actions)))):
         shot = run_computer_use(
             [{"kind": "screenshot",
               **({"capture": capture} if capture is not None else {})}],
@@ -228,12 +228,17 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
                          f"decision failed: {exc}")
             return {"ok": False, "error": f"decision failed: {exc}",
                     "actions_taken": history, "final_description": last_description}
-        if decision.get("done") or decision.get("action") is None:
+        if decision.get("done") is True:
             _write_trace(target, description, history, last_description, "")
             return {"ok": True, "actions_taken": history,
                     "final_description": last_description,
                     "reason": decision.get("reason", "")}
-        action = decision["action"]
+        action = decision.get("action")
+        if action is None:
+            _write_trace(target, description, history, last_description,
+                         "model gave no action without confirming completion")
+            return {"ok": False, "error": "model gave no action without confirming completion",
+                    "actions_taken": history, "final_description": last_description}
         step = run_computer_use([action], approve=approve, driver=driver,
                                 screenshot_dir=str(target), secrets=secrets)
         history.append({"description": last_description, "action": action,

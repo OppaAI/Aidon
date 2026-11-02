@@ -38,6 +38,10 @@ html[data-theme="light"] {
 * { box-sizing: border-box; }
 a { color: var(--accent); }
 a:visited { color: color-mix(in srgb, var(--accent) 82%, var(--text)); }
+.demo-record-controls { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.demo-record-controls button { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 5px 8px; cursor: pointer; }
+.demo-record-controls button.recording { border-color: #ff7979; color: #ff9999; }
+.demo-record-controls span { color: var(--muted); }
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text);
   font-family: var(--font-body);

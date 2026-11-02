@@ -71,7 +71,7 @@ def make_handler(server):
             data = candidate.read_bytes()
             if candidate.suffix.lower() == '.html':
                 asset_times = [candidate.stat().st_mtime]
-                for asset_name in ('style.css', 'theme.js', 'app.js', 'avatar.js'):
+                for asset_name in ('style.css', 'theme.js', 'app.js', 'avatar.js', 'screen-record.js'):
                     asset = STATIC_DIR / asset_name
                     if asset.is_file():
                         asset_times.append(asset.stat().st_mtime)

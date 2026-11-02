@@ -149,6 +149,14 @@ class PlanExecutionMixin:
                     raise RuntimeError(str(tool_result))
                 if step.tool == "tts_speak" and str(tool_result).startswith("TTS_FAILED:"):
                     raise RuntimeError(str(tool_result))
+                if step.tool in {"computer_use", "computer_use_task"}:
+                    try:
+                        desktop_result = json.loads(str(tool_result))
+                    except (TypeError, ValueError):
+                        raise RuntimeError("Desktop tool returned an invalid result")
+                    if not isinstance(desktop_result, dict) or desktop_result.get("ok") is not True:
+                        raise RuntimeError(str(desktop_result.get("error", "Desktop action failed"))
+                                           if isinstance(desktop_result, dict) else "Desktop action failed")
                 if ((step.tool == "mcp_connect" and str(tool_result).startswith("MCP_REFUSED:"))
                         or (step.tool == "adopt_tool_plugin" and str(tool_result).startswith("adoption refused:"))
                         or (step.tool == "adopt_skill" and str(tool_result).startswith((
