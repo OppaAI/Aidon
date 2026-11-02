@@ -147,6 +147,8 @@ class PlanExecutionMixin:
                         and str(tool_result).startswith((
                             "IMAGE_EDIT_FAILED:", "image edit rejected:"))):
                     raise RuntimeError(str(tool_result))
+                if step.tool == "tts_speak" and str(tool_result).startswith("TTS_FAILED:"):
+                    raise RuntimeError(str(tool_result))
                 if ((step.tool == "mcp_connect" and str(tool_result).startswith("MCP_REFUSED:"))
                         or (step.tool == "adopt_tool_plugin" and str(tool_result).startswith("adoption refused:"))
                         or (step.tool == "adopt_skill" and str(tool_result).startswith((

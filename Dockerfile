@@ -30,7 +30,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /opt/aidon
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y bubblewrap ca-certificates \
+    && apt-get install --no-install-recommends -y bubblewrap ca-certificates xdotool \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 aidon \
     && useradd --uid 10001 --gid aidon --create-home \

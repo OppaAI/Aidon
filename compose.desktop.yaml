@@ -1,0 +1,11 @@
+# Opt-in access to the host's X11 desktop for approved computer-use actions.
+services:
+  aidon:
+    environment:
+      DISPLAY: "${DISPLAY:?Run this from your graphical desktop session}"
+      XAUTHORITY: /run/aidon-xauthority
+      AIDON_COMPUTER_DRIVER: x11
+      AIDON_KERNEL: "0"
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - "${XAUTHORITY:?XAUTHORITY must point to your desktop session authorization file}:/run/aidon-xauthority:ro"

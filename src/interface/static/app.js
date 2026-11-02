@@ -704,6 +704,7 @@
   // sentences to Fish. This starts voice output before the final answer
   // event arrives and keeps sentence audio in order.
   const streamSpeech = new Map();
+  const explicitSpeechRuns = new Set();
   let streamSpeechGeneration = 0;
 
   function streamWordCount(text) {
@@ -1742,7 +1743,8 @@
             const hadStreamedVoice = streamSpeech.has(speechId);
             const streamedVoice = hadStreamedVoice &&
               feedStreamSpeech(speechId, "", true, m);
-            if (!streamedVoice) announceImportant(m, e.text, btn);
+            if (!streamedVoice && !explicitSpeechRuns.has(polledRun)) announceImportant(m, e.text, btn);
+            explicitSpeechRuns.delete(polledRun);
           } else if (e.text) {
             // Running commentary: only when AIDON_VOICE_ANNOUNCE=1.
             maybeAnnounce(e.text, btn);
@@ -1751,6 +1753,14 @@
         // stage events are NOT rendered as chat bubbles — the stages bar
         // + status line already show "working · interpret" etc. (one
         // status line, not a bubble per phase)
+        else if (e.kind === "speech-request") {
+          explicitSpeechRuns.add(polledRun);
+          const message = addMsg("aidon", e.text, e.t);
+          const button = playButton(e.text, message);
+          message.appendChild(button);
+          if (ttsAvailable) speak(message, e.text, button).catch(() => {});
+          else showMiddleStatus("Voice is not configured; use the message text.", "warning");
+        }
         else if (e.kind === "approval-request") {
           const m = addMsg("stage-line", "approval requested: " + e.text);
           m.appendChild(playButton("Approval requested. " + e.text));
