@@ -107,8 +107,8 @@ class WebUIWorkflowMixin:
         Body: {"dag": {"nodes": [...]}} (a bare list of nodes, or a
         dag dict with "steps" instead of "nodes", is also accepted).
         layer = longest-path depth from roots via depends_on
-        (roots layer 0); x = layer * 280, y = index within the
-        layer * 90. The horizontal gap keeps the 210px editor nodes
+        (roots layer 0); x = layer * 350, y = index within the
+        layer * 110. The horizontal gap keeps the 270px editor nodes
         and their ports from touching. Entries follow topological order. An invalid
         or missing dag, an empty node id, an unknown dependency,
         or a cycle is 400, never a half-layout.
@@ -145,6 +145,6 @@ class WebUIWorkflowMixin:
             layer = layers[node.id]
             index = per_layer.get(layer, 0)
             per_layer[layer] = index + 1
-            layout.append({"id": node.id, "x": layer * 280,
-                           "y": index * 90, "layer": layer})
+            layout.append({"id": node.id, "x": layer * 350,
+                           "y": index * 110, "layer": layer})
         return 200, {"layout": layout}
