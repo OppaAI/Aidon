@@ -164,9 +164,9 @@ def discover_mcp(queries, get_json=None, limit=8):
             if repo_match:
                 owner, repository = repo_match.groups()
                 option["readme_source"] = (
-                    f"https://github.com/{owner}/{repository}/blob/HEAD/README.md")
+                    f"https://github.com/{owner}/{repository}/blob/main/README.md")
                 option["setup_source"] = (
-                    f"https://github.com/{owner}/{repository}/blob/HEAD/docs/mcp-server.md")
+                    f"https://github.com/{owner}/{repository}/blob/main/docs/mcp-server.md")
             option.update({"auth_env_names": auth_env_names,
                            "auth_headers": auth_headers,
                            "may_use_oauth": may_use_oauth})
