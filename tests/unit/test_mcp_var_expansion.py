@@ -81,7 +81,10 @@ def _mock_urlopen(monkeypatch, seen):
         return _FakeResponse({"jsonrpc": "2.0", "id": 1,
                               "result": {"serverInfo": {"name": "demo"}}})
 
-    monkeypatch.setattr(http_mod.urllib.request, "urlopen", fake_urlopen)
+    # The client uses a no-redirect opener to avoid forwarding credentials
+    # to redirect targets. Stub that opener directly so these tests remain
+    # hermetic while exercising the same transport path as production.
+    monkeypatch.setattr(http_mod._http_opener, "open", fake_urlopen)
 
 
 def test_http_client_var_token_sends_expanded_header(monkeypatch):

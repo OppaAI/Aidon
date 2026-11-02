@@ -114,7 +114,9 @@ def test_mcp_click_lists_only_published_secret_setup_requirements(tmp_path):
     assert status == 200
     brief = result["state"]["brief"]
     assert brief["purpose"] == "Connect my Example account and keep it read-only."
-    assert brief["requirements"] == ["Set API_TOKEN in Aidon's .env before connecting."]
+    assert brief["requirements"] == [
+        "Set API_TOKEN in Aidon's .env; Aidon passes it to the server as API_TOKEN."
+    ]
 
 
 def test_skill_test_backend_rejects_missing_isolation_and_honors_failure(tmp_path):
