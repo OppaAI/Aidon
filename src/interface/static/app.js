@@ -504,6 +504,13 @@
     img.src = dataUrl;
     img.className = "chat-image";
     img.alt = "attached image";
+    // Sent attachments use short-lived object URLs. Revoke them after the
+    // browser has decoded the image; the rendered thumbnail remains visible.
+    if (String(dataUrl).startsWith("blob:")) {
+      const release = () => URL.revokeObjectURL(dataUrl);
+      img.addEventListener("load", release, { once: true });
+      img.addEventListener("error", release, { once: true });
+    }
     d.appendChild(img);
     thread.appendChild(d);
     scrollThreadToLatest();
@@ -2140,6 +2147,14 @@
     // event until the runner has begun, which otherwise leaves the chat
     // visually empty after the composer clears.
     if (!data.lab_answer) addMsg("user", goal);
+    // Keep uploaded photos visible in the conversation after the composer
+    // clears. CSS constrains each image to a 320x240 thumbnail so full-size
+    // camera photos cannot expand the chat layout.
+    imgs.forEach((file) => {
+      if (file && file.type && file.type.startsWith("image/")) {
+        addMsgImage("user", URL.createObjectURL(file));
+      }
+    });
     if (data.conversation_id && window.aidonSetConversation)
       window.aidonSetConversation(data.conversation_id);
     refreshThinkBtn();
