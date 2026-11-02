@@ -667,3 +667,29 @@ Configure the OBS scene, display capture, output folder, and audio before the de
 Screen capture and typing occur on the host desktop, including when requested
 from WhatsApp or Slack. Round screenshots and the action trace are kept in the
 run's computer-screenshots directory. Screenshots may contain visible private data.
+
+### Asking Aidon to create a grocery price tool
+
+Tool Crafting in `/labs` accepts natural language requests and generates Python
+source, offline acceptance tests, and a plugin manifest. No grocery price tool
+ships with this example. Ask Aidon to research representative product pages
+before generating a parser; retailer pages and store availability can change.
+
+Example request:
+
+> Create a Python tool to fetch grocery prices from public Safeway, Real
+> Canadian Superstore, and Save-On-Foods product pages for my selected Vancouver
+> stores. Ask me for store locations and sample product URLs first. Research
+> the actual page data before implementing each retailer. Return product name,
+> package size, CAD price, price type, store, source URL, and retrieval time.
+> Report unavailable prices explicitly. Test with offline page fixtures, then
+> show me the Python source and test results for approval.
+
+Generated context plugins can use host-scoped HTTP capabilities through
+`ctx.http_get` / `ctx.http_post`; sandbox plugins can declare `network` for
+stdlib HTTP. Existing scanning, offline acceptance tests, adoption approval,
+and runtime capability controls apply. Plain HTTP does not render JavaScript;
+blocked pages or sources requiring a browser must be reported rather than
+presented as working integrations. Successful offline tests prove parsing of
+fixtures; a separately authorized live lookup is needed to demonstrate current
+retailer access and the selected store's actual price.
