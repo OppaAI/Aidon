@@ -533,6 +533,45 @@ class WebUIServer(WebUIRunMixin, WebUILabMixin, WebUIMessagingMixin, WebUISettin
                             "size": path.stat().st_size})
         return out
 
+    def handle_artifacts_list(self) -> dict:
+        """List files imported through chat, without mixing them into Library."""
+        from urllib.parse import quote
+        import mimetypes
+
+        home = Path(self.home).resolve()
+        root = (home / "library" / "uploads").resolve()
+        if not root.is_dir():
+            return {"files": []}
+        rows = []
+        for path in root.rglob("*"):
+            try:
+                resolved = path.resolve()
+                if not path.is_file() or not resolved.is_relative_to(root):
+                    continue
+                relative = resolved.relative_to(home).as_posix()
+                name = path.name
+                # Chat uploads carry a content hash for collision safety;
+                # show the original filename in the list.
+                if (len(name) > 13 and name[12] == "-" and
+                        all(c in "0123456789abcdef" for c in name[:12].lower())):
+                    name = name[13:]
+                mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+                stat = resolved.stat()
+                rows.append({
+                    "name": name,
+                    "path": relative,
+                    "size": stat.st_size,
+                    "mime": mime,
+                    "kind": "image" if mime.startswith("image/") else "file",
+                    "created_at": stat.st_mtime,
+                    "url": "/api/files/" + "/".join(
+                        quote(part, safe="") for part in relative.split("/")),
+                })
+            except (OSError, ValueError):
+                continue
+        rows.sort(key=lambda row: (row["created_at"], row["name"]), reverse=True)
+        return {"files": rows}
+
     def _avatar_path(self) -> Path | None:
         import os
         candidates = []

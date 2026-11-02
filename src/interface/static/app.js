@@ -117,12 +117,23 @@
          .replace(/(^|[\s(])\*([^*\n]+)\*(?=$|[\s.,!?)\]])/g, "$1<em>$2</em>")
          .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s.,!?)\]])/g, "$1<em>$2</em>")
          .replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
+    // Generated image deliverables can be previewed inline using the same-
+    // origin file route as artifact links. Restrict image embeds to
+    // local file URLs; arbitrary remote Markdown images are not loaded.
+    t = t.replace(/!\[([^\]\n]*)\]\((file:\/\/[^\s)]+)\)/g,
+        '<img class="chat-image" alt="$1" src="$2">');
     t = t.replace(/\[([^\]\n]+)\]\(((?:https?:\/\/|file:\/\/|\/(?!\/))[^\s)]+)\)/g,
         '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
     // A file:// link is not clickable from an http page in Chrome, so
     // the WebUI serves the file itself: same-origin, always clickable.
     t = t.replace(/href="file:\/\/([^"]+)"/g,
         (m, p) => 'href="/api/files/' + p.replace(/^\/+/, "").split("/")
+          .map((part) => {
+            try { return encodeURIComponent(decodeURIComponent(part)); }
+            catch (_) { return encodeURIComponent(part); }
+          }).join("/") + '"');
+    t = t.replace(/src="file:\/\/([^"]+)"/g,
+        (m, p) => 'src="/api/files/' + p.replace(/^\/+/, "").split("/")
           .map((part) => {
             try { return encodeURIComponent(decodeURIComponent(part)); }
             catch (_) { return encodeURIComponent(part); }
@@ -1834,6 +1845,24 @@
   let pendingImages = [];  // image File objects
   let pendingFiles = [];  // document File objects
   const imgPreview = document.getElementById("img-preview");
+  function queueAttachments(fileList) {
+    let added = 0;
+    for (const f of Array.from(fileList || [])) {
+      if (pendingImages.length + pendingFiles.length >= 3) {
+        showMiddleStatus("Only 3 attachments can be added at a time", "error");
+        break;
+      }
+      if (f.size > 25 * 1024 * 1024) {
+        showMiddleStatus(f.name + " is larger than the 25 MiB attachment limit", "error");
+        continue;
+      }
+      if (f.type.startsWith("image/")) pendingImages.push(f);
+      else pendingFiles.push(f);
+      added++;
+    }
+    refreshPreview();
+    return added;
+  }
   function refreshPreview() {
     imgPreview.innerHTML = "";
     imgPreview.hidden = pendingImages.length === 0 && pendingFiles.length === 0;
@@ -1881,24 +1910,43 @@
     inp.accept = "image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.tsv,.ppt,.pptx,.txt,.md,.json,.html,.htm,.epub,.rtf,.odt,.ods,.py,.js,.ts,.tsx,.jsx,.mjs,.java,.c,.h,.cpp,.hpp,.go,.rs,.rb,.php,.sh,.yaml,.yml,.toml,.xml,.zip";
     inp.multiple = true;
     inp.addEventListener("change", () => {
-      for (const f of inp.files) {
-        if (pendingImages.length + pendingFiles.length >= 3) break;
-        if (f.size > 25 * 1024 * 1024) {
-          showMiddleStatus(f.name + " is larger than the 25 MiB attachment limit", "error");
-          continue;
-        }
-        if (f.type.startsWith("image/")) {
-          pendingImages.push(f);
-        } else {
-          pendingFiles.push(f);
-        }
-      }
-      refreshPreview();
+      queueAttachments(inp.files);
     });
     inp.click();
   }
   document.getElementById("attach-btn").addEventListener("click",
     () => pickImages());
+
+  // Desktop files can be dropped anywhere in the chat column. Keep the
+  // same limits and preview/removal controls as the paperclip picker.
+  const chatDropZone = document.getElementById("center");
+  let fileDragDepth = 0;
+  const hasDraggedFiles = (event) =>
+    Array.from(event.dataTransfer?.types || []).includes("Files");
+  chatDropZone.addEventListener("dragenter", (event) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    fileDragDepth++;
+    chatDropZone.classList.add("drag-over");
+  });
+  chatDropZone.addEventListener("dragover", (event) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  });
+  chatDropZone.addEventListener("dragleave", (event) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    fileDragDepth = Math.max(0, fileDragDepth - 1);
+    if (!fileDragDepth) chatDropZone.classList.remove("drag-over");
+  });
+  chatDropZone.addEventListener("drop", (event) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    fileDragDepth = 0;
+    chatDropZone.classList.remove("drag-over");
+    queueAttachments(event.dataTransfer.files);
+  });
 
   // ---- take photo: real webcam capture (getUserMedia) -------------------
   // The camera button is disabled up front when the device has no webcam
@@ -2745,6 +2793,7 @@
     document.getElementById("view-" + b.dataset.view).classList.add("active");
     if (b.dataset.view === "goals") loadGoals();
     if (b.dataset.view === "chat") loadHistory();
+    if (b.dataset.view === "artifacts") loadArtifacts();
     if (b.dataset.view === "library") loadLibrary();
     if (b.dataset.view === "ideas") loadIdeas();
   }));
@@ -3170,7 +3219,7 @@
     });
   }
 
-  // ---- library: every imported file + run output ----
+  // ---- library: saved images and outputs ----
   async function loadLibrary() {
     const list = document.getElementById("library-list");
     let items = [];
@@ -3180,7 +3229,7 @@
     } catch (e) { items = []; }
     if (!items.length) {
       list.innerHTML = '<div class="empty-note">Nothing here yet.<br>' +
-        "Attach a file or ask Aidon to make one.</div>";
+        "Generated images and saved outputs will appear here.</div>";
       return;
     }
     list.innerHTML = "";
@@ -3213,6 +3262,54 @@
       list.appendChild(d);
     });
   }
+
+  // ---- artifacts: files attached or imported through chat ----
+  async function loadArtifacts() {
+    const list = document.getElementById("artifacts-list");
+    let items = [];
+    try {
+      const data = await (await fetch("/api/artifacts")).json();
+      items = Array.isArray(data) ? data : (data.files || []);
+    } catch (e) { items = []; }
+    if (!items.length) {
+      list.innerHTML = '<div class="empty-note">No imported files yet.<br>' +
+        "Attach an image or file in Chat and it will appear here.</div>";
+      return;
+    }
+    list.innerHTML = "";
+    items.forEach((a) => {
+      const d = document.createElement("div");
+      d.className = "lib-item";
+      const visual = a.kind === "image"
+        ? '<img class="lib-thumb" src="' + esc(a.url) + '" alt="">'
+        : '<span class="lib-ico">📎</span>';
+      const date = a.created_at
+        ? fmtDate(new Date(a.created_at * 1000).toISOString()) : "";
+      const meta = [a.kind === "image" ? "Imported image" : "Imported file",
+        fmtSize(a.size), date].filter(Boolean).join(" · ");
+      d.innerHTML = visual + "<div><div class=\"lib-name\">" + esc(a.name) +
+        '</div><div class="lib-meta">' + esc(meta) + "</div></div>";
+      d.title = "Click to attach " + a.name + " to the chat composer";
+      d.addEventListener("click", async () => {
+        try {
+          const response = await fetch(a.url);
+          if (!response.ok) throw new Error("file unavailable (HTTP " + response.status + ")");
+          const blob = await response.blob();
+          const file = new File([blob], a.name, {
+            type: a.mime || blob.type || "application/octet-stream",
+          });
+          if (queueAttachments([file]))
+            showMiddleStatus("Added " + a.name + " to chat attachments");
+        } catch (error) {
+          showMiddleStatus("Could not attach " + a.name + ": " +
+            (error && error.message ? error.message : error), "error");
+        }
+      });
+      list.appendChild(d);
+    });
+  }
+
+  document.getElementById("artifacts-refresh")?.addEventListener("click", loadArtifacts);
 
   // initial load
   loadHistory();

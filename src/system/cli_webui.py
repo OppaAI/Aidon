@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
+from pathlib import Path
 
 from .runtime import (
     _make_governor,
@@ -13,6 +14,36 @@ from .runtime import (
     _startup_style,
     make_deep_researcher,
 )
+
+
+def _archive_generated_images(home, workdir, files, conversation_id: str,
+                             run_id: str, goal: str) -> list[str]:
+    """Copy successful image deliverables into Aidon's Library."""
+    from ..memory.library import Library
+
+    home = Path(home).resolve()
+    workdir = Path(workdir).resolve()
+    if not workdir.is_relative_to(home):
+        return ["run workspace is outside Aidon's home"]
+    library = Library(home)
+    errors = []
+    for name in files or []:
+        candidate = Path(name)
+        candidate = candidate if candidate.is_absolute() else workdir / candidate
+        try:
+            source = candidate.resolve()
+            if (source.suffix.lower() not in
+                    {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}):
+                continue
+            if not source.is_file() or not source.is_relative_to(workdir):
+                continue
+            description = f"Generated image from run {run_id}: {goal[:240]}"
+            library.add_file(source, kind="output",
+                             conversation_id=conversation_id,
+                             description=description)
+        except Exception as exc:
+            errors.append(f"{candidate.name}: {type(exc).__name__}")
+    return errors
 
 
 def run_webui(args, config, memory, client, model_router=None) -> int:
@@ -518,7 +549,11 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         route_callback = event.payload.get("_route_callback")
         if callable(route_callback):
             route_callback(runner.last_route)
-        run_control.set_status(run_id, report.status)
+        _library_archive_errors = []
+        if report.status == "done" and report.files:
+            _library_archive_errors = _archive_generated_images(
+                config.home, run_sandbox.workdir, report.files,
+                str(event.conversation_id or ""), run_id, event.goal)
         if workspace_store is not None and report.status == "done":
             plan = report.plan
             workflow = {
@@ -643,6 +678,7 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                 _workspace = _ArtifactPath(run_sandbox.workdir).resolve()
                 _home = _ArtifactPath(config.home).resolve()
                 _links = []
+                _previews = []
                 for _name in report.files:
                     _candidate = (_ArtifactPath(_name) if _ArtifactPath(_name).is_absolute()
                                   else _workspace / str(_name))
@@ -658,16 +694,25 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                             if _resolved.suffix.lower() == ".html":
                                 _label += " (download)"
                             _links.append(f"- [{_label}](file://{_url_path})")
+                            if _resolved.suffix.lower() in {
+                                    ".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+                                _previews.append(
+                                    f"![{_resolved.name}](file://{_url_path})")
                     except (OSError, ValueError):
                         continue
                 if _links:
                     _final_text += "\n\nFiles in this run's workspace:\n" + "\n".join(_links)
+                if _previews:
+                    _final_text += "\n\n" + "\n\n".join(_previews)
             # The WebUI recognizes the stopwatch line as the start of
             # compact message metadata. Keep all body content (including
             # deliverable links) before it so links remain visible and
             # clickable instead of being escaped into the tiny stats row.
             if _stats_line:
                 _final_text += "\n" + _stats_line
+            if _library_archive_errors:
+                _final_text += ("\n\nSome generated images could not be added to "
+                                "Library: " + ", ".join(_library_archive_errors))
             _surface_reply(_final_text, files=report.files)
         # A run that started on Slack or WhatsApp gets its
         # deliverables as uploads on that same surface, after
@@ -702,6 +747,11 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                                        ("slack", str(_slack_target)))
                 except Exception:
                     pass
+        # Keep the run pollable until its final reply (including artifact
+        # links) has been added to the event stream. The WebUI stops polling
+        # as soon as it observes a terminal status, so publishing this status
+        # immediately after runner.run() can race ahead of _surface_reply().
+        run_control.set_status(run_id, report.status)
 
     dispatcher.register("webui", _goal_handler)
     dispatcher.register("whatsapp", _goal_handler)

@@ -151,6 +151,8 @@ def make_handler(server):
                 if not items:
                     items = server._library_files()
                 self._send_json(200, {'files': items})
+            elif parsed.path == '/api/artifacts':
+                self._send_json(200, server.handle_artifacts_list())
             elif parsed.path == '/api/approvals':
                 self._send_json(200, {'cards': server.webui_gate.pending_cards()})
             elif parsed.path == '/api/preapprovals':
@@ -456,6 +458,7 @@ def make_handler(server):
                 return
             if parsed.path == '/api/library/upload':
                 import base64 as _b64
+                import hashlib as _hashlib
                 name = str(body.get('name', 'upload.bin'))
                 safe = ''.join((c for c in name if c.isalnum() or c in ('-', '_', '.'))) or 'upload.bin'
                 try:
@@ -463,12 +466,17 @@ def make_handler(server):
                 except Exception:
                     self._send_json(400, {'error': 'bad base64'})
                     return
-                tmp = server.home / 'library' / 'uploads' / safe
+                digest = _hashlib.sha256(data).hexdigest()[:12]
+                tmp = server.home / 'library' / 'uploads' / f'{digest}-{safe}'
                 tmp.parent.mkdir(parents=True, exist_ok=True)
                 tmp.write_bytes(data)
-                from ..memory.library import Library
-                saved = Library(server.home).add_file(tmp, kind='file', description='WebUI upload')
-                self._send_json(200, {'id': saved['id'], 'name': safe})
+                from urllib.parse import quote as _quote
+                _relative = str(tmp.relative_to(server.home))
+                self._send_json(200, {
+                    'name': safe,
+                    'path': _relative,
+                    'url': '/api/files/' + _quote(_relative, safe='/'),
+                })
             elif parsed.path == '/api/settings':
                 if isinstance(body.get('settings'), dict):
                     updated = []

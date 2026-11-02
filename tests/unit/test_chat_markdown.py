@@ -29,6 +29,18 @@ def test_chat_links_and_artifact_paths_render_without_control_characters():
     assert not any(ord(char) < 32 and char not in "\n\r\t" for char in html)
 
 
+def test_local_image_artifact_renders_as_bounded_chat_preview():
+    html = render("![edited_cafe.jpg](file://workspace/run/edited_cafe.jpg)")
+    assert '<img class="chat-image" alt="edited_cafe.jpg"' in html
+    assert 'src="/api/files/workspace/run/edited_cafe.jpg"' in html
+    assert "file://" not in html
+
+
+def test_remote_markdown_images_are_not_loaded():
+    html = render("![tracking pixel](https://example.com/pixel.png)")
+    assert "<img " not in html
+
+
 def test_chat_renderer_escapes_html_and_refuses_unsafe_link_schemes():
     html = render('<script>alert(1)</script> [bad](javascript:alert) [bad](//evil.test)')
     assert "<script>" not in html

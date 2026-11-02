@@ -94,7 +94,8 @@ class WebUIDataMixin:
         if not resolved.is_relative_to(home):
             return 403, "application/json", b'{"error": "outside home"}'
         relative = resolved.relative_to(home)
-        allowed_roots = (home / "workspace", home / "library" / "files", home / "images")
+        allowed_roots = (home / "workspace", home / "library" / "files",
+                         home / "library" / "uploads", home / "images")
         if (any(part.startswith(".") for part in relative.parts)
                 or resolved.suffix.lower() in (".db", ".sqlite", ".sqlite3", ".pem", ".key")
                 or not any(resolved.is_relative_to(root.resolve()) for root in allowed_roots)):

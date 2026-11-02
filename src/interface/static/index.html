@@ -45,6 +45,9 @@
       <button class="nav-btn" data-view="goals" title="Goals">
         <span class="nav-ico">🎯</span><span class="nav-label">Goals</span>
       </button>
+      <button class="nav-btn" data-view="artifacts" title="Artifacts — files imported into chat">
+        <span class="nav-ico">🗂️</span><span class="nav-label">Artifacts</span>
+      </button>
       <button class="nav-btn" data-view="library" title="Library">
         <span class="nav-ico">📚</span><span class="nav-label">Library</span>
       </button>
@@ -98,10 +101,18 @@
         <div class="left-head"><span>Goals</span></div>
         <div id="goals-list"></div>
       </div>
+      <div class="left-view" id="view-artifacts">
+        <div class="left-head">
+          <span>Artifacts</span>
+          <button id="artifacts-refresh" class="mini-btn" title="Refresh imported files">↻</button>
+          <span class="left-sub">Images and files attached to chat</span>
+        </div>
+        <div id="artifacts-list"></div>
+      </div>
       <div class="left-view" id="view-library">
         <div class="left-head">
           <span>Library</span>
-          <span class="left-sub">files Aidon keeps — imports &amp; outputs, linked to memory</span>
+          <span class="left-sub">Generated images and other files Aidon keeps</span>
         </div>
         <div id="library-list"></div>
       </div>
