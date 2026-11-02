@@ -80,11 +80,8 @@ def builtin_image_edit_covers(goal: str, tool_names) -> bool:
             and is_image_edit_request(goal))
 
 
-def builtin_computer_use_covers(goal: str, tool_names) -> bool:
-    """Don't reopen a missing-tool interview when desktop controls exist."""
-    names = set(tool_names or ())
-    if not names.intersection({"computer_use", "computer_use_task"}):
-        return False
+def is_desktop_interaction_goal(goal: str) -> bool:
+    """Recognize requests that require operating a visible desktop UI."""
     low = str(goal or "").lower()
     return any(term in low for term in (
         "notepad", "text editor", "mouse", "keyboard", "on my screen",
@@ -92,6 +89,13 @@ def builtin_computer_use_covers(goal: str, tool_names) -> bool:
         "type in the", "click on", "click the", "computer use",
         "control my computer",
     )) or bool(re.search(r"\b(?:on|in) (?:my|the) (?:ubuntu |linux )?desktop\b", low))
+
+
+def builtin_computer_use_covers(goal: str, tool_names) -> bool:
+    """Don't reopen a missing-tool interview when desktop controls exist."""
+    names = set(tool_names or ())
+    return (bool(names.intersection({"computer_use", "computer_use_task"}))
+            and is_desktop_interaction_goal(goal))
 
 STATUS_CRITERIA = {
     "covered": "Every capability the goal needs is in the inventory.",

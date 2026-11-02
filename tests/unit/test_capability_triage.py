@@ -33,6 +33,22 @@ def test_desktop_goal_is_covered_when_computer_use_is_registered():
         ["computer_use_task"])
 
 
+def test_desktop_plan_cannot_turn_into_file_deliverables():
+    from src.agentic.planning import PlanningMixin
+    runner = SimpleNamespace(
+        kernel_mode=False,
+        extra_tools={"computer_use": object(), "computer_use_task": object()},
+        memory=None,
+        _memory_context=lambda _goal: "",
+    )
+    plan = PlanningMixin._plan(
+        runner,
+        "Open Notepad on my Ubuntu desktop and type a note about me.")
+    assert [step["tool"] for step in plan.steps] == ["computer_use_task"]
+    assert plan.steps[0]["args"]["max_actions"] == 20
+    assert plan.deliverables == []
+
+
 class _StubClef:
     def __init__(self, choice, confidence):
         self.choice = choice
