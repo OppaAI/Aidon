@@ -20,19 +20,24 @@ class _Gate:
         return SimpleNamespace(verdict="approved")
 
 
-def _setup(tmp_path, monkeypatch):
+def _setup(tmp_path, monkeypatch, *, optional_tools=True, image_calls=None):
     home = tmp_path / "home"
     uploads = home / "library" / "uploads"
     uploads.mkdir(parents=True)
     photo = uploads / "face.png"
     photo.write_bytes(b"\x89PNGface")
-    monkeypatch.setattr(image_gen, "edit_image_files", lambda *a, **k: b"edited-bytes")
+    def fake_edit(*args, **kwargs):
+        if image_calls is not None:
+            image_calls.append(kwargs)
+        return b"edited-bytes"
+
+    monkeypatch.setattr(image_gen, "edit_image_files", fake_edit)
     config = Config(home=home)
     config.api_key = "test-key"
     config.api_base = "https://example.com/v1"
     gate = _Gate()
     tools = _goal_extra_tools(config, home / "workspace", gate=gate,
-                              optional_tools=True)
+                              optional_tools=optional_tools)
     return config, gate, photo, tools
 
 
@@ -46,6 +51,18 @@ def test_edit_image_saves_under_home_images(tmp_path, monkeypatch):
     assert len(gate.calls) == 1
     assert gate.calls[0]["kind"] == "live"
     assert "spend image credits" in gate.calls[0]["body"]
+
+
+def test_edit_image_available_with_optional_tools_disabled_and_still_approved(
+        tmp_path, monkeypatch):
+    calls = []
+    config, gate, photo, tools = _setup(
+        tmp_path, monkeypatch, optional_tools=False, image_calls=calls)
+    config.image_model = "muse-image-1.0"
+    result = tools["edit_image"]("describe the attached image", image=str(photo))
+    assert result.startswith("IMAGE_SAVED: ")
+    assert gate.calls[0]["kind"] == "live"
+    assert calls[0]["model"] == "muse-image-1.0"
 
 
 def test_edit_image_accepts_upload_basename(tmp_path, monkeypatch):

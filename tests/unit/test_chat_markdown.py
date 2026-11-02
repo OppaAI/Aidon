@@ -40,3 +40,12 @@ def test_chat_code_and_tables_stay_separate():
     html = render('```python\nprint("<tag>")\n```\n\n| A | B |\n|---|---|\n| x | y |')
     assert '<pre><code>print(&quot;&lt;tag&gt;&quot;)</code></pre>' in html
     assert '<table class="md-table">' in html
+
+
+def test_new_chat_resets_stage_bar_and_status():
+    source = (Path(__file__).parents[2] / "src/interface/static/app.js").read_text()
+    start = source.index('document.getElementById("new-chat").addEventListener')
+    end = source.index('\n  renderStages("interpret");', start)
+    handler = source[start:end]
+    assert 'renderStages("interpret")' in handler
+    assert 'setStatus("idle", "ready")' in handler

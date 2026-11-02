@@ -2371,6 +2371,11 @@
     currentRun = null;
     // a new chat starts a fresh persistent conversation on first send
     if (window.aidonSetConversation) window.aidonSetConversation("");
+    renderStages("interpret");
+    setStatus("idle", "ready");
+    routeShownFor = null;
+    lastRoute = null;
+    lastTracePhase = null;
     approvalSlot.innerHTML = "";
     cardShownFor = null;
     thread.innerHTML = "";

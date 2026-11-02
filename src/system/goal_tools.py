@@ -737,9 +737,15 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         optional_tools = bool(getattr(config, "optional_tools", True))
     if not optional_tools:
         from ..agentic.kernel import CORE_LADDER_TOOLS
+        # Image editing is a core, user-requested capability rather than
+        # an ambient optional tool. Its host-side API call remains gated by
+        # a fresh live approval because it spends credits and sends images.
+        ALWAYS_AVAILABLE_TOOLS = {"edit_image"}
         # Keep the same dictionary captured by mcp_connect and disconnect:
         # they register and remove tools dynamically during this goal.
         for name in list(tools):
-            if name not in CORE_LADDER_TOOLS and name not in ("read_file", "write_file"):
+            if (name not in CORE_LADDER_TOOLS
+                    and name not in ("read_file", "write_file")
+                    and name not in ALWAYS_AVAILABLE_TOOLS):
                 del tools[name]
     return tools

@@ -13,6 +13,7 @@ CORE = set(CORE_LADDER_TOOLS) | {"read_file", "write_file"}
 OPTIONAL = {"youtube_upload", "threads_publish",
             "generate_document"}
 CONDITIONAL = {"computer_use", "computer_use_task"}
+ALWAYS_AVAILABLE = {"edit_image"}
 
 
 def _tools(tmp_path, **kwargs):
@@ -35,8 +36,9 @@ def test_on_shows_full_set(tmp_path):
 def test_off_shows_core_only(tmp_path):
     on = _tools(tmp_path, optional_tools=True)
     off = _tools(tmp_path, optional_tools=False)
-    assert set(off) <= CORE
+    assert set(off) <= (CORE | ALWAYS_AVAILABLE)
     assert set(off) >= (set(on) & CORE)
+    assert ALWAYS_AVAILABLE <= set(off)
     for name in OPTIONAL:
         assert name not in off, name
 
