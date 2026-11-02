@@ -134,6 +134,7 @@ def test_edit_image_accepts_upload_basename(tmp_path, monkeypatch):
     assert result.startswith("IMAGE_SAVED: ")
     saved = Path(result.split(": ", 1)[1])
     assert saved.is_relative_to(workdir)
+    assert saved.name.startswith("aidon-")
 
 
 def test_edit_image_maps_legacy_upload_path_only_to_managed_copy(
@@ -147,7 +148,6 @@ def test_edit_image_maps_legacy_upload_path_only_to_managed_copy(
     assert Path(result.split(": ", 1)[1]).is_relative_to(workdir)
     assert len(gate.calls) == 1
     assert gate.calls[0]["kind"] == "live"
-    assert saved.name.startswith("aidon-")
 
 
 def test_edit_image_refuses_unknown_reference(tmp_path, monkeypatch):
