@@ -1,202 +1,164 @@
 "use strict";
 
-try {
-  document.documentElement.setAttribute("data-theme", localStorage.getItem("aidon-theme") || "light");
-} catch (_) { /* keep theme default */ }
-
-const LABS = {
-  tool: {
-    title: "Tool Crafting Lab",
-    intro: "Interview me step by step to define a tool I want Aidon to create. Clarify the actual task and expected result, input/output, whether this should use an AI model or a named software/service, credentials and access boundaries, where it should run, and how to test it. For image editing, first ask whether I want an AI image model (ask which one) or editing software (ask which software); do not choose silently. Ask one concise question at a time and wait for my answer. If I request suggestions or online research, compare concrete options and distinguish free, paid, and open-source choices with sources. Do not write or adopt anything during this interview. When enough is known, give a clearly labeled TOOL SPEC with purpose, interface, dependencies, capabilities, safety boundaries, and acceptance tests, then ask me to approve or revise it."
-  },
-  skill: {
-    title: "Skill Learning Lab",
-    intro: "Interview me step by step about a repeatable workflow I want Aidon to learn. Clarify when to use it, expected outcome, my preferred process, examples, exceptions, safety boundaries, and how success is checked. Ask one concise question at a time. Research conventions or sources only if I ask. Do not create or import a skill during this interview. When enough is known, give a clearly labeled SKILL SPEC and a Claude-style SKILL.md draft: YAML front matter with name and description, concise instructions, and a ## Tests section with safe, repeatable checks required by Aidon's library. Ask me to approve or revise it."
-  },
-  mcp: {
-    title: "MCP Connection Lab",
-    intro: "Interview me step by step about what external workflow or service I want Aidon to use. Clarify the task, data involved, account/region constraints, and whether I prefer local/open-source, free, or paid options. Ask one concise question at a time. Research concrete MCP servers and compare fit, pricing, open-source status, publisher/source, and exact connection method; cite sources and never invent a server command or URL. Do not connect anything during the interview. When enough is known, produce a clearly labeled MCP CONNECTION SPEC with the chosen server, exact stdio command+args or HTTP URL, environment variable names (never secret values), requested tools, permissions, and approval risks. Ask me to approve or revise it."
-  }
-};
-
+const KINDS = ["tool", "skill", "mcp"];
+const state = {};
+const revisions = {};
+const busy = {};
+const params = new URLSearchParams(location.search);
 function esc(value) {
   return String(value == null ? "" : value).replace(/[&<>"']/g, ch =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
 }
-function newConversationId() {
-  if (window.crypto && window.crypto.randomUUID) {
-    return window.crypto.randomUUID().replace(/-/g, "");
-  }
-  return Array.from({ length: 32 }, () =>
-    Math.floor(Math.random() * 16).toString(16)).join("");
+function fresh() {
+  return { id: crypto.randomUUID().replace(/-/g, ""), turns: [], brief: null, options: [] };
 }
-function stateKey(kind) { return "aidon-lab-" + kind; }
-function readState(kind) {
+function cache(kind) {
+  localStorage.setItem("aidon-lab-" + kind, JSON.stringify(state[kind]));
+}
+function safeLink(url, label) {
   try {
-    const value = JSON.parse(localStorage.getItem(stateKey(kind)) || "null");
-    if (value && Array.isArray(value.turns)) return { created: false, ...value };
-  } catch (_) { /* start a fresh session */ }
-  return { id: "", created: false, started: false, turns: [] };
+    const parsed = new URL(url);
+    if (parsed.protocol === "https:" || parsed.protocol === "http:")
+      return '<a href="' + esc(parsed.href) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + '</a>';
+  } catch (_) { /* no link for an invalid address */ }
+  return esc(label);
 }
-const state = Object.fromEntries(Object.keys(LABS).map(k => [k, readState(k)]));
-const revisions = { tool: 0, skill: 0, mcp: 0 };
-const skillSource = new URLSearchParams(location.search).get("source_run") || "";
-const skillSourceConversation = new URLSearchParams(location.search).get("conversation_id") || "";
-let verifiedSkillSource = null;
-
 function render(kind) {
+  const current = state[kind] || fresh();
   const box = document.getElementById("chat-" + kind);
-  box.innerHTML = state[kind].turns.map(turn =>
-    '<div class="lab-msg ' + (turn.role === "user" ? "user" : "assistant") + '">' + esc(turn.text) + "</div>").join("");
+  box.innerHTML = current.turns.map(turn =>
+    '<div class="lab-msg ' + (turn.role === "user" ? "user" : "assistant") + '">' + esc(turn.text) + '</div>').join("");
+  if (current.brief) {
+    const brief = document.createElement("details");
+    brief.className = "lab-brief";
+    brief.open = true;
+    const summary = document.createElement("summary");
+    summary.textContent = "Brief to approve";
+    const pre = document.createElement("pre");
+    pre.textContent = JSON.stringify(current.brief, null, 2);
+    brief.append(summary, pre);
+    box.appendChild(brief);
+  }
   box.scrollTop = box.scrollHeight;
-  const marker = { tool: /TOOL SPEC/i, skill: /SKILL SPEC/i,
-                   mcp: /MCP CONNECTION SPEC/i }[kind];
-  const ready = state[kind].turns.some(turn => turn.role === "assistant" && marker.test(turn.text));
-  const sourceReady = kind !== "skill" || Boolean(verifiedSkillSource);
-  document.querySelector('[data-brief="' + kind + '"]').disabled = !ready || !sourceReady;
+  const options = document.getElementById("mcp-options");
+  if (kind === "mcp") {
+    options.innerHTML = (current.options || []).map(option => {
+      const connection = option.connection;
+      const address = connection ? (connection.url || [connection.command, ...(connection.args || [])].join(" ")) : "Connection needs additional setup";
+      return '<article class="mcp-option"><strong>' + esc(option.title) + '</strong>'
+        + '<p>' + esc(option.description) + '</p><p>Publisher: ' + esc(option.author)
+        + ' · Version: ' + esc(option.version) + '</p><code>' + esc(address) + '</code><p>'
+        + 'License: ' + esc(option.license) + ' · GitHub stars: ' + esc(option.stars == null ? "Unavailable" : option.stars)
+        + '</p><p>Pricing: ' + esc(option.pricing) + '</p><p>Reviews: ' + esc(option.reviews) + '</p><p>'
+        + safeLink(option.source, "Registry record") + ' · ' + safeLink(option.repository, "Repository")
+        + (option.website ? ' · ' + safeLink(option.website, "Publisher website") : '') + '</p>'
+        + '<button data-choice="' + esc(option.id) + '"' + ((!connection || busy.mcp) ? ' disabled' : '') + '>Use this server</button></article>';
+    }).join("");
+  }
+  document.querySelector('[data-brief="' + kind + '"]').disabled = busy[kind] || !current.brief || Boolean(current.build);
+  document.querySelector('[data-send="' + kind + '"]').disabled = Boolean(busy[kind]);
+  document.querySelector('[data-reset="' + kind + '"]').disabled = Boolean(busy[kind]);
+  if (current.build) showBuild(kind, current.build);
 }
-async function save(kind) {
-  localStorage.setItem(stateKey(kind), JSON.stringify(state[kind]));
-  const response = await fetch("/api/lab-session", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind, conversation_id: state[kind].id,
-      state: state[kind], revision: revisions[kind] })
-  });
+function showBuild(kind, result) {
+  const status = document.getElementById("status-" + kind);
+  const url = result.url || ("/?conversation_id=" + encodeURIComponent(result.conversation_id) + "&run_id=" + encodeURIComponent(result.run_id));
+  status.innerHTML = 'Workflow started. <a href="' + esc(url) + '" target="_blank" rel="noopener">Open this workflow and its approvals →</a>';
+}
+async function post(url, body) {
+  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Could not save the lab session");
-  revisions[kind] = data.revision;
+  if (!response.ok || data.error) throw new Error(data.error || "HTTP " + response.status);
+  return data;
 }
-
-async function send(kind) {
+async function send(kind, choice="") {
+  if (busy[kind]) return;
   const input = document.getElementById("input-" + kind);
+  const option = choice && (state[kind].options || []).find(x => x.id === choice);
+  const message = option ? "Use " + option.title + " for the workflow we discussed." : input.value.trim();
+  if (!message) return;
   const status = document.getElementById("status-" + kind);
-  const button = document.querySelector('[data-send="' + kind + '"]');
-  const text = input.value.trim();
-  if (!text) return;
-  const research = document.getElementById("research-" + kind).checked;
-  state[kind].turns.push({ role: "user", text });
-  if (!state[kind].id) state[kind].id = newConversationId();
-  render(kind); input.value = ""; button.disabled = true;
-  status.textContent = "Aidon is thinking…";
-  const message = (state[kind].started ? "" : "[" + LABS[kind].title + "] " + LABS[kind].intro + "\n\n") + text;
+  busy[kind] = true;
+  render(kind);
+  status.textContent = kind === "mcp" && !choice ? "Searching published MCP servers and official sources…" : "Aidon is preparing the next question or brief…";
   try {
-    await save(kind);
-    if (!state[kind].created) {
-      const created = await fetch("/api/conversations", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: state[kind].id })
-      });
-      const record = await created.json();
-      if (!created.ok || !record.id) throw new Error(record.error || "Could not create lab conversation");
-      state[kind].id = record.id;
-      state[kind].created = true;
-      await save(kind);
-    }
-    const response = await fetch("/api/chat", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, conversation_id: state[kind].id, force_web: research })
+    const data = await post("/api/labs/message", {
+      kind, message, choice, conversation_id: state[kind].id,
+      revision: revisions[kind], research: document.getElementById("research-" + kind).checked
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "HTTP " + response.status);
-    const reply = data.reply || "Aidon did not return a response.";
-    state[kind].started = true;
-    state[kind].turns.push({ role: "assistant", text: reply });
-    await save(kind); render(kind); status.textContent = "";
+    state[kind] = data.state;
+    revisions[kind] = data.revision;
+    cache(kind);
+    if (!choice) input.value = "";
+    status.textContent = (data.warnings || []).join(" ");
   } catch (error) {
-    status.textContent = "Could not reach Aidon: " + error.message;
-  } finally { button.disabled = false; }
+    status.textContent = error.message;
+  } finally { busy[kind] = false; render(kind); }
 }
-
-function startFromBrief(kind) {
-  const turns = state[kind].turns;
-  if (!turns.length) {
-    document.getElementById("status-" + kind).textContent = "Tell Aidon what you want first.";
-    return;
-  }
-  const marker = { tool: /TOOL SPEC/i, skill: /SKILL SPEC/i,
-                   mcp: /MCP CONNECTION SPEC/i }[kind];
-  if (!turns.some(turn => turn.role === "assistant" && marker.test(turn.text))) {
-    document.getElementById("status-" + kind).textContent = "Finish the interview and review Aidon's spec before approving the brief.";
-    return;
-  }
-  if (kind === "skill" && !verifiedSkillSource) {
-    document.getElementById("status-skill").textContent = "A skill can only be distilled from a successful verified workflow. Open Skill Lab from a completed run.";
-    return;
-  }
-  const transcript = turns.map(t => (t.role === "user" ? "Owner" : "Aidon") + ":\n" + t.text).join("\n\n");
-  const instruction = {
-    tool: "Use the conversation below as the owner's approved requirements brief. First summarize the agreed TOOL SPEC and identify any remaining ambiguity; if the brief is sufficient, create the proposed sandbox tool plugin in the goal workdir, test it safely, and request adoption through the existing explicit plugin approval card. Do not assume brief approval is plugin adoption approval. For image work, follow the user's chosen model/software.\n\n",
-    skill: "Use the conversation below as the owner's approved requirements brief. Produce a reusable Claude-style SKILL.md with YAML front matter name and description, concise actionable instructions, and a ## Tests section with meaningful safe checks. Import it through the existing SkillLibrary path, run the skill tests if the workflow supports it, and request any required trust approvals. Do not claim it is trusted until lifecycle checks pass and owner approval is recorded.\n\n",
-    mcp: "Use the conversation below as the owner's approved MCP requirements brief. Research any missing details, use only a real, cited server and exact command or URL, then request connection through the existing MCP approval lifecycle. Never invent a command or URL and never ask the owner to paste a secret into chat; use named environment variables. Do not connect before the approval card is accepted.\n\n"
-  }[kind];
-  const goal = kind === "skill"
-    ? instruction + "Verified successful workflow source (owner may refine this into a reusable skill):\n"
-      + JSON.stringify(verifiedSkillSource, null, 2) + "\n\nOwner-approved refinement discussion:\n" + transcript
-    : instruction + transcript;
+async function startFromBrief(kind) {
+  if (busy[kind] || !state[kind].brief) return;
+  busy[kind] = true;
+  render(kind);
   const status = document.getElementById("status-" + kind);
-  status.textContent = "Starting the approved brief in a new workflow…";
-  fetch("/api/goals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ goal, mode: "plan", conversation_id: state[kind].id, skill_source_run_id: kind === "skill" ? verifiedSkillSource.run_id : "" }) })
-    .then(async response => {
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "HTTP " + response.status);
-      status.innerHTML = 'Workflow started. Follow it in <a href="/">Chat</a>; required adoption or connection approvals will appear there.';
-    })
-    .catch(error => { status.textContent = "Could not start workflow: " + error.message; });
+  status.textContent = "Starting the approved brief…";
+  try {
+    const data = await post("/api/labs/start", { kind, conversation_id: state[kind].id, revision: revisions[kind] });
+    revisions[kind] = data.revision || revisions[kind];
+    state[kind].build = data;
+    cache(kind);
+    showBuild(kind, data);
+  } catch (error) { status.textContent = error.message; }
+  finally { busy[kind] = false; render(kind); }
 }
-
 document.querySelectorAll(".lab-tab").forEach(tab => tab.addEventListener("click", () => {
   document.querySelectorAll(".lab-tab").forEach(t => t.setAttribute("aria-selected", String(t === tab)));
   document.querySelectorAll(".lab-panel").forEach(p => p.classList.toggle("active", p.id === "lab-" + tab.dataset.lab));
 }));
-document.querySelectorAll("[data-send]").forEach(btn => btn.addEventListener("click", () => send(btn.dataset.send)));
-document.querySelectorAll("[data-brief]").forEach(btn => btn.addEventListener("click", () => startFromBrief(btn.dataset.brief)));
-document.querySelectorAll("[data-reset]").forEach(btn => btn.addEventListener("click", async () => {
-  const kind = btn.dataset.reset;
-  state[kind] = { id: newConversationId(), created: false,
-    started: false, turns: [] };
-  revisions[kind] = 0;
-  try {
-    await save(kind); render(kind); document.getElementById("status-" + kind).textContent = "New interview started.";
-  } catch (error) { document.getElementById("status-" + kind).textContent = error.message; }
+document.querySelectorAll("[data-send]").forEach(button => button.addEventListener("click", () => send(button.dataset.send)));
+document.querySelectorAll("[data-brief]").forEach(button => button.addEventListener("click", () => startFromBrief(button.dataset.brief)));
+document.getElementById("mcp-options").addEventListener("click", event => {
+  const button = event.target.closest("[data-choice]");
+  if (button) send("mcp", button.dataset.choice);
+});
+document.querySelectorAll("[data-reset]").forEach(button => button.addEventListener("click", () => {
+  const kind = button.dataset.reset;
+  if (busy[kind]) return;
+  state[kind] = fresh(); revisions[kind] = 0; cache(kind); render(kind);
+  document.getElementById("status-" + kind).textContent = "New interview started.";
 }));
-Object.keys(LABS).forEach(async kind => {
-  const sendButton = document.querySelector('[data-send="' + kind + '"]');
-  sendButton.disabled = true;
-  try {
-    const response = await fetch("/api/lab-session?kind=" + encodeURIComponent(kind)
-      + "&conversation_id=" + encodeURIComponent(state[kind].id || ""));
-    if (!response.ok) throw new Error("Could not load saved lab session");
-    const saved = await response.json();
-    revisions[kind] = saved.revision;
-    if (saved.state && Array.isArray(saved.state.turns)) state[kind] = saved.state;
-  } catch (error) {
-    document.getElementById("status-" + kind).textContent = error.message;
-    return;
-  }
-  sendButton.disabled = false;
+async function initialize(kind) {
+  busy[kind] = true;
+  try { state[kind] = JSON.parse(localStorage.getItem("aidon-lab-" + kind) || "null") || fresh(); }
+  catch (_) { state[kind] = fresh(); }
+  revisions[kind] = 0;
   render(kind);
+  try {
+    const response = await fetch("/api/lab-session?kind=" + kind + "&conversation_id=" + encodeURIComponent(state[kind].id));
+    const saved = await response.json();
+    if (!response.ok) throw new Error(saved.error || "Could not load the lab");
+    if (saved.state) state[kind] = saved.state;
+    revisions[kind] = saved.revision;
+    if (kind === "skill" && params.get("source_run")) {
+      const sourceResponse = await fetch("/api/skill-source?run_id=" + encodeURIComponent(params.get("source_run"))
+        + "&conversation_id=" + encodeURIComponent(params.get("conversation_id") || ""));
+      const source = await sourceResponse.json();
+      if (!sourceResponse.ok) throw new Error(source.error || "Could not load the workflow source");
+      if (state.skill.source_run_id !== source.run_id) {
+        state.skill = fresh(); revisions.skill = 0;
+        state.skill.source_run_id = source.run_id;
+        state.skill.turns.push({ role: "user", text: "Distill this verified workflow into a reusable skill:\n" + JSON.stringify(source) });
+        const savedSource = await post("/api/lab-session", {kind, conversation_id: state.skill.id, state: state.skill, revision: 0});
+        revisions.skill = savedSource.revision;
+      }
+    }
+    cache(kind);
+    busy[kind] = false;
+    render(kind);
+  } catch (error) { document.getElementById("status-" + kind).textContent = error.message; }
   document.getElementById("input-" + kind).addEventListener("keydown", event => {
     if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(kind); }
   });
-});
-
-if (skillSource) {
-  fetch("/api/skill-source?run_id=" + encodeURIComponent(skillSource)
-      + "&conversation_id=" + encodeURIComponent(skillSourceConversation))
-    .then(async response => {
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "No verified successful workflow found");
-      verifiedSkillSource = data;
-      document.querySelector('[data-lab="skill"]').click();
-      const note = "We are distilling a skill from this successful workflow:\n\n"
-        + data.goal + "\n\n" + data.workflow.map(node => "• " + node.name
-          + " [" + node.tool + "]" + (node.expected ? " — " + node.expected : "")).join("\n")
-        + "\n\nReview this proven procedure and tell me what should be generalized, renamed, or bounded before I draft the skill.";
-      state.skill = { id: newConversationId(), created: false, started: false,
-        turns: [{ role: "assistant", text: note }], source_run_id: data.run_id };
-      await save("skill");
-      render("skill");
-      document.getElementById("status-skill").textContent = "Verified successful workflow loaded. Refine the procedure, then review the skill spec.";
-    })
-    .catch(error => { document.getElementById("status-skill").textContent = error.message; });
 }
+KINDS.forEach(initialize);
+const selectedTab = params.get("lab") || (params.has("source_run") ? "skill" : "tool");
+if (KINDS.includes(selectedTab)) document.querySelector('[data-lab="' + selectedTab + '"]').click();

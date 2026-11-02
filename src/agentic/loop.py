@@ -684,7 +684,9 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
         # is not re-blocked unless a tool disappeared, which the
         # execution-time lookup still catches.
         self._triage_note = ""
-        if getattr(self, "clef_client", None) is not None or getattr(self, "question_ask", None) is not None:
+        if (not getattr(self, "approved_capability_brief", None)
+                and (getattr(self, "clef_client", None) is not None
+                     or getattr(self, "question_ask", None) is not None)):
             try:
                 from .capability_triage import build_inventory, triage, inventory_text
                 _inventory = build_inventory(

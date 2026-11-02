@@ -147,6 +147,11 @@ class PlanExecutionMixin:
                         and str(tool_result).startswith((
                             "IMAGE_EDIT_FAILED:", "image edit rejected:"))):
                     raise RuntimeError(str(tool_result))
+                if ((step.tool == "mcp_connect" and str(tool_result).startswith("MCP_REFUSED:"))
+                        or (step.tool == "adopt_tool_plugin" and str(tool_result).startswith("adoption refused:"))
+                        or (step.tool == "adopt_skill" and str(tool_result).startswith((
+                            "skill adoption refused:", "skill tests failed")))):
+                    raise RuntimeError(str(tool_result))
                 # File-producing extra tools return their actual
                 # path. Bind that path to the step when the model
                 # supplied a prose deliverable such as

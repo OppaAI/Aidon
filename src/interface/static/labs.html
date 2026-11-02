@@ -35,6 +35,11 @@
   .lab-actions label { color:var(--muted); font-size:12px; }
   .lab-status { min-height:18px; color:var(--muted); font-size:12px; margin-top:5px; }
   .lab-next { margin-top:10px; padding:9px 11px; border-left:3px solid var(--amber); background:var(--surface); color:var(--muted); font-size:12px; }
+  .lab-brief pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
+  .mcp-options { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px; margin-top:10px; }
+  .mcp-option { border:1px solid var(--border); border-radius:9px; background:var(--surface); padding:12px; font-size:12px; overflow-wrap:anywhere; }
+  .mcp-option p { margin:6px 0; }
+  .mcp-option button { padding:7px 12px; background:var(--moss); color:#fff; border:0; border-radius:6px; cursor:pointer; }
   @media(max-width:640px) { .lab-wrap{padding:12px 10px 20px}.lab-chat{height:40vh;min-height:200px}.lab-msg{max-width:96%} }
 </style>
 </head>
@@ -70,6 +75,7 @@
     <p class="lab-note">Describe the workflow you want to connect. Aidon can research and compare services, including pricing and open-source options, then help you select one. The final brief must identify a real server and exact connection details; connecting it requires a separate approval.</p>
     <div class="lab-hints"><span class="lab-hint">Compare services</span><span class="lab-hint">Record free / paid / open source</span><span class="lab-hint">Exact server reviewed before connect</span></div>
     <div class="lab-chat" id="chat-mcp" aria-live="polite"></div>
+    <div class="mcp-options" id="mcp-options" aria-live="polite"></div>
     <div class="lab-compose"><textarea id="input-mcp" placeholder="What do you want to connect Aidon to? e.g. organize notes across my projects"></textarea><button data-send="mcp">Send</button></div>
     <div class="lab-actions"><label><input type="checkbox" id="research-mcp" checked> Research and compare options online</label><button class="secondary" data-reset="mcp">Start over</button><button data-brief="mcp">Approve brief &amp; prepare connection</button></div>
     <div class="lab-status" id="status-mcp" role="status"></div>

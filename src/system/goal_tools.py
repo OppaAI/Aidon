@@ -513,6 +513,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         source = _confined(path)
         if not source.is_file() or source.suffix.lower() != ".md":
             return "skill adoption refused: provide a Markdown file in the goal workdir"
+        test_backend = None
         try:
             import hashlib
             import re as _re
@@ -523,16 +524,17 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             clean_name = _re.sub(r"[^A-Za-z0-9_.-]+", "-", raw_name)
             if not clean_name:
                 return "skill adoption refused: name is required"
-            sandbox = _SkillSandbox(
-                workdir, getattr(config, "sandbox_timeout_seconds", 120),
-                mem_mb=getattr(config, "sandbox_mem_mb", 1024),
-                nproc=getattr(config, "sandbox_nproc", 256),
-                fsize_mb=getattr(config, "sandbox_fsize_mb", 512),
-                cpu_seconds=getattr(config, "sandbox_cpu_seconds", 0),
-                backend=getattr(config, "sandbox_backend", "auto"),
-                allow_network=False, require_isolation=True)
-            if not sandbox.isolated or sandbox.allow_network:
-                return "skill adoption refused: tests need working bubblewrap isolation with network disabled"
+            if test_backend_factory is not None:
+                from ..capabilities.skill_test_backend import SkillTestBackend
+                test_backend = test_backend_factory()
+                sandbox = SkillTestBackend(test_backend, workdir,
+                    getattr(config, "sandbox_timeout_seconds", 120))
+            else:
+                sandbox = _SkillSandbox(
+                    workdir, getattr(config, "sandbox_timeout_seconds", 120),
+                    allow_network=False, require_isolation=True)
+                if not sandbox.isolated or sandbox.allow_network:
+                    return "skill adoption refused: tests need working bubblewrap isolation with network disabled"
 
             library = SkillLibrary(config.home)
             skill = library.get(clean_name)
@@ -577,6 +579,9 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                     "Replan the original goal using it where useful.")
         except Exception as exc:
             return f"skill adoption refused: {type(exc).__name__}: {exc}"
+        finally:
+            if test_backend is not None:
+                test_backend.cleanup()
 
     if allow_skill_adoption:
         tools["adopt_skill"] = adopt_skill

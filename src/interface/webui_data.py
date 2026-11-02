@@ -185,6 +185,18 @@ class WebUIDataMixin:
                                    "trace_total": len(record.get("trace", [])),
                                    "question": waiter["question"], "lab": waiter.get("lab", False)}
                                   if waiter and record else None)
+                if active_run is None:
+                    for candidate in reversed(list(self._web_runs.values())):
+                        if candidate.get("conversation_id") != conversation_id:
+                            continue
+                        control = (self.run_control.get(candidate["run_id"])
+                                   if self.run_control is not None else None)
+                        status = (control or {}).get("status", candidate.get("status"))
+                        if status in ("running", "queued"):
+                            active_run = {"run_id": candidate["run_id"],
+                                          "event_total": 0, "trace_total": 0,
+                                          "question": "", "lab": False}
+                            break
                 from .interview_store import InterviewStore
                 recovery = None
                 try:

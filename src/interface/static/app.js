@@ -2710,7 +2710,8 @@
   const thread = document.getElementById("thread");
   const input = document.getElementById("goal-input");
 
-  let currentConversationId = localStorage.getItem("aidon-conversation") || "";
+  let currentConversationId = new URLSearchParams(location.search).get("conversation_id")
+    || localStorage.getItem("aidon-conversation") || "";
   window.aidonConversation = () => ({
     conversation_id: currentConversationId,
   });
@@ -3039,7 +3040,7 @@
     if (window.aidonScrollThread) window.aidonScrollThread();
     if (window.aidonRenderStopCardForConversation)
       window.aidonRenderStopCardForConversation(conv.id);
-    if (window.aidonRestoreRunState) window.aidonRestoreRunState(conv.id);
+    if (!conv.active_run && window.aidonRestoreRunState) window.aidonRestoreRunState(conv.id);
     input.disabled = false;
     input.focus();
   }
