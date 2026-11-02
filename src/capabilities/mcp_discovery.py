@@ -158,6 +158,15 @@ def discover_mcp(queries, get_json=None, limit=8):
                       "source": REGISTRY + "/" + urllib.parse.quote(name, safe="") + "/versions/latest",
                       "connection": connection, "stars": None,
                       "stars_source": "", "license": "Unknown", "official": False}
+            repo_match = re.fullmatch(
+                r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?",
+                repo)
+            if repo_match:
+                owner, repository = repo_match.groups()
+                option["readme_source"] = (
+                    f"https://github.com/{owner}/{repository}/blob/HEAD/README.md")
+                option["setup_source"] = (
+                    f"https://github.com/{owner}/{repository}/blob/HEAD/docs/mcp-server.md")
             option.update({"auth_env_names": auth_env_names,
                            "auth_headers": auth_headers,
                            "may_use_oauth": may_use_oauth})
@@ -181,3 +190,46 @@ def discover_mcp(queries, get_json=None, limit=8):
     results.sort(key=lambda item: (not item.get("official", False),
                                    -(item.get("stars") or 0)))
     return results, errors
+
+
+def read_mcp_setup_docs(option, read_document=None, max_chars=18000):
+    """Read a selected server's GitHub README and conventional setup guide.
+
+    Only repository URLs already supplied by the registry are accepted. The
+    document reader retains its HTTPS/SSRF and redirect protections. Remote
+    documentation is untrusted reference text; callers must not treat it as
+    executable instructions or let it override approval boundaries.
+    """
+    repo = str(option.get("repository", ""))
+    match = re.fullmatch(
+        r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?",
+        repo)
+    if not match:
+        return {"readme_url": "", "setup_url": "", "readme": "",
+                "setup": "", "error": "No verified GitHub repository was published."}
+    owner, repository = match.groups()
+    if read_document is None:
+        from .documents import read_document as read_document
+    result = {}
+    remaining = max(1000, int(max_chars))
+    for key, url_key in (("readme", "readme_url"), ("setup", "setup_url")):
+        if remaining <= 0:
+            result[key] = ""
+            continue
+        relative = "README.md" if key == "readme" else "docs/mcp-server.md"
+        content, selected_url = "", ""
+        for branch in ("main", "master"):
+            candidate = f"https://raw.githubusercontent.com/{owner}/{repository}/{branch}/{relative}"
+            try:
+                candidate_content = str(read_document(candidate))
+            except Exception:
+                continue
+            if not candidate_content.startswith(("READ_BLOCKED:", "READ_FAILED:")):
+                content, selected_url = candidate_content, candidate
+                break
+        content = content[:remaining]
+        result[key] = content
+        result[url_key] = selected_url or (
+            f"https://github.com/{owner}/{repository}/blob/main/{relative}")
+        remaining -= len(content)
+    return result

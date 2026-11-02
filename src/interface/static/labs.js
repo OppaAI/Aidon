@@ -69,7 +69,8 @@ function render(kind) {
         + (!connection ? '<p class="mcp-warning">This entry does not have a connection method Aidon can start automatically.</p>' : '')
         + '<p>'
         + safeLink(option.source, "Registry record") + ' · ' + safeLink(option.repository, "Repository")
-        + (option.setup_source ? ' · ' + safeLink(option.setup_source, "API key setup") : '')
+        + (option.readme_source ? ' · ' + safeLink(option.readme_source, "Official README") : '')
+        + (option.setup_source ? ' · ' + safeLink(option.setup_source, "Setup guide") : '')
         + (option.website ? ' · ' + safeLink(option.website, "Publisher website") : '') + '</p>'
         + '<button data-choice="' + esc(option.id) + '"' + ((!connection || busy.mcp) ? ' disabled' : '') + '>Use this server</button></article>';
     }).join("");
