@@ -218,7 +218,7 @@ def test_edit_image_path_is_bound_to_workspace_deliverable(tmp_path, monkeypatch
     plan = Plan(
         steps=[Step(tool="edit_image", args={}, deliverable="cafe_scene.jpg")],
         deliverables=["cafe_scene.jpg"],
-        criteria=["cafe_scene.jpg exists and is non-empty"],
+        criteria=["cafe_scene.jpg exists"],
     )
 
     report = runner._execute_plan("Change the scene in the attached image", plan)
