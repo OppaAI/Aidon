@@ -20,12 +20,12 @@
   .cap-panel { display:none; }
   .cap-panel.active { display:block; }
   .cap-split { display:grid; grid-template-columns:minmax(230px, 290px) minmax(0,1fr); min-height:360px; border:1px solid var(--border); border-radius:9px; overflow:hidden; background:var(--surface); }
-  .cap-list { border-right:1px solid var(--border); padding:8px; overflow:auto; max-height:62vh; }
+  .cap-list { border-right:1px solid var(--border); padding:8px 8px 22px; overflow:auto; max-height:62vh; }
   .cap-list button { display:block; width:100%; text-align:left; background:transparent; border:1px solid transparent; border-radius:7px; padding:6px 8px; color:var(--text); cursor:pointer; margin-bottom:2px; font:inherit; }
   .cap-list button:hover,.cap-list button[aria-selected="true"] { background:var(--surface2); border-color:var(--border); }
   .cap-list-name { display:block; color:var(--text); font-family:inherit; font-size:13px; font-weight:600; overflow-wrap:anywhere; }
   .cap-list-sub { display:block; color:var(--muted); font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; }
-  .cap-detail { min-width:0; padding:12px; overflow:auto; max-height:62vh; font-size:13px; }
+  .cap-detail { min-width:0; padding:12px 12px 24px; overflow:auto; max-height:62vh; font-size:13px; }
   .cap-detail h2 { font-family:var(--font-display); font-size:17px; margin:0 0 4px; overflow-wrap:anywhere; }
   .cap-detail p { color:var(--muted); line-height:1.4; white-space:pre-wrap; overflow-wrap:anywhere; margin:6px 0; }
   .cap-detail-head { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
@@ -106,6 +106,7 @@
   <section class="cap-panel" id="cap-mcp" role="tabpanel"><div class="cap-split"><div class="cap-list" id="mcp-list"></div><article class="cap-detail" id="mcp-detail"><p>Select an MCP server to see its connection details.</p></article></div></section>
   <section class="cap-panel" id="cap-other" role="tabpanel">
   <section class="cap-sec"><h2>Saved workflows <span id="dags-count" class="cap-note"></span></h2><p class="cap-note">Plans Aidon has run and kept as reusable graphs. Inspect or edit them in the <a href="/dag">DAG editor</a>.</p><div id="dags"></div></section>
+  </section>
   <section class="cap-sec">
     <h2>How Aidon gets a capability it doesn't have</h2>
     <div class="cap-ladder">
@@ -118,7 +119,7 @@
       <div class="cap-rung"><span class="cap-rung-n">4 · Build it</span>
         <p>Draft a tool plugin, test it in the sandbox, and adopt it with your approval — usable immediately, and listed here.</p></div>
     </div>
-  </section></section>
+  </section>
 </div>
 <script src="/static/capabilities.js?v=__ASSET_V__"></script>
 </body>
