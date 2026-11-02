@@ -68,6 +68,36 @@ def test_edit_image_available_with_optional_tools_disabled_and_still_approved(
     assert calls[0]["model"] == "muse-image-1.0"
 
 
+def test_proceeded_plan_authorizes_only_its_exact_image_edit_once(
+        tmp_path, monkeypatch):
+    config, gate, photo, _, workdir = _setup(tmp_path, monkeypatch)
+    args = {"prompt": "change the scene to a cafe", "image": photo.name,
+            "output": "cafe_scene.jpg"}
+    tools = _goal_extra_tools(
+        config, workdir, gate=gate,
+        approved_image_edits=[args | {"images": None, "size": "1024x1024"}])
+
+    result = tools["edit_image"](**args)
+    assert result.startswith("IMAGE_SAVED: ")
+    assert gate.calls == []
+
+
+def test_proceeded_plan_does_not_authorize_a_different_image_edit(
+        tmp_path, monkeypatch):
+    config, gate, photo, _, workdir = _setup(tmp_path, monkeypatch)
+    approved = {"prompt": "change the scene to a cafe", "image": photo.name,
+                "output": "cafe_scene.jpg", "images": None,
+                "size": "1024x1024"}
+    tools = _goal_extra_tools(config, workdir, gate=gate,
+                              approved_image_edits=[approved])
+
+    result = tools["edit_image"]("make it a beach", image=photo.name,
+                                 output="cafe_scene.jpg")
+    assert result.startswith("IMAGE_SAVED: ")
+    assert len(gate.calls) == 1
+    assert gate.calls[0]["kind"] == "live"
+
+
 def test_edit_image_accepts_upload_basename(tmp_path, monkeypatch):
     _, _, photo, tools, workdir = _setup(tmp_path, monkeypatch)
     result = tools["edit_image"]("anime style", image=photo.name)
