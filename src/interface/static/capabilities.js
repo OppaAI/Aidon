@@ -2,6 +2,71 @@
 
 try { document.documentElement.setAttribute("data-theme", localStorage.getItem("aidon-theme") || "light"); } catch (_) {}
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]); }
+function inlineMarkdown(text) {
+  let value = esc(text);
+  const code = [];
+  value = value.replace(/`([^`\n]+)`/g, (_, body) => {
+    code.push(body);
+    return "\u0000INLINE" + (code.length - 1) + "\u0000";
+  });
+  value = value.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  value = value.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/~~([^~\n]+)~~/g, "<del>$1</del>")
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?=$|[\s.,!?)\]])/g, "$1<em>$2</em>")
+    .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s.,!?)\]])/g, "$1<em>$2</em>");
+  return value.replace(/\u0000INLINE(\d+)\u0000/g, (_, index) => "<code>" + code[Number(index)] + "</code>");
+}
+function renderMarkdown(markdown) {
+  const lines = String(markdown == null ? "" : markdown).replace(/\r\n?/g, "\n").split("\n");
+  const html = [];
+  let paragraph = [];
+  let list = null;
+  let fenced = false;
+  let code = [];
+  const flushParagraph = () => {
+    if (paragraph.length) html.push("<p>" + paragraph.map(inlineMarkdown).join("<br>") + "</p>");
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (list) html.push("</" + list + ">");
+    list = null;
+  };
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) {
+      flushParagraph(); flushList();
+      if (fenced) {
+        html.push("<pre class=\"cap-code cap-markdown-code\"><code>" + esc(code.join("\n")) + "</code></pre>");
+        code = [];
+      }
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) { code.push(line); continue; }
+    if (!line.trim()) { flushParagraph(); flushList(); continue; }
+    const heading = line.match(/^\s*(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if (heading) {
+      flushParagraph(); flushList();
+      const level = Math.min(heading[1].length + 1, 6);
+      html.push("<h" + level + ">" + inlineMarkdown(heading[2]) + "</h" + level + ">");
+      continue;
+    }
+    const item = line.match(/^\s*([-+*]|\d+[.)])\s+(.+)$/);
+    if (item) {
+      flushParagraph();
+      const nextList = /^\d/.test(item[1]) ? "ol" : "ul";
+      if (list !== nextList) { flushList(); list = nextList; html.push("<" + list + ">"); }
+      html.push("<li>" + inlineMarkdown(item[2]) + "</li>");
+      continue;
+    }
+    const quote = line.match(/^\s*&gt;\s?(.*)$/);
+    if (quote) { flushParagraph(); flushList(); html.push("<blockquote>" + inlineMarkdown(quote[1]) + "</blockquote>"); continue; }
+    flushList(); paragraph.push(line);
+  }
+  flushParagraph(); flushList();
+  if (fenced) html.push("<pre class=\"cap-code cap-markdown-code\"><code>" + esc(code.join("\n")) + "</code></pre>");
+  return html.join("");
+}
 function badge(text, cls="") { return '<span class="cap-badge ' + esc(cls) + '">' + esc(text) + '</span>'; }
 function icon(text, kind) {
   const s = String(text || "").toLowerCase();
@@ -60,7 +125,11 @@ async function showDetails(kind, item, detail, button) {
   }
   const code = source && (source.source != null || source.code != null) ? (source.source != null ? source.source : source.code) : "";
   const note = source && source.note ? '<p>' + esc(source.note) + '</p>' : "";
-  detail.innerHTML = heading + info + note + (code ? '<h3 class="cap-code-title">' + (kind === "skill" ? "Skill Markdown" : kind === "mcp" ? "Safe connection record" : "Source") + '</h3><pre class="cap-code">' + esc(code) + '</pre>' : (kind === "mcp" ? "" : '<p class="cap-empty">' + esc(source ? "Source is not available for this item." : "Could not load source details.") + '</p>'));
+  const sourceView = !code ? (kind === "mcp" ? "" : '<p class="cap-empty">' + esc(source ? "Source is not available for this item." : "Could not load source details.") + '</p>')
+    : kind === "skill"
+      ? '<h3 class="cap-code-title">Skill</h3><div class="cap-markdown">' + renderMarkdown(code) + '</div><details class="cap-source"><summary>View Markdown source</summary><pre class="cap-code">' + esc(code) + '</pre></details>'
+      : '<h3 class="cap-code-title">' + (kind === "mcp" ? "Safe connection record" : "Source") + '</h3><pre class="cap-code">' + esc(code) + '</pre>';
+  detail.innerHTML = heading + info + note + sourceView;
 }
 function activateFirst(kind, list, items, detail) {
   list.onclick = e => {
