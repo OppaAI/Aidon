@@ -64,7 +64,9 @@ def builtin_image_edit_covers(goal: str, tool_names) -> bool:
     return any(term in low for term in (
         "edit", "modify", "transform", "retouch", "adjust", "enhance",
         "filter", "crop", "resize", "recolor", "remove background",
-        "background removal", "inpaint", "outpaint",
+        "background removal", "inpaint", "outpaint", "change the scene",
+        "change scene", "change the background", "change background",
+        "replace the background", "replace background",
     ))
 
 STATUS_CRITERIA = {

@@ -10,6 +10,9 @@ from src.agentic.capability_triage import (
 def test_attached_image_edit_is_covered_by_registered_builtin():
     assert builtin_image_edit_covers(
         "Edit the attached image", {"edit_image": object()})
+    assert builtin_image_edit_covers(
+        "Can you change the scene of the image to inside a cafe?",
+        {"edit_image": object()})
     assert not builtin_image_edit_covers(
         "Edit the attached image", {"make_chart": object()})
 
