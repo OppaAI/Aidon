@@ -41,7 +41,8 @@
         const blob = new Blob(chunks, { type: recorder.mimeType || "video/webm" });
         objectUrl = URL.createObjectURL(blob);
         download.href = objectUrl;
-        download.download = "aidon-demo-" + new Date().toISOString().replace(/[:.]/g, "-") + ".webm";
+        const extension = blob.type.includes("mp4") ? ".mp4" : ".webm";
+        download.download = "aidon-demo-" + new Date().toISOString().replace(/[:.]/g, "-") + extension;
         download.hidden = false;
         status.textContent = "Recording ready.";
       };

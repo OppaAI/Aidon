@@ -384,8 +384,9 @@ class PlanningMixin:
                            "bare ISO datetime, which never fire.")
             if "computer_use" in self.extra_tools:
                 system += (" For GUI tasks such as opening an application or "
-                           "typing into it, use computer_use with validated "
-                           "click/type/key actions; do not substitute a "
+                           "typing into it, prefer computer_use_task when available "
+                           "to observe the screen between actions. Otherwise use "
+                           "computer_use with validated click/type/key actions; do not substitute a "
                            "file-only plan.")
             if "generate_document" in self.extra_tools:
                 system += (" For PDF or document requests, call "

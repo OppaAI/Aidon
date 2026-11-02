@@ -1759,7 +1759,10 @@
           const button = playButton(e.text, message);
           message.appendChild(button);
           if (ttsAvailable) speak(message, e.text, button).catch(() => {});
-          else showMiddleStatus("Voice is not configured; use the message text.", "warning");
+          else if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance(e.text));
+          } else showMiddleStatus("Speech is unavailable; the requested text is shown.", "warning");
         }
         else if (e.kind === "approval-request") {
           const m = addMsg("stage-line", "approval requested: " + e.text);
