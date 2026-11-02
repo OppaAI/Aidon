@@ -27,9 +27,10 @@
 >
 > Built for the Meta Global AI Developer Hackathon (October 26 – November 4, 2026), Aidon submits three capabilities, all powered by Meta's models through the Meta Model API:
 >
->- Understands goals in plain natural language and interviews the user in conversation to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it.
->- Grows its own capabilities — drafting, sandbox-testing, and adopting tools and skills that plug into its agentic workflows, including niche ones tailored to a user's own task.
->- Keeps a human in the loop — every consequential action passes through human review and approval before it goes live, with verification and rollback on failure, so the agent's autonomy never outruns its owner's consent.
+>- Understands goals in plain natural language and interviews the user in conversation to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it. Ask mode is the default: the agent asks chat questions first and works to a verified, frozen spec before planning anything, and the same conversation works in chat, on WhatsApp or Slack, or on the command line.
+>- Grows its own capabilities — drafting, sandbox-testing, and adopting tools and skills that plug into its agentic workflows, including niche ones tailored to a user's own task. A tool plugin is a directory with a manifest and module files: it is tested in the sandbox first, scanned for unsafe patterns, and adopted only on human approval, after which its tools are usable immediately in the current run and every later goal. Skills follow a candidate → validated → trusted lifecycle, and only trusted skills enter plan prompts.
+>- Keeps a human in the loop — every consequential action passes through human review and approval before it goes live, with verification and rollback on failure, so the agent's autonomy never outruns its owner's consent. Nothing unproven goes live: work runs in a sandbox first, is verified by code, and only failed steps are repaired (at most 3 attempts); the approval card itself fails closed on timeout, and approvals can also be given by replying approve or reject on WhatsApp or Slack.
+>- Generate graph workflows after successful runs — every goal becomes a directed acyclic graph of steps with dependencies, deliverables, and acceptance criteria, so the agent knows what depends on what and what "done" means for each step. Completed DAGs are saved and adapted to new goals instead of planned from scratch, which is how Aidon reuses past work and saves time and tokens and LLM calls over time.
 
 > **Meta models used:**
 >
