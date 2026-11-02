@@ -86,6 +86,7 @@ from .webui_capabilities import WebUICapabilityMixin
 from .webui_workflows import WebUIWorkflowMixin
 from .webui_messaging import WebUIMessagingMixin
 from .webui_runs import WebUIRunMixin
+from .webui_labs import WebUILabMixin
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -281,7 +282,7 @@ def _api_key_row(key: dict) -> str:
             f"<span class=\"set-key\">hash {prefix}</span></div></div>")
 
 
-class WebUIServer(WebUIRunMixin, WebUIMessagingMixin, WebUISettingsMixin, WebUIDataMixin, WebUICapabilityMixin,
+class WebUIServer(WebUIRunMixin, WebUILabMixin, WebUIMessagingMixin, WebUISettingsMixin, WebUIDataMixin, WebUICapabilityMixin,
                   WebUIWorkflowMixin):
     def __init__(self, home: Path, dispatcher: TriggerDispatcher | None = None,
                  auth_store=None, memory=None, whatsapp_reply=None,
@@ -292,6 +293,7 @@ class WebUIServer(WebUIRunMixin, WebUIMessagingMixin, WebUISettingsMixin, WebUID
                  tts_key=None, config=None):
         self.home = Path(home)
         self.config = config
+        self._lab_lock = threading.Lock()
         self.dispatcher = dispatcher or TriggerDispatcher()
         self.auth_store = auth_store
         self.memory = memory

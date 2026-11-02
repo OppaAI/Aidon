@@ -602,6 +602,12 @@ def make_handler(server):
                     self._send_json(409, {'error': str(exc)})
             elif parsed.path == '/api/chat':
                 self._send_json(200, server.handle_chat(body))
+            elif parsed.path == '/api/labs/message':
+                status, payload = server.handle_lab_message(body)
+                self._send_json(status, payload)
+            elif parsed.path == '/api/labs/start':
+                status, payload = server.handle_lab_start(body)
+                self._send_json(status, payload)
             elif parsed.path == '/api/dags':
                 status, payload = server.handle_dag_save(body)
                 self._send_json(status, payload)

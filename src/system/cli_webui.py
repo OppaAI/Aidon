@@ -74,6 +74,11 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                          tts_key=config.fish_api_key or config.api_key or None,
                          config=config)
     server.voice_announce = config.voice_announce
+    # Lab discussions use the strong model directly, with no GoalRunner or
+    # acquisition tools until the owner approves the completed brief.
+    server.lab_model = lambda messages: (client.chat_phase("plan", messages)
+        if hasattr(client, "chat_phase") else client.chat(messages))
+    server.lab_researcher = _make_web_researcher(config, "")
 
     def _goal_handler(event):
         from ..agentic.loop import GoalRunner, format_run_stats
@@ -368,13 +373,18 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         _governor = _make_governor(config, _budget_key)
         _skill_source_run_id = str(event.payload.get("skill_source_run_id", "") or "")
         _allow_skill_adoption = False
+        from ..interface.webui_labs import approved_lab_for_conversation
+        _approved_lab = (approved_lab_for_conversation(config.home, event.conversation_id)
+                         if event.source == "webui" else None)
+        if _approved_lab and _approved_lab[0] == "skill":
+            _allow_skill_adoption = True
         if event.source == "webui" and _skill_source_run_id:
             try:
                 _skill_source = server.handle_skill_source(
                     _skill_source_run_id, event.conversation_id)
-                _allow_skill_adoption = bool(_skill_source)
+                _allow_skill_adoption = _allow_skill_adoption or bool(_skill_source)
             except Exception:
-                _allow_skill_adoption = False
+                pass
         runner = GoalRunner(client, run_sandbox, _gate,
                             config.home, memory=memory,
                             conversation_id=event.conversation_id, plugins=plugins,
