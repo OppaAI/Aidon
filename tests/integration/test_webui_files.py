@@ -254,6 +254,20 @@ def test_chat_page_contains_render_markdown():
     assert "element.innerHTML = render_markdown(text);" in CHAT_HTML
 
 
+def test_dag_editor_accepts_wrapped_tools_api_response():
+    if shutil.which("node") is None:
+        pytest.skip("node not available")
+    source = (Path(__file__).resolve().parents[2]
+              / "src" / "interface" / "static" / "dag.js").read_text()
+    fn = _extract_fn(source, "normalizeToolList")
+    harness = (fn + '\nconsole.log(JSON.stringify(normalizeToolList('
+               '{tools:[{name:"edit_image"}]})));\n')
+    proc = subprocess.run(["node", "-e", harness], capture_output=True,
+                          text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout) == [{"name": "edit_image"}]
+
+
 def test_render_markdown_table_bold_code_link_and_escape():
     sample = ("| Item | Cost |\n| --- | ---: |\n| **Beef** | `42` |\n"
               "See [shop](https://example.com) and <b>not bold</b>")

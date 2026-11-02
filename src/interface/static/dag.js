@@ -42,6 +42,11 @@ async function api(path, opts) {
   return data;
 }
 
+function normalizeToolList(data) {
+  if (Array.isArray(data)) return data;
+  return data && Array.isArray(data.tools) ? data.tools : [];
+}
+
 function status(msg, kind) {
   const el = $("#status");
   el.textContent = msg;
@@ -699,8 +704,11 @@ async function boot() {
     S.dag.goal = e.target.value; markDirty();
   });
 
+  // Load saved workflows independently so an unavailable/malformed tool
+  // catalog cannot leave the DAG list blank during editor startup.
+  const dagListReady = loadList();
   try {
-    S.tools = await api("/api/tools");
+    S.tools = normalizeToolList(await api("/api/tools"));
   } catch (e) {
     S.tools = [];
   }
@@ -722,7 +730,7 @@ async function boot() {
   }
 
   applyView();
-  await loadList();
+  await dagListReady;
 }
 
 boot();
