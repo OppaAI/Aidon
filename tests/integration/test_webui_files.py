@@ -169,6 +169,53 @@ def test_file_route_refuses_symlink_escaping_home(live_server, tmp_path):
     assert _get(base, "link.txt")[0] == 403
 
 
+def test_chat_image_attachment_survives_history_reload_and_is_served(live_server):
+    from src.memory.conversations_db import ConversationStoreDB
+
+    base, home = live_server
+    image = home / "library" / "uploads" / "photo.jpg"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"fake-jpeg")
+    db = ConversationStoreDB(home)
+    conversation = db.create_conversation()["id"]
+    db.record_exchange(conversation, "user", "What is in this picture?")
+    exchange_no = db.latest_exchange_no(conversation, "user")
+    attachment = db.add_attachment(conversation, str(image), kind="image",
+                                   exchange_no=exchange_no)
+
+    # Exercise the same restore path as a page refresh, then fetch only by
+    # opaque attachment ID (the HTTP request cannot provide a filesystem path).
+    from src.interface.webui import WebUIServer
+    server = WebUIServer(home, memory=None)
+    restored = server.handle_conversation_get(conversation)
+    assert restored["attachments"][0]["name"] == "photo.jpg"
+    assert restored["attachments"][0]["exchange_no"] == exchange_no
+    path = restored["attachments"][0]["url"]
+    with urllib.request.urlopen(base + path) as response:
+        assert response.status == 200
+        assert response.headers.get("Content-Type") == "image/jpeg"
+        assert response.read() == b"fake-jpeg"
+    db.close()
+
+
+def test_chat_attachment_route_does_not_allow_path_traversal(live_server):
+    from src.memory.conversations_db import ConversationStoreDB
+
+    base, home = live_server
+    outside = home.parent / "outside.jpg"
+    outside.write_bytes(b"private")
+    db = ConversationStoreDB(home)
+    conversation = db.create_conversation()["id"]
+    db.add_attachment(conversation, str(outside), kind="image")
+    row = db.attachments(conversation)[0]
+    try:
+        with urllib.request.urlopen(base + "/api/conversation-attachments/" + row["id"] + "/file"):
+            pytest.fail("outside path should not be served")
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 404
+    db.close()
+
+
 # ---------------------------------------------------------------- markdown
 
 def _extract_fn(source: str, name: str) -> str:

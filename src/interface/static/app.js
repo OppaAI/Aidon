@@ -2935,7 +2935,7 @@
     const renderAtt = (a) => {
       const d = document.createElement("div");
       d.className = "msg user";
-      const url = "/api/library/" + a.id + "/file";
+      const url = a.url || ("/api/library/" + a.id + "/file");
       if (a.kind === "image") {
         const img = document.createElement("img");
         img.src = url;
@@ -2958,6 +2958,16 @@
         if (state && state.route && state.route.group) savedRoute = state.route;
       } catch (e) {}
       let lastAssistantTurn = -1;
+      const attachmentsByExchange = {};
+      const unattached = [];
+      atts.forEach((a) => {
+        const n = Number(a.exchange_no);
+        if (Number.isInteger(n) && n > 0) {
+          (attachmentsByExchange[n] = attachmentsByExchange[n] || []).push(a);
+        } else {
+          unattached.push(a);
+        }
+      });
       turns.forEach((turn, index) => {
         if ((turn.role || "user") === "assistant") lastAssistantTurn = index;
       });
@@ -2965,6 +2975,7 @@
         const role = turn.role || "user";
         if (role === "user") {
           thread.appendChild(window.aidonRenderStoredMessage("user", turn.text));
+          (attachmentsByExchange[Number(turn.exchange_no)] || []).forEach(renderAtt);
         } else if (role === "assistant") {
           const route = turn.route ||
             (index === lastAssistantTurn ? savedRoute : null);
@@ -2972,7 +2983,7 @@
             "assistant", turn.text, route));
         }
       });
-      atts.forEach(renderAtt);
+      unattached.forEach(renderAtt);
     } else {
       (conv.exchanges || []).forEach((ex) => {
         if (ex.user_text) {

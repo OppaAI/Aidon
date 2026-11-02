@@ -94,6 +94,7 @@ class ConversationStoreDB:
                     conversation_id TEXT NOT NULL,
                     path TEXT NOT NULL,
                     kind TEXT NOT NULL DEFAULT '',
+                    exchange_no INTEGER,
                     created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS ideas (
@@ -119,6 +120,13 @@ class ConversationStoreDB:
             if "route_json" not in exchange_columns:
                 self._conn.execute(
                     "ALTER TABLE exchanges ADD COLUMN route_json TEXT NOT NULL DEFAULT ''")
+            attachment_columns = {
+                row["name"] for row in self._conn.execute(
+                    "PRAGMA table_info(attachments)").fetchall()
+            }
+            if "exchange_no" not in attachment_columns:
+                self._conn.execute(
+                    "ALTER TABLE attachments ADD COLUMN exchange_no INTEGER")
             self._restore_orphaned_webui_conversations()
             self._conn.commit()
 
@@ -300,16 +308,40 @@ class ConversationStoreDB:
     # -- attachments and ideas -----------------------------------------
 
     def add_attachment(self, conversation_id: str, path: str,
-                       kind: str = "") -> dict:
+                       kind: str = "", exchange_no: int | None = None) -> dict:
         attachment_id = _new_id()
         with self._lock:
             self._conn.execute(
                 "INSERT INTO attachments (id, conversation_id, path, kind,"
-                " created_at) VALUES (?, ?, ?, ?, ?)",
-                (attachment_id, conversation_id, path, kind, _now()))
+                " exchange_no, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (attachment_id, conversation_id, path, kind, exchange_no, _now()))
             self._conn.commit()
         return {"id": attachment_id, "conversation_id": conversation_id,
-                "path": path, "kind": kind}
+                "path": path, "kind": kind, "exchange_no": exchange_no}
+
+    def attachments(self, conversation_id: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, path, kind, exchange_no, created_at FROM attachments"
+                " WHERE conversation_id = ? ORDER BY id", (conversation_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_attachment(self, attachment_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, conversation_id, path, kind, exchange_no, created_at"
+                " FROM attachments WHERE id = ?", (attachment_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def latest_exchange_no(self, conversation_id: str, role: str) -> int | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT MAX(exchange_no) AS n FROM exchanges"
+                " WHERE conversation_id = ? AND role = ?",
+                (conversation_id, role)).fetchone()
+        return int(row["n"]) if row and row["n"] is not None else None
 
     def add_idea(self, text: str) -> dict:
         idea_id = _new_id()

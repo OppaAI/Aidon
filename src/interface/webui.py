@@ -868,6 +868,22 @@ class WebUIServer(WebUIRunMixin, WebUIMessagingMixin, WebUISettingsMixin, WebUID
             goal += ("\n\nAttached image paths (available to image-aware "
                      "sandbox plugins after approval):\n" + "\n".join(image_paths))
         result = self.start_goal({**body, "goal": goal, "image_paths": image_paths})
+        # Keep uploaded images attached to the durable conversation so the
+        # chat can render them again after a page refresh. The browser's
+        # immediate preview uses a temporary object URL, which cannot survive
+        # reload; the server-side upload is the durable source of truth.
+        conversation_id = str(result.get("conversation_id", "") or "")
+        if conversation_id and image_paths:
+            try:
+                db = self._conversations_db()
+                exchange_no = db.latest_exchange_no(conversation_id, "user")
+                for path in image_paths:
+                    db.add_attachment(conversation_id, path, kind="image",
+                                      exchange_no=exchange_no)
+            except Exception:
+                # Attachment rendering is a history enhancement; a database
+                # hiccup must not discard an otherwise valid goal run.
+                pass
         result.update({"images": [Path(path).name for path in image_paths],
                       "documents": [Path(path).name for path in document_paths],
                       "videos": [Path(path).name for path in video_paths]})

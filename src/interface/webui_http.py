@@ -301,6 +301,16 @@ def make_handler(server):
                     self._send_json(400, {'error': str(exc)})
             elif parsed.path == '/api/conversations':
                 self._send_json(200, server.handle_conversations_list())
+            elif (parsed.path.startswith('/api/conversation-attachments/')
+                  and parsed.path.endswith('/file')):
+                attachment_id = parsed.path[
+                    len('/api/conversation-attachments/'):-len('/file')].strip('/')
+                path = server.handle_conversation_attachment(attachment_id)
+                if path is None:
+                    self._send_json(404, {'error': 'conversation attachment not found'})
+                else:
+                    content_type = mimetypes.guess_type(path.name)[0] or 'application/octet-stream'
+                    self._send_bytes(200, content_type, path.read_bytes())
             elif parsed.path == '/api/skill-source':
                 query = parse_qs(parsed.query)
                 source = server.handle_skill_source(

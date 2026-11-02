@@ -200,11 +200,39 @@ class WebUIDataMixin:
                 except (OSError, ValueError):
                     lab_turns = []
                     recovery = None
-                return {"id": conversation_id, "turns": history, "lab_turns": lab_turns, "active_run": active_run, "recovery": recovery}
+                attachments = []
+                try:
+                    for item in db.attachments(conversation_id):
+                        path = Path(item.pop("path", ""))
+                        item["name"] = path.name
+                        item["url"] = ("/api/conversation-attachments/"
+                                       + str(item["id"]) + "/file")
+                        attachments.append(item)
+                except Exception:
+                    attachments = []
+                return {"id": conversation_id, "turns": history,
+                        "attachments": attachments, "lab_turns": lab_turns,
+                        "active_run": active_run, "recovery": recovery}
         except Exception:
             pass
         return self._read_json_file(
             self.home / "conversations" / f"{self._safe_name(conversation_id)}.json")
+
+    def handle_conversation_attachment(self, attachment_id: str):
+        """Resolve a persisted chat attachment without accepting a path from HTTP."""
+        try:
+            item = self._conversations_db().get_attachment(str(attachment_id))
+            if not item:
+                return None
+            path = Path(item["path"]).resolve()
+            upload_root = (self.home / "library" / "uploads").resolve()
+            if path == upload_root or upload_root not in path.parents:
+                return None
+            if not path.is_file():
+                return None
+            return path
+        except (OSError, ValueError, KeyError):
+            return None
 
     def handle_conversation_delete(self, conversation_id: str) -> dict:
         try:
