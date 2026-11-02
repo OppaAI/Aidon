@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 FROM node:24-bookworm-slim AS node-runtime
 
-FROM python:3.12-bookworm-slim
+FROM python:3.12-slim-bookworm
 
 # Some official MCP servers (including Todoist's stdio server) are published
 # for Node. Keep the runtime available without adding npm installs to Aidon's
