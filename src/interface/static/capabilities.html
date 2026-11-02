@@ -6,28 +6,29 @@
 <title>Aidon — Capabilities</title>
 <link rel="stylesheet" href="/static/style.css?v=__ASSET_V__">
 <style>
-  .cap-wrap { max-width: 1180px; margin: 0 auto; padding: 20px 18px 60px; }
-  .cap-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 4px; }
-  .cap-head a.brand { color: var(--olive); text-decoration: none; font-family: var(--font-display); font-size: 22px; font-weight: 700; }
-  .cap-head .cap-title { color: var(--muted); font-size: 15px; }
-  .cap-sub { color: var(--muted); margin: 2px 0 18px; max-width: 72ch; }
-  .cap-kernel { border: 1px solid var(--amber); color: var(--amber); border-radius: 8px; padding: 8px 12px; margin-bottom: 16px; display: none; }
-  .cap-sec { margin-top: 20px; }
-  .cap-tabs { display:flex; flex-wrap:wrap; gap:7px; margin:18px 0 10px; border-bottom:1px solid var(--border); padding-bottom:8px; }
-  .cap-tab { background:var(--surface); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:8px 13px; cursor:pointer; }
+  .cap-wrap { max-width: 1320px; margin: 0 auto; padding: 14px 16px 36px; font-size:13px; line-height:1.4; }
+  .cap-head { display: flex; align-items:baseline; gap:10px; margin-bottom:2px; }
+  .cap-head a.brand { color: var(--olive); text-decoration: none; font-family: var(--font-display); font-size:19px; font-weight:700; }
+  .cap-head .cap-title { color:var(--muted); font-size:13px; }
+  .cap-wrap h2 { font-size:17px; margin:12px 0 4px; }
+  .cap-sub { color:var(--muted); margin:2px 0 10px; max-width:90ch; font-size:13px; }
+  .cap-kernel { border:1px solid var(--amber); color:var(--amber); border-radius:8px; padding:6px 10px; margin-bottom:10px; display:none; }
+  .cap-sec { margin-top:12px; }
+  .cap-tabs { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0 8px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+  .cap-tab { background:var(--surface); border:1px solid var(--border); color:var(--text); border-radius:7px; padding:6px 10px; cursor:pointer; font:inherit; }
   .cap-tab[aria-selected="true"] { border-color:var(--accent); color:var(--accent); }
   .cap-panel { display:none; }
   .cap-panel.active { display:block; }
-  .cap-split { display:grid; grid-template-columns:minmax(240px, 310px) minmax(0,1fr); min-height:440px; border:1px solid var(--border); border-radius:11px; overflow:hidden; background:var(--surface); }
-  .cap-list { border-right:1px solid var(--border); padding:10px; overflow:auto; max-height:70vh; }
-  .cap-list button { display:block; width:100%; text-align:left; background:transparent; border:1px solid transparent; border-radius:8px; padding:9px 10px; color:var(--text); cursor:pointer; margin-bottom:3px; }
+  .cap-split { display:grid; grid-template-columns:minmax(230px, 290px) minmax(0,1fr); min-height:360px; border:1px solid var(--border); border-radius:9px; overflow:hidden; background:var(--surface); }
+  .cap-list { border-right:1px solid var(--border); padding:8px; overflow:auto; max-height:62vh; }
+  .cap-list button { display:block; width:100%; text-align:left; background:transparent; border:1px solid transparent; border-radius:7px; padding:6px 8px; color:var(--text); cursor:pointer; margin-bottom:2px; font:inherit; }
   .cap-list button:hover,.cap-list button[aria-selected="true"] { background:var(--surface2); border-color:var(--border); }
-  .cap-list-name { display:block; color:#d5a52d; font-family:var(--font-mono); font-weight:700; overflow-wrap:anywhere; }
-  .cap-list-sub { display:block; color:var(--muted); font-size:12px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; }
-  .cap-detail { min-width:0; padding:16px; overflow:auto; max-height:70vh; }
-  .cap-detail h2 { font-family:var(--font-display); font-size:19px; margin:0 0 5px; overflow-wrap:anywhere; }
-  .cap-detail p { color:var(--muted); line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; }
-  .cap-detail-head { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+  .cap-list-name { display:block; color:var(--text); font-family:inherit; font-size:13px; font-weight:600; overflow-wrap:anywhere; }
+  .cap-list-sub { display:block; color:var(--muted); font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; }
+  .cap-detail { min-width:0; padding:12px; overflow:auto; max-height:62vh; font-size:13px; }
+  .cap-detail h2 { font-family:var(--font-display); font-size:17px; margin:0 0 4px; overflow-wrap:anywhere; }
+  .cap-detail p { color:var(--muted); line-height:1.4; white-space:pre-wrap; overflow-wrap:anywhere; margin:6px 0; }
+  .cap-detail-head { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
   .cap-detail-head .cap-badge { margin:0; }
   .cap-code-title { margin:18px 0 5px; font-size:13px; color:var(--muted); }
   .cap-code { max-height:48vh; overflow:auto; white-space:pre; font:12px/1.5 var(--font-mono); background:var(--surface2); border:1px solid var(--border); padding:12px; border-radius:8px; }
@@ -60,15 +61,16 @@
   .cap-rung { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
   .cap-rung .cap-rung-n { color: var(--accent); font-family: var(--font-display); font-weight: 700; }
   .cap-rung p { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
-  .cap-dagrow { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
-  .cap-dagrow .cap-goal { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cap-dagrow { display:grid; grid-template-columns:minmax(180px, 260px) minmax(0,1fr); align-items:start; gap:10px; padding:5px 0; border-bottom:1px solid var(--border); }
+  .cap-dagrow .cap-list-name { min-width:0; overflow-wrap:anywhere; }
+  .cap-dagrow .cap-goal { min-width:0; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   details.cap-retired { margin-top: 10px; }
   details.cap-retired summary { color: var(--muted); cursor: pointer; }
   /* This page is a document, not the chat app: the shared stylesheet
      locks body scroll for the app shell, so unlock it here. */
   html, body { height: auto; }
   body { overflow: auto; }
-  @media(max-width:680px) { .cap-split { grid-template-columns:1fr; } .cap-list { border-right:0; border-bottom:1px solid var(--border); max-height:28vh; } .cap-detail { max-height:none; } }
+  @media(max-width:680px) { .cap-split { grid-template-columns:1fr; } .cap-list { border-right:0; border-bottom:1px solid var(--border); max-height:28vh; } .cap-detail { max-height:none; } .cap-dagrow { grid-template-columns:minmax(0,1fr); gap:2px; } }
 </style>
 </head>
 <body>

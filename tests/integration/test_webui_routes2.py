@@ -217,6 +217,9 @@ def test_capabilities_keys_and_contents(tmp_path):
     assert "write" in rows
     assert rows["write"]["origin"] == "core"
     assert rows["write"]["side_effect"] is False
+    assert "isolated task workspace" in rows["write"]["description"]
+    assert rows["mcp_connect"]["side_effect"] is True
+    assert "MCP server" in rows["mcp_connect"]["description"]
     assert "adder" in [row["name"] for row in payload["skills"]]
     assert payload["mcp_servers"] == []
 
@@ -251,6 +254,8 @@ def test_capability_code_route_live(live_server):
     library.add(Skill(name="aurora", description="A reusable aurora procedure"))
     (home / "skills" / "aurora.md").write_text("# Aurora skill source\n")
     status, payload = _get(base, "/api/capabilities/code?name=lookup_capability")
+    assert status == 200 and "def lookup_capability" in payload["code"]
+    status, payload = _get(base, "/api/capabilities/code?kind=tool&name=lookup_capability")
     assert status == 200 and "def lookup_capability" in payload["code"]
     status, payload = _get(base, "/api/capabilities/code?kind=skill&name=aurora")
     assert status == 200 and "Aurora skill source" in payload["source"]

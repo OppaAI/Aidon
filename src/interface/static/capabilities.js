@@ -99,7 +99,7 @@ async function showDetails(kind, item, detail, button) {
   detail.innerHTML = '<p>Loading details…</p>';
   let source = null;
   try {
-    const response = await fetch("/api/capabilities/code?kind=" + encodeURIComponent(kind) + "&name=" + encodeURIComponent(item.name));
+    const response = await fetch("/api/capabilities/code?kind=" + encodeURIComponent(kind === "tools" ? "tool" : kind) + "&name=" + encodeURIComponent(item.name));
     if (response.ok) source = await response.json();
   } catch (_) {}
   const desc = item.description || item.goal || "";
@@ -142,13 +142,14 @@ async function load() {
   let data;
   try { const r = await fetch("/api/capabilities"); if (!r.ok) throw new Error("HTTP " + r.status); data = await r.json(); }
   catch (e) { document.getElementById("tools-list").innerHTML = '<p class="cap-empty">Could not load capabilities: ' + esc(e.message) + '</p>'; return; }
-  const tools = (data.tools || []).map(t => typeof t === "string" ? {name:t} : t);
+  const tools = (data.tools || []).map(t => typeof t === "string" ? {name:t} : t)
+    .sort((a,b) => Number(Boolean(b.side_effect)) - Number(Boolean(a.side_effect)) || String(a.name).localeCompare(String(b.name)));
   const skills = (data.skills || []).map(s => typeof s === "string" ? {name:s} : s).sort((a,b) => String(a.name).localeCompare(String(b.name)));
   const mcps = (data.mcp_servers || []).map(m => typeof m === "string" ? {name:m} : m).sort((a,b) => String(a.name).localeCompare(String(b.name)));
   const retired = skills.filter(s => s.state === "retired");
   const liveSkills = skills.filter(s => s.state !== "retired");
   if (data.kernel_mode) document.getElementById("kernel-banner").style.display = "block";
-  const lists = [["tools",tools,"tools-list","tools-detail","No tools registered."],["skill",liveSkills,"skills-list","skills-detail","No saved skills yet."],["mcp",mcps,"mcp-list","mcp-detail","No connected MCP servers yet."]];
+  const lists = [["tool",tools,"tools-list","tools-detail","No tools registered."],["skill",liveSkills,"skills-list","skills-detail","No saved skills yet."],["mcp",mcps,"mcp-list","mcp-detail","No connected MCP servers yet."]];
   lists.forEach(([kind,items,listId,detailId,emptyText]) => { const list=document.getElementById(listId); renderList(list,items,kind,emptyText); activateFirst(kind,list,items,document.getElementById(detailId)); });
   if (retired.length) {
     const list = document.getElementById("skills-list");

@@ -4,6 +4,64 @@ import json
 from pathlib import Path
 
 
+_TOOL_DESCRIPTIONS = {
+    "ask_user": "Ask you a question when a goal needs your choice or missing information.",
+    "declare_blocked": "Report that a goal cannot proceed because a required dependency or decision is unavailable.",
+    "schedule_job": "Create a scheduled or recurring Aidon goal.",
+    "list_schedule": "List scheduled Aidon jobs.",
+    "cancel_schedule": "Cancel a scheduled Aidon job.",
+    "web_search": "Search the web for current information and sources.",
+    "fetch_url": "Fetch and extract readable content from a web page.",
+    "read_document": "Extract text from a local document such as a PDF or office file.",
+    "search_document": "Search indexed documents for relevant passages.",
+    "search_research_cache": "Search saved research results from earlier work.",
+    "youtube_learn": "Find and learn from a YouTube video transcript.",
+    "github_search": "Search GitHub repositories and source code.",
+    "github_fetch": "Read a GitHub repository file or project details.",
+    "make_bar_chart": "Create a bar chart from supplied data.",
+    "make_line_chart": "Create a line chart from supplied data.",
+    "make_chart": "Create a chart from supplied data.",
+    "generate_document": "Create a formatted document in the workspace.",
+    "build_ebook": "Build an EPUB ebook from Markdown sources.",
+    "make_spreadsheet": "Create a spreadsheet file from supplied data.",
+    "make_docx": "Create a Word document.",
+    "make_slides": "Create a presentation deck.",
+    "make_latex": "Compile a LaTeX document into a deliverable.",
+    "record_system_audio": "Record system audio after you approve the recording.",
+    "capture_webcam_photo": "Capture a webcam photo after you approve camera access.",
+    "record_webcam": "Record a webcam clip after you approve camera access.",
+    "tts_speak": "Generate spoken audio from text.",
+    "transcribe_audio": "Convert an audio recording to text.",
+    "email_make_draft": "Draft an email for your review without sending it.",
+    "email_send": "Send an email after the required approval.",
+    "slack_send": "Send a message or file to Slack.",
+    "whatsapp_send": "Send a WhatsApp message.",
+    "threads_publish": "Publish a post to Threads after approval.",
+    "threads_post": "Publish a post to Threads after approval.",
+    "instagram_publish": "Publish an image to Instagram after approval.",
+    "instagram_post": "Publish an image to Instagram after approval.",
+    "write_versioned": "Write a new version of a workspace file while preserving earlier versions.",
+    "read_file": "Read a file from the current workspace.",
+    "write_file": "Write or update a file in the current workspace.",
+    "notify": "Add a notification to Aidon's notification outbox.",
+    "sam_segment": "Segment objects in an image using the image segmentation model.",
+    "uv_venv": "Create an isolated Python virtual environment for the task.",
+    "install_python_package": "Install a Python package into the task's isolated environment.",
+    "apt_install": "Install a system package after approval.",
+    "adopt_tool_plugin": "Test and request approval to add a workspace tool plugin to Aidon.",
+    "adopt_skill": "Test and request approval to add a reusable skill to Aidon.",
+    "mcp_connect": "Connect to an MCP server, inspect its tools, and register the connection after approval.",
+    "mcp_disconnect": "Close an MCP connection for the current run.",
+    "self_modify": "Propose and apply an approved change to Aidon's own code.",
+    "write": "Write a file inside the isolated task workspace.",
+    "read": "Read a file inside the isolated task workspace.",
+    "list": "List files inside the isolated task workspace.",
+    "shell": "Run a command inside the isolated task sandbox.",
+    "calculate": "Evaluate a mathematical expression.",
+    "computer_use": "Interact with the computer through approved visual controls.",
+}
+
+
 class WebUICapabilityMixin:
     def handle_reports_list(self) -> dict:
         directory = self._json_dir("reports")
@@ -75,11 +133,24 @@ class WebUICapabilityMixin:
             "write_file", "write_versioned", "sam_segment",
         }
         tool_rows = []
+        plugin_descriptions = {}
+        try:
+            from ..capabilities.plugins import PluginRegistry
+            registry = PluginRegistry(self.home)
+            registry.load_all()
+            for name in plugin_names:
+                plugin, spec = registry.tool_owner(name)
+                description = (spec or {}).get("description") or getattr(plugin, "description", "")
+                if description:
+                    plugin_descriptions[name] = str(description)
+        except Exception:
+            pass
         for name in tool_names:
             tool_rows.append({
                 "name": name,
-                "description": ("Adopted plugin tool." if name in plugin_names
-                                 else "Goal-run tool."),
+                "description": (plugin_descriptions.get(name)
+                                or _TOOL_DESCRIPTIONS.get(name)
+                                or "Aidon tool: " + name.replace("_", " ") + "."),
                 "origin": "plugin" if name in plugin_names else "core",
                 "side_effect": name in side_effect_tools,
             })
