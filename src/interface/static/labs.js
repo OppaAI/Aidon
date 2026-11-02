@@ -51,6 +51,8 @@ function render(kind) {
       const connection = option.connection;
       const address = connection ? (connection.url || [connection.command, ...(connection.args || [])].join(" ")) : "Connection needs additional setup";
       const envNames = [...new Set([...(option.auth_env_names || []), ...Object.keys((connection && connection.env) || {})])];
+      const envBindings = Object.entries((connection && connection.env) || {}).filter(([target, value]) =>
+        typeof value === "string" && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(value));
       const provenance = option.official
         ? '<span class="mcp-official">Publisher domain match</span>'
         : '<span class="mcp-community">Community / publisher not verified</span>';
@@ -61,6 +63,7 @@ function render(kind) {
         + ' · Version: ' + esc(option.version) + '</p><code>' + esc(address) + '</code><p>'
         + 'License: ' + esc(option.license) + ' · ' + stars + '</p>'
         + (envNames.length ? '<p>Needs environment variable(s): <code>' + esc(envNames.join(", ")) + '</code>. Put values in Aidon .env; secret values stay hidden.</p>' : '')
+        + envBindings.map(([target, value]) => '<label class="mcp-env-alias">Your .env variable name for <code>' + esc(target) + '</code><input type="text" data-env-target="' + esc(target) + '" value="' + esc(value.slice(1)) + '" autocomplete="off" spellcheck="false"></label>').join("")
         + (option.auth_headers && option.auth_headers.length ? '<p>Published endpoint requires header(s): <code>' + esc(option.auth_headers.join(", ")) + '</code>. Aidon needs a supported credential setup before connecting.</p>' : '')
         + (option.may_use_oauth ? '<p class="mcp-warning">The registry lists an HTTP endpoint but no API key variable. It may require browser OAuth. Aidon cannot complete MCP OAuth yet; check the setup source before choosing it.</p>' : '')
         + (!connection ? '<p class="mcp-warning">This entry does not have a connection method Aidon can start automatically.</p>' : '')
@@ -87,7 +90,7 @@ async function post(url, body) {
   if (!response.ok || data.error) throw new Error(data.error || "HTTP " + response.status);
   return data;
 }
-async function send(kind, choice="") {
+async function send(kind, choice="", envAliases={}) {
   if (busy[kind]) return;
   const input = document.getElementById("input-" + kind);
   const option = choice && (state[kind].options || []).find(x => x.id === choice);
@@ -100,7 +103,8 @@ async function send(kind, choice="") {
   try {
     const data = await post("/api/labs/message", {
       kind, message, choice, conversation_id: state[kind].id,
-      revision: revisions[kind], research: document.getElementById("research-" + kind).checked
+      revision: revisions[kind], research: document.getElementById("research-" + kind).checked,
+      env_aliases: envAliases
     });
     state[kind] = data.state;
     revisions[kind] = data.revision;
@@ -134,7 +138,14 @@ document.querySelectorAll("[data-send]").forEach(button => button.addEventListen
 document.querySelectorAll("[data-brief]").forEach(button => button.addEventListener("click", () => startFromBrief(button.dataset.brief)));
 document.getElementById("mcp-options").addEventListener("click", event => {
   const button = event.target.closest("[data-choice]");
-  if (button) send("mcp", button.dataset.choice);
+  if (button) {
+    const card = button.closest(".mcp-option");
+    const envAliases = {};
+    card.querySelectorAll("[data-env-target]").forEach(input => {
+      envAliases[input.dataset.envTarget] = input.value.trim();
+    });
+    send("mcp", button.dataset.choice, envAliases);
+  }
 });
 document.querySelectorAll("[data-reset]").forEach(button => button.addEventListener("click", () => {
   const kind = button.dataset.reset;

@@ -143,15 +143,29 @@ class WebUILabMixin:
             if not option or not option.get("connection"):
                 return 400, {"error": "Select a listed server with complete connection details"}
             connection = option["connection"]
+            env_aliases = body.get("env_aliases") or {}
+            if not isinstance(env_aliases, dict):
+                return 400, {"error": "Environment variable names must be an object"}
+            connection = dict(connection)
+            connection_env = dict(connection.get("env") or {})
+            requirements = []
+            for target, value in connection_env.items():
+                match = re.fullmatch(r"\$([A-Za-z_][A-Za-z0-9_]*)", str(value))
+                if not match:
+                    continue
+                default_name = match.group(1)
+                source_name = str(env_aliases.get(target, default_name)).strip()
+                if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", source_name):
+                    return 400, {"error": f"Enter a valid .env variable name for {target}; do not enter the key value"}
+                connection_env[target] = "$" + source_name
+                requirements.append(
+                    f"Set {source_name} in Aidon's .env; Aidon passes it to the server as {target}.")
+            connection["env"] = connection_env
             # The card click text is a selection command, and earlier user
             # turns describe the goal. Neither is a technical setup
-            # requirement. Only publish-record secret placeholders belong here.
+            # requirement; requirements below describe only secret-name bindings.
             prior_requests = [t["text"] for t in turns[:-1]
                               if t.get("role") == "user" and t.get("text", "").strip()]
-            env = connection.get("env") or {}
-            requirements = [f"Set {key} in Aidon's .env before connecting."
-                            for key, value in sorted(env.items())
-                            if isinstance(value, str) and value == f"${key}"]
             brief = {"name": re.sub(r"[^a-zA-Z0-9_]", "_", option["name"]),
                      "purpose": "\n".join(prior_requests) or f"Connect to {option['title']}.",
                      "connection": connection, "requirements": requirements,
