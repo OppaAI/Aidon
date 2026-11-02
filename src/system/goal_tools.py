@@ -424,6 +424,35 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
 
     register_mcp_tools(config, tools, _approval, governor)
 
+    # Turn user-authored JSON tool specifications into reviewable plugin
+    # drafts. This is deliberately unavailable to unattended runs and does
+    # not execute or adopt model-generated source.
+    if callable(model_chat) and not scheduled:
+        def draft_tool_plugin(spec, output_dir=""):
+            try:
+                from ..capabilities.plugin_generation import (
+                    default_plugin_name, generate_plugin_draft)
+                directory = str(output_dir or (
+                    "plugins_draft/" + default_plugin_name(spec)))
+                target = _confined(directory)
+                reserved_names = (plugin_registry.tool_names()
+                                  if plugin_registry is not None else [])
+                draft, findings = generate_plugin_draft(
+                    spec, target, model_chat, workdir=workdir,
+                    reserved_tool_names=reserved_names)
+                return ToolResult(
+                    f"Drafted plugin at {draft}; scanner findings: {findings}. "
+                    "Generated code was not executed. Review tool.py and "
+                    "capabilities, then sandbox-test it before calling "
+                    "adopt_tool_plugin. Adoption requires the existing owner "
+                    "approval and acceptance-test gate.",
+                    path=draft / "plugin.json", kind="plugin")
+            except Exception as exc:
+                return (f"plugin generation failed: {type(exc).__name__}: "
+                        f"{exc}")
+
+        tools["draft_tool_plugin"] = draft_tool_plugin
+
     try:
         from ..capabilities.plugins import (
             PluginRegistry, _existing_approved_plugin, adoption_gate, ask_plugin_approval,

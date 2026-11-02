@@ -265,6 +265,18 @@ autonomy or pre-approval is enabled. Once approved, the live
 registry updates immediately. Plans validated after adoption can
 use the tool; re-plan if the current plan needs it.
 
+When a goal includes a structured JSON tool specification, Aidon
+can call `draft_tool_plugin` to ask the configured model to turn it
+into a `tool.py` implementation and a valid `plugin.json` manifest.
+The draft is written inside the current run's workdir; generation
+does not import or execute the resulting source. Aidon must inspect
+the generated code, sandbox-test it, review its requested
+capabilities, and then call `adopt_tool_plugin`. Adoption still
+passes through the scanner and an explicit owner approval card.
+Draft generation is available on interactive runs, not unattended
+scheduled runs. The generated implementation is model-written code,
+so passing the static scan is not evidence that it behaves correctly.
+
 - Adopt: `python -m src.system.main plugin scan <dir>`,
   then `python -m src.system.main plugin adopt <dir>`, then
   `python -m src.system.main plugin list`. Adoption is scan,
