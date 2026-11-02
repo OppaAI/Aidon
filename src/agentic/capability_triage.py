@@ -51,6 +51,18 @@ from __future__ import annotations
 MIN_CONFIDENCE = 0.6
 BLOCK_CONFIDENCE = 0.8
 
+
+def builtin_image_edit_covers(goal: str, image_paths, tool_names) -> bool:
+    """Avoid a Lab referral when an attached-image edit has a built-in tool."""
+    if not image_paths or "edit_image" not in set(tool_names or ()):
+        return False
+    low = str(goal or "").lower()
+    return any(term in low for term in (
+        "edit", "modify", "transform", "retouch", "adjust", "enhance",
+        "filter", "crop", "resize", "recolor", "remove background",
+        "background removal", "inpaint", "outpaint",
+    ))
+
 STATUS_CRITERIA = {
     "covered": "Every capability the goal needs is in the inventory.",
     "need_skill": "A reusable procedure might improve this work, but no "

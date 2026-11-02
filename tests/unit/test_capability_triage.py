@@ -4,7 +4,16 @@ import json
 from types import SimpleNamespace
 
 from src.agentic.capability_triage import (
-    build_inventory, inventory_text, triage)
+    build_inventory, builtin_image_edit_covers, inventory_text, triage)
+
+
+def test_attached_image_edit_is_covered_by_registered_builtin():
+    assert builtin_image_edit_covers(
+        "Edit the attached image", ["upload.png"], {"edit_image": object()})
+    assert not builtin_image_edit_covers(
+        "Edit the attached image", ["upload.png"], {"make_chart": object()})
+    assert not builtin_image_edit_covers(
+        "Edit the attached image", [], {"edit_image": object()})
 
 
 class _StubClef:
