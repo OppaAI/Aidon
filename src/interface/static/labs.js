@@ -37,6 +37,13 @@ function render(kind) {
     const pre = document.createElement("pre");
     pre.textContent = JSON.stringify(current.brief, null, 2);
     brief.append(summary, pre);
+    const docLinks = document.createElement("p");
+    docLinks.className = "mcp-doc-links";
+    if (current.brief.readme_url)
+      docLinks.innerHTML += safeLink(current.brief.readme_url, "Read the README") + " · ";
+    if (current.brief.setup_guide_url)
+      docLinks.innerHTML += safeLink(current.brief.setup_guide_url, "Read the setup guide");
+    if (docLinks.innerHTML) brief.appendChild(docLinks);
     box.appendChild(brief);
   }
   box.scrollTop = box.scrollHeight;
@@ -69,7 +76,7 @@ function render(kind) {
         + (!connection ? '<p class="mcp-warning">This entry does not have a connection method Aidon can start automatically.</p>' : '')
         + '<p>'
         + safeLink(option.source, "Registry record") + ' · ' + safeLink(option.repository, "Repository")
-        + (option.readme_source ? ' · ' + safeLink(option.readme_source, "Official README") : '')
+        + (option.readme_source ? ' · ' + safeLink(option.readme_source, option.official ? "Publisher README" : "Project README") : '')
         + (option.setup_source ? ' · ' + safeLink(option.setup_source, "Setup guide") : '')
         + (option.website ? ' · ' + safeLink(option.website, "Publisher website") : '') + '</p>'
         + '<button data-choice="' + esc(option.id) + '"' + ((!connection || busy.mcp) ? ' disabled' : '') + '>Use this server</button></article>';
