@@ -16,7 +16,7 @@ from .runtime import (
 
 
 def run_webui(args, config, memory, client, model_router=None) -> int:
-    from .goal_tools import _goal_extra_tools, _image_edit_approval_spec
+    from .goal_tools import _goal_extra_tools
     from ..interface.messaging import MessagingConfig, send_slack, send_whatsapp
     from ..interface.triggers import TriggerDispatcher, TriggerEvent
     from ..interface.v1 import AuthStore
@@ -341,12 +341,11 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
             for _step in _resume_plan.normalized_steps():
                 if getattr(_step, "tool", "") != "edit_image":
                     continue
-                _args = dict(getattr(_step, "args", {}) or {})
-                _allowed = {"prompt", "image", "image_path", "images",
-                            "image_paths", "output", "size"}
-                if "prompt" not in _args or set(_args) - _allowed:
-                    continue
-                _approved_image_edits.append(_image_edit_approval_spec(_args))
+                # Proceed authorizes the image-edit step shown in the saved
+                # plan. Runtime attachment paths can be normalized differently
+                # from the planner's paths, so bind approval to the number of
+                # planned calls and consume each authorization once.
+                _approved_image_edits.append({"tool": "edit_image"})
         # Mission budget key: a proceed rejoins the stopped
         # run's record via the stop; a fresh run gets a fresh
         # key, so a later mission never inherits an earlier

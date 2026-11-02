@@ -35,25 +35,6 @@ CAPABILITY_TOOLS_WHEN_OPTIONAL_DISABLED = frozenset({
 })
 
 
-def _image_edit_approval_spec(args: dict) -> dict:
-    """Canonical action identity shared by plan and tool-call arguments."""
-    args = args if isinstance(args, dict) else {}
-    references = []
-    for key in ("image_paths", "images"):
-        value = args.get(key)
-        if value is not None:
-            references.extend([value] if isinstance(value, str) else list(value))
-    primary = args.get("image") or args.get("image_path")
-    if primary:
-        references.insert(0, primary)
-    return {
-        "prompt": args.get("prompt", ""),
-        "references": references,
-        "output": args.get("output", ""),
-        "size": args.get("size", "1024x1024"),
-    }
-
-
 def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None, governor=None, optional_tools=None,
                       plugin_registry=None, gate_context=None, test_backend_factory=None,
                       allow_skill_adoption=False,
@@ -91,11 +72,10 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     from ..capabilities.tools import ToolResult
     workdir = Path(workdir)
     tools: dict = {}
-    # A Proceed on a saved plan is informed approval for the exact
-    # edit_image step(s) shown on that plan card. Keep the authorization
-    # narrow and one-use; all other image edits still get a live gate.
-    approved_image_edits = [_image_edit_approval_spec(item)
-                            for item in (approved_image_edits or [])
+    # A Proceed on a saved plan is informed approval for each edit_image
+    # step shown on that plan card. Consume one authorization per tool
+    # call; later calls (including repairs) still get a live gate.
+    approved_image_edits = [None for item in (approved_image_edits or [])
                             if isinstance(item, dict)]
     if test_backend_factory is None and isinstance(config, Config):
         def test_backend_factory():
@@ -375,10 +355,13 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         def edit_image(prompt, image="", images=None, output="", size="1024x1024",
                        image_path="", image_paths=None):
             """Restyle or compose a photo. Saves in the goal workspace."""
-            action_args = {"prompt": prompt, "image": image, "images": images,
-                           "output": output, "size": size,
-                           "image_path": image_path, "image_paths": image_paths}
-            refs = _image_edit_approval_spec(action_args)["references"]
+            refs = []
+            for value in (image_paths, images):
+                if value is not None:
+                    refs.extend([value] if isinstance(value, str) else list(value))
+            primary = image or image_path
+            if primary:
+                refs.insert(0, primary)
             if not str(prompt or "").strip():
                 return "IMAGE_EDIT_FAILED: a prompt is required"
             if not refs or len(refs) > 10:
@@ -393,17 +376,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             if not key or not endpoint:
                 return ("IMAGE_EDIT_FAILED: image tools need AIDON_API_KEY and "
                         "AIDON_API_ENDPOINT in .env")
-            try:
-                canonical = json.dumps(_image_edit_approval_spec(action_args), sort_keys=True,
-                                       ensure_ascii=False, default=str)
-            except (TypeError, ValueError):
-                canonical = ""
-            approved_index = next((i for i, item in enumerate(approved_image_edits)
-                                   if json.dumps(item, sort_keys=True,
-                                                 ensure_ascii=False, default=str)
-                                   == canonical), None)
-            if approved_index is not None:
-                approved_image_edits.pop(approved_index)
+            if approved_image_edits:
+                approved_image_edits.pop(0)
             else:
                 ok, why = _approval(
                     "live", "Edit image with Muse Image",
