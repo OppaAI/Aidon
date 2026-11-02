@@ -82,6 +82,20 @@ def test_proceeded_plan_authorizes_only_its_exact_image_edit_once(
     assert gate.calls == []
 
 
+def test_edit_image_accepts_planner_image_path_alias_and_plan_approval(
+        tmp_path, monkeypatch):
+    config, gate, photo, _, workdir = _setup(tmp_path, monkeypatch)
+    planned_args = {"prompt": "change the scene to a cafe",
+                    "image_path": photo.name, "output": "cafe_scene.jpg"}
+    tools = _goal_extra_tools(config, workdir, gate=gate,
+                              approved_image_edits=[planned_args])
+
+    result = tools["edit_image"](**planned_args)
+    assert result == f"IMAGE_SAVED: {workdir / 'cafe_scene.jpg'}"
+    assert (workdir / "cafe_scene.jpg").read_bytes() == b"edited-bytes"
+    assert gate.calls == []
+
+
 def test_proceeded_plan_does_not_authorize_a_different_image_edit(
         tmp_path, monkeypatch):
     config, gate, photo, _, workdir = _setup(tmp_path, monkeypatch)
