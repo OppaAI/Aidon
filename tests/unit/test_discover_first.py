@@ -70,8 +70,31 @@ def test_image_edit_prompt_uses_available_builtin_instead_of_plugin_lab(tmp_path
     runner._chat = fake_chat
     runner._plan("Edit the attached image to brighten it")
     assert "built-in edit_image tool is available" in captured["system"]
-    assert "do not ask to create or adopt another image tool" in captured["system"]
+    assert "Do not ask to create or adopt another image tool" in captured["system"]
     assert "no built-in image editor is available" not in captured["system"]
+
+
+def test_image_edit_plan_normalizes_only_current_upload_paths(tmp_path):
+    image = tmp_path / "uploads" / "current-photo.jpg"
+    image.parent.mkdir()
+    image.write_bytes(b"current image")
+    runner = _runner(tmp_path, False,
+                     extra_tools={"edit_image": lambda **kw: "ok"})
+    runner.plugins = SimpleNamespace(plugins={}, skill_texts=lambda: {})
+    runner.image_paths = [image]
+    runner._chat = lambda *_args: json.dumps({
+        "steps": [{"tool": "edit_image", "args": {
+            "prompt": "Change the background to a cafe",
+            "image": str(image), "output": "cafe_scene.jpg"},
+            "deliverable": "cafe_scene.jpg"}],
+        "deliverables": ["cafe_scene.jpg"],
+        "criteria": ["cafe_scene.jpg exists in the workspace folder"]})
+
+    plan = runner._plan("Change the attached image background to a cafe")
+    assert plan.steps[0]["args"]["image"] == image.name
+    from src.agentic.validator import validate_plan
+    assert validate_plan(plan, allowed_tools={"edit_image"},
+                         goal="Change the attached image background to a cafe") == []
 
 
 def test_kernel_guard_points_at_ladder_not_missing_tool(tmp_path):

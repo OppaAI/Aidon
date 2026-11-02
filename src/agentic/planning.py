@@ -264,8 +264,10 @@ class PlanningMixin:
             if self.image_paths and self._is_image_edit_goal(goal):
                 if "edit_image" in self.extra_tools:
                     system += (" For this image-editing goal, the built-in "
-                               "edit_image tool is available. Use it with the "
-                               "current attached image path(s); do not ask to "
+                               "edit_image tool is available. Use the attached "
+                               "image filename(s) only (basename, not an absolute "
+                               "path); the tool resolves them from this upload. "
+                               "Do not ask to "
                                "create or adopt another image tool or plugin. "
                                "The tool uses the configured Muse image model "
                                "and saves its output in the goal workspace, "
@@ -445,6 +447,42 @@ class PlanningMixin:
                     "no steps were run") from None
         try:
             steps = data.get("steps", [])
+            # The plan validator correctly rejects arbitrary absolute paths,
+            # but attached uploads are server-owned absolute paths. Convert
+            # only exact current-attachment references to their basenames;
+            # edit_image resolves those names within the uploads directory.
+            if self.image_paths and isinstance(steps, list):
+                from pathlib import Path
+                attached = {}
+                for image_path in self.image_paths:
+                    try:
+                        attached[str(Path(image_path).resolve())] = Path(image_path).name
+                    except (OSError, TypeError, ValueError):
+                        continue
+                for step in steps:
+                    if not isinstance(step, dict) or step.get("tool") != "edit_image":
+                        continue
+                    args = step.get("args")
+                    if not isinstance(args, dict):
+                        continue
+                    for key in ("image", "images"):
+                        value = args.get(key)
+                        if isinstance(value, str):
+                            try:
+                                args[key] = attached.get(
+                                    str(Path(value).resolve()), value)
+                            except (OSError, TypeError, ValueError):
+                                pass
+                        elif isinstance(value, list):
+                            normalized = []
+                            for item in value:
+                                try:
+                                    normalized.append(attached.get(
+                                        str(Path(item).resolve()), item)
+                                        if isinstance(item, str) else item)
+                                except (OSError, TypeError, ValueError):
+                                    normalized.append(item)
+                            args[key] = normalized
             raw_deliverables = data.get("deliverables") or []
             if isinstance(raw_deliverables, str):
                 raw_deliverables = [raw_deliverables]
