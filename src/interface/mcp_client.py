@@ -67,7 +67,7 @@ class McpClient:
         inherited = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT",
                      "WINDIR", "USERPROFILE", "SSL_CERT_FILE", "SSL_CERT_DIR",
                      "REQUESTS_CA_BUNDLE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
-                     "http_proxy", "https_proxy", "no_proxy")
+                     "http_proxy", "https_proxy", "no_proxy", "NPM_CONFIG_CACHE")
         merged_env = {key: os.environ[key] for key in inherited if key in os.environ}
         merged_env.update(self.env)
         self.proc = subprocess.Popen(self.command, stdin=subprocess.PIPE,

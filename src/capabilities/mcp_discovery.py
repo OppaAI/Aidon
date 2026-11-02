@@ -11,6 +11,29 @@ import urllib.request
 REGISTRY = "https://registry.modelcontextprotocol.io/v0.1/servers"
 
 
+def _todoist_api_key_connection(server, get):
+    """Resolve the official documented API-key transport omitted by the registry."""
+    if server.get("name") != "net.todoist/mcp" or not any(
+        remote.get("url") == "https://ai.todoist.net/mcp"
+        for remote in server.get("remotes", [])
+    ):
+        return None
+    package = get("https://registry.npmjs.org/@doist/todoist-mcp/latest")
+    repository = str((package.get("repository") or {}).get("url", ""))
+    version = str(package.get("version", ""))
+    if (package.get("name") != "@doist/todoist-mcp"
+            or repository not in ("git+https://github.com/Doist/todoist-mcp.git",
+                                  "https://github.com/Doist/todoist-mcp")
+            or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", version)
+            or "todoist-mcp" not in (package.get("bin") or {})):
+        raise ValueError("Official Todoist package metadata could not be verified")
+    # Explicit binary: this package also ships todoist-mcp-http, so bare npx
+    # cannot always infer which executable to launch.
+    return {"transport": "stdio", "command": "npx",
+            "args": ["-y", "--package", f"@doist/todoist-mcp@{version}", "todoist-mcp"],
+            "env": {"TODOIST_API_KEY": "$TODOIST_API_KEY"}}
+
+
 def _get_json(url):
     request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "Aidon-MCP-Discovery"})
     with urllib.request.urlopen(request, timeout=15) as response:
@@ -96,8 +119,12 @@ def _publisher_matches_website(server, repo, get):
     labels = namespace.split(".")
     if len(labels) >= 2 and all(labels):
         namespace_domain = ".".join(reversed(labels))
+        remote_hosts = [(urllib.parse.urlsplit(str(remote.get("url", ""))).hostname or "").lower()
+                        for remote in server.get("remotes", [])]
         if (site_host == namespace_domain
-                or site_host.endswith("." + namespace_domain)):
+                or site_host.endswith("." + namespace_domain)
+                or any(host == namespace_domain or host.endswith("." + namespace_domain)
+                       for host in remote_hosts)):
             return True
     match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+)/[A-Za-z0-9_.-]+(?:\.git)?/?", repo)
     if not match or not site_host:
@@ -155,6 +182,15 @@ def discover_mcp(queries, get_json=None, limit=8):
                 except Exception:
                     pass
             option["official"] = _publisher_matches_website(server, repo, get)
+            if name == "net.todoist/mcp" and not (option["connection"] or {}).get("env"):
+                try:
+                    api_key_connection = _todoist_api_key_connection(server, get)
+                    if api_key_connection:
+                        option["connection"] = api_key_connection
+                        option["repository"] = "https://github.com/Doist/todoist-mcp"
+                        option["setup_source"] = "https://github.com/Doist/todoist-mcp/blob/main/docs/mcp-server.md"
+                except Exception as exc:
+                    errors.append(f"Todoist API-key setup unavailable ({type(exc).__name__})")
             results.append(option)
             if len(results) >= limit:
                 break
