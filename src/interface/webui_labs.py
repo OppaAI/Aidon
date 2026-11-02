@@ -13,6 +13,11 @@ LAB_INSTRUCTIONS = {
         "(inputs and outputs), implementation (their chosen service/software or a standard-library "
         "implementation), capabilities, and acceptance_tests (good and bad input assertions). "
         "The eventual plugin needs plugin.json and a top-level function taking args: dict. "
+        "Every manifest tool entry must use the exact existing module filename including its "
+        ".py suffix (for example module=tool.py), and its exact top-level function name. "
+        "Every acceptance_tests entry is an argv array that imports and calls the real function. "
+        "Include a normal-result assertion and a bad-input check whose expected exception is "
+        "asserted; tests must fail if the tool body is replaced by a RuntimeError. "
         "Use mode=sandbox for network/subprocess/package capabilities; pure tools use stdlib. "
         "Do not choose a paid service without the owner's choice. Return the brief as an object."
     ),
@@ -235,7 +240,7 @@ class WebUILabMixin:
                         "brief": brief, "approved": True}
             store.save_lab(kind, approved, 0, build_id)
             action = {
-                "tool": "Create the tool plugin described by this approved brief. Write plugin.json and module files in the workspace, including assertion-based acceptance_tests for every declared tool and bad-input cases. Test and adopt it through adopt_tool_plugin; report the actual adoption result. Do not reopen the interview or claim success without adoption evidence.",
+                "tool": "Create the tool plugin described by this approved brief. Write a plugin directory under the workspace with plugin.json and a real Python module file (for example tool.py). In every plugin.json tool entry, module must exactly match that filename including .py, and function must exactly match a top-level function taking args: dict. Add acceptance_tests as argv arrays; each test must import and call the function, assert its normal result, and assert expected bad-input errors. Tests must fail if the tool body is replaced by RuntimeError. Run adopt_tool_plugin on the directory. If manifest validation or tests fail, repair the files and retry within the run budget. Report success only after the tool appears in the adopted registry; otherwise report the exact refusal.",
                 "skill": "Create the approved SKILL.md and any test fixtures in the workspace. Use adopt_skill to run meaningful offline tests and request trust approval. A draft, a validated skill and a trusted skill are different outcomes; report the actual result.",
                 "mcp": "Connect exactly the selected MCP server with mcp_connect using the name and connection arguments in the approved brief. Do not substitute another server. The existing MCP connection approval is required. List the actual discovered tools and report successful registration or the concrete connection error. Do not call mutating remote tools."}[kind]
             result = self.start_goal({"goal": action + "\n\nOwner-approved brief:\n" + json.dumps(brief, ensure_ascii=False, indent=2),
