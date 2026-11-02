@@ -24,6 +24,15 @@ def register_mcp_tools(config, tools: dict, approval, governor=None) -> None:
             return f"MCP_ALREADY_CONNECTED {server_name!r}"
         transport = str(transport or "stdio").lower()
         if transport == "stdio":
+            from ..interface.mcp_http import expand_env_value
+            missing = []
+            for value in dict(env or {}).values():
+                expanded, variable = expand_env_value(value)
+                if variable and not expanded.strip():
+                    missing.append(variable)
+            if missing:
+                return ("MCP_REFUSED: configure " + ", ".join(sorted(set(missing)))
+                        + " in Aidon's .env before connecting")
             command_parts = shlex.split(str(command)) + [str(x) for x in (args or [])]
             if not command_parts:
                 return "MCP_REFUSED: command is required for stdio transport"
