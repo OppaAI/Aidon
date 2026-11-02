@@ -30,6 +30,12 @@
 >- Understands goals in plain natural language and interviews the user in conversation to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it.
 >- Grows its own capabilities — drafting, sandbox-testing, and adopting tools and skills that plug into its agentic workflows, including niche ones tailored to a user's own task.
 >- Keeps a human in the loop — every consequential action passes through human review and approval before it goes live, with verification and rollback on failure, so the agent's autonomy never outruns its owner's consent.
+
+> **Meta models used:**
+>
+>- Muse Spark 1.3 — the reasoning engine: goal understanding, interviewing, plan and DAG construction, recalling and adapting past workflows, repairing failed steps, and verifying results. Lightweight phases (interpret, learn, respond, webchat) can route to a smaller fast model through the same API to keep token costs down.
+>- Muse Image 1.0 — generates and edits images and diagrams for workflows that need them, through the same API key and endpoint as the chat model, with generation approval-gated and credit-aware.
+>- Muse Voice Transcribe — speech-to-text that lets users speak to the agent in natural language instead of typing, via a transcribe tool backed by Meta's transcription API.
 >
 >*Note: Aidon is still under active development — it was built during this 10-day hackathon, and not all planned agentic capabilities are implemented yet.*
 
