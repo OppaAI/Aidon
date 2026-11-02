@@ -23,7 +23,14 @@
 
 ---
 
-Built for the Meta Global AI Developer Hackathon (October 26 – November 4, 2026), Aidon submits three capabilities, all powered by Meta's models through the Meta Model API: first, it understands goals in plain natural language and interviews the user in conversation to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it; second, it grows its own capabilities — drafting, sandbox-testing, and adopting tools and skills that plug into its agentic workflows, including niche ones tailored to a user's own task; and third, it keeps a human in the loop — every consequential action passes through human review and approval before it goes live, with verification and rollback on failure, so the agent's autonomy never outruns its owner's consent.
+# What this project wants to showcase for the Meta Global AI Developer Hackathon
+
+Built for the Meta Global AI Developer Hackathon (October 26 – November 4, 2026), Aidon submits three capabilities, all powered by Meta's models through the Meta Model API:
+
+- Understands goals in plain natural language and interviews the user in conversation to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it.
+- Grows its own capabilities — drafting, sandbox-testing, and adopting tools and skills that plug into its agentic workflows, including niche ones tailored to a user's own task.
+- Keeps a human in the loop — every consequential action passes through human review and approval before it goes live, with verification and rollback on failure, so the agent's autonomy never outruns its owner's consent.
+
 
 # Autonomous AI agent. You give it one goal — it does the rest.
 
