@@ -50,6 +50,16 @@
   .mcp-env-alias { display:grid; gap:4px; margin:8px 0; color:var(--muted); }
   .mcp-env-alias input { width:min(100%,320px); padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--surface-2); color:var(--text); font:inherit; }
   .mcp-option button { padding:7px 12px; background:var(--moss); color:var(--moss-contrast); border:0; border-radius:6px; cursor:pointer; }
+  .schedule-toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:8px 0; }
+  .schedule-toolbar button { background:var(--moss); color:var(--moss-contrast); border:0; border-radius:8px; padding:7px 11px; cursor:pointer; }
+  .schedule-list { display:grid; gap:9px; }
+  .schedule-card { border:1px solid var(--border); border-radius:10px; background:var(--surface); padding:12px; }
+  .schedule-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .schedule-card-head strong { font:700 15px var(--font-display); overflow-wrap:anywhere; }
+  .schedule-badge { border:1px solid var(--border); border-radius:999px; padding:3px 8px; color:var(--muted); font-size:11px; white-space:nowrap; }
+  .schedule-goal { margin:7px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .schedule-meta { display:flex; flex-wrap:wrap; gap:6px 14px; color:var(--muted); font-size:12px; }
+  .schedule-empty { padding:18px; border:1px dashed var(--border); border-radius:10px; color:var(--muted); text-align:center; }
   @media(max-width:640px) { .lab-wrap{padding:12px 10px 20px}.lab-chat{height:40vh;min-height:200px}.lab-msg{max-width:96%} }
 </style>
 </head>
@@ -61,6 +71,7 @@
     <button class="lab-tab" role="tab" aria-selected="true" data-lab="tool">Tool crafting</button>
     <button class="lab-tab" role="tab" aria-selected="false" data-lab="skill">Skill learning</button>
     <button class="lab-tab" role="tab" aria-selected="false" data-lab="mcp">MCP connection</button>
+    <button class="lab-tab" id="tab-schedule" role="tab" aria-selected="false" data-lab="schedule">Scheduled tasks</button>
   </nav>
   <section class="lab-panel active" id="lab-tool" role="tabpanel">
     <h1>Tool Crafting Lab</h1>
@@ -89,6 +100,12 @@
     <div class="lab-compose"><textarea id="input-mcp" placeholder="What do you want to connect Aidon to? e.g. organize notes across my projects"></textarea><button data-send="mcp">Send</button></div>
     <div class="lab-actions"><label><input type="checkbox" id="research-mcp" checked> Research and compare options online</label><button class="secondary" data-reset="mcp">Start over</button><button data-brief="mcp">Approve brief &amp; prepare connection</button></div>
     <div class="lab-status" id="status-mcp" role="status"></div>
+  </section>
+  <section class="lab-panel" id="lab-schedule" role="tabpanel" aria-labelledby="tab-schedule">
+    <h1>Scheduled Tasks</h1>
+    <p class="lab-note">Review the recurring and one-time jobs Aidon has saved, including their next run, timezone, and previous run. Refresh to load the latest schedule.</p>
+    <div class="schedule-toolbar"><span class="lab-status" id="schedule-status" role="status" aria-live="polite"></span><button id="schedule-refresh" type="button">Refresh</button></div>
+    <div class="schedule-list" id="schedule-list" aria-live="polite"><div class="schedule-empty">Loading scheduled tasks…</div></div>
   </section>
   <div class="lab-next">Brief approval authorizes Aidon to work on that brief. It does not grant access by itself: plugin adoption, MCP connections, package installs, and live actions keep their existing explicit approval gates.</div>
 </main>

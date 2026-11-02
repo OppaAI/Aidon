@@ -141,7 +141,41 @@ async function startFromBrief(kind) {
 document.querySelectorAll(".lab-tab").forEach(tab => tab.addEventListener("click", () => {
   document.querySelectorAll(".lab-tab").forEach(t => t.setAttribute("aria-selected", String(t === tab)));
   document.querySelectorAll(".lab-panel").forEach(p => p.classList.toggle("active", p.id === "lab-" + tab.dataset.lab));
+  if (tab.dataset.lab === "schedule") loadScheduledTasks();
 }));
+async function loadScheduledTasks() {
+  const status = document.getElementById("schedule-status");
+  const list = document.getElementById("schedule-list");
+  status.textContent = "Loading…";
+  try {
+    const response = await fetch("/api/scheduled-tasks");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Could not load scheduled tasks");
+    const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+    status.textContent = jobs.length + (jobs.length === 1 ? " task" : " tasks");
+    if (!jobs.length) {
+      list.innerHTML = '<div class="schedule-empty">No scheduled tasks yet.</div>';
+      return;
+    }
+    list.innerHTML = jobs.map(job => {
+      const state = job.pending ? "Run pending" : (job.next_run ? "Scheduled" : "No upcoming run");
+      const meta = [
+        ["Type", job.kind], ["Schedule", job.schedule], ["Timezone", job.timezone],
+        ["Next run", job.pending ? "Pending dispatch" : (job.next_run || "None")],
+        ["Last run", job.last_run || "Never"], ...(job.until ? [["Until", job.until]] : [])
+      ];
+      return '<article class="schedule-card"><div class="schedule-card-head"><strong>' + esc(job.name)
+        + '</strong><span class="schedule-badge">' + esc(state) + '</span></div><p class="schedule-goal">'
+        + esc(job.goal) + '</p><div class="schedule-meta">' + meta.map(([label, value]) =>
+          '<span><strong>' + esc(label) + ':</strong> ' + esc(value) + '</span>').join("")
+        + '</div></article>';
+    }).join("");
+  } catch (error) {
+    status.textContent = "Could not load tasks";
+    list.innerHTML = '<div class="schedule-empty">' + esc(error.message) + '</div>';
+  }
+}
+document.getElementById("schedule-refresh").addEventListener("click", loadScheduledTasks);
 document.querySelectorAll("[data-send]").forEach(button => button.addEventListener("click", () => send(button.dataset.send)));
 document.querySelectorAll("[data-brief]").forEach(button => button.addEventListener("click", () => startFromBrief(button.dataset.brief)));
 document.getElementById("mcp-options").addEventListener("click", event => {

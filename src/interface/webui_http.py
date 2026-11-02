@@ -322,6 +322,29 @@ def make_handler(server):
                 _research_query = _parse_qs_research(parsed.query)
                 conv = str(_research_query.get('conversation_id', [''])[0])
                 self._send_json(200, {'research_mode': _get_research(server.home, conv)})
+            elif parsed.path == '/api/scheduled-tasks':
+                from datetime import datetime
+                from .triggers import Scheduler
+                now = datetime.now()
+                jobs = []
+                for job in Scheduler(server.home).jobs:
+                    try:
+                        next_run = job.next_due(now)
+                    except Exception:
+                        next_run = None
+                    jobs.append({
+                        'name': str(job.name),
+                        'kind': str(job.kind or 'goal'),
+                        'goal': str(job.goal),
+                        'schedule': str(job.schedule),
+                        'timezone': str(job.tz or 'Server local time'),
+                        'next_run': next_run.isoformat(timespec='minutes') if next_run else '',
+                        'last_run': str(job.last_run or ''),
+                        'until': str(job.until or ''),
+                        'pending': bool(job.pending_run),
+                    })
+                jobs.sort(key=lambda item: (item['name'].casefold(), item['schedule']))
+                self._send_json(200, {'jobs': jobs})
             elif parsed.path == '/api/practice':
                 self._send_json(200, server.handle_practice_list())
             elif parsed.path == '/api/lab-session':
