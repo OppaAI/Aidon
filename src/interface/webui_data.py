@@ -200,6 +200,36 @@ class WebUIDataMixin:
                 except (OSError, ValueError):
                     lab_turns = []
                     recovery = None
+                # Backfill images uploaded before attachment-to-conversation
+                # links were persisted. Their server upload paths are already
+                # present in the stored user turn; accept only existing image
+                # files rooted in this home's uploads directory.
+                upload_root = (self.home / "library" / "uploads").resolve()
+                known_paths = {str(Path(item["path"]).resolve())
+                               for item in db.attachments(conversation_id)}
+                marker = ("Attached image paths (available to image-aware "
+                          "sandbox plugins after approval):")
+                for turn in history:
+                    if turn.get("role") != "user" or marker not in turn.get("text", ""):
+                        continue
+                    listed = turn["text"].split(marker, 1)[1]
+                    for line in listed.splitlines():
+                        candidate_text = line.strip()
+                        if not candidate_text:
+                            continue
+                        try:
+                            candidate = Path(candidate_text).resolve()
+                            if (candidate.suffix.lower() not in
+                                    {".png", ".jpg", ".jpeg", ".gif", ".webp"}):
+                                continue
+                            if (upload_root in candidate.parents and candidate.is_file()
+                                    and str(candidate) not in known_paths):
+                                db.add_attachment(
+                                    conversation_id, str(candidate), kind="image",
+                                    exchange_no=int(turn.get("exchange_no") or 0) or None)
+                                known_paths.add(str(candidate))
+                        except (OSError, ValueError, TypeError):
+                            continue
                 attachments = []
                 try:
                     for item in db.attachments(conversation_id):
