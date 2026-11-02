@@ -44,6 +44,8 @@
     h1 { font-size: clamp(58px, 9vw, 112px); }
     h2 { font-size: clamp(44px, 6.4vw, 76px); max-width: 700px; }
     .nowrap { white-space: nowrap; }
+    .spec-slide, .control-slide { grid-template-columns: minmax(0, 1.25fr) minmax(280px, .75fr); }
+    .control-title { max-width: none; white-space: nowrap; letter-spacing: -.09em; }
     .gradient { background: linear-gradient(100deg, #f8f5ee 8%, #a9ebff 57%, #c9b0ff 96%); -webkit-background-clip: text; background-clip: text; color: transparent; }
     .subtitle { max-width: 590px; color: #c1c4d3; font-size: clamp(18px, 2vw, 23px); line-height: 1.55; }
     .support { max-width: 550px; color: var(--muted); font-size: 16px; line-height: 1.75; }
@@ -72,11 +74,9 @@
     .detail-slide .speech { width: min(230px, 58%); margin: 0; font-size: 13px; }
     .detail-slide .speech::after { display: none; }
     .detail-slide .robot-stage { width: min(205px, 40%); }
-    .spec-slide, .control-slide { grid-template-columns: minmax(0, 1.05fr) minmax(300px, .95fr); grid-template-rows: auto 1fr; }
-    .wide-heading { grid-column: 1 / -1; grid-row: 1; }
-    .wide-heading h2 { max-width: none; }
-    .spec-copy, .control-copy { grid-column: 1; grid-row: 2; }
-    .spec-slide .visual, .control-slide .visual { grid-column: 2; grid-row: 2; }
+    .spec-slide.detail-slide .visual { gap: 6px; }
+    .spec-slide.detail-slide .speech { width: 58%; font-size: 12px; }
+    .spec-slide.detail-slide .robot-stage { width: 38%; }
     .journey { margin-top: 25px; max-width: 550px; }
     .journey-label { margin-bottom: 9px; color: #868ba4; font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
     .flow-steps { display: flex; align-items: center; gap: 7px; }
@@ -117,10 +117,11 @@
       .speech { width: min(310px, 95%); font-size: 12px; padding: 10px 13px; }
       h1 { margin: 8px 0 12px; font-size: clamp(52px, 16vw, 84px); }
       h2 { margin: 12px 0; font-size: clamp(39px, 12vw, 60px); }
-      .spec-slide, .control-slide { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
-      .spec-slide .wide-heading, .control-slide .wide-heading { grid-column: 1; grid-row: 1; width: calc(100% + 32px); margin-left: -16px; }
-      .spec-slide .visual, .control-slide .visual { grid-column: 1; grid-row: 2; }
-      .spec-copy, .control-copy { grid-column: 1; grid-row: 3; }
+      .spec-slide, .control-slide { grid-template-columns: 1fr; }
+      .spec-slide .visual { gap: 8px; }
+      .spec-slide .speech { width: 72%; font-size: 10px; }
+      .spec-slide .robot-stage { width: 82px; }
+      .control-title { font-size: clamp(39px, 12vw, 60px); letter-spacing: -.10em; }
       .subtitle { font-size: 16px; }
       .support { margin: 10px 0; font-size: 14px; line-height: 1.55; }
       .journey { margin-top: 13px; }
@@ -212,11 +213,9 @@
       </section>
 
       <section class="slide detail-slide spec-slide" data-title="How the interview becomes a spec" data-speech="Here is how a plain-language request becomes a ready-to-plan spec. I gather only the details that are missing, reflect the result back, and wait for the user to confirm it.">
-        <div class="wide-heading">
+        <div class="copy">
           <span class="eyebrow">01 · The interview, step by step</span>
           <h2>From a request<br><span class="gradient nowrap">to an agreed spec.</span></h2>
-        </div>
-        <div class="copy spec-copy">
           <p class="support">Aidon closes gaps in the goal before creating a workflow. The user can correct the summary or add a constraint before planning begins.</p>
           <ol class="detail-flow">
             <li class="detail-step"><span class="step-no">01</span><span class="step-copy"><strong>Say what you want</strong><small>Describe the outcome in everyday language.</small></span></li>
@@ -257,11 +256,9 @@
       </section>
 
       <section class="slide control-slide" data-title="You are in control" data-speech="Before a consequential action goes live, I show what will happen and wait for your approval. Work is checked first, so you are in control.">
-        <div class="wide-heading">
+        <div class="copy">
           <span class="eyebrow">03 · Human approval</span>
-          <h2 class="nowrap">You are in control.</h2>
-        </div>
-        <div class="copy control-copy">
+          <h2 class="control-title">You are in control.</h2>
           <p class="support">Aidon prepares and verifies work in a sandbox. Consequential live actions pause for a human decision, with the proposed action shown before approval.</p>
           <div class="journey"><div class="journey-label">How it flows</div><div class="flow-steps"><span class="flow-step">Verify safely</span><span class="flow-arrow">→</span><span class="flow-step">You review</span><span class="flow-arrow">→</span><span class="flow-step">Live action</span></div></div>
           <div class="feature-card"><div class="feature-icon approval" role="img" aria-label="A person approving a safe action with Aidon"></div><div><strong>Verify first. Approve before live actions.</strong><span>The agent's autonomy stays within the boundaries you set.</span></div></div>
