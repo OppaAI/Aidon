@@ -207,8 +207,19 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
         # JPEG for the vision request; retain the original PNG on disk for the
         # user's trace. This cuts upload and model-prefill time substantially.
         vision_bytes, vision_mime = _compact_vision_image(png)
+        screen_size = ""
+        try:
+            import io
+            from PIL import Image
+            with Image.open(io.BytesIO(png)) as frame:
+                screen_size = (f"Original desktop size: {frame.width} by {frame.height} pixels. "
+                               "The attached preview may be scaled. Return click coordinates "
+                               "in ORIGINAL desktop pixels, not preview pixels. ")
+        except Exception:
+            pass
         decide_prompt = (
             f"Goal: {description}\nActions so far: {history}\n"
+            + screen_size +
             "Inspect the attached current screen and choose the next action. "
             "Reply JSON only: {\"screen\": str, \"action\": null | "
             "{\"kind\": \"click\" | \"type\" | \"scroll\" | \"key\", "

@@ -192,3 +192,8 @@ def test_triage_state_carries_goal_and_inventory():
     state, name = stub.seen[0]
     assert state["goal"] == "Connect Notion"
     assert "write" in state["inventory"] and "notion" in state["inventory"]
+
+
+def test_visible_desktop_demo_goals_are_covered():
+    for goal in ("Open gedit and type Hello", "Open OBS", "Start recording in OBS Studio", "Stop recording the demo"):
+        assert builtin_computer_use_covers(goal, {"computer_use_task"})

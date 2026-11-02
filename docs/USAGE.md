@@ -642,3 +642,28 @@ collection.
   manager, stronger sandbox, dedicated live toolset,
   and SAM 3.1 segmentation, see [ROADMAP.md](ROADMAP.md).
 
+
+### Visible Ubuntu desktop demos
+
+Run Aidon from the logged-in Ubuntu **Xorg** desktop session. Install gedit,
+OBS Studio, `xdotool`, and the Pillow vision dependency. Set
+`AIDON_COMPUTER_DRIVER=x11` and `AIDON_KERNEL=0` in the Aidon configuration,
+and restart Aidon with that session's `DISPLAY` and `XAUTHORITY` available.
+Aidon must run on the desktop host (or have an explicitly configured X11
+connection); a Modal task sandbox cannot see or control your Ubuntu desktop.
+Wayland desktop control is not supported by the X11 driver.
+
+Use WebUI, or the configured owner WhatsApp/Slack chat, to request:
+
+- “Open gedit using the Ubuntu launcher and visibly type Hello from Aidon.”
+- “Open OBS Studio using the launcher and click Start Recording.”
+- “Bring OBS Studio to the foreground and click Stop Recording.”
+
+These requests use the current screenshot to choose each mouse/keyboard action.
+The next screenshot confirms the result; OBS recording is never blindly toggled.
+Desktop actions retain their approval cards, which can be answered through the
+originating chat. In Ask/Plan mode, proceed through the spec/plan stops first.
+Configure the OBS scene, display capture, output folder, and audio before the demo.
+Screen capture and typing occur on the host desktop, including when requested
+from WhatsApp or Slack. Round screenshots and the action trace are kept in the
+run's computer-screenshots directory. Screenshots may contain visible private data.

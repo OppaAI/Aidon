@@ -144,8 +144,19 @@ class PlanningMixin:
         # the planner to honor a long, generic tool-selection prompt.
         if not self.kernel_mode:
             from .capability_triage import builtin_computer_use_covers
-            if builtin_computer_use_covers(goal, self.extra_tools):
+            if ("computer_use_task" in self.extra_tools
+                    and builtin_computer_use_covers(goal, self.extra_tools)):
                 task = str(goal).strip()
+                task += ("\nUse visible desktop controls: open applications through the "
+                         "Ubuntu application launcher, move the pointer and click their "
+                         "controls. Do not use a terminal, shell command, background "
+                         "process or API to substitute for visible interaction. "
+                         "For OBS, bring its window to the foreground and click the "
+                         "requested Start Recording or Stop Recording button. "
+                         "For gedit, launch the editor visibly, focus the text area, "
+                         "type the requested text and verify it on the next screenshot. "
+                         "Verify the changed recording status on the next screenshot "
+                         "before reporting success. Never toggle recording blindly.")
                 if any(term in task.lower() for term in (
                         "about me", "think of me", "think about me",
                         "based on our conversations")):

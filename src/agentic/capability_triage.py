@@ -87,7 +87,8 @@ def is_desktop_interaction_goal(goal: str) -> bool:
         "notepad", "text editor", "mouse", "keyboard", "on my screen",
         "on the screen", "open an app", "open the app", "type into",
         "type in the", "click on", "click the", "computer use",
-        "control my computer",
+        "control my computer", "gedit", "obs studio", "open obs", "start recording",
+        "stop recording",
     )) or bool(re.search(r"\b(?:on|in) (?:my|the) (?:ubuntu |linux )?desktop\b", low))
 
 
