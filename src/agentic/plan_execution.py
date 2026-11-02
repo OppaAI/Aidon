@@ -143,19 +143,27 @@ class PlanExecutionMixin:
                             "self-modification aborted:",
                             "self-modification failed ("))):
                     raise RuntimeError(str(tool_result))
+                if (step.tool == "edit_image"
+                        and str(tool_result).startswith((
+                            "IMAGE_EDIT_FAILED:", "image edit rejected:"))):
+                    raise RuntimeError(str(tool_result))
                 # File-producing extra tools return their actual
                 # path. Bind that path to the step when the model
                 # supplied a prose deliverable such as
                 # "Aidon introduction PDF" instead of a filename.
-                if step.tool in {"generate_document", "write_file"}:
+                if step.tool in {"generate_document", "write_file", "edit_image"}:
                     artifact_path = getattr(tool_result, "path", "")
                     raw_result = str(tool_result).strip()
                     # Structured ToolResult is authoritative. Keep
                     # the prose fallback for older plugins/tools.
-                    raw_path = artifact_path or (
-                        raw_result[6:].strip()
-                        if raw_result.lower().startswith("wrote ")
-                        else raw_result)
+                    if artifact_path:
+                        raw_path = artifact_path
+                    elif step.tool == "edit_image" and raw_result.startswith("IMAGE_SAVED:"):
+                        raw_path = raw_result.split(":", 1)[1].strip()
+                    elif raw_result.lower().startswith("wrote "):
+                        raw_path = raw_result[6:].strip()
+                    else:
+                        raw_path = raw_result
                     candidate = Path(raw_path)
                     if not candidate.is_absolute():
                         candidate = self.sandbox.workdir / candidate

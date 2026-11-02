@@ -1,4 +1,4 @@
-"""edit_image tool: local files, approval, and saving under <home>/images."""
+"""edit_image tool: local files, approval, and workspace deliverables."""
 
 import sys
 from pathlib import Path
@@ -36,16 +36,18 @@ def _setup(tmp_path, monkeypatch, *, optional_tools=True, image_calls=None):
     config.api_key = "test-key"
     config.api_base = "https://example.com/v1"
     gate = _Gate()
-    tools = _goal_extra_tools(config, home / "workspace", gate=gate,
+    workdir = home / "workspace"
+    workdir.mkdir()
+    tools = _goal_extra_tools(config, workdir, gate=gate,
                               optional_tools=optional_tools)
-    return config, gate, photo, tools
+    return config, gate, photo, tools, workdir
 
 
-def test_edit_image_saves_under_home_images(tmp_path, monkeypatch):
-    config, gate, photo, tools = _setup(tmp_path, monkeypatch)
+def test_edit_image_saves_in_workspace_at_requested_path(tmp_path, monkeypatch):
+    config, gate, photo, tools, workdir = _setup(tmp_path, monkeypatch)
     result = tools["edit_image"]("anime style, @Image1", image=str(photo),
                                  output="images/portrait.png")
-    saved = config.home / "images" / "portrait.png"
+    saved = workdir / "images" / "portrait.png"
     assert result == f"IMAGE_SAVED: {saved}"
     assert saved.read_bytes() == b"edited-bytes"
     assert len(gate.calls) == 1
@@ -56,31 +58,34 @@ def test_edit_image_saves_under_home_images(tmp_path, monkeypatch):
 def test_edit_image_available_with_optional_tools_disabled_and_still_approved(
         tmp_path, monkeypatch):
     calls = []
-    config, gate, photo, tools = _setup(
+    config, gate, photo, tools, workdir = _setup(
         tmp_path, monkeypatch, optional_tools=False, image_calls=calls)
     config.image_model = "muse-image-1.0"
     result = tools["edit_image"]("describe the attached image", image=str(photo))
     assert result.startswith("IMAGE_SAVED: ")
+    assert Path(result.split(": ", 1)[1]).is_relative_to(workdir)
     assert gate.calls[0]["kind"] == "live"
     assert calls[0]["model"] == "muse-image-1.0"
 
 
 def test_edit_image_accepts_upload_basename(tmp_path, monkeypatch):
-    _, _, photo, tools = _setup(tmp_path, monkeypatch)
+    _, _, photo, tools, workdir = _setup(tmp_path, monkeypatch)
     result = tools["edit_image"]("anime style", image=photo.name)
     assert result.startswith("IMAGE_SAVED: ")
-    assert Path(result.split(": ", 1)[1]).name.startswith("aidon-")
+    saved = Path(result.split(": ", 1)[1])
+    assert saved.is_relative_to(workdir)
+    assert saved.name.startswith("aidon-")
 
 
 def test_edit_image_refuses_unknown_reference(tmp_path, monkeypatch):
-    _, gate, _, tools = _setup(tmp_path, monkeypatch)
+    _, gate, _, tools, _ = _setup(tmp_path, monkeypatch)
     result = tools["edit_image"]("anime style", image="missing.png")
     assert result.startswith("IMAGE_EDIT_FAILED:")
     assert gate.calls == []
 
 
 def test_edit_image_refuses_output_outside_home(tmp_path, monkeypatch):
-    _, _, photo, tools = _setup(tmp_path, monkeypatch)
+    _, _, photo, tools, _ = _setup(tmp_path, monkeypatch)
     result = tools["edit_image"]("anime style", image=str(photo),
                                  output="/tmp/elsewhere.png")
     assert result.startswith("IMAGE_EDIT_FAILED:")

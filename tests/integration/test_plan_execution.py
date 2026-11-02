@@ -204,6 +204,28 @@ def test_generated_file_path_replaces_prose_deliverable(tmp_path):
     assert report.files == ["intro.pdf"]
 
 
+def test_edit_image_path_is_bound_to_workspace_deliverable(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIDON_CRITIC_ENABLED", "0")
+    runner = _runner(tmp_path, FakeClient("{}"))
+    output = runner.sandbox.workdir / "cafe_scene.jpg"
+
+    def edit_image(**_kwargs):
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"edited image bytes")
+        return f"IMAGE_SAVED: {output}"
+
+    runner.extra_tools = {"edit_image": edit_image}
+    plan = Plan(
+        steps=[Step(tool="edit_image", args={}, deliverable="cafe_scene.jpg")],
+        deliverables=["cafe_scene.jpg"],
+        criteria=["cafe_scene.jpg exists and is non-empty"],
+    )
+
+    report = runner._execute_plan("Change the scene in the attached image", plan)
+    assert report.status == "done", report.error
+    assert report.files == ["cafe_scene.jpg"]
+
+
 def test_document_goal_does_not_accept_list_only_plan(tmp_path):
     plan = {"steps": [{"tool": "list", "args": {},
                         "deliverable": "workdir_listing_verification"}],

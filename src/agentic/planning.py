@@ -267,8 +267,8 @@ class PlanningMixin:
                                "edit_image tool is available. Use it with the "
                                "current attached image path(s); do not ask to "
                                "create or adopt another image tool or plugin. "
-                               "The tool uses the configured Muse image model, "
-                               "saves its output under the Aidon images folder, "
+                               "The tool uses the configured Muse image model "
+                               "and saves its output in the goal workspace, "
                                "and requires live approval before sending images "
                                "or spending credits.")
                 else:

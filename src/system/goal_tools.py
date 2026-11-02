@@ -332,24 +332,21 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             return path
 
         def _image_destination(output) -> Path:
-            images_dir = (config.home / "images").resolve()
+            workspace = workdir.resolve()
             raw = str(output or "").strip() or (
                 f"aidon-{datetime.now().strftime('%Y%m%d-%H%M%S')}.png")
-            relative = raw.replace("\\", "/")
             target = Path(raw).expanduser()
             if not target.is_absolute():
-                target = (config.home / relative) if relative.startswith("images/") \
-                    else (images_dir / relative)
+                target = workspace / raw.replace("\\", "/")
             target = target.resolve()
-            home_root = config.home.resolve()
-            if target != home_root and home_root not in target.parents:
-                raise ValueError("output path must stay inside the Aidon home")
+            if target != workspace and workspace not in target.parents:
+                raise ValueError("output path must stay inside the goal workspace")
             if target.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
                 target = target.with_suffix(".png")
             return target
 
         def edit_image(prompt, image="", images=None, output="", size="1024x1024"):
-            """Restyle or compose a photo. Saves under <home>/images by default."""
+            """Restyle or compose a photo. Saves in the goal workspace."""
             refs = []
             if images is not None:
                 refs.extend([images] if isinstance(images, str) else list(images))
