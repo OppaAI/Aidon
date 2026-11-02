@@ -66,6 +66,22 @@ def _connection(server):
     return None
 
 
+def _auth_hints(server):
+    """Report credential names and OAuth uncertainty from published metadata."""
+    names = set()
+    for package in server.get("packages", []):
+        for variable in package.get("environmentVariables", []):
+            name = str(variable.get("name", ""))
+            if (variable.get("isSecret") or variable.get("isRequired")) and re.fullmatch(
+                    r"[A-Za-z_][A-Za-z0-9_]*", name):
+                names.add(name)
+    has_http = any(remote.get("type") == "streamable-http"
+                   for remote in server.get("remotes", []))
+    auth_headers = sorted({str(key) for remote in server.get("remotes", [])
+                           for key in (remote.get("headers") or {})})
+    return sorted(names), auth_headers, bool(has_http and not names and not auth_headers)
+
+
 def _package_connection(package):
     name = str(package.get("identifier", ""))
     version = str(package.get("version", ""))
@@ -165,6 +181,7 @@ def discover_mcp(queries, get_json=None, limit=8):
                 continue
             seen.add(name)
             repo = str((server.get("repository") or {}).get("url", ""))
+            auth_env_names, auth_headers, may_use_oauth = _auth_hints(server)
             option = {"id": hashlib.sha256(name.encode()).hexdigest()[:20],
                       "name": name, "title": str(server.get("title") or name),
                       "description": str(server.get("description", ""))[:2000],
@@ -173,6 +190,9 @@ def discover_mcp(queries, get_json=None, limit=8):
                       "source": REGISTRY + "/" + urllib.parse.quote(name, safe="") + "/versions/latest",
                       "connection": _connection(server), "stars": None,
                       "stars_source": "", "license": "Unknown", "official": False}
+            option.update({"auth_env_names": auth_env_names,
+                           "auth_headers": auth_headers,
+                           "may_use_oauth": may_use_oauth})
             match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?", repo)
             if match:
                 try:
@@ -191,6 +211,8 @@ def discover_mcp(queries, get_json=None, limit=8):
                         option["connection"] = api_key_connection
                         option["repository"] = "https://github.com/Doist/todoist-mcp"
                         option["setup_source"] = "https://github.com/Doist/todoist-mcp/blob/main/docs/mcp-server.md"
+                        option["auth_env_names"] = ["TODOIST_API_KEY"]
+                        option["may_use_oauth"] = False
                 except Exception as exc:
                     errors.append(f"Todoist API-key setup unavailable ({type(exc).__name__})")
             results.append(option)

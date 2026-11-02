@@ -155,6 +155,11 @@ class McpHttpClient:
                 data = _parse_response(resp.read(),
                                        resp.headers.get("Content-Type", ""))
         except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                raise McpHttpError(
+                    "HTTP 401 from MCP server; it requires authorization. "
+                    "Aidon supports configured bearer/API keys, but browser OAuth is not supported yet"
+                ) from exc
             raise McpHttpError(f"HTTP {exc.code} from MCP server") from exc
         except urllib.error.URLError as exc:
             raise McpHttpError(f"MCP server unreachable: {exc}") from exc

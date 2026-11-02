@@ -155,11 +155,16 @@ class WebUILabMixin:
             brief = {"name": re.sub(r"[^a-zA-Z0-9_]", "_", option["name"]),
                      "purpose": "\n".join(prior_requests) or f"Connect to {option['title']}.",
                      "connection": connection, "requirements": requirements,
+                     "authentication_note": ("This endpoint publishes no credential variable. If it requires browser OAuth, Aidon cannot complete that flow yet."
+                                             if option.get("may_use_oauth") else
+                                             "Credential variable names come from the published server record; place their values in Aidon's .env."
+                                             if requirements else
+                                             "The discovery record does not list a credential variable; review its setup documentation for authentication details."),
                      "source": option["source"], "title": option["title"]}
             reply = ("Review this MCP connection before starting.\n\n"
                      + json.dumps(brief, indent=2, ensure_ascii=False)
                      + "\n\nCredentials belong in .env, never in this chat. "
-                     "Starting requests the existing connection approval; it does not approve remote actions.")
+                     + brief["authentication_note"] + " Starting requests the existing connection approval; it does not approve remote actions.")
         else:
             try:
                 if kind == "mcp" and body.get("research", True):

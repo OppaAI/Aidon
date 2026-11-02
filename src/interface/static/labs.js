@@ -50,7 +50,7 @@ function render(kind) {
     }).map(option => {
       const connection = option.connection;
       const address = connection ? (connection.url || [connection.command, ...(connection.args || [])].join(" ")) : "Connection needs additional setup";
-      const envNames = Object.keys((connection && connection.env) || {});
+      const envNames = [...new Set([...(option.auth_env_names || []), ...Object.keys((connection && connection.env) || {})])];
       const provenance = option.official
         ? '<span class="mcp-official">Publisher domain match</span>'
         : '<span class="mcp-community">Community / publisher not verified</span>';
@@ -61,9 +61,12 @@ function render(kind) {
         + ' · Version: ' + esc(option.version) + '</p><code>' + esc(address) + '</code><p>'
         + 'License: ' + esc(option.license) + ' · ' + stars + '</p>'
         + (envNames.length ? '<p>Needs environment variable(s): <code>' + esc(envNames.join(", ")) + '</code>. Put values in Aidon .env; secret values stay hidden.</p>' : '')
+        + (option.auth_headers && option.auth_headers.length ? '<p>Published endpoint requires header(s): <code>' + esc(option.auth_headers.join(", ")) + '</code>. Aidon needs a supported credential setup before connecting.</p>' : '')
+        + (option.may_use_oauth ? '<p class="mcp-warning">The registry lists an HTTP endpoint but no API key variable. It may require browser OAuth. Aidon cannot complete MCP OAuth yet; check the setup source before choosing it.</p>' : '')
         + (!connection ? '<p class="mcp-warning">This entry does not have a connection method Aidon can start automatically.</p>' : '')
         + '<p>'
         + safeLink(option.source, "Registry record") + ' · ' + safeLink(option.repository, "Repository")
+        + (option.setup_source ? ' · ' + safeLink(option.setup_source, "API key setup") : '')
         + (option.website ? ' · ' + safeLink(option.website, "Publisher website") : '') + '</p>'
         + '<button data-choice="' + esc(option.id) + '"' + ((!connection || busy.mcp) ? ' disabled' : '') + '>Use this server</button></article>';
     }).join("");
