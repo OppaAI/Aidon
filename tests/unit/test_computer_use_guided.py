@@ -99,11 +99,29 @@ def test_guided_task_sees_screen_then_acts_then_finishes(tmp_path):
     assert result["ok"] is True
     assert len(result["actions_taken"]) == 1
     assert driver.actions[0] == {"kind": "type", "text": "hello"}
+    assert any(part.get("type") == "image_url" for part in chat.calls[1][0].content)
     assert (tmp_path / "screenshot_round_0.png").exists()
     assert (tmp_path / "screenshot_round_1.png").exists()
     trace = json.loads((tmp_path / "task_trace.json").read_text())
     assert trace["goal"] == "submit the form"
     assert len(trace["steps"]) == 1
+
+
+def test_guided_task_does_not_claim_success_without_an_action_or_done(tmp_path):
+    chat = _ScriptChat(["A desktop.", json.dumps({"action": None, "done": False})])
+    result = run_guided_task("open an app", chat, driver=_Driver(),
+                             screenshot_dir=str(tmp_path), capture=_fake_png)
+    assert not result["ok"]
+    assert "without confirming completion" in result["error"]
+
+
+def test_speech_tool_requests_exact_text_in_webui(tmp_path):
+    spoken = []
+    tools = _goal_extra_tools(SimpleNamespace(home=tmp_path), tmp_path,
+                              speak_callback=spoken.append, optional_tools=False)
+    result = tools["tts_speak"]("Hello from Aidon")
+    assert spoken == ["Hello from Aidon"]
+    assert "requested" in result.lower()
 
 
 def test_guided_task_stops_at_max_actions(tmp_path):

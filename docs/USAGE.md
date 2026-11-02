@@ -387,6 +387,31 @@ Aidon climbing work, through plugins, not arena code.
 What is built here is the research, live, and
 verification arena they will run in.
 
+## Desktop demo and recording
+
+On an X11 Linux desktop, run `./scripts/start-desktop-demo.sh` from a terminal
+in the graphical session. It builds and starts the Aidon container with access
+to that desktop; the usual `docker compose up -d aidon` starts it without the
+desktop overlay. The script needs `xauth`, a valid `DISPLAY`, and the session's
+X11 authorization file. Desktop access gives the container access to the X11
+session, so use it only when you intend Aidon to control that desktop. Wayland
+desktop control is not supported by this driver.
+
+In chat, ask, for example: “Open the text editor on my desktop, type ‘Hello
+from Aidon’, and read that sentence aloud.” Approve the plan and the individual
+desktop actions. The guided tool sends screenshots to the configured vision
+model, so close any windows you do not want it to see. Aidon requests speech
+in the WebUI after the desktop step; it uses the configured voice service or
+the browser's speech synthesis. Browser audio playback may require a prior
+interaction with the page.
+
+Use **Record demo** in the chat header to choose a screen or window in the
+browser's sharing dialog. Stop the recording using the button or browser
+sharing control, then select **Download recording**. Select audio sharing in
+the browser dialog if available; some browser and Linux combinations cannot
+capture desktop audio, which the recording status indicates. The video is
+created in the browser and is not uploaded automatically.
+
 ## 📊 Budgets, trace, v1 API, token auth, and MCP
 
 - Budgets: 200,000 tokens estimated, 50 steps, 3,600

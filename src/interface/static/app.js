@@ -1756,12 +1756,22 @@
         else if (e.kind === "speech-request") {
           explicitSpeechRuns.add(polledRun);
           const message = addMsg("aidon", e.text, e.t);
-          const button = playButton(e.text, message);
-          message.appendChild(button);
-          if (ttsAvailable) speak(message, e.text, button).catch(() => {});
-          else if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
-            window.speechSynthesis.cancel();
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance(e.text));
+          if (ttsAvailable) {
+            const button = playButton(e.text, message);
+            message.appendChild(button);
+            speak(message, e.text, button).catch(() => {});
+          } else if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
+            const play = () => {
+              window.speechSynthesis.cancel();
+              window.speechSynthesis.speak(new SpeechSynthesisUtterance(e.text));
+            };
+            const button = document.createElement("button");
+            button.className = "tts-play";
+            button.textContent = "▶";
+            button.title = "Read aloud";
+            button.addEventListener("click", play);
+            message.appendChild(button);
+            play();
           } else showMiddleStatus("Speech is unavailable; the requested text is shown.", "warning");
         }
         else if (e.kind === "approval-request") {
