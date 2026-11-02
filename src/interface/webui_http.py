@@ -104,6 +104,30 @@ def make_handler(server):
 
         def do_GET(self):
             parsed = urlparse(self.path)
+            is_oauth_callback = parsed.path == '/oauth/mcp/callback'
+            if is_oauth_callback:
+                import ipaddress
+                from .mcp_oauth import callback_uri_from_env
+                try:
+                    remote_is_loopback = ipaddress.ip_address(self.client_address[0]).is_loopback
+                    expected_host = urlparse(callback_uri_from_env()).netloc.lower()
+                except (ValueError, RuntimeError):
+                    remote_is_loopback = False
+                    expected_host = ''
+                if (server.webhook_only or not remote_is_loopback
+                        or self.headers.get('Host', '').lower() != expected_host):
+                    self._send_json(403, {'error': 'OAuth callback is restricted to its loopback address'})
+                    return
+                from .mcp_oauth import get_oauth_manager
+                manager = get_oauth_manager(server.home, callback_uri_from_env())
+                accepted, message = manager.finish_callback(parse_qs(parsed.query))
+                safe_message = html.escape(message)
+                content = ('<main style="max-width:640px;margin:12vh auto;padding:24px">'
+                           '<h1>MCP authorization</h1><p>' + safe_message + '</p>'
+                           '<p>You can close this tab and return to Aidon.</p></main>')
+                self._send_html(200 if accepted else 400,
+                                _page_html('MCP authorization', content))
+                return
             if not parsed.path.startswith(('/webhook/', '/webhooks/')):
                 from .webui_auth import is_allowed_host, is_authorized
                 headers = {k.lower(): v for k, v in self.headers.items()}
