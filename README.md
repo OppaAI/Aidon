@@ -23,13 +23,22 @@
 
 ---
 
-# What this project wants to showcase for the Meta Global AI Developer Hackathon
+> # What this project wants to showcase for the Meta Global AI Developer Hackathon
+>
+> Built for the Meta Global AI Developer Hackathon (October 26 – November 4, 2026), Aidon submits three capabilities, all powered by Meta's models through the Meta Model API:
+>
+>- Understands goals in plain natural language and interviews the user in conversation to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it.
+>- Grows its own capabilities — drafting, sandbox-testing, and adopting tools and skills that plug into its agentic workflows, including niche ones tailored to a user's own task.
+>- Keeps a human in the loop — every consequential action passes through human review and approval before it goes live, with verification and rollback on failure, so the agent's autonomy never outruns its owner's consent.
+>
+>*Note: Aidon is still under active development — it was built during this 10-day hackathon, and not all planned agentic capabilities are implemented yet.*
 
-Built for the Meta Global AI Developer Hackathon (October 26 – November 4, 2026), Aidon submits three capabilities, all powered by Meta's models through the Meta Model API:
+> ## Demo video
+> 
+>▶️ [Watch the 3-minute demo on YouTube — coming soon](https://www.youtube.com/watch?v=YOUR_VIDEO_ID)
+>
+><!-- TODO: replace YOUR_VIDEO_ID with the real YouTube video ID after uploading -->
 
-- Understands goals in plain natural language and interviews the user in conversation to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it.
-- Grows its own capabilities — drafting, sandbox-testing, and adopting tools and skills that plug into its agentic workflows, including niche ones tailored to a user's own task.
-- Keeps a human in the loop — every consequential action passes through human review and approval before it goes live, with verification and rollback on failure, so the agent's autonomy never outruns its owner's consent.
 
 
 # Autonomous AI agent. You give it one goal — it does the rest.
