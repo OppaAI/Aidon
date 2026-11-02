@@ -6,20 +6,31 @@
 <title>Aidon — Capabilities</title>
 <link rel="stylesheet" href="/static/style.css?v=__ASSET_V__">
 <style>
-  .cap-wrap { max-width: 980px; margin: 0 auto; padding: 20px 18px 60px; }
+  .cap-wrap { max-width: 1180px; margin: 0 auto; padding: 20px 18px 60px; }
   .cap-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 4px; }
   .cap-head a.brand { color: var(--olive); text-decoration: none; font-family: var(--font-display); font-size: 22px; font-weight: 700; }
   .cap-head .cap-title { color: var(--muted); font-size: 15px; }
   .cap-sub { color: var(--muted); margin: 2px 0 18px; max-width: 72ch; }
   .cap-kernel { border: 1px solid var(--amber); color: var(--amber); border-radius: 8px; padding: 8px 12px; margin-bottom: 16px; display: none; }
-  .cap-sec { margin-top: 26px; }
-  .cap-sec h2 { font-family: var(--font-display); font-size: 19px; margin: 0 0 4px; }
-  .cap-sec .cap-note { color: var(--muted); margin: 0 0 10px; max-width: 72ch; }
-  .cap-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px; }
-  .cap-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
-  .cap-card .cap-name { font-family: var(--font-mono); font-size: 14px; font-weight: 600; word-break: break-all; }
-  .cap-card .cap-desc { color: var(--muted); font-size: 13px; margin-top: 4px; }
-  .cap-card .cap-meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .cap-sec { margin-top: 20px; }
+  .cap-tabs { display:flex; flex-wrap:wrap; gap:7px; margin:18px 0 10px; border-bottom:1px solid var(--border); padding-bottom:8px; }
+  .cap-tab { background:var(--surface); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:8px 13px; cursor:pointer; }
+  .cap-tab[aria-selected="true"] { border-color:var(--accent); color:var(--accent); }
+  .cap-panel { display:none; }
+  .cap-panel.active { display:block; }
+  .cap-split { display:grid; grid-template-columns:minmax(240px, 310px) minmax(0,1fr); min-height:440px; border:1px solid var(--border); border-radius:11px; overflow:hidden; background:var(--surface); }
+  .cap-list { border-right:1px solid var(--border); padding:10px; overflow:auto; max-height:70vh; }
+  .cap-list button { display:block; width:100%; text-align:left; background:transparent; border:1px solid transparent; border-radius:8px; padding:9px 10px; color:var(--text); cursor:pointer; margin-bottom:3px; }
+  .cap-list button:hover,.cap-list button[aria-selected="true"] { background:var(--surface2); border-color:var(--border); }
+  .cap-list-name { display:block; color:#d5a52d; font-family:var(--font-mono); font-weight:700; overflow-wrap:anywhere; }
+  .cap-list-sub { display:block; color:var(--muted); font-size:12px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; }
+  .cap-detail { min-width:0; padding:16px; overflow:auto; max-height:70vh; }
+  .cap-detail h2 { font-family:var(--font-display); font-size:19px; margin:0 0 5px; overflow-wrap:anywhere; }
+  .cap-detail p { color:var(--muted); line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .cap-detail-head { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+  .cap-detail-head .cap-badge { margin:0; }
+  .cap-code-title { margin:18px 0 5px; font-size:13px; color:var(--muted); }
+  .cap-code { max-height:48vh; overflow:auto; white-space:pre; font:12px/1.5 var(--font-mono); background:var(--surface2); border:1px solid var(--border); padding:12px; border-radius:8px; }
   .cap-badge { font-size: 11px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; color: var(--muted); }
   .cap-badge.plugin { color: var(--accent2); border-color: var(--accent2); }
   .cap-badge.sidefx { color: var(--amber); border-color: var(--amber); }
@@ -45,17 +56,7 @@
      locks body scroll for the app shell, so unlock it here. */
   html, body { height: auto; }
   body { overflow: auto; }
-  .cap-card.clickable { cursor: pointer; }
-  .cap-card.clickable:hover { border-color: var(--accent); }
-  .cap-viewcode { color: var(--accent); font-size: 12px; margin-top: 8px; }
-  .cap-modal { position: fixed; inset: 0; background: rgba(0,0,0,.62); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 22px; }
-  .cap-modal[hidden] { display: none; }
-  .cap-modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; max-width: 880px; width: 100%; max-height: 86vh; display: flex; flex-direction: column; }
-  .cap-modal-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
-  .cap-modal-head .cap-mname { font-family: var(--font-mono); font-weight: 600; }
-  .cap-modal-head .cap-mnote { color: var(--muted); font-size: 12px; margin-left: auto; }
-  .cap-modal-head button { background: none; border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 2px 9px; cursor: pointer; }
-  .cap-modal-code { margin: 0; padding: 14px; overflow: auto; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; white-space: pre; }
+  @media(max-width:680px) { .cap-split { grid-template-columns:1fr; } .cap-list { border-right:0; border-bottom:1px solid var(--border); max-height:28vh; } .cap-detail { max-height:none; } }
 </style>
 </head>
 <body>
@@ -80,45 +81,17 @@
     <p><a class="cap-badge" href="/labs">Open Tool, Skill &amp; MCP Labs →</a></p>
   </section>
 
-  <section class="cap-sec">
-    <h2>Tools <span id="tools-count" class="cap-note"></span></h2>
-    <p class="cap-note">Showing tools available with the current settings.
-    Ask, Plan, and Execute use the same tool set; optional tools and kernel
-    mode affect availability. “Acts on the world” tools are approval-gated
-    before live use.</p>
-    <div class="cap-cards" id="tools"></div>
-  </section>
-
-  <section class="cap-sec">
-    <h2>Learned skills</h2>
-    <p class="cap-note">Skills Aidon distilled from its own runs. Trusted and
-    validated skills carry passing sandbox tests; candidates are still in
-    testing and are <em>not</em> verified yet.</p>
-    <h3>Trusted &amp; validated</h3>
-    <div class="cap-cards" id="skills-verified"></div>
-    <h3>Candidates — in testing</h3>
-    <div class="cap-cards" id="skills-candidate"></div>
-    <details class="cap-retired" id="skills-retired-wrap">
-      <summary>Retired skills</summary>
-      <div class="cap-cards" id="skills-retired" style="margin-top:10px"></div>
-    </details>
-  </section>
-
-  <section class="cap-sec">
-    <h2>Connected MCP servers</h2>
-    <p class="cap-note">External tool servers Aidon proposed and you approved.
-    Reconnecting to one of these needs no new approval; a new server always
-    asks first.</p>
-    <div class="cap-cards" id="mcp"></div>
-  </section>
-
-  <section class="cap-sec">
-    <h2>Saved workflows <span id="dags-count" class="cap-note"></span></h2>
-    <p class="cap-note">Plans Aidon has run and kept as reusable graphs.
-    Inspect or edit them in the <a href="/dag">DAG editor</a>.</p>
-    <div id="dags"></div>
-  </section>
-
+  <nav class="cap-tabs" role="tablist" aria-label="Capability categories">
+    <button class="cap-tab" role="tab" aria-selected="true" data-cap-tab="tools">🧰 Tools</button>
+    <button class="cap-tab" role="tab" aria-selected="false" data-cap-tab="skills">📘 Skills</button>
+    <button class="cap-tab" role="tab" aria-selected="false" data-cap-tab="mcp">🔌 MCP</button>
+    <button class="cap-tab" role="tab" aria-selected="false" data-cap-tab="other">🗂 Other</button>
+  </nav>
+  <section class="cap-panel active" id="cap-tools" role="tabpanel"><div class="cap-split"><div class="cap-list" id="tools-list"></div><article class="cap-detail" id="tools-detail"><p>Select a tool to see its details and source.</p></article></div></section>
+  <section class="cap-panel" id="cap-skills" role="tabpanel"><div class="cap-split"><div class="cap-list" id="skills-list"></div><article class="cap-detail" id="skills-detail"><p>Select a skill to see its info and Markdown.</p></article></div></section>
+  <section class="cap-panel" id="cap-mcp" role="tabpanel"><div class="cap-split"><div class="cap-list" id="mcp-list"></div><article class="cap-detail" id="mcp-detail"><p>Select an MCP server to see its connection details.</p></article></div></section>
+  <section class="cap-panel" id="cap-other" role="tabpanel">
+  <section class="cap-sec"><h2>Saved workflows <span id="dags-count" class="cap-note"></span></h2><p class="cap-note">Plans Aidon has run and kept as reusable graphs. Inspect or edit them in the <a href="/dag">DAG editor</a>.</p><div id="dags"></div></section>
   <section class="cap-sec">
     <h2>How Aidon gets a capability it doesn't have</h2>
     <div class="cap-ladder">
@@ -131,18 +104,7 @@
       <div class="cap-rung"><span class="cap-rung-n">4 · Build it</span>
         <p>Draft a tool plugin, test it in the sandbox, and adopt it with your approval — usable immediately, and listed here.</p></div>
     </div>
-  </section>
-</div>
-<div class="cap-modal" id="cap-modal" hidden>
-  <div class="cap-modal-box">
-    <div class="cap-modal-head">
-      <span class="cap-mname" id="cap-modal-name"></span>
-      <span class="cap-badge" id="cap-modal-origin"></span>
-      <span class="cap-mnote" id="cap-modal-note"></span>
-      <button id="cap-modal-close" type="button">✕</button>
-    </div>
-    <pre class="cap-modal-code" id="cap-modal-code"></pre>
-  </div>
+  </section></section>
 </div>
 <script src="/static/capabilities.js?v=__ASSET_V__"></script>
 </body>

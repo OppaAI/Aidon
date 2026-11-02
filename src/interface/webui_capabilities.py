@@ -1,6 +1,7 @@
 """Reporting, missions, capability inventory, and memory endpoints."""
 
 import json
+from pathlib import Path
 
 
 class WebUICapabilityMixin:
@@ -84,23 +85,57 @@ class WebUICapabilityMixin:
             })
         try:
             from ..capabilities.skill_library import SkillLibrary
-            skill_names = [skill.name for skill in SkillLibrary(self.home).list()]
+            skills = [skill.to_dict() for skill in SkillLibrary(self.home).list(
+                states=("candidate", "validated", "trusted", "retired"))]
         except Exception:
-            skill_names = []
-        mcp_servers: list[str] = []
+            skills = []
+        mcp_servers = {}
+        try:
+            from ..capabilities.capability_registry import CapabilityRegistry
+            for entry in CapabilityRegistry(self.home).list(kind="mcp"):
+                mcp_servers[str(entry.get("name", ""))] = entry
+        except Exception:
+            pass
         try:
             data = self._read_json_file(self.home / "mcp_servers.json")
             if isinstance(data, dict):
-                mcp_servers = [str(key) for key in data]
+                legacy = data.items()
             elif isinstance(data, list):
-                mcp_servers = [str(item.get("name", item)) if isinstance(item, dict)
-                               else str(item) for item in data]
+                legacy = ((str(item.get("name", "")), item) for item in data
+                          if isinstance(item, dict))
+            else:
+                legacy = ()
+            for name, config in legacy:
+                if not name or name in mcp_servers or not isinstance(config, dict):
+                    continue
+                mcp_servers[name] = {"name": name, "status": "connected",
+                                     "config": config, "kind": "mcp"}
         except Exception:
-            mcp_servers = []
-        return {"tools": tool_rows, "skills": skill_names,
-                "mcp_servers": mcp_servers}
+            pass
+        for entry in mcp_servers.values():
+            config = dict(entry.get("config") or {})
+            safe = {key: value for key, value in config.items()
+                    if key not in ("env", "token", "headers")}
+            if config.get("env"):
+                safe["environment_variables"] = sorted(
+                    str(key) for key in dict(config["env"]))
+            if config.get("token") or config.get("headers"):
+                safe["authentication"] = "configured (secret hidden)"
+            entry["config"] = safe
+        try:
+            dags = self.handle_dags_list().get("dags", [])
+            dags = [{"name": item.get("id", item.get("name", "workflow")),
+                     "goal": item.get("goal", "")}
+                    for item in dags if isinstance(item, dict)]
+        except Exception:
+            dags = []
+        return {"tools": tool_rows, "skills": skills,
+                "mcp_servers": list(mcp_servers.values()),
+                "counts": {"tools": len(tool_rows), "skills": len(skills),
+                           "mcp": len(mcp_servers)},
+                "dags": {"count": len(dags), "recent": dags[:30]}}
 
-    def handle_capability_code(self, name: str):
+    def handle_capability_code(self, name: str, kind: str = "tool"):
         """Python source for a named capability handler, or None
         when no importable handler carries that name.
 
@@ -118,6 +153,75 @@ class WebUICapabilityMixin:
         wanted = str(name or "")
         if not wanted:
             return None
+        kind = str(kind or "tool").strip().lower()
+        if kind == "skill":
+            try:
+                from ..capabilities.skill_library import SkillLibrary
+                skill = SkillLibrary(self.home).get(wanted)
+                if skill is None:
+                    return None
+                path = (Path(self.home) / "skills" / f"{skill.name}.md")
+                home = Path(self.home).resolve()
+                resolved = path.resolve()
+                if resolved.is_relative_to(home) and resolved.is_file():
+                    source = resolved.read_text(encoding="utf-8")
+                else:
+                    source = skill.to_markdown()
+                return {"name": wanted, "source": source,
+                        "origin": f"skill · {skill.state}",
+                        "note": "Stored Markdown instructions; skills are guidance, not executable code."}
+            except (OSError, ValueError):
+                return None
+        if kind == "mcp":
+            try:
+                from ..capabilities.capability_registry import CapabilityRegistry
+                entry = CapabilityRegistry(self.home).get(wanted)
+                if not entry:
+                    data = self._read_json_file(Path(self.home) / "mcp_servers.json")
+                    if isinstance(data, dict):
+                        config = data.get(wanted)
+                    elif isinstance(data, list):
+                        config = next((item for item in data
+                                       if isinstance(item, dict)
+                                       and str(item.get("name", "")) == wanted), None)
+                    else:
+                        config = None
+                    if isinstance(config, dict):
+                        entry = {"config": config, "status": "connected"}
+                if not entry:
+                    return None
+                config = dict(entry.get("config") or {})
+                # MCP environment and token values are never returned to the
+                # browser. Only variable names make a useful, safe diagnostic.
+                safe = {key: value for key, value in config.items()
+                        if key not in ("env", "token", "headers")}
+                if config.get("env"):
+                    safe["environment_variables"] = sorted(
+                        str(key) for key in config["env"])
+                if config.get("token"):
+                    safe["authentication"] = "configured (secret hidden)"
+                return {"name": wanted, "source": json.dumps(safe, indent=2),
+                        "origin": f"MCP · {entry.get('status', 'registered')}",
+                        "note": "Connection details shown with secrets hidden."}
+            except Exception:
+                return None
+        if kind != "tool":
+            return None
+        # Adopted plugin tools can show their own checked-in module source.
+        try:
+            from ..capabilities.plugins import PluginRegistry
+            registry = PluginRegistry(self.home)
+            registry.load_all()
+            plugin, spec = registry.tool_owner(wanted)
+            if plugin is not None and spec is not None:
+                module = (Path(plugin.directory) / str(spec.get("module", ""))).resolve()
+                if module.is_relative_to(Path(plugin.directory).resolve()) and module.is_file():
+                    return {"name": wanted,
+                            "source": module.read_text(encoding="utf-8"),
+                            "origin": f"plugin · {plugin.name}",
+                            "note": "Source from the adopted plugin module."}
+        except (OSError, ValueError, AttributeError):
+            pass
         # Goal-run tools are closures assembled by main.py, so they do not
         # exist as importable module-level functions. They are nevertheless
         # real tools; show their builder source instead of returning a

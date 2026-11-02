@@ -19,50 +19,87 @@ def _get_json(url):
 
 def _connection(server):
     """Offer only fully specified transports supported by Aidon's MCP client."""
+    # Prefer a package that uses a named secret from .env over a hosted
+    # endpoint that requires an interactive OAuth exchange. Aidon's MCP HTTP
+    # client currently supports optional bearer tokens, not OAuth browser
+    # redirects; advertising that hosted endpoint as connect-ready misleads.
+    packages = list(server.get("packages", []))
+    packages.sort(key=lambda package: not any(
+        variable.get("isSecret") or variable.get("isRequired")
+        for variable in package.get("environmentVariables", [])))
+    for package in packages:
+        config = _package_connection(package)
+        if config and config.get("env"):
+            return config
     for remote in server.get("remotes", []):
         url = str(remote.get("url", ""))
         if (remote.get("type") == "streamable-http" and url.startswith("https://")
                 and "{" not in url and not remote.get("headers")):
             return {"transport": "http", "url": url}
-    for package in server.get("packages", []):
-        name = str(package.get("identifier", ""))
-        version = str(package.get("version", ""))
-        if (package.get("registryType") not in ("npm", "pypi")
-                or (package.get("transport") or {}).get("type", "stdio") != "stdio"
-                or not re.fullmatch(r"[@A-Za-z0-9_./-]+", name)
-                or not re.fullmatch(r"[A-Za-z0-9_.+-]+", version)
-                or version in ("latest", "main")
-                or package.get("runtimeArguments")):
-            continue
-        args = []
-        complete = True
-        for argument in package.get("packageArguments", []):
-            value = argument.get("value") or argument.get("default")
-            if value is None and argument.get("isRequired"):
-                complete = False
-            if value is not None:
-                if "{" in str(value):
-                    complete = False
-                if argument.get("type") == "named":
-                    args.append(str(argument.get("name", "")))
-                args.append(str(value))
-        if not complete:
-            continue
-        env = {}
-        for variable in package.get("environmentVariables", []):
-            key = str(variable.get("name", ""))
-            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
-                complete = False
-                break
-            if variable.get("isSecret") or variable.get("isRequired"):
-                env[key] = "$" + key
-            elif variable.get("default") is not None:
-                env[key] = str(variable["default"])
-        if complete:
-            if package["registryType"] == "npm":
-                return {"transport": "stdio", "command": "npx", "args": ["-y", f"{name}@{version}", *args], "env": env}
-            return {"transport": "stdio", "command": "uvx", "args": [f"{name}=={version}", *args], "env": env}
+    for package in packages:
+        config = _package_connection(package)
+        if config:
+            return config
     return None
+
+
+def _package_connection(package):
+    name = str(package.get("identifier", ""))
+    version = str(package.get("version", ""))
+    if (package.get("registryType") not in ("npm", "pypi")
+            or (package.get("transport") or {}).get("type", "stdio") != "stdio"
+            or not re.fullmatch(r"[@A-Za-z0-9_./-]+", name)
+            or not re.fullmatch(r"[A-Za-z0-9_.+-]+", version)
+            or version in ("latest", "main")
+            or package.get("runtimeArguments")):
+        return None
+    args = []
+    complete = True
+    for argument in package.get("packageArguments", []):
+        value = argument.get("value") or argument.get("default")
+        if value is None and argument.get("isRequired"):
+            complete = False
+        if value is not None:
+            if "{" in str(value):
+                complete = False
+            if argument.get("type") == "named":
+                args.append(str(argument.get("name", "")))
+            args.append(str(value))
+    if not complete:
+        return None
+    env = {}
+    for variable in package.get("environmentVariables", []):
+        key = str(variable.get("name", ""))
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            complete = False
+            break
+        if variable.get("isSecret") or variable.get("isRequired"):
+            env[key] = "$" + key
+        elif variable.get("default") is not None:
+            env[key] = str(variable["default"])
+    if not complete:
+        return None
+    if package["registryType"] == "npm":
+        return {"transport": "stdio", "command": "npx", "args": ["-y", f"{name}@{version}", *args], "env": env}
+    return {"transport": "stdio", "command": "uvx", "args": [f"{name}=={version}", *args], "env": env}
+
+
+def _publisher_matches_website(server, repo, get):
+    """True only when GitHub owner and registry site share a domain."""
+    match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+)/[A-Za-z0-9_.-]+(?:\.git)?/?", repo)
+    website = str(server.get("websiteUrl", ""))
+    if not match or not website:
+        return False
+    try:
+        owner = get("https://api.github.com/users/" + match[1])
+        profile_url = str(owner.get("blog", ""))
+        site_host = (urllib.parse.urlsplit(website).hostname or "").lower().removeprefix("www.")
+        owner_host = (urllib.parse.urlsplit(profile_url if "://" in profile_url else "https://" + profile_url).hostname or "").lower().removeprefix("www.")
+        return bool(site_host and owner_host and
+                    (site_host == owner_host or site_host.endswith("." + owner_host)
+                     or owner_host.endswith("." + site_host)))
+    except Exception:
+        return False
 
 
 def discover_mcp(queries, get_json=None, limit=8):
@@ -94,18 +131,24 @@ def discover_mcp(queries, get_json=None, limit=8):
                       "author": name.split("/", 1)[0], "version": str(server.get("version", "")),
                       "repository": repo, "website": str(server.get("websiteUrl", "")),
                       "source": REGISTRY + "/" + urllib.parse.quote(name, safe="") + "/versions/latest",
-                      "connection": _connection(server), "stars": None, "license": "Unknown",
-                      "pricing": "Not verified; check publisher pricing", "reviews": "No verified review rating available"}
+                      "connection": _connection(server), "stars": None,
+                      "stars_source": "", "license": "Unknown", "official": False}
             match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?", repo)
             if match:
                 try:
                     github = get("https://api.github.com/repos/" + match[1])
                     option["stars"] = github.get("stargazers_count")
+                    option["stars_source"] = repo
                     option["license"] = (github.get("license") or {}).get("spdx_id") or "Unknown"
                     option["author"] = (github.get("owner") or {}).get("login") or option["author"]
                 except Exception:
                     pass
+            option["official"] = _publisher_matches_website(server, repo, get)
             results.append(option)
             if len(results) >= limit:
-                return results, errors
+                break
+        if len(results) >= limit:
+            break
+    results.sort(key=lambda item: (not item.get("official", False),
+                                   -(item.get("stars") or 0), item.get("name", "")))
     return results, errors

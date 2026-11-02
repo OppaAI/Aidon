@@ -209,7 +209,7 @@ def test_capabilities_keys_and_contents(tmp_path):
     library = SkillLibrary(tmp_path / "home")
     library.add(Skill(name="adder", description="adds things"))
     payload = server.handle_capabilities()
-    assert set(payload) == {"tools", "skills", "mcp_servers"}
+    assert {"tools", "skills", "mcp_servers", "counts", "dags"} <= set(payload)
     # Tools are rows, not bare names: the capabilities page needs
     # origin and side-effect badges to tell a core tool from an
     # adopted plugin that acts on the world.
@@ -217,7 +217,7 @@ def test_capabilities_keys_and_contents(tmp_path):
     assert "write" in rows
     assert rows["write"]["origin"] == "core"
     assert rows["write"]["side_effect"] is False
-    assert "adder" in payload["skills"]
+    assert "adder" in [row["name"] for row in payload["skills"]]
     assert payload["mcp_servers"] == []
 
 
@@ -230,6 +230,13 @@ def test_capabilities_route_live(live_server):
 
 def test_capability_code_known_and_unknown(tmp_path):
     server = _server(tmp_path)
+    library = SkillLibrary(tmp_path / "home")
+    library.add(Skill(name="aurora", description="A reusable aurora procedure"))
+    (tmp_path / "home" / "skills").mkdir(exist_ok=True)
+    (tmp_path / "home" / "skills" / "aurora.md").write_text(
+        "# Aurora\n\n## Procedure\n\nObserve the sky.\n")
+    skill = server.handle_capability_code("aurora", "skill")
+    assert skill is not None and "Observe the sky" in skill["source"]
     found = server.handle_capability_code("lookup_capability")
     assert found is not None
     assert found["name"] == "lookup_capability"
@@ -239,9 +246,14 @@ def test_capability_code_known_and_unknown(tmp_path):
 
 
 def test_capability_code_route_live(live_server):
-    base, _, _ = live_server
+    base, server, home = live_server
+    library = SkillLibrary(home)
+    library.add(Skill(name="aurora", description="A reusable aurora procedure"))
+    (home / "skills" / "aurora.md").write_text("# Aurora skill source\n")
     status, payload = _get(base, "/api/capabilities/code?name=lookup_capability")
     assert status == 200 and "def lookup_capability" in payload["code"]
+    status, payload = _get(base, "/api/capabilities/code?kind=skill&name=aurora")
+    assert status == 200 and "Aurora skill source" in payload["source"]
     status, _ = _get(base, "/api/capabilities/code?name=no-such-handler-xyz")
     assert status == 404
 

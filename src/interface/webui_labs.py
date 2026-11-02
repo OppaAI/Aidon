@@ -32,7 +32,7 @@ LAB_INSTRUCTIONS = {
     "mcp": (
         "Help choose an MCP server that fits the owner's task and preferences. Compare only the "
         "supplied discovery records and research sources. Never invent a server address, command, "
-        "price, rating, review or star count. If a fact is unknown, say so. Ask the owner to click "
+        "publisher identity or GitHub star count. If a fact is unknown, say so. Ask the owner to click "
         "a server card; the server constructs its connection brief from the published record. "
         "Do not return a connection brief yourself."
     ),
@@ -160,7 +160,7 @@ class WebUILabMixin:
                     options, warnings = discover_mcp(queries, get_json=getattr(self, "lab_registry_get", None))
                 researcher = getattr(self, "lab_researcher", None)
                 if body.get("research") and callable(researcher):
-                    research = str(researcher("Find official sources, exact services and pricing for this capability request: "
+                    research = str(researcher("Find official sources, exact server addresses, publisher identity, authentication requirements, and GitHub repositories for this capability request: "
                                              + json.dumps(turns[-8:], ensure_ascii=False)))[:18000]
                 system = ("You are Aidon's Capability Lab interviewer. This is a read-only interview; "
                           "never execute a workflow, open another lab, ask for API key values, or claim "
@@ -169,10 +169,9 @@ class WebUILabMixin:
                           "information is already supplied, produce a brief immediately; do not repeat "
                           "answered questions. Return JSON only: {\"reply\": string, \"brief\": object or null}. "
                           "The reply should show the completed brief when one is ready for review. "
-                          "Re-evaluate the brief after every user correction. For MCP you may also "
-                          "return option_details: [{id, pricing, pricing_source, reviews, reviews_source}]. "
-                          "Every pricing/review claim must cite an exact URL present in the supplied research. "
-                          "Omit unsupported facts. " + LAB_INSTRUCTIONS[kind])
+                          "Re-evaluate the brief after every user correction. "
+                          "For MCP, describe the publisher-domain match flag accurately, list connection requirements, and mention GitHub stars only when the discovery record supplies them. "
+                          "Do not report price or reviews; do not infer ratings. " + LAB_INSTRUCTIONS[kind])
                 messages = [Message("system", system), Message("user", json.dumps({
                     "interview": turns, "previous_brief": state.get("brief"),
                     "discovery": options, "research": research,
@@ -180,17 +179,6 @@ class WebUILabMixin:
                 result = _extract_json(model(messages))
                 if kind == "mcp":
                     sources = {url.rstrip(".,;:!?)") for url in re.findall(r'https?://[^\s<>\[\]{}"\']+', research)}
-                    for details in (result.get("option_details") or [])[:8]:
-                        if not isinstance(details, dict):
-                            continue
-                        option = next((x for x in options if x["id"] == details.get("id")), None)
-                        if option is None:
-                            continue
-                        for field in ("pricing", "reviews"):
-                            source = details.get(field + "_source")
-                            if source in sources and isinstance(details.get(field), str):
-                                option[field] = details[field][:1000]
-                                option[field + "_source"] = source
                 reply = str(result.get("reply", "")).strip()
                 if not reply:
                     raise ValueError("The Lab model returned an empty answer")

@@ -45,13 +45,19 @@ function render(kind) {
     options.innerHTML = (current.options || []).map(option => {
       const connection = option.connection;
       const address = connection ? (connection.url || [connection.command, ...(connection.args || [])].join(" ")) : "Connection needs additional setup";
-      return '<article class="mcp-option"><strong>' + esc(option.title) + '</strong>'
+      const envNames = Object.keys((connection && connection.env) || {});
+      const provenance = option.official
+        ? '<span class="mcp-official">Official publisher match</span>'
+        : '<span class="mcp-community">Community / publisher not verified</span>';
+      const stars = option.stars == null ? 'GitHub stars: unavailable'
+        : '⭐ ' + esc(option.stars) + ' GitHub stars' + (option.stars_source ? ' · ' + safeLink(option.stars_source, 'source') : '');
+      return '<article class="mcp-option"><div class="mcp-option-head">' + provenance + '<strong>' + esc(option.title) + '</strong></div>'
         + '<p>' + esc(option.description) + '</p><p>Publisher: ' + esc(option.author)
         + ' · Version: ' + esc(option.version) + '</p><code>' + esc(address) + '</code><p>'
-        + 'License: ' + esc(option.license) + ' · GitHub stars: ' + esc(option.stars == null ? "Unavailable" : option.stars)
-        + '</p><p>Pricing: ' + esc(option.pricing) + '</p><p>Reviews: ' + esc(option.reviews) + '</p><p>'
-        + (option.pricing_source ? safeLink(option.pricing_source, "Pricing source") + ' · ' : '')
-        + (option.reviews_source ? safeLink(option.reviews_source, "Review source") + ' · ' : '')
+        + 'License: ' + esc(option.license) + ' · ' + stars + '</p>'
+        + (envNames.length ? '<p>Needs environment variable(s): <code>' + esc(envNames.join(", ")) + '</code>. Put values in Aidon .env; secret values stay hidden.</p>' : '')
+        + (!connection ? '<p class="mcp-warning">This entry does not have a connection method Aidon can start automatically.</p>' : '')
+        + '<p>'
         + safeLink(option.source, "Registry record") + ' · ' + safeLink(option.repository, "Repository")
         + (option.website ? ' · ' + safeLink(option.website, "Publisher website") : '') + '</p>'
         + '<button data-choice="' + esc(option.id) + '"' + ((!connection || busy.mcp) ? ' disabled' : '') + '>Use this server</button></article>';

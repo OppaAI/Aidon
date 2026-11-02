@@ -1,5 +1,16 @@
 # syntax=docker/dockerfile:1.7
-FROM python:3.12-slim
+FROM node:24-bookworm-slim AS node-runtime
+
+FROM python:3.12-bookworm-slim
+
+# Some official MCP servers (including Todoist's stdio server) are published
+# for Node. Keep the runtime available without adding npm installs to Aidon's
+# own Python environment; npx only downloads a selected MCP package after its
+# normal connection approval.
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
 # Pin the installer so image builds stay reproducible. uv is only needed
 # during the build; the application runs from its virtual environment.
@@ -13,6 +24,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/aidon/.venv \
     UV_CACHE_DIR=/root/.cache/uv \
     UV_LINK_MODE=copy \
+    NPM_CONFIG_CACHE=/data/.cache/npm \
     PATH=/opt/aidon/.venv/bin:$PATH
 
 WORKDIR /opt/aidon

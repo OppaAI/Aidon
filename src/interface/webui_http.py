@@ -380,7 +380,8 @@ def make_handler(server):
                 self._send_json(200, server.handle_capabilities())
             elif parsed.path == '/api/capabilities/code':
                 query = parse_qs(parsed.query)
-                data = server.handle_capability_code(query.get('name', [''])[0])
+                data = server.handle_capability_code(
+                    query.get('name', [''])[0], query.get('kind', ['tool'])[0])
                 self._send_json(200 if data is not None else 404, data or {'error': 'capability not found'})
             elif parsed.path in ('/api/memory/episodes', '/api/memory/knowledge'):
                 query = parse_qs(parsed.query)
