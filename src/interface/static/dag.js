@@ -7,8 +7,8 @@
 "use strict";
 
 const NS = "http://www.w3.org/2000/svg";
-const NODE_W = 210;
-const NODE_H = 76;
+const NODE_W = 270;
+const NODE_H = 88;
 
 const S = {
   dags: [],
@@ -161,7 +161,10 @@ async function openDag(name) {
       }
     }
     S.sel = null;
-    S.dirty = inferredSequence || needsLayout;
+    // Dependency inference and auto-placement are view-time repairs for
+    // legacy learned DAGs. They can be saved explicitly, but opening a graph
+    // alone must not trigger a destructive-change confirmation.
+    S.dirty = false;
     S.view = { x: 0, y: 0, k: 1 };
     renderList();
     renderGraph();

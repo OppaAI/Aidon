@@ -30,6 +30,46 @@
   <aside class="dag-side">
     <input id="search" class="dag-search" type="text" placeholder="filter graphs…">
     <div id="dag-list" class="dag-list"></div>
+    <section class="dag-inspector">
+      <div id="inspector-empty" class="dag-empty">
+        select a node to edit it
+        <ul class="dag-empty-list">
+          <li><b>id</b> — stable key, used by templates</li>
+          <li><b>name</b> — human title on the canvas</li>
+          <li><b>tool</b> — the tool this step calls</li>
+          <li><b>args</b> — JSON passed to the tool</li>
+          <li><b>deps</b> — nodes that must finish first</li>
+          <li><b>executor</b> — tool / fast / strong (llm nodes)</li>
+        </ul>
+      </div>
+
+      <div id="inspector" hidden>
+        <div class="dag-insp-head">
+          <span id="insp-id" class="dag-insp-id"></span>
+          <button id="btn-dup" class="dag-btn dag-btn-small">Duplicate</button>
+          <button id="btn-delnode" class="dag-btn dag-btn-small dag-btn-danger">Delete</button>
+        </div>
+        <label class="dag-field"><span>Step name</span><input id="f-name" type="text"></label>
+        <label class="dag-field"><span>Deliverable</span><input id="f-deliverable" type="text"></label>
+        <label class="dag-field"><span>Tool</span><select id="f-tool"></select></label>
+        <label class="dag-field"><span>Arguments (JSON)</span><textarea id="f-args" rows="7" spellcheck="false"></textarea></label>
+        <label class="dag-field"><span>Inputs (one per line)</span><textarea id="f-inputs" rows="3"></textarea></label>
+        <label class="dag-field"><span>Outputs (one per line)</span><textarea id="f-outputs" rows="3"></textarea></label>
+        <label class="dag-field"><span>Preconditions (one per line)</span><textarea id="f-preconditions" rows="3"></textarea></label>
+        <label class="dag-field"><span>Expected result</span><textarea id="f-expected" rows="3"></textarea></label>
+        <label class="dag-field"><span>Assumptions (one per line)</span><textarea id="f-assumptions" rows="3"></textarea></label>
+        <label class="dag-field">
+          <span>Executor</span>
+          <select id="f-executor">
+            <option value="tool">tool (deterministic)</option>
+            <option value="fast">fast model</option>
+            <option value="strong">strong model</option>
+          </select>
+        </label>
+        <div class="dag-field"><span>Depends on</span><div id="f-deps" class="dag-deps"></div></div>
+        <div class="dag-insp-foot"><span id="insp-state" class="dag-note"></span></div>
+      </div>
+    </section>
   </aside>
 
   <!-- center: the canvas -->
@@ -61,66 +101,6 @@
       node to connect · click the background to pan · wheel to zoom</div>
   </section>
 
-  <!-- right: the node inspector -->
-  <aside class="dag-inspector">
-    <div id="inspector-empty" class="dag-empty">
-      select a node to edit it
-      <ul class="dag-empty-list">
-        <li><b>id</b> — stable key, used by templates</li>
-        <li><b>name</b> — human title on the canvas</li>
-        <li><b>tool</b> — the tool this step calls</li>
-        <li><b>args</b> — JSON passed to the tool</li>
-        <li><b>deps</b> — nodes that must finish first</li>
-        <li><b>executor</b> — tool / fast / strong (llm nodes)</li>
-      </ul>
-    </div>
-
-    <div id="inspector" hidden>
-      <div class="dag-insp-head">
-        <span id="insp-id" class="dag-insp-id"></span>
-        <button id="btn-dup" class="dag-btn dag-btn-small">Duplicate</button>
-        <button id="btn-delnode" class="dag-btn dag-btn-small dag-btn-danger">
-          Delete</button>
-      </div>
-
-      <label class="dag-field"><span>Step name</span><input id="f-name" type="text"></label>
-      <label class="dag-field"><span>Deliverable</span><input id="f-deliverable" type="text"></label>
-
-      <label class="dag-field">
-        <span>Tool</span>
-        <select id="f-tool"></select>
-      </label>
-
-      <label class="dag-field">
-        <span>Arguments (JSON)</span>
-        <textarea id="f-args" rows="7" spellcheck="false"></textarea>
-      </label>
-
-      <label class="dag-field"><span>Inputs (one per line)</span><textarea id="f-inputs" rows="3"></textarea></label>
-      <label class="dag-field"><span>Outputs (one per line)</span><textarea id="f-outputs" rows="3"></textarea></label>
-      <label class="dag-field"><span>Preconditions (one per line)</span><textarea id="f-preconditions" rows="3"></textarea></label>
-      <label class="dag-field"><span>Expected result</span><textarea id="f-expected" rows="3"></textarea></label>
-      <label class="dag-field"><span>Assumptions (one per line)</span><textarea id="f-assumptions" rows="3"></textarea></label>
-
-      <label class="dag-field">
-        <span>Executor</span>
-        <select id="f-executor">
-          <option value="tool">tool (deterministic)</option>
-          <option value="fast">fast model</option>
-          <option value="strong">strong model</option>
-        </select>
-      </label>
-
-      <div class="dag-field">
-        <span>Depends on</span>
-        <div id="f-deps" class="dag-deps"></div>
-      </div>
-
-      <div class="dag-insp-foot">
-        <span id="insp-state" class="dag-note"></span>
-      </div>
-    </div>
-  </aside>
 </main>
 
 <script src="/static/dag.js?v=__ASSET_V__"></script>
