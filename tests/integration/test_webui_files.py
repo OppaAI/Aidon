@@ -86,11 +86,27 @@ def _get(base, path):
         return exc.code, exc.headers.get("Content-Type", ""), exc.read()
 
 
+def test_lab_session_http_persists_and_rejects_stale_revision(live_server):
+    base, _ = live_server
+    state = {"id": "chat", "turns": [{"role": "user", "text": "Help with video"}]}
+    body = json.dumps({"kind": "tool", "state": state, "revision": 0}).encode()
+    request = urllib.request.Request(base + "/api/lab-session", body,
+                                     {"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(request) as response:
+        assert json.load(response)["revision"] == 1
+    with urllib.request.urlopen(base + "/api/lab-session?kind=tool") as response:
+        assert json.load(response) == {"revision": 1, "state": state}
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(request)
+    assert exc.value.code == 409
+
+
 def test_file_route_serves_file_under_home_with_md_type(live_server):
     base, home = live_server
-    target = home / "notes.md"
+    target = home / "workspace" / "notes.md"
+    target.parent.mkdir()
     target.write_text("# hello\n")
-    status, ctype, body = _get(base, "notes.md")
+    status, ctype, body = _get(base, "workspace/notes.md")
     assert status == 200
     assert body == b"# hello\n"
     assert ctype == "text/markdown"
@@ -98,8 +114,8 @@ def test_file_route_serves_file_under_home_with_md_type(live_server):
 
 def test_file_route_serves_absolute_path_under_home(live_server):
     base, home = live_server
-    target = home / "sub" / "data.json"
-    target.parent.mkdir()
+    target = home / "workspace" / "sub" / "data.json"
+    target.parent.mkdir(parents=True)
     target.write_text('{"a": 1}')
     status, ctype, body = _get(base, str(target))
     assert status == 200
@@ -117,9 +133,32 @@ def test_file_route_rejects_traversal(live_server):
 
 def test_file_route_missing_is_404_and_directory_is_400(live_server):
     base, home = live_server
-    (home / "sub").mkdir()
-    assert _get(base, "nope-xyz.txt")[0] == 404
-    assert _get(base, "sub")[0] == 400
+    (home / "workspace" / "sub").mkdir(parents=True)
+    assert _get(base, "workspace/nope-xyz.txt")[0] == 404
+    assert _get(base, "workspace/sub")[0] == 400
+
+
+def test_file_route_rejects_private_home_files(live_server):
+    base, home = live_server
+    (home / ".env").write_text("SECRET=value")
+    (home / "registry.db").write_text("private")
+    assert _get(base, ".env")[0] == 403
+    assert _get(base, "registry.db")[0] == 403
+
+
+@pytest.mark.parametrize("length,expected", [("-1", 400), ("not-a-number", 400), (str(81 * 1024 * 1024), 413)])
+def test_request_body_length_is_bounded(live_server, length, expected):
+    import http.client
+    base, _ = live_server
+    parsed = urllib.parse.urlparse(base)
+    conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=3)
+    try:
+        conn.putrequest("POST", "/api/chat")
+        conn.putheader("Content-Length", length)
+        conn.endheaders()
+        assert conn.getresponse().status == expected
+    finally:
+        conn.close()
 
 
 def test_file_route_refuses_symlink_escaping_home(live_server, tmp_path):
@@ -128,6 +167,54 @@ def test_file_route_refuses_symlink_escaping_home(live_server, tmp_path):
     secret.write_text("secret\n")
     (home / "link.txt").symlink_to(secret)
     assert _get(base, "link.txt")[0] == 403
+
+
+def test_chat_image_attachment_survives_history_reload_and_is_served(live_server):
+    from src.memory.conversations_db import ConversationStoreDB
+
+    base, home = live_server
+    image = home / "library" / "uploads" / "photo.jpg"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"fake-jpeg")
+    db = ConversationStoreDB(home)
+    conversation = db.create_conversation()["id"]
+    db.record_exchange(
+        conversation, "user",
+        "What is in this picture?\n\nAttached image paths (available to "
+        "image-aware sandbox plugins after approval):\n" + str(image))
+    exchange_no = db.latest_exchange_no(conversation, "user")
+
+    # Exercise the same restore path as a page refresh, then fetch only by
+    # opaque attachment ID (the HTTP request cannot provide a filesystem path).
+    from src.interface.webui import WebUIServer
+    server = WebUIServer(home, memory=None)
+    restored = server.handle_conversation_get(conversation)
+    assert restored["attachments"][0]["name"] == "photo.jpg"
+    assert restored["attachments"][0]["exchange_no"] == exchange_no
+    path = restored["attachments"][0]["url"]
+    with urllib.request.urlopen(base + path) as response:
+        assert response.status == 200
+        assert response.headers.get("Content-Type") == "image/jpeg"
+        assert response.read() == b"fake-jpeg"
+    db.close()
+
+
+def test_chat_attachment_route_does_not_allow_path_traversal(live_server):
+    from src.memory.conversations_db import ConversationStoreDB
+
+    base, home = live_server
+    outside = home.parent / "outside.jpg"
+    outside.write_bytes(b"private")
+    db = ConversationStoreDB(home)
+    conversation = db.create_conversation()["id"]
+    db.add_attachment(conversation, str(outside), kind="image")
+    row = db.attachments(conversation)[0]
+    try:
+        with urllib.request.urlopen(base + "/api/conversation-attachments/" + row["id"] + "/file"):
+            pytest.fail("outside path should not be served")
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 404
+    db.close()
 
 
 # ---------------------------------------------------------------- markdown
@@ -165,6 +252,20 @@ def test_chat_page_contains_render_markdown():
         assert marker in CHAT_HTML
     # The karaoke completion hook re-renders the finished message.
     assert "element.innerHTML = render_markdown(text);" in CHAT_HTML
+
+
+def test_dag_editor_accepts_wrapped_tools_api_response():
+    if shutil.which("node") is None:
+        pytest.skip("node not available")
+    source = (Path(__file__).resolve().parents[2]
+              / "src" / "interface" / "static" / "dag.js").read_text()
+    fn = _extract_fn(source, "normalizeToolList")
+    harness = (fn + '\nconsole.log(JSON.stringify(normalizeToolList('
+               '{tools:[{name:"edit_image"}]})));\n')
+    proc = subprocess.run(["node", "-e", harness], capture_output=True,
+                          text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout) == [{"name": "edit_image"}]
 
 
 def test_render_markdown_table_bold_code_link_and_escape():

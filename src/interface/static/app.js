@@ -6,7 +6,7 @@
 
   const thread = document.getElementById("thread");
   const input = document.getElementById("goal-input");
-  const defaultGoalPlaceholder = "Start with a goal…\n\nPlan something, research a question, or ask Aidon to build a result for you. Your run stages and deliverables will appear here.";
+  const defaultGoalPlaceholder = "Start with a goal…\n\nPlan something, research a question, or ask Aidon to build a result for you. Your run stages and results will appear here.";
   const guidanceInput = document.getElementById("guidance-input");
   const sendBtn = document.getElementById("send");
   const steerRow = document.getElementById("steer-row");
@@ -52,14 +52,24 @@
     if (middleStatusTimer) clearTimeout(middleStatusTimer);
     middleStatusTimer = setTimeout(() => { middleStatus.hidden = true; }, 7000);
   }
+  window.aidonShowMiddleStatus = showMiddleStatus;
   function loadDashboardStatus() {
     fetch("/api/status").then((r) => r.json()).then((data) => {
       document.querySelectorAll("[data-status]").forEach((node) => {
         const key = node.getAttribute("data-status");
         let value = data[key] || "Unavailable";
-        if (key === "model" && data.backend) value += " · " + data.backend;
+        if (key === "model") value = String(value).split("/").pop();
         node.textContent = value;
-        node.classList.toggle("status-ready", ["Online", "Ready", "bubblewrap", "docker", "Semantic memory (on demand)", "EmbeddingGemma2Embedder"].includes(value));
+        const memoryWarning = key === "memory"
+          ? String(data.memory_warning || "").trim() : "";
+        node.title = memoryWarning;
+        node.classList.toggle("status-warning", !!memoryWarning);
+        node.classList.toggle("status-ready", !memoryWarning && [
+          "Online", "Ready", "bubblewrap", "docker",
+          "Semantic memory (on demand)", "EmbeddingGemma2Embedder",
+          "HybridEmbedder · QdrantStore",
+          "EmbeddingGemma2Embedder · QdrantStore",
+        ].includes(value));
       });
     }).catch(() => {
       document.querySelectorAll("[data-status]").forEach((node) => { node.textContent = "Unavailable"; });
@@ -69,6 +79,7 @@
 
   let currentRun = null;
   let pollTimer = null;
+  let pollInFlight = false;
   let lastEventCount = 0;
   let lastTraceCount = 0;
   let lastTracePhase = null;
@@ -107,14 +118,27 @@
          .replace(/(^|[\s(])\*([^*\n]+)\*(?=$|[\s.,!?)\]])/g, "$1<em>$2</em>")
          .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s.,!?)\]])/g, "$1<em>$2</em>")
          .replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
-    t = t.replace(/\[([^\]\n]+)\]\(((?:https?:\/\/|file:)\/\/[^\s)]+)\)/g,
+    // Generated image deliverables can be previewed inline using the same-
+    // origin file route as artifact links. Restrict image embeds to
+    // local file URLs; arbitrary remote Markdown images are not loaded.
+    t = t.replace(/!\[([^\]\n]*)\]\((file:\/\/[^\s)]+)\)/g,
+        '<img class="chat-image" alt="$1" src="$2">');
+    t = t.replace(/\[([^\]\n]+)\]\(((?:https?:\/\/|file:\/\/|\/(?!\/))[^\s)]+)\)/g,
         '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
     // A file:// link is not clickable from an http page in Chrome, so
     // the WebUI serves the file itself: same-origin, always clickable.
     t = t.replace(/href="file:\/\/([^"]+)"/g,
-        (m, p) => 'href="/api/files/' +
-          p.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/") +
-          '"');
+        (m, p) => 'href="/api/files/' + p.replace(/^\/+/, "").split("/")
+          .map((part) => {
+            try { return encodeURIComponent(decodeURIComponent(part)); }
+            catch (_) { return encodeURIComponent(part); }
+          }).join("/") + '"');
+    t = t.replace(/src="file:\/\/([^"]+)"/g,
+        (m, p) => 'src="/api/files/' + p.replace(/^\/+/, "").split("/")
+          .map((part) => {
+            try { return encodeURIComponent(decodeURIComponent(part)); }
+            catch (_) { return encodeURIComponent(part); }
+          }).join("/") + '"');
     // Markdown tables: a header row, a |---|---| separator, then body
     // rows. Without this they render as raw pipe text - the model
     // writes proper tables, the renderer just did not know them.
@@ -150,7 +174,7 @@
     }
     t = kept.join("\n");
     t = t.replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>");
-    t = "\x01<p>" + t + "</p>\x01";
+    t = "<p>" + t + "</p>";
     // restore code blocks (outside <p>, which cannot contain <pre>)
     t = t.replace(/\x00CODE(\d+)\x00/g,
         (m, i) => { const b = blocks[Number(i)];
@@ -163,19 +187,95 @@
     const d = document.createElement("div");
     d.className = "msg " + kind;
     d.innerHTML = (t ? '<div class="t">' + esc(t) + "</div>" : "") + md(text);
+    if (kind === "user" || kind === "aidon")
+      appendMessageCopyButton(d, text);
     thread.appendChild(d);
     scrollThreadToLatest();
     return d;
   }
 
+  // Stored and live messages must share escaping and Markdown rendering.
+  window.aidonRenderStoredMessage = (role, text, route = null) => {
+    const node = document.createElement("div");
+    node.className = "msg " + (role === "assistant" ? "aidon" : "user");
+    node.innerHTML = role === "assistant"
+      ? renderFinalMessage(String(text || ""), route) : md(String(text || ""));
+    if (role === "assistant") {
+      appendMessagePlayButton(node, String(text || ""));
+    }
+    appendMessageCopyButton(node, String(text || ""));
+    return node;
+  };
+
+  let labCard = null;
+  let waitingForLab = false;
+  const labTurnsSeen = new Set();
+  function addLabTurn(kind, text, turnId) {
+    const key = turnId == null ? "" : String(turnId) + ":" + kind;
+    if (key && labTurnsSeen.has(key)) return;
+    if (key) labTurnsSeen.add(key);
+    if (!labCard || !labCard.isConnected) {
+      labCard = document.createElement("section");
+      labCard.className = "capability-lab-card";
+      const heading = document.createElement("strong");
+      heading.textContent = "Tool Crafting Lab";
+      labCard.appendChild(heading);
+      thread.appendChild(labCard);
+    }
+    const turn = document.createElement("div");
+    turn.className = "capability-lab-turn " + kind;
+    turn.textContent = (kind === "user" ? "You: " : "Aidon: ") + text;
+    labCard.appendChild(turn);
+    scrollThreadToLatest();
+  }
+  window.aidonRestoreLabTurns = (turns) => {
+    labCard = null;
+    labTurnsSeen.clear();
+    (turns || []).forEach(turn => {
+      addLabTurn("aidon", turn.question || "", turn.id);
+      if (turn.answer != null) addLabTurn("user", turn.answer, turn.id);
+    });
+  };
+  window.aidonRestoreInterviewRecovery = (recovery) => {
+    if (!recovery || !recovery.goal) return;
+    const card = document.createElement("section");
+    card.className = "interview-recovery-card";
+    const note = document.createElement("p");
+    note.textContent = "An interview for this goal was interrupted. Your saved answers are preserved.";
+    const goal = document.createElement("p");
+    goal.textContent = recovery.goal;
+    const resume = document.createElement("button");
+    resume.type = "button";
+    resume.textContent = "Continue saved interview";
+    resume.addEventListener("click", () => {
+      resume.disabled = true;
+      if (window.aidonStartRun) window.aidonStartRun("/resume-interview");
+    });
+    card.append(note, goal, resume);
+    thread.appendChild(card);
+  };
+
   function finalMessageParts(text) {
     const value = String(text || "");
     const lines = value.split("\n");
-    const index = lines.findIndex((line) => /^\s*⏱️?\s/.test(line));
-    if (index < 0) return { body: value, stats: "" };
+    const statsIndexes = [];
+    lines.forEach((line, index) => {
+      if (/^\s*⏱️?\s/.test(line)) statsIndexes.push(index);
+    });
+    if (!statsIndexes.length) return { body: value, stats: "" };
+    // Some live replies carry a preliminary usage line as well as the
+    // finished-run footer. Show one compact footer, using the last line
+    // (the completed run's totals), and never leave the earlier line in
+    // the answer body as an apparent duplicate.
+    const statsIndexSet = new Set(statsIndexes);
+    const finalStatsIndex = statsIndexes[statsIndexes.length - 1];
     return {
-      body: lines.slice(0, index).join("\n").replace(/\s+$/, ""),
-      stats: lines.slice(index).join(" ").replace(/^\s*⏱️?\s*/, "").trim(),
+      // Older server versions appended artifact links after the stats line.
+      // Keep only that line in compact metadata and put any trailing content
+      // back in the message body so those links remain visible and clickable.
+      body: lines.filter((_line, index) => !statsIndexSet.has(index))
+        .join("\n").replace(/^\s+|\s+$/g, ""),
+      stats: lines[finalStatsIndex].replace(/^\s*⏱️?\s*/, "").trim(),
     };
   }
 
@@ -184,8 +284,14 @@
   // carried, and HTML collapses whitespace anyway, so neither
   // difference is a second message.
   function sameMessageBody(a, b) {
-    const norm = (s) => String(s || "").replace(/\s+/g, " ").trim();
-    return norm(finalMessageParts(a).body) === norm(finalMessageParts(b).body);
+    const norm = (s) => {
+      const rendered = document.createElement("div");
+      rendered.innerHTML = md(finalMessageParts(s).body);
+      return (rendered.textContent || "").normalize("NFKC")
+        .replace(/[\u200B-\u200D\uFEFF]/g, "")
+        .replace(/\s+/g, " ").trim();
+    };
+    return norm(a) === norm(b);
   }
 
   function renderFinalMessage(text, route) {
@@ -199,13 +305,14 @@
       const confidence = Math.round(
         Math.max(0, Math.min(1, Number(route.confidence) || 0)) * 100);
       routeChip = '<span>' + (icons[route.group] || "◆") + " " +
-        esc(labels[route.group] || route.group) + " · " + confidence +
-        "%</span><span> · </span>";
+        esc(labels[route.group] || route.group) + " · " +
+        confidence + "%</span><span> · </span>";
     }
     if (parts.stats || routeChip) {
-      html += '<div class="run-stats">' + routeChip +
+      html += '<div class="run-stats">' +
+        routeChip +
         (parts.stats
-          ? '<span class="run-stats-icon" aria-hidden="true">◷</span>' +
+          ? '<span class="run-stats-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="9" r="5.5"/><path d="M8 6v3l2 1.2M6.5 1.5h3M8 1.5V3"/></svg></span>' +
             '<span>' + esc(parts.stats) + "</span>"
           : "") + "</div>";
     }
@@ -262,7 +369,7 @@
     const nodes = [];
     let n;
     while ((n = walker.nextNode())) {
-      if (n.parentElement && n.parentElement.closest(".run-stats")) continue;
+      if (n.parentElement && n.parentElement.closest(".run-stats, .t")) continue;
       nodes.push(n);
     }
     let offset = 0;
@@ -300,27 +407,44 @@
     return words;
   }
 
-  function karaokeSync(words, audio) {
+  function karaokeSync(words, audio, range = null) {
     // Light the words the voice has passed; the current one glows.
     // The timeline is weighted (see karaokeWords): the voice takes
     // longer over long words and pauses at punctuation, so spreading
     // the words evenly over the audio would drift visibly.
     let raf = 0;
     const spoken = words.filter((w) => w.spoken);
-    const totalW = spoken.reduce((s, w) => s + w.weight, 0) || 1;
+    const start = Math.max(0, Number(range && range.start) || 0);
+    const end = range
+      ? Math.min(spoken.length, start + Math.max(0, Number(range.count) || 0))
+      : spoken.length;
+    const active = spoken.slice(start, end);
+    const totalW = active.reduce((s, w) => s + w.weight, 0) || 1;
     const tick = () => {
       const dur = (audio.duration && isFinite(audio.duration)) ? audio.duration : 0;
       if (dur > 0) {
-        const pos = (audio.currentTime / dur) * totalW;
+        // The voice is heard slightly after its audio playhead, and our
+        // weighted word boundaries are approximate. Build a modest lead
+        // smoothly so playback never jumps across a word at the start.
+        const leadTarget = Math.min(0.4,
+          dur / Math.max(active.length, 1));
+        const rampDuration = Math.max(leadTarget * 4, 0.001);
+        const ramp = Math.min(1, audio.currentTime / rampDuration);
+        const smoothRamp = ramp * ramp * (3 - 2 * ramp);
+        const lead = leadTarget * smoothRamp;
+        const spokenTime = audio.currentTime + lead;
+        const pos = (spokenTime / dur) * totalW;
         let acc = 0;
+        let spokenIndex = 0;
         for (const w of words) {
-          if (!w.spoken) { acc += w.weight; continue; }
+          if (!w.spoken) continue;
           const next = acc + w.weight;
-          const done = pos >= next;
-          const now = !done && pos >= acc;
-          w.node.classList.toggle("kw-done", done);
+          const inRange = spokenIndex >= start && spokenIndex < end;
+          const now = inRange && pos >= acc && pos < next;
+          w.node.classList.remove("kw-done");
           w.node.classList.toggle("kw-now", now);
-          acc = next;
+          if (inRange) acc = next;
+          spokenIndex++;
         }
       }
       raf = requestAnimationFrame(tick);
@@ -331,6 +455,49 @@
       for (const w of words) {
         w.node.classList.remove("kw-done", "kw-now");
       }
+    };
+  }
+
+  function mouthVisemeForChar(ch) {
+    const c = String(ch || "").toLowerCase();
+    if (/[mbp]/.test(c)) return "closed";
+    if (/[fv]/.test(c)) return "fv";
+    if (/[aáàâäãå]/.test(c)) return "ah";
+    if (/[eéèêëiyíìîï]/.test(c)) return "ee";
+    if (/[oóòôöõ]/.test(c)) return "oh";
+    if (/[uúùûüw]/.test(c)) return "oo";
+    return /[a-z]/.test(c) ? "teeth" : "closed";
+  }
+
+  // TTS does not provide phoneme timestamps, so estimate viseme timing from
+  // the spoken text and the audio duration. The audio envelope still sets
+  // opening strength through aidonSetMouthOpen.
+  function syncMouthToText(text, audio) {
+    const chars = Array.from(String(text || "")).filter((ch) => !/\s/.test(ch));
+    if (!chars.length || !window.aidonSetMouthPose) return () => {};
+    const weights = chars.map((ch) => /[.,!?;:]/.test(ch) ? 1.8 : 1);
+    const total = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+    let raf = 0;
+    const tick = () => {
+      if (audio.ended) {
+        window.aidonSetMouthPose("closed");
+        return;
+      }
+      const duration = Number(audio.duration);
+      if (duration > 0 && isFinite(duration)) {
+        let position = (audio.currentTime / duration) * total;
+        let index = 0;
+        while (index < chars.length - 1 && position >= weights[index]) {
+          position -= weights[index++];
+        }
+        window.aidonSetMouthPose(mouthVisemeForChar(chars[index]));
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      if (window.aidonSetMouthPose) window.aidonSetMouthPose("closed");
     };
   }
 
@@ -349,6 +516,13 @@
     img.src = dataUrl;
     img.className = "chat-image";
     img.alt = "attached image";
+    // Sent attachments use short-lived object URLs. Revoke them after the
+    // browser has decoded the image; the rendered thumbnail remains visible.
+    if (String(dataUrl).startsWith("blob:")) {
+      const release = () => URL.revokeObjectURL(dataUrl);
+      img.addEventListener("load", release, { once: true });
+      img.addEventListener("error", release, { once: true });
+    }
     d.appendChild(img);
     thread.appendChild(d);
     scrollThreadToLatest();
@@ -387,6 +561,7 @@
   const micWaveLevels = new Array(WAVE_BARS).fill(0);
   const avatarWaveLevels = new Array(WAVE_BARS).fill(0);
   let waveFreq = null;
+  const TTS_PLAYBACK_RATE = 0.84;
 
   function getTtsAnalyser() {
     if (!ttsCtx) {
@@ -489,6 +664,7 @@
   }).catch(() => {});
 
   let stopKaraokeActive = null;  // cancels the rAF loop of the current voice
+  let stopMouthSync = null;
   let currentAudioUrl = null;    // blob URL to revoke when playback ends
   let currentAudioCancel = null;
   function resetSpeakBtn() {
@@ -498,6 +674,10 @@
     if (stopKaraokeActive) {
       try { stopKaraokeActive(); } catch (e) { /* already gone */ }
       stopKaraokeActive = null;
+    }
+    if (stopMouthSync) {
+      try { stopMouthSync(); } catch (e) { /* already gone */ }
+      stopMouthSync = null;
     }
     if (currentAudioUrl) {
       try { URL.revokeObjectURL(currentAudioUrl); } catch (e) { /* noop */ }
@@ -524,7 +704,26 @@
   // sentences to Fish. This starts voice output before the final answer
   // event arrives and keeps sentence audio in order.
   const streamSpeech = new Map();
+  const explicitSpeechRuns = new Set();
   let streamSpeechGeneration = 0;
+
+  function streamWordCount(text) {
+    const words = spokenText(text).match(/\S+/g);
+    return words ? words.length : 0;
+  }
+
+  function refreshStreamKaraoke(state) {
+    if (!state || !state.activeAudio || !state.activeItem || !state.message) return;
+    if (state.stopKaraoke) state.stopKaraoke();
+    const message = state.message;
+    const body = message._body && message._body.isConnected
+      ? message._body : message;
+    const words = karaokeWords(body);
+    state.stopKaraoke = karaokeSync(words, state.activeAudio, {
+      start: state.activeItem.wordStart,
+      count: state.activeItem.wordCount,
+    });
+  }
 
   function completeSpeechSentences(buffer, flush = false) {
     const found = [];
@@ -576,10 +775,16 @@
         return;
       }
       const audio = progressive.audio;
+      audio.playbackRate = TTS_PLAYBACK_RATE;
+      audio.preservesPitch = true;
       currentAudio = audio;
       currentAudioUrl = progressive.url;
       currentAudioCancel = progressive.cancel;
       ttsPlaying = true;
+      state.activeAudio = audio;
+      state.activeItem = item;
+      refreshStreamKaraoke(state);
+      stopMouthSync = syncMouthToText(item.text, audio);
       startMouthLoop();
       try {
         const analyser = getTtsAnalyser();
@@ -592,6 +797,13 @@
         audio.addEventListener("error", resolve, { once: true });
       });
       if (progressive.url) URL.revokeObjectURL(progressive.url);
+      if (state.stopKaraoke) {
+        state.stopKaraoke();
+        state.stopKaraoke = null;
+      }
+      state.activeAudio = null;
+      state.activeItem = null;
+      if (stopMouthSync) { stopMouthSync(); stopMouthSync = null; }
       currentAudio = null;
       currentAudioUrl = null;
       currentAudioCancel = null;
@@ -599,19 +811,29 @@
     } catch (e) {
       ttsPlaying = false;
     } finally {
+      if (state.stopKaraoke) {
+        state.stopKaraoke();
+        state.stopKaraoke = null;
+      }
+      state.activeAudio = null;
+      state.activeItem = null;
       state.playing = false;
       if (state.done && !state.queue.length) streamSpeech.delete(state.id);
       else pumpStreamSpeech(state);
     }
   }
 
-  function feedStreamSpeech(id, delta, done = false) {
+  function feedStreamSpeech(id, delta, done = false, message = null) {
     if (!ttsAvailable) return false;
     let state = streamSpeech.get(id);
     if (!state) {
       state = { id, buffer: "", queue: [], playing: false, done: false,
-                generation: ++streamSpeechGeneration };
+                generation: ++streamSpeechGeneration, wordCursor: 0 };
       streamSpeech.set(id, state);
+    }
+    if (message) {
+      state.message = message;
+      refreshStreamKaraoke(state);
     }
     state.buffer += String(delta || "");
     const split = completeSpeechSentences(state.buffer, done);
@@ -620,7 +842,10 @@
       // Attach the rejection immediately so a cancelled/failed prefetch does
       // not become an unhandled browser promise before the queue reaches it.
       const audio = fetchSpeechAudio(part).catch((error) => ({ error }));
-      state.queue.push({ text: part, audio });
+      const wordCount = streamWordCount(part);
+      state.queue.push({ text: part, audio, wordStart: state.wordCursor,
+                         wordCount });
+      state.wordCursor += wordCount;
     }
     if (done) state.done = true;
     pumpStreamSpeech(state);
@@ -629,6 +854,9 @@
 
   function stopStreamSpeech() {
     streamSpeechGeneration++;
+    for (const state of streamSpeech.values()) {
+      if (state.stopKaraoke) state.stopKaraoke();
+    }
     streamSpeech.clear();
   }
 
@@ -721,7 +949,14 @@
     try {
       // Start the network request immediately. Waiting for the typewriter
       // first made TTS feel several seconds late on long answers.
-      const body = (el && el._body) || null;
+      // Typed messages keep a dedicated body node. Streamed messages replace
+      // their markup at completion, and restored messages never had that
+      // wrapper, so fall back to the message itself when the cached node is
+      // absent or has been detached. karaokeWords skips timestamp and stats
+      // descendants in that case.
+      const body = el
+        ? (el._body && el._body.isConnected ? el._body : el)
+        : null;
       const spoken = spokenText(text || (body ? body.textContent : ""));
       const request = {
         method: "POST",
@@ -765,6 +1000,8 @@
       }
       // Route through the analyser for lip sync + waveform (no-op if
       // Web Audio is unavailable — falls back to plain playback).
+      audio.playbackRate = TTS_PLAYBACK_RATE;
+      audio.preservesPitch = true;
       try {
         const analyser = getTtsAnalyser();
         const src = ttsCtx.createMediaElementSource(audio);
@@ -777,6 +1014,7 @@
       btn.classList.add("playing");
       btn.title = "Stop";
       ttsPlaying = true;
+      stopMouthSync = syncMouthToText(spoken, audio);
       startMouthLoop();
       // Karaoke: the words light up as the voice reaches them.
       // resetSpeakBtn() owns cancellation and the blob URL, so a
@@ -800,6 +1038,75 @@
     b.title = "Play aloud";
     b.addEventListener("click", () => speak(el, text, b));
     return b;
+  }
+
+  function appendMessagePlayButton(message, text) {
+    let stats = message.querySelector(":scope > .run-stats");
+    if (!stats) {
+      stats = document.createElement("div");
+      stats.className = "run-stats";
+      message.appendChild(stats);
+    }
+    const button = playButton(text, message);
+    button.classList.add("run-stats-play");
+    stats.appendChild(button);
+    return button;
+  }
+
+  async function copyMessageText(text) {
+    const value = String(text || "");
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+    const field = document.createElement("textarea");
+    field.value = value;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed";
+    field.style.opacity = "0";
+    document.body.appendChild(field);
+    field.select();
+    const copied = document.execCommand("copy");
+    field.remove();
+    if (!copied) throw new Error("Clipboard access is unavailable");
+  }
+
+  function appendMessageCopyButton(message, text) {
+    if (!message || message.querySelector(":scope > .msg-actions .msg-copy, :scope > .run-stats .msg-copy"))
+      return null;
+    const isAssistant = message.classList.contains("aidon");
+    let row = isAssistant ? message.querySelector(":scope > .run-stats") : null;
+    if (!row) {
+      row = document.createElement("div");
+      row.className = "msg-actions";
+      message.appendChild(row);
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "msg-copy";
+    button.textContent = "⧉";
+    button.title = "Copy message";
+    button.setAttribute("aria-label", "Copy message");
+    const copyText = isAssistant ? finalMessageParts(text).body : String(text || "");
+    button.addEventListener("click", async () => {
+      try {
+        await copyMessageText(copyText);
+        button.textContent = "✓";
+        button.title = "Copied";
+        button.setAttribute("aria-label", "Copied");
+      } catch (e) {
+        button.textContent = "!";
+        button.title = "Could not copy message";
+        button.setAttribute("aria-label", "Could not copy message");
+      }
+      setTimeout(() => {
+        button.textContent = "⧉";
+        button.title = "Copy message";
+        button.setAttribute("aria-label", "Copy message");
+      }, 1400);
+    });
+    row.appendChild(button);
+    return button;
   }
 
   function maybeAnnounce(text, btn) {
@@ -894,7 +1201,9 @@
       const failed = String(e.status || "").toLowerCase() === "failed";
       item.className = "think-item " + (e.kind || "note") +
         (failed ? " think-failed" : "");
-      const hasTokenFields = ("tokens_in" in e) || ("tokens_out" in e);
+      const tokensIn = Number(e.tokens_in || 0);
+      const tokensOut = Number(e.tokens_out || 0);
+      const hasTokenUsage = tokensIn > 0 || tokensOut > 0;
       // Thinking is internal and encrypted on Meta, but its token
       // count arrives in usage. Per Meta's docs, reasoning tokens
       // are output tokens and already inside completion_tokens,
@@ -902,28 +1211,25 @@
       // an addition on top of it.
       const thinkSuffix = ((e.thinking_tokens || 0) > 0)
         ? (" (" + e.thinking_tokens + " think)") : "";
-      const meta = hasTokenFields
-        ? ((e.seconds || 0) + "s · " + (e.tokens_in || 0) + "→" + (e.tokens_out || 0) + " tok" + thinkSuffix)
-        : ((e.tokens_in || e.tokens_out)
-          ? ((e.tokens_in || 0) + " in · " + (e.tokens_out || 0) + " out")
-          : (e.status || ((e.seconds || 0) + "s")));
-      const detail = e.detail || e.title || e.error || "";
-      const usefulDetail = detail && detail !== (e.title || "");
-      // Expandable when the step carries thinking to show: thinking
-      // text (Ollama) or a thinking-token count (Meta usage). The
-      // body stays collapsed until the row is clicked.
-      const hasThinkingText = !!(e.thinking && String(e.thinking).trim());
+      const meta = (e.seconds || 0) + "s" + (hasTokenUsage
+        ? " · " + tokensIn + "→" + tokensOut + " tok" + thinkSuffix : "");
+      let detail = e.detail || e.title || e.error || "";
+      if (phase === "plan" && detail === "plan proposed") {
+        detail = "Aidon drafted the plan shown in the plan card. This model reports reasoning-token usage, but does not provide a user-facing reasoning transcript.";
+      }
+      // Show an auditable stage summary and usage metadata. Hidden model
+      // reasoning is never displayed: some providers redact it, and where
+      // a backend returns it, it is still not the user-facing explanation.
       const hasThinkingTokens = (e.thinking_tokens || 0) > 0;
-      const expandable = hasThinkingText || hasThinkingTokens;
+      const expandable = !failed && (!!detail || hasThinkingTokens);
       const detailMarkup = failed
-        ? (usefulDetail ? '<div class="think-error-detail">' + esc(detail) + "</div>" : "")
-        : (expandable && (usefulDetail || hasThinkingText || hasThinkingTokens)
-          ? '<div class="think-body"><div class="think-detail">' + esc(detail) +
-            (hasThinkingTokens ? '</div><div class="think-detail">thinking tokens: ' +
-              esc(e.thinking_tokens) + '</div>' : '</div>') +
-            (hasThinkingText ? '<pre class="think-thinking">' + esc(e.thinking) + "</pre>" : "") +
-            "</div>"
-          : "");
+        ? (detail ? '<div class="think-error-detail">' + esc(detail) + "</div>" : "")
+        : (expandable
+          ? '<div class="think-body">' +
+            (detail ? '<div class="think-detail">' + esc(detail) + "</div>" : "") +
+            (hasThinkingTokens ? '<div class="think-detail">Reasoning tokens: ' +
+              esc(e.thinking_tokens) + '. Private reasoning text is not available here; this row shows the stage summary.</div>' : "") +
+            "</div>" : "");
       item.innerHTML =
         '<div class="think-head-row"' + (expandable ? ' title="click to expand' +
           (hasThinkingTokens ? ' thinking tokens"' : ' details"') : '') + '>' +
@@ -979,10 +1285,17 @@
     // (the permanent button sends the edited/PERMANENT decision the
     // gate already understands; no typing, no second click).
     const isDomain = pending.kind === "domain";
+    const approvalBody = String(pending.body || "").split("\n").map((line) => {
+      const match = line.match(/^Authorize: (https:\/\/\S+)$/);
+      if (!match) return esc(line);
+      const href = match[1];
+      return 'Authorize: <a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">'
+        + esc(href) + "</a>";
+    }).join("\n");
     card.innerHTML =
       '<div class="kind">approval required — ' + esc(pending.kind) + "</div>" +
       "<h3>" + esc(pending.title) + "</h3>" +
-      "<pre>" + esc(pending.body) + "</pre>" +
+      "<pre>" + approvalBody + "</pre>" +
       (isDomain ? "" :
         '<textarea id="edit-text" placeholder="Edited text — press Submit to send…"></textarea>' +
         '<div id="edit-submit-row" class="row" style="display:none; justify-content:flex-end">' +
@@ -1051,15 +1364,31 @@
       if (s.budget_cents != null) lines.push("<strong>Budget (cents)</strong><br>" + esc(String(s.budget_cents)));
     } else if (stop.plan) {
       const p = stop.plan;
-      pushList("Deliverables", p.deliverables);
+      if (p.summary) lines.push("<strong>In short</strong><br>" + esc(String(p.summary)));
+      const descriptions = p.deliverable_descriptions &&
+        typeof p.deliverable_descriptions === "object"
+        ? p.deliverable_descriptions : {};
+      const deliverables = Array.isArray(p.deliverables) ? p.deliverables : [];
+      if (deliverables.length) {
+        lines.push("<strong>Files Aidon will create</strong>");
+        deliverables.forEach((file) => {
+          const name = String(file);
+          const description = descriptions[name];
+          lines.push("• <strong>" + esc(name) + "</strong>" +
+            (description ? " — " + esc(String(description)) : ""));
+        });
+      }
       pushList("Criteria", p.criteria);
       const steps = Array.isArray(p.steps) ? p.steps : [];
       if (steps.length) {
         lines.push("<strong>Steps</strong>");
         steps.forEach((st, i) => {
           const label = st && typeof st === "object"
-            ? (st.tool || st.deliverable || JSON.stringify(st)) : String(st);
-          lines.push((i + 1) + ". " + esc(String(label)));
+            ? (st.description || st.title || st.deliverable || st.tool || JSON.stringify(st))
+            : String(st);
+          const tool = st && typeof st === "object" && st.tool
+            ? " <span class=\"step-tool\">(" + esc(String(st.tool)) + ")</span>" : "";
+          lines.push((i + 1) + ". " + esc(String(label)) + tool);
         });
       }
     }
@@ -1147,6 +1476,20 @@
       const el = shell.querySelector(".spec-save-status");
       if (el) el.textContent = text;
     }
+    function markProceeded() {
+      // Keep the already-rendered approved plan intact. Rebuilding the card
+      // from stop data here can lose plan details when the stop payload has
+      // been normalized by the server.
+      const kind = shell.querySelector(".kind");
+      if (kind) kind.textContent = stop.mode + " proceeded";
+      const heading = shell.querySelector("h3");
+      if (heading) heading.textContent = isAsk ? "Interview proceeded" : "Plan proceeded";
+      const note = shell.querySelector(".spec-note");
+      if (note) note.textContent =
+        "Aidon is continuing the run. The approved plan is shown below.";
+      shell.querySelector(".spec-save-status")?.remove();
+      shell.querySelector(".row")?.remove();
+    }
     function render() {
       if (isAsk && spec && editing) {
         shell.innerHTML =
@@ -1173,12 +1516,19 @@
           }
         });
       } else {
+        const planSteps = stop.plan && Array.isArray(stop.plan.steps)
+          ? stop.plan.steps : [];
+        const includesImageEdit = planSteps.some((step) =>
+          step && typeof step === "object" && step.tool === "edit_image");
         shell.innerHTML =
           '<div class="kind">stopped — ' + esc(stop.mode) + " ready</div>" +
           "<h3>" + (isAsk ? "Spec ready" : "Plan ready") + "</h3>" +
           (isAsk
             ? '<p class="spec-note">Proceeding builds a plan for your approval — nothing runs yet.</p>'
             : '<p class="spec-note">Proceeding runs the plan.</p>') +
+          (!isAsk && includesImageEdit
+            ? '<p class="spec-note">This plan sends the attached image(s) to the configured Muse Image endpoint and spends image credits. Proceed authorizes the image edit shown here; no second approval is needed for that step.</p>'
+            : "") +
           ((spec || stop.plan)
             ? '<div class="spec-detail">' +
               renderStopDetail({ spec: spec, plan: stop.plan }) + "</div>" : "") +
@@ -1217,6 +1567,10 @@
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok || !data.run_id) throw new Error((data && data.detail) || "no run");
+        // The stop is now a historical note, not an active decision.
+        // Replace both buttons immediately; the resumed run can take
+        // time and may pause at a separate live approval gate.
+        markProceeded();
         proceedShownFor = null;
         cardShownFor = null;
         currentRun = data.run_id;
@@ -1302,12 +1656,18 @@
   }
 
   async function poll() {
-    if (!currentRun) return;
+    if (!currentRun || pollInFlight) return;
+    const polledRun = currentRun;
+    pollInFlight = true;
     try {
-      const r = await fetch("/api/runs/" + currentRun +
+      const r = await fetch("/api/runs/" + polledRun +
         "?since=" + lastEventCount + "&trace_since=" + lastTraceCount);
       if (!r.ok) return;
       const run = await r.json();
+      // A run may have been replaced while this request was in flight.
+      // Its events belong to the old conversation and must not be drawn
+      // into the newly selected chat.
+      if (currentRun !== polledRun) return;
       renderRoute(run.route);
       renderStages(run.stage);
       setStatus(run.status === "running" ? "busy" : "ok",
@@ -1316,13 +1676,19 @@
       // append new events (the server returns only the unseen tail)
       let sawDecision = false;
       run.events.forEach((e) => {
-        if (e.kind === "user") {
+        if (e.kind === "lab-question" || e.kind === "lab-answer") {
+          addLabTurn(e.kind === "lab-answer" ? "user" : "aidon", e.text, e.turn_id);
+        }
+        else if (e.kind === "user") {
           if (!renderMaybeImage("user", e.text, e.t))
             addMsg("user", e.text, e.t);
         }
         else if (e.kind === "aidon-stream" || e.kind === "aidon" || e.kind === "aidon-final") {
           const sid = e.stream_id || "";
-          let m = sid ? streamMessages[sid] : null;
+          let streamKey = sid;
+          if (!streamMessages[streamKey] && e.kind === "aidon-final" &&
+              streamMessages[polledRun]) streamKey = polledRun;
+          let m = streamMessages[streamKey] || null;
           if (e.kind === "aidon-stream") {
             if (!m) {
               m = addMsg("aidon", "", e.t);
@@ -1333,14 +1699,17 @@
               streamMessages[sid] = m;
             }
             m._streamText += String(e.delta || "");
-            feedStreamSpeech(sid, e.delta, false);
+            feedStreamSpeech(sid, e.delta, false, m);
             m._body.innerHTML = md(m._streamText);
+            refreshStreamKaraoke(streamSpeech.get(sid));
             scrollThreadToLatest();
             return;
           }
           if (m) {
+            const isPlainChat = lastRoute &&
+              (lastRoute.group === "chat" || lastRoute.group === "webchat");
             if (e.kind === "aidon-final" && m._streamText && e.text &&
-                !sameMessageBody(e.text, m._streamText)) {
+                !sameMessageBody(e.text, m._streamText) && !isPlainChat) {
               // Streamed intermediate prose genuinely differs from
               // the final summary (agentic runs stream fast-node
               // prose, then finish with an assembled summary): keep
@@ -1350,28 +1719,32 @@
               // not a difference: the final always appends a ⏱ stats
               // line the stream never carried, and keeping both
               // bubbles then reads as a duplicated reply.
-              delete streamMessages[sid];
+              delete streamMessages[streamKey];
               m = addMsgTyped("aidon", e.text, e.t, true, lastRoute);
             } else {
               m._streamText = String(e.text || m._streamText || "");
               m.innerHTML = e.kind === "aidon-final"
                 ? renderFinalMessage(m._streamText, lastRoute) : md(m._streamText);
-              if (e.kind === "aidon-final") delete streamMessages[sid];
+              if (e.kind === "aidon-final") delete streamMessages[streamKey];
             }
           } else {
             m = addMsgTyped("aidon", e.text, e.t, e.kind === "aidon-final" || !!finalMessageParts(e.text).stats, lastRoute);
           }
-          const btn = playButton(e.text || m._streamText || "", m);
-          m.appendChild(btn);
+          const btn = appendMessagePlayButton(
+            m, e.text || m._streamText || "");
+          appendMessageCopyButton(m, e.text || m._streamText || "");
           if (e.kind === "aidon-final") {
             // The run is over: the avatar smiles, the answer is read
             // (never the elapsed clock - that is for the eye), with the
             // words lighting up as they are spoken.
             setAvatarMood("happy");
             setTimeout(() => setAvatarMood("idle"), 7000);
-            const hadStreamedVoice = streamSpeech.has(sid);
-            const streamedVoice = hadStreamedVoice && feedStreamSpeech(sid, "", true);
-            if (!streamedVoice) announceImportant(m, e.text, btn);
+            const speechId = streamSpeech.has(sid) ? sid : polledRun;
+            const hadStreamedVoice = streamSpeech.has(speechId);
+            const streamedVoice = hadStreamedVoice &&
+              feedStreamSpeech(speechId, "", true, m);
+            if (!streamedVoice && !explicitSpeechRuns.has(polledRun)) announceImportant(m, e.text, btn);
+            explicitSpeechRuns.delete(polledRun);
           } else if (e.text) {
             // Running commentary: only when AIDON_VOICE_ANNOUNCE=1.
             maybeAnnounce(e.text, btn);
@@ -1380,6 +1753,27 @@
         // stage events are NOT rendered as chat bubbles — the stages bar
         // + status line already show "working · interpret" etc. (one
         // status line, not a bubble per phase)
+        else if (e.kind === "speech-request") {
+          explicitSpeechRuns.add(polledRun);
+          const message = addMsg("aidon", e.text, e.t);
+          if (ttsAvailable) {
+            const button = playButton(e.text, message);
+            message.appendChild(button);
+            speak(message, e.text, button).catch(() => {});
+          } else if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
+            const play = () => {
+              window.speechSynthesis.cancel();
+              window.speechSynthesis.speak(new SpeechSynthesisUtterance(e.text));
+            };
+            const button = document.createElement("button");
+            button.className = "tts-play";
+            button.textContent = "▶";
+            button.title = "Read aloud";
+            button.addEventListener("click", play);
+            message.appendChild(button);
+            play();
+          } else showMiddleStatus("Speech is unavailable; the requested text is shown.", "warning");
+        }
         else if (e.kind === "approval-request") {
           const m = addMsg("stage-line", "approval requested: " + e.text);
           m.appendChild(playButton("Approval requested. " + e.text));
@@ -1432,6 +1826,7 @@
         // while answering: an answer is a chat message, not a new
         // goal with guidance.
         const waiting = !!run.waiting_question;
+        waitingForLab = !!run.waiting_lab;
         sendBtn.disabled = !waiting;
         input.disabled = !waiting;
         guidanceInput.disabled = true;
@@ -1440,9 +1835,14 @@
           : defaultGoalPlaceholder;
       }
       if (run.status !== "running") {
+        waitingForLab = false;
+        // Lazy capabilities (especially memory) can initialize during a
+        // run. Refresh their dashboard labels now instead of leaving the
+        // startup-time "on demand" snapshot stale until page reload.
+        loadDashboardStatus();
         try {
-          const key = currentConversationId
-            ? "aidon-run-state-" + currentConversationId : "";
+          const conversationId = window.aidonConversation ? window.aidonConversation().conversation_id : "";
+          const key = conversationId ? "aidon-run-state-" + conversationId : "";
           if (key) localStorage.setItem(key, JSON.stringify({
             status: run.status, stage: run.stage || "done",
             route: run.route || null, trace: runTraceHistory,
@@ -1465,6 +1865,8 @@
       }
     } catch (e) {
       console.error("poll failed:", e);
+    } finally {
+      pollInFlight = false;
     }
   }
 
@@ -1474,6 +1876,27 @@
   let pendingImages = [];  // image File objects
   let pendingFiles = [];  // document File objects
   const imgPreview = document.getElementById("img-preview");
+  function queueAttachments(fileList) {
+    let added = 0;
+    for (const f of Array.from(fileList || [])) {
+      if (pendingImages.length + pendingFiles.length >= 3) {
+        showMiddleStatus("Only 3 attachments can be added at a time", "error");
+        break;
+      }
+      if (f.size > 25 * 1024 * 1024) {
+        showMiddleStatus(f.name + " is larger than the 25 MiB attachment limit", "error");
+        continue;
+      }
+      if (f.type.startsWith("image/")) pendingImages.push(f);
+      else pendingFiles.push(f);
+      added++;
+    }
+    refreshPreview();
+    return added;
+  }
+  // The sidebar artifact list lives in a separate IIFE; expose the same
+  // validated queue path used by the picker and drag/drop.
+  window.aidonQueueAttachments = queueAttachments;
   function refreshPreview() {
     imgPreview.innerHTML = "";
     imgPreview.hidden = pendingImages.length === 0 && pendingFiles.length === 0;
@@ -1521,24 +1944,43 @@
     inp.accept = "image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.tsv,.ppt,.pptx,.txt,.md,.json,.html,.htm,.epub,.rtf,.odt,.ods,.py,.js,.ts,.tsx,.jsx,.mjs,.java,.c,.h,.cpp,.hpp,.go,.rs,.rb,.php,.sh,.yaml,.yml,.toml,.xml,.zip";
     inp.multiple = true;
     inp.addEventListener("change", () => {
-      for (const f of inp.files) {
-        if (pendingImages.length + pendingFiles.length >= 3) break;
-        if (f.size > 25 * 1024 * 1024) {
-          showMiddleStatus(f.name + " is larger than the 25 MiB attachment limit", "error");
-          continue;
-        }
-        if (f.type.startsWith("image/")) {
-          pendingImages.push(f);
-        } else {
-          pendingFiles.push(f);
-        }
-      }
-      refreshPreview();
+      queueAttachments(inp.files);
     });
     inp.click();
   }
   document.getElementById("attach-btn").addEventListener("click",
     () => pickImages());
+
+  // Desktop files can be dropped anywhere in the chat column. Keep the
+  // same limits and preview/removal controls as the paperclip picker.
+  const chatDropZone = document.getElementById("center");
+  let fileDragDepth = 0;
+  const hasDraggedFiles = (event) =>
+    Array.from(event.dataTransfer?.types || []).includes("Files");
+  chatDropZone.addEventListener("dragenter", (event) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    fileDragDepth++;
+    chatDropZone.classList.add("drag-over");
+  });
+  chatDropZone.addEventListener("dragover", (event) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  });
+  chatDropZone.addEventListener("dragleave", (event) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    fileDragDepth = Math.max(0, fileDragDepth - 1);
+    if (!fileDragDepth) chatDropZone.classList.remove("drag-over");
+  });
+  chatDropZone.addEventListener("drop", (event) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    fileDragDepth = 0;
+    chatDropZone.classList.remove("drag-over");
+    queueAttachments(event.dataTransfer.files);
+  });
 
   // ---- take photo: real webcam capture (getUserMedia) -------------------
   // The camera button is disabled up front when the device has no webcam
@@ -1730,7 +2172,7 @@
     const previousRun = currentRun;
     const guidance = guidanceInput.value.trim();
     const forceWeb = document.getElementById("web-btn")?.classList.contains("active") || false;
-    const runMode = document.getElementById("mode-chooser")?.value || "ask";
+    const runMode = document.getElementById("mode-chooser")?.value || "plan";
     const imgs = pendingImages.slice();
     const fls = pendingFiles.slice();
     const files = imgs.concat(fls);
@@ -1811,7 +2253,15 @@
     // Show the user's message immediately; the server may not emit an
     // event until the runner has begun, which otherwise leaves the chat
     // visually empty after the composer clears.
-    addMsg("user", goal);
+    if (!data.lab_answer) addMsg("user", goal);
+    // Keep uploaded photos visible in the conversation after the composer
+    // clears. CSS constrains each image to a 320x240 thumbnail so full-size
+    // camera photos cannot expand the chat layout.
+    imgs.forEach((file) => {
+      if (file && file.type && file.type.startsWith("image/")) {
+        addMsgImage("user", URL.createObjectURL(file));
+      }
+    });
     if (data.conversation_id && window.aidonSetConversation)
       window.aidonSetConversation(data.conversation_id);
     refreshThinkBtn();
@@ -1828,6 +2278,7 @@
       return;
     }
     lastEventCount = 0;
+    labCard = null;
     lastTraceCount = 0;
     lastTracePhase = null;
     runTraceHistory = [];
@@ -1855,6 +2306,18 @@
     return Promise.resolve(startRun(...args)).finally(() => {
       window.aidonSendInProgress = false;
     });
+  };
+  window.aidonReconnectInterview = (active) => {
+    if (!active || !active.run_id) return;
+    currentRun = active.run_id;
+    lastEventCount = active.event_total || 0;
+    lastTraceCount = active.trace_total || 0;
+    waitingForLab = !!active.lab;
+    if (!active.lab && active.question) addMsg("aidon", active.question);
+    if (pollTimer) clearInterval(pollTimer);
+    steerRow.hidden = false;
+    pollTimer = setInterval(poll, 2000);
+    poll();
   };
 
   async function sendSteer() {
@@ -2024,12 +2487,28 @@
     guidanceInput.disabled = false;
   };
 
+  // Studio pages are separate documents. Keep the chat document (and its
+  // live run poller) open while a workflow is executing, so opening a lab or
+  // studio does not make the active run disappear from the user's view.
+  document.querySelectorAll("#main-nav a.nav-btn[href]").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      if (!currentRun || !pollTimer) return;
+      event.preventDefault();
+      window.open(link.href, "_blank", "noopener");
+    });
+  });
+
   document.getElementById("new-chat").addEventListener("click", () => {
     // never orphan a poll interval or strand the composer mid-run
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     currentRun = null;
     // a new chat starts a fresh persistent conversation on first send
     if (window.aidonSetConversation) window.aidonSetConversation("");
+    renderStages("interpret");
+    setStatus("idle", "ready");
+    routeShownFor = null;
+    lastRoute = null;
+    lastTracePhase = null;
     approvalSlot.innerHTML = "";
     cardShownFor = null;
     thread.innerHTML = "";
@@ -2071,12 +2550,15 @@
   // ── theme: dark / light chooser, persisted ──────────────────────────
   const rootEl = document.documentElement;
   function setTheme(t) {
-    rootEl.dataset.theme = t;
-    try { localStorage.setItem("aidon-theme", t); } catch (e) {}
+    if (window.AidonTheme) window.AidonTheme.set(t);
+    else {
+      rootEl.dataset.theme = t;
+      try { localStorage.setItem("aidon-theme", t); } catch (e) {}
+    }
     const btn = document.getElementById("theme-toggle");
     if (btn) btn.textContent = t === "dark" ? "◐" : "◑";
   }
-  setTheme(localStorage.getItem("aidon-theme") || "dark");
+  setTheme(localStorage.getItem("aidon-theme") || "light");
   document.getElementById("theme-toggle").addEventListener("click", () => {
     setTheme(rootEl.dataset.theme === "dark" ? "light" : "dark");
   });
@@ -2310,7 +2792,8 @@
   const thread = document.getElementById("thread");
   const input = document.getElementById("goal-input");
 
-  let currentConversationId = localStorage.getItem("aidon-conversation") || "";
+  let currentConversationId = new URLSearchParams(location.search).get("conversation_id")
+    || localStorage.getItem("aidon-conversation") || "";
   window.aidonConversation = () => ({
     conversation_id: currentConversationId,
   });
@@ -2344,6 +2827,7 @@
     document.getElementById("view-" + b.dataset.view).classList.add("active");
     if (b.dataset.view === "goals") loadGoals();
     if (b.dataset.view === "chat") loadHistory();
+    if (b.dataset.view === "artifacts") loadArtifacts();
     if (b.dataset.view === "library") loadLibrary();
     if (b.dataset.view === "ideas") loadIdeas();
   }));
@@ -2378,6 +2862,8 @@
       '<div class="brief-hint">Standing instructions for this ' +
       'chat. Every run in this chat starts from this ' +
       'brief. Leave it empty to clear it.</div>' +
+      '<div id="brief-status" class="brief-status" role="status" ' +
+      'aria-live="polite"></div>' +
       '<textarea id="brief-text" rows="14" spellcheck="false" ' +
       'placeholder="e.g. Hard budget cap: CAD $100 for the shopping ' +
       'basket. Ledger: basket.json in the workspace — totals come ' +
@@ -2400,40 +2886,88 @@
     const o = document.getElementById("brief-overlay");
     if (o) o.hidden = true;
   }
+  async function briefFetch(url, options) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    try {
+      return await fetch(url, { ...(options || {}), signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   async function openBrief() {
     if (!currentConversationId) {
       window.alert("Start a chat first, then set its brief.");
       return;
     }
-    briefConversationId = currentConversationId;
+    const conversationId = currentConversationId;
+    briefConversationId = conversationId;
     const overlay = ensureBriefModal();
     overlay.querySelector("#brief-title").textContent = "Chat brief";
     const ta = overlay.querySelector("#brief-text");
+    const status = overlay.querySelector("#brief-status");
     ta.value = "";
     ta.placeholder = "Loading…";
+    ta.disabled = true;
+    status.textContent = "Loading this chat’s brief…";
     overlay.hidden = false;
     try {
-      const r = await (await fetch(
-        "/api/conversations/" + encodeURIComponent(currentConversationId) +
-        "/brief")).json();
-      ta.value = r.brief || "";
-    } catch (e) { ta.value = ""; }
-    ta.focus();
+      const response = await briefFetch(
+        "/api/conversations/" + encodeURIComponent(conversationId) +
+        "/brief");
+      if (briefConversationId !== conversationId ||
+          currentConversationId !== conversationId) return;
+      if (response.status === 404) {
+        ta.value = ""; // a chat without a saved brief is normal
+        status.textContent = "No brief saved for this chat yet.";
+      } else if (!response.ok) {
+        throw new Error("Loading failed (HTTP " + response.status + ")");
+      } else {
+        const data = await response.json();
+        ta.value = typeof data.brief === "string"
+          ? data.brief : (data.brief ? JSON.stringify(data.brief, null, 2) : "");
+        status.textContent = "";
+      }
+    } catch (e) {
+      if (briefConversationId !== conversationId ||
+          currentConversationId !== conversationId) return;
+      ta.value = "";
+      status.textContent = "Could not load this chat’s brief. Check the Aidon connection and try again.";
+    } finally {
+      if (briefConversationId === conversationId &&
+          currentConversationId === conversationId) {
+        ta.placeholder = "e.g. Hard budget cap: CAD $100 for the shopping basket.";
+        ta.disabled = false;
+        ta.focus();
+      }
+    }
   }
   const chatBriefBtn = document.getElementById("chat-brief");
   if (chatBriefBtn) chatBriefBtn.addEventListener("click", openBrief);
   async function saveBrief() {
-    const ta = document.getElementById("brief-text");
+    const overlay = document.getElementById("brief-overlay");
+    const ta = overlay.querySelector("#brief-text");
+    const status = overlay.querySelector("#brief-status");
+    const save = overlay.querySelector("#brief-save");
+    save.disabled = true;
+    status.textContent = "Saving brief…";
     try {
-      await fetch(
+      const response = await briefFetch(
         "/api/conversations/" + encodeURIComponent(briefConversationId) +
         "/brief", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ brief: ta.value }),
         });
-    } catch (e) { /* the modal simply stays as it was */ }
-    closeBrief();
+      if (!response.ok) {
+        throw new Error("Saving failed (HTTP " + response.status + ")");
+      }
+      closeBrief();
+    } catch (e) {
+      status.textContent = "Could not save this brief. Check the Aidon connection and try again.";
+    } finally {
+      save.disabled = false;
+    }
   }
 
   // ---- history: persistent conversations ----
@@ -2521,7 +3055,7 @@
     const renderAtt = (a) => {
       const d = document.createElement("div");
       d.className = "msg user";
-      const url = "/api/library/" + a.id + "/file";
+      const url = a.url || ("/api/library/" + a.id + "/file");
       if (a.kind === "image") {
         const img = document.createElement("img");
         img.src = url;
@@ -2537,42 +3071,59 @@
     };
     const turns = conv.turns || [];
     if (turns.length) {
-      turns.forEach((turn) => {
-        const role = turn.role || "user";
-        if (role === "user") {
-        const u = document.createElement("div");
-        u.className = "msg user";
-          u.textContent = turn.text || "";
-          thread.appendChild(u);
-        } else if (role === "assistant") {
-          const a = document.createElement("div");
-          a.className = "msg aidon";
-          a.textContent = turn.text || "";
-          thread.appendChild(a);
+      let savedRoute = null;
+      try {
+        const state = JSON.parse(localStorage.getItem(
+          "aidon-run-state-" + conv.id) || "null");
+        if (state && state.route && state.route.group) savedRoute = state.route;
+      } catch (e) {}
+      let lastAssistantTurn = -1;
+      const attachmentsByExchange = {};
+      const unattached = [];
+      atts.forEach((a) => {
+        const n = Number(a.exchange_no);
+        if (Number.isInteger(n) && n > 0) {
+          (attachmentsByExchange[n] = attachmentsByExchange[n] || []).push(a);
+        } else {
+          unattached.push(a);
         }
       });
+      turns.forEach((turn, index) => {
+        if ((turn.role || "user") === "assistant") lastAssistantTurn = index;
+      });
+      turns.forEach((turn, index) => {
+        const role = turn.role || "user";
+        if (role === "user") {
+          thread.appendChild(window.aidonRenderStoredMessage("user", turn.text));
+          (attachmentsByExchange[Number(turn.exchange_no)] || []).forEach(renderAtt);
+        } else if (role === "assistant") {
+          const route = turn.route ||
+            (index === lastAssistantTurn ? savedRoute : null);
+          thread.appendChild(window.aidonRenderStoredMessage(
+            "assistant", turn.text, route));
+        }
+      });
+      unattached.forEach(renderAtt);
     } else {
       (conv.exchanges || []).forEach((ex) => {
         if (ex.user_text) {
-          const u = document.createElement("div");
-          u.className = "msg user";
-          u.textContent = ex.user_text;
-          thread.appendChild(u);
+          thread.appendChild(window.aidonRenderStoredMessage("user", ex.user_text));
         }
         (byImport[ex.exchange_no] || []).forEach(renderAtt);
         if (ex.assistant_text) {
-          const a = document.createElement("div");
-          a.className = "msg aidon";
-          a.textContent = ex.assistant_text;
-          thread.appendChild(a);
+          thread.appendChild(window.aidonRenderStoredMessage("assistant", ex.assistant_text));
         }
         (outputsByRun[ex.run_id] || []).forEach(renderAtt);
       });
     }
+    if (window.aidonRestoreLabTurns) window.aidonRestoreLabTurns(conv.lab_turns || []);
+    if (!conv.active_run && window.aidonRestoreInterviewRecovery)
+      window.aidonRestoreInterviewRecovery(conv.recovery);
+    if (window.aidonReconnectInterview && conv.active_run) window.aidonReconnectInterview(conv.active_run);
     if (window.aidonScrollThread) window.aidonScrollThread();
     if (window.aidonRenderStopCardForConversation)
       window.aidonRenderStopCardForConversation(conv.id);
-    if (window.aidonRestoreRunState) window.aidonRestoreRunState(conv.id);
+    if (!conv.active_run && window.aidonRestoreRunState) window.aidonRestoreRunState(conv.id);
     input.disabled = false;
     input.focus();
   }
@@ -2702,7 +3253,7 @@
     });
   }
 
-  // ---- library: every imported file + run output ----
+  // ---- library: saved images and outputs ----
   async function loadLibrary() {
     const list = document.getElementById("library-list");
     let items = [];
@@ -2712,7 +3263,7 @@
     } catch (e) { items = []; }
     if (!items.length) {
       list.innerHTML = '<div class="empty-note">Nothing here yet.<br>' +
-        "Attach a file or ask Aidon to make one.</div>";
+        "Generated images and saved outputs will appear here.</div>";
       return;
     }
     list.innerHTML = "";
@@ -2745,6 +3296,58 @@
       list.appendChild(d);
     });
   }
+
+  // ---- artifacts: files attached or imported through chat ----
+  async function loadArtifacts() {
+    const list = document.getElementById("artifacts-list");
+    let items = [];
+    try {
+      const data = await (await fetch("/api/artifacts")).json();
+      items = Array.isArray(data) ? data : (data.files || []);
+    } catch (e) { items = []; }
+    if (!items.length) {
+      list.innerHTML = '<div class="empty-note">No imported files yet.<br>' +
+        "Attach an image or file in Chat and it will appear here.</div>";
+      return;
+    }
+    list.innerHTML = "";
+    items.forEach((a) => {
+      const d = document.createElement("div");
+      d.className = "lib-item";
+      const visual = a.kind === "image"
+        ? '<img class="lib-thumb" src="' + esc(a.url) + '" alt="">'
+        : '<span class="lib-ico">📎</span>';
+      const date = a.created_at
+        ? fmtDate(new Date(a.created_at * 1000).toISOString()) : "";
+      const meta = [a.kind === "image" ? "Imported image" : "Imported file",
+        fmtSize(a.size), date].filter(Boolean).join(" · ");
+      d.innerHTML = visual + "<div><div class=\"lib-name\">" + esc(a.name) +
+        '</div><div class="lib-meta">' + esc(meta) + "</div></div>";
+      d.title = "Click to attach " + a.name + " to the chat composer";
+      d.addEventListener("click", async () => {
+        try {
+          const response = await fetch(a.url);
+          if (!response.ok) throw new Error("file unavailable (HTTP " + response.status + ")");
+          const blob = await response.blob();
+          const file = new File([blob], a.name, {
+            type: a.mime || blob.type || "application/octet-stream",
+          });
+          if (typeof window.aidonQueueAttachments !== "function")
+            throw new Error("Chat attachment controls are not ready; refresh the page");
+          if (!window.aidonQueueAttachments([file])) return;
+          document.querySelector('.nav-btn[data-view="chat"]')?.click();
+          document.getElementById("goal-input")?.focus({ preventScroll: true });
+          window.aidonShowMiddleStatus("Added " + a.name + " to chat attachments");
+        } catch (error) {
+          window.aidonShowMiddleStatus("Could not attach " + a.name + ": " +
+            (error && error.message ? error.message : error), "error");
+        }
+      });
+      list.appendChild(d);
+    });
+  }
+
+  document.getElementById("artifacts-refresh")?.addEventListener("click", loadArtifacts);
 
   // initial load
   loadHistory();

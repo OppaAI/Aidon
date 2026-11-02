@@ -98,13 +98,13 @@ def test_experience_build_recall_and_loop_reuse(tmp_path):
     home.mkdir()
     sandbox = Sandbox(home / "work")
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
-    runner = GoalRunner(FakeClient(""), sandbox, gate, home, memory=memory)
+    runner = GoalRunner(FakeClient('{"steps": [{"tool": "write", "args": {"file": "deliverable.md", "text": "Verified test deliverable.\\n"}, "deliverable": "deliverable.md"}], "deliverables": ["deliverable.md"], "criteria": []}'), sandbox, gate, home, memory=memory)
     report1 = runner.run("Write a note")
     assert report1.status == "done"
     # Second run, same goal, with a fresh workdir, should reuse
     # the Experience DAG and still deliver the file.
     sandbox2 = Sandbox(home / "work2")
-    runner2 = GoalRunner(FakeClient(""), sandbox2, gate, home, memory=memory)
+    runner2 = GoalRunner(FakeClient('{"steps": [{"tool": "write", "args": {"file": "deliverable.md", "text": "Verified test deliverable.\\n"}, "deliverable": "deliverable.md"}], "deliverables": ["deliverable.md"], "criteria": []}'), sandbox2, gate, home, memory=memory)
     report2 = runner2.run("Write a note")
     assert report2.status == "done"
     assert report2.files == ["deliverable.md"]

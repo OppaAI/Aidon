@@ -22,17 +22,22 @@ Rules, fail closed:
 from __future__ import annotations
 
 from urllib.parse import urlparse
+import hmac
 
 _LOCALHOSTS = {"127.0.0.1", "::1", "[::1]", "localhost"}
 
 
 def _is_localhost(remote_addr: str) -> bool:
+    import ipaddress
     addr = (remote_addr or "").strip().lower()
     if addr in _LOCALHOSTS:
         return True
-    if addr.startswith("127."):
-        return True
-    return False
+    try:
+        parsed = ipaddress.ip_address(addr)
+    except ValueError:
+        return False
+    mapped = getattr(parsed, "ipv4_mapped", None)
+    return parsed.is_loopback or (mapped is not None and mapped.is_loopback)
 
 
 def _authorization(headers: dict) -> str | None:
@@ -53,7 +58,8 @@ def is_authorized(headers: dict, token: str | None, remote_addr: str = "127.0.0.
     if token is None or not str(token).strip():
         return _is_localhost(remote_addr)
     expected = f"Bearer {token}"
-    return _authorization(headers) == expected
+    supplied = _authorization(headers)
+    return supplied is not None and hmac.compare_digest(supplied.encode(), expected.encode())
 
 
 def _host_name(host: str) -> str:

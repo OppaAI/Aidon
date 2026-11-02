@@ -69,7 +69,8 @@ class RouterClient(ModelClient):
             return self.chat_phase("", phase_or_messages)
         return self.chat_phase(str(phase_or_messages), messages)
 
-    def chat_phase(self, phase: str, messages, sampling=None) -> str:
+    def chat_phase(self, phase: str, messages, sampling=None,
+                   usage_phase: str | None = None) -> str:
         key = str(phase or "").lower()
         self.calls_by_phase[key] = self.calls_by_phase.get(key, 0) + 1
         client = self.route(phase)
@@ -81,7 +82,8 @@ class RouterClient(ModelClient):
         # CountingClient default ("chat") and per-phase trace
         # events drain 0.
         if callable(getattr(client, "take_phase_usage", None)):
-            return client.chat(messages, phase=phase, sampling=sampling)
+            return client.chat(messages, phase=usage_phase or phase,
+                               sampling=sampling)
         try:
             return client.chat(messages, sampling=sampling)
         except TypeError:

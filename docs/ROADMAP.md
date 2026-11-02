@@ -288,17 +288,11 @@ VM and will be available inside a future VM once that backend exists.
   definite, checkable kind (outcome verification,
   guardrail classification), not a general moral sense.
 
-- Scheduler serve as one process: the standalone schedule
-  serve daemon is broken since the practice-windows change —
-  it references server and msg that only the webui serve
-  branch constructs, so it crashes at startup and its
-  practice delivery would silently drop. The fix extracts
-  the WebUI construction into a shared helper, calls it in
-  the serve branch, runs the server in a thread, and wires
-  practice_session_runner and the two senders, with a
-  sandbox smoke test of the daemon. Until then the live
-  scheduler path stays the timer plus the WebUI process.
-  Post-hackathon.
+- Scheduler serve practice wiring: the daemon now constructs its
+  messaging configuration and senders locally, confines practice
+  workspace names, and uses the nonblocking scheduled approval gate
+  when practice is not pre-approved. Startup and practice delivery
+  still need a smoke test on the target machine.
 
 - Post-hackathon cleanup, one entry: research-cache search index and
   single persistence registry. The research cache is bounded by small

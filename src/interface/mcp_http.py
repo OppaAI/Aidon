@@ -35,6 +35,14 @@ import urllib.request
 
 PROTOCOL_VERSION = "2024-11-05"
 
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        return None
+
+
+_http_opener = urllib.request.build_opener(_NoRedirect())
+
 # A $VAR reference: "$NAME" or "${NAME}", NAME = [A-Z0-9_]+.
 _VAR_REF_RE = re.compile(r"\$(?:\{([A-Z0-9_]+)\}|([A-Z0-9_]+))")
 
@@ -68,6 +76,17 @@ class McpHttpError(Exception):
     """A JSON-RPC error, or an HTTP failure, from the MCP server."""
 
 
+class McpUnauthorizedError(McpHttpError):
+    """HTTP 401 with the server's OAuth discovery challenge, if present."""
+
+    def __init__(self, challenge: str = ""):
+        super().__init__(
+            "HTTP 401 from MCP server; it requires authorization. "
+            "Aidon will try the server's standard OAuth flow when advertised."
+        )
+        self.challenge = challenge
+
+
 def _parse_response(body: bytes, content_type: str) -> dict:
     text = body.decode("utf-8", errors="replace").strip()
     if "text/event-stream" in (content_type or ""):
@@ -94,7 +113,7 @@ class McpHttpClient:
     """One MCP server over HTTP, JSON-RPC, Bearer token optional."""
 
     def __init__(self, endpoint: str, token: str | None = None,
-                 timeout: float = 30.0):
+                 timeout: float = 30.0, token_provider=None):
         if not endpoint:
             raise ValueError("MCP HTTP endpoint is required")
         self.endpoint = endpoint.rstrip("/")
@@ -118,6 +137,7 @@ class McpHttpClient:
             self.token = expanded or None
             self.token_var = var
         self.timeout = timeout
+        self.token_provider = token_provider
         self.session_id: str | None = None
         self.server_info: dict = {}
         self._counter = 0
@@ -140,6 +160,11 @@ class McpHttpClient:
                    "method": method, "params": params}
         headers = {"Content-Type": "application/json",
                    "Accept": "application/json, text/event-stream"}
+        if self.token_provider is not None:
+            try:
+                self.token = self.token_provider() or None
+            except Exception:
+                self.token = None
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         if self.session_id:
@@ -148,13 +173,15 @@ class McpHttpClient:
             self.endpoint, data=json.dumps(payload).encode(),
             method="POST", headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as resp:
+            with _http_opener.open(request, timeout=self.timeout) as resp:
                 session = resp.headers.get("Mcp-Session-Id")
                 if session:
                     self.session_id = session
                 data = _parse_response(resp.read(),
                                        resp.headers.get("Content-Type", ""))
         except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                raise McpUnauthorizedError(exc.headers.get("WWW-Authenticate", "")) from exc
             raise McpHttpError(f"HTTP {exc.code} from MCP server") from exc
         except urllib.error.URLError as exc:
             raise McpHttpError(f"MCP server unreachable: {exc}") from exc

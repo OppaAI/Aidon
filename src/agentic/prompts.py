@@ -95,8 +95,11 @@ def runtime_model_inventory() -> str:
 
 
 def _read_doc(name: str) -> str:
-    """Read a repository doc when present, '' when absent."""
-    candidates = [os.path.join(os.getcwd(), name),
+    """Read owner docs first, then checkout or installed-package defaults."""
+    import sys
+    home = os.path.expanduser(os.environ.get("AIDON_HOME", "~/.aidon"))
+    candidates = [os.path.join(home, name),
+                  os.path.join(os.getcwd(), name),
                   os.path.join(os.getcwd(), "docs", name)]
     try:
         repo_root = os.path.dirname(os.path.dirname(
@@ -105,6 +108,7 @@ def _read_doc(name: str) -> str:
                            os.path.join(repo_root, "docs", name)))
     except Exception:
         pass
+    candidates.append(os.path.join(sys.prefix, "share", "aidon", name))
     for path in candidates:
         try:
             with open(path, encoding="utf-8") as handle:

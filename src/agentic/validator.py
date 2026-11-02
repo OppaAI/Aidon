@@ -1,9 +1,12 @@
 """Deterministic plan validation, before execution, no model call.
 
 A plan is checked by code, not by the model that proposed it:
-- every step has a tool in the allowed set, a dict args, and
-  a non-empty deliverable,
+- every step has a tool in the allowed set and dict args;
+- file-producing steps have a deliverable, while result-only steps may
+  return their tool output directly to the user;
 - plan deliverables match step deliverables,
+- filenames the user explicitly introduced as "file named X" are preserved
+  exactly in the plan's deliverables,
 - no absolute path, no parent-directory escape, in any
   file argument or deliverable,
 - no duplicate deliverable from two different tools, which
@@ -16,15 +19,38 @@ called for, in code, not as a model opinion.
 
 from __future__ import annotations
 
+import re
+
 ALLOWED_TOOLS = {"write", "read", "list", "shell", "calculate"}
 
 
+def _explicit_named_files(goal: str) -> list[str]:
+    """Return filenames the user explicitly introduces with ``file named``.
+
+    These are task contracts, not suggestions from the planner. Keep this
+    intentionally narrow so ordinary mentions of filenames remain flexible.
+    """
+    pattern = re.compile(
+        r"\bfile\s+named\s+[`\"']?"
+        r"([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)",
+        re.IGNORECASE)
+    found = []
+    for match in pattern.finditer(str(goal or "")):
+        name = match.group(1).strip(".`\"'")
+        if name and name not in found:
+            found.append(name)
+    return found
+
+
 def validate_plan(plan, allowed_tools: set[str] | None = None,
-                  skill_names: set[str] | None = None) -> list[str]:
+                  skill_names: set[str] | None = None,
+                  goal: str = "") -> list[str]:
     allowed = set(allowed_tools) if allowed_tools is not None else ALLOWED_TOOLS
     skills = set(skill_names or [])
     failures = []
     steps = plan.normalized_steps() if hasattr(plan, "normalized_steps") else plan.steps
+    if not steps:
+        return ["plan has no steps"]
     deliverables = set()
     for index, step in enumerate(steps):
         tool = step.tool if hasattr(step, "tool") else step.get("tool", "")
@@ -61,20 +87,30 @@ def validate_plan(plan, allowed_tools: set[str] | None = None,
             # the user did not specify one. Requiring a model-invented path
             # here caused otherwise valid document requests to fail before
             # execution and encouraged arbitrary ``workdir/`` names.
-        if not deliverable and tool == "write":
-            failures.append(f"step {index}: write step deliverable is empty")
-        if not deliverable:
-            continue
-        if deliverable in deliverables:
-            failures.append(f"step {index}: duplicate deliverable {deliverable}")
-        deliverables.add(deliverable)
+        if not deliverable and tool in {"write", "write_file", "generate_document"}:
+            failures.append(f"step {index}: {tool} step deliverable is empty")
         for value in (args.values() if isinstance(args, dict) else []):
             if isinstance(value, str) and (value.startswith("/") or ".." in value.split("/")):
                 failures.append(f"step {index}: path escape in args: {value}")
-        if deliverable.startswith("/") or ".." in deliverable.split("/"):
-            failures.append(f"step {index}: path escape in deliverable: {deliverable}")
+        if deliverable:
+            if deliverable in deliverables:
+                failures.append(f"step {index}: duplicate deliverable {deliverable}")
+            deliverables.add(deliverable)
+            if deliverable.startswith("/") or ".." in deliverable.split("/"):
+                failures.append(f"step {index}: path escape in deliverable: {deliverable}")
     plan_deliverables = plan.deliverables if hasattr(plan, "deliverables") else []
     missing = set(plan_deliverables) - deliverables
     if missing:
         failures.append(f"plan deliverables with no step: {', '.join(sorted(missing))}")
+    for required in _explicit_named_files(goal):
+        if required not in plan_deliverables or required not in deliverables:
+            failures.append(
+                f"explicitly requested filename {required!r} must appear "
+                "exactly in plan and step deliverables")
+        if (re.search(r"\bexactly\s+one\s+(?:file|artifact)\b",
+                      str(goal or ""), re.IGNORECASE)
+                and set(str(name) for name in plan_deliverables) != {required}):
+            failures.append(
+                f"goal requires exactly one deliverable, {required!r}; "
+                "remove unrelated deliverables")
     return failures

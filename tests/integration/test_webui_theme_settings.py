@@ -21,13 +21,34 @@ from src.interface.webui import (
 
 
 def test_theme_variables_and_toggle():
-    assert "--bg:#030b1c" in BASE_CSS  # deep blue dark default
-    assert "--accent:#0082fb" in BASE_CSS
-    assert "body.light{--bg:#dfe8f4" in BASE_CSS  # light override
+    assert "body.dark{--bg:#19161d" in BASE_CSS  # Kiro Dark inspired
+    assert 'html[data-theme="dark"]{--bg:#19161d' in BASE_CSS
+    assert "--accent:#b080ff" in BASE_CSS
+    assert ":root{--bg:#d3d1c5;--surface:#f0ede3" in BASE_CSS  # light theme
     assert 'id="theme-toggle"' in CHAT_HTML
     assert "aidon-theme" in CHAT_HTML
-    assert "aidon-theme" in _page_html("X", "<p>y</p>")
+    assert '/static/theme.js' in _page_html("X", "<p>y</p>")
 
+
+
+def test_shared_theme_bootstrap_is_injected_into_every_page():
+    with TemporaryDirectory() as td:
+        server = WebUIServer(Path(td), None, None)
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler())
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{httpd.server_address[1]}"
+            for route in ("/", "/dag", "/capabilities", "/labs", "/memory",
+                          "/knowledge", "/reports", "/practice", "/graph", "/documents"):
+                with urllib.request.urlopen(base + route) as response:
+                    html = response.read().decode()
+                assert '/static/theme.js?v=' in html, route
+            with urllib.request.urlopen(base + "/static/theme.js") as response:
+                script = response.read().decode()
+            assert 'window.AidonTheme' in script
+            assert 'addEventListener("storage"' in script
+        finally:
+            httpd.shutdown()
 
 def test_settings_page_and_api_are_available():
     with TemporaryDirectory() as td:
@@ -40,6 +61,7 @@ def test_settings_page_and_api_are_available():
             with urllib.request.urlopen(base + "/settings") as response:
                 page = response.read().decode()
             assert "settings-groups" in page
+            assert "AidonTheme.toggle()" in page
         finally:
             httpd.shutdown()
 

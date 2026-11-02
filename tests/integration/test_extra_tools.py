@@ -44,6 +44,7 @@ def test_all_nine_tools_present(tmp_path):
     for name in EXPECTED:
         assert name in tools, name
         assert callable(tools[name])
+    assert "adopt_skill" not in tools
 
 
 def test_schedule_list_and_cancel_round_trip(tmp_path):
@@ -113,3 +114,143 @@ def test_messaging_sends_unconfigured_return_strings(tmp_path, monkeypatch):
     assert isinstance(slack, str) and "failed" in slack
     wa = tools["whatsapp_send"]("+1234567890", "hello")
     assert isinstance(wa, str) and "failed" in wa
+
+
+def test_adopt_skill_tests_offline_and_requires_separate_approval(tmp_path, monkeypatch):
+    from src.capabilities.skill_library import SkillLibrary
+    from src.interface.approval import Decision
+    import src.capabilities.sandbox as sandbox_module
+
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    draft = workdir / "summarize.md"
+    draft.write_text("# Summarize\n\nSummarize reports.\n\n## Tests\n\npython3 --version\n")
+
+    class FakeSandbox:
+        def __init__(self, root, *args, allow_network=False,
+                     require_isolation=False, **kwargs):
+            self.workdir = Path(root)
+            self.isolated = True
+            self.allow_network = allow_network
+        def run(self, command):
+            assert command == ["sh", "-c", "python3 --version"]
+            return {"ok": True, "output": "Python 3"}
+
+    class Approve:
+        def ask(self, *args, **kwargs):
+            return Decision("approved")
+
+    monkeypatch.setattr(sandbox_module, "Sandbox", FakeSandbox)
+    config = _Config()
+    config.home = tmp_path
+    result = _goal_extra_tools(config, workdir, gate=Approve(),
+                               allow_skill_adoption=True)["adopt_skill"](
+        "summarize.md")
+    assert "Trusted skill summarize" in result
+    assert SkillLibrary(tmp_path).get("summarize").state == "trusted"
+
+
+def test_adopt_skill_refuses_without_isolation(tmp_path, monkeypatch):
+    from src.capabilities.skill_library import SkillLibrary
+    import src.capabilities.sandbox as sandbox_module
+
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    (workdir / "unsafe.md").write_text(
+        "# Unsafe\n\nProcedure.\n\n## Tests\n\npython3 --version\n")
+
+    class HostSandbox:
+        def __init__(self, root, *args, allow_network=False,
+                     require_isolation=False, **kwargs):
+            self.isolated = False
+            self.allow_network = allow_network
+
+    monkeypatch.setattr(sandbox_module, "Sandbox", HostSandbox)
+    config = _Config()
+    config.home = tmp_path
+    result = _goal_extra_tools(config, workdir, allow_skill_adoption=True)["adopt_skill"]("unsafe.md")
+    assert "need working bubblewrap isolation" in result
+    assert SkillLibrary(tmp_path).get("unsafe") is None
+
+
+def test_mcp_connect_forwards_owner_requested_functional_probe(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from src.capabilities import mcp_acquisition
+    from src.interface.approval import Decision
+
+    seen = {}
+    client = SimpleNamespace(close=lambda: None)
+
+    def acquire(home, name, config, approve, **kwargs):
+        seen["test_call"] = kwargs.get("test_call")
+        seen["keep_client"] = kwargs.get("keep_client")
+        return {"client": client, "tools": ["search_papers"],
+                "scan_findings": []}
+
+    class Approve:
+        def ask(self, *args, **kwargs):
+            return Decision("approved")
+
+    monkeypatch.setattr(mcp_acquisition, "acquire_mcp_server", acquire)
+    config = _Config()
+    config.home = tmp_path
+    tools = _goal_extra_tools(config, tmp_path / "work", gate=Approve())
+    result = tools["mcp_connect"](
+        "papers", transport="stdio", command="papers-mcp",
+        test_tool="search_papers", test_args={"query": "example"})
+
+    assert result.startswith("MCP_CONNECTED")
+    assert seen == {"test_call": {
+        "tool": "search_papers", "args": {"query": "example"}},
+        "keep_client": True}
+
+
+def test_mcp_connect_rejects_test_args_without_named_tool(tmp_path):
+    config = _Config()
+    config.home = tmp_path
+    result = _goal_extra_tools(config, tmp_path / "work")["mcp_connect"](
+        "papers", command="papers-mcp", test_args={"query": "example"})
+    assert result == "MCP_REFUSED: test_args requires test_tool"
+
+
+def test_mcp_missing_api_key_does_not_start_package_or_wait_for_approval(tmp_path, monkeypatch):
+    monkeypatch.delenv("TODOIST_API_KEY", raising=False)
+    config = _Config()
+    config.home = tmp_path
+    result = _goal_extra_tools(config, tmp_path / "work")["mcp_connect"](
+        "todoist", command="npx", args=["-y", "--package", "@doist/todoist-mcp@13.8.3", "todoist-mcp"],
+        env={"TODOIST_API_KEY": "$TODOIST_API_KEY"})
+    assert result == "MCP_REFUSED: configure TODOIST_API_KEY in Aidon's .env before connecting"
+
+
+def test_capability_interview_removes_unverified_source_links():
+    from src.agentic.loop import GoalRunner
+
+    prompts = []
+    replies = iter([
+        '{"question":"Compare these options: https://invented.invalid"}',
+        '{"brief":"Choose option A based on current pricing: '
+        'https://official.example/pricing"}',
+    ])
+
+    def ask(prompt):
+        prompts.append(prompt)
+        if "May I open the Tool Crafting Lab" in prompt:
+            return "proceed"
+        if "Proposed tool brief" in prompt:
+            return "proceed"
+        if prompt.startswith("[AIDON_LAB]"):
+            return "I do not know; compare options for me."
+        return "proceed"
+
+    outcome, brief = GoalRunner._run_capability_interview(
+        None, "Create a video workflow", "need_plugin", ask,
+        lambda *_: next(replies),
+        research=lambda *_: [
+            "Official pricing page https://official.example/pricing"])
+
+    assert outcome == "approved"
+    assert "https://invented.invalid" not in "\n".join(prompts)
+    assert "[unverified URL removed]" in "\n".join(prompts)
+    assert "https://official.example/pricing" in brief
+    assert "check that they support the claims" in brief

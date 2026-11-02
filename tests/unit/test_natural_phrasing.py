@@ -56,6 +56,41 @@ def test_report_text_variants():
     assert files_sentence(["a.pdf", "b.pdf"]) == "a.pdf and b.pdf are ready."
 
 
+def test_report_text_includes_result_without_file_deliverable():
+    text = report_text("done", [], "", "run-output", "stats",
+                       result_text="/workspace/run-123")
+    assert "The requested action completed." in text
+    assert "Tool result:" in text
+    assert "/workspace/run-123" in text
+    assert "Nothing was delivered" not in text
+
+
+def test_report_text_renders_markdown_readback_as_markdown():
+    text = report_text(
+        "done", ["grocery-plan.md"], "", "run-markdown", "stats",
+        result_text="read_file:\n# Grocery plan\n\n## Meal Plan\n- Oatmeal")
+    assert "**read_file:**" in text
+    assert "# Grocery plan" in text
+    assert "## Meal Plan" in text
+    assert "```text" not in text
+
+
+def test_report_text_renders_markdown_after_descriptive_tool_label():
+    text = report_text(
+        "done", ["grocery-plan.md"], "", "run-described-readback", "stats",
+        result_text=("Read current grocery-plan.md before editing:\n"
+                     "# Grocery plan\n\n## Shopping List\n- Zucchini"))
+    assert "**Read current grocery-plan.md before editing:**" in text
+    assert "# Grocery plan" in text
+    assert "```text" not in text
+
+
+def test_report_text_keeps_plain_readback_in_code_block():
+    text = report_text("done", [], "", "run-plain", "stats",
+                       result_text="read_file:\nplain output")
+    assert "```text\nread_file:" in text
+
+
 def test_approval_lead_ins_rotate_and_acks_vary():
     first = approval_lead_in()
     second = approval_lead_in()
@@ -132,11 +167,14 @@ def _sign(secret, raw):
     return {"x-slack-request-timestamp": ts, "x-slack-signature": sig}
 
 
-def test_slack_answer_is_not_a_new_goal(tmp_path):
+def test_slack_answer_is_not_a_new_goal(tmp_path, monkeypatch):
     sent = []
     server = WebUIServer(tmp_path,
                          slack_sender=lambda c, t, ts=None: sent.append((c, t)))
     server.slack_signing_secret = "secret123"
+    # Answers in channels require an explicit mention; DMs remain direct.
+    monkeypatch.setattr("src.interface.messaging.slack_bot_user_id",
+                        lambda _config: "UBOT")
     answers = []
     thread = threading.Thread(
         target=lambda: answers.append(
@@ -144,7 +182,7 @@ def test_slack_answer_is_not_a_new_goal(tmp_path):
         daemon=True)
     thread.start()
     assert _wait_for_waiter(server, "run-9")
-    body = {"event": {"type": "message", "text": "Plan B",
+    body = {"event": {"type": "message", "text": "<@UBOT> Plan B",
                    "channel": "C1", "ts": "1.0"}}
     raw = json.dumps(body).encode()
     status, payload = server.handle_slack_post(raw, _sign("secret123", raw), body)

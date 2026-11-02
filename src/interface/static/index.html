@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -23,11 +23,13 @@
     <div id="brand">
       <span id="brand-mark" aria-label="Aidon mark">
         <svg viewBox="0 0 64 64" role="img" aria-hidden="true">
-          <path d="M10 52 28 12a5 5 0 0 1 8 0l18 40h-9l-5-12H24l-5 12Zm18-21h8l-4-10Z"/>
+          <path d="M11 53C20 39 26 23 32 11c1-2 4-2 5 1 6 14 11 28 17 41" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M22 39c7-3 14-4 21-3" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+          <path d="M35 18c4-8 11-9 16-8-1 7-6 12-14 12" fill="currentColor"/>
+          <path d="M38 20l8-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
         </svg>
       </span>
       <span id="brand-name">Aidon</span>
-      <button id="theme-toggle" class="icon-btn" title="Toggle dark / light theme">◐</button>
     </div>
     <div id="brand-subtitle">Your Goals. My Actions.</div>
     <nav id="main-nav">
@@ -43,6 +45,9 @@
       <button class="nav-btn" data-view="goals" title="Goals">
         <span class="nav-ico">🎯</span><span class="nav-label">Goals</span>
       </button>
+      <button class="nav-btn" data-view="artifacts" title="Artifacts — files imported into chat">
+        <span class="nav-ico">🗂️</span><span class="nav-label">Artifacts</span>
+      </button>
       <button class="nav-btn" data-view="library" title="Library">
         <span class="nav-ico">📚</span><span class="nav-label">Library</span>
       </button>
@@ -51,6 +56,9 @@
       </a>
       <a class="nav-btn" href="/capabilities" title="Capabilities — what Aidon can do, what it has learned, and the evidence">
         <span class="nav-ico">🧰</span><span class="nav-label">Capabilities</span>
+      </a>
+      <a class="nav-btn" href="/labs" title="Tool, skill, and MCP labs — define what Aidon should build or connect">
+        <span class="nav-ico">🧪</span><span class="nav-label">Labs</span>
       </a>
       <a class="nav-btn" href="/memory" title="Memory Studio — the episodes Aidon remembers from past work">
         <span class="nav-ico">🧠</span><span class="nav-label">Memory</span>
@@ -93,15 +101,24 @@
         <div class="left-head"><span>Goals</span></div>
         <div id="goals-list"></div>
       </div>
+      <div class="left-view" id="view-artifacts">
+        <div class="left-head">
+          <span>Artifacts</span>
+          <button id="artifacts-refresh" class="mini-btn" title="Refresh imported files">↻</button>
+          <span class="left-sub">Images and files attached to chat</span>
+        </div>
+        <div id="artifacts-list"></div>
+      </div>
       <div class="left-view" id="view-library">
         <div class="left-head">
           <span>Library</span>
-          <span class="left-sub">files Aidon keeps — imports &amp; outputs, linked to memory</span>
+          <span class="left-sub">Generated images and other files Aidon keeps</span>
         </div>
         <div id="library-list"></div>
       </div>
     </div>
     <div id="left-foot">
+      <button id="theme-toggle" class="icon-btn" title="Toggle dark / light theme" aria-label="Toggle dark / light theme">◐</button>
       <a id="settings-link" class="icon-btn" href="/settings" title="Settings">⚙</a>
       <span id="run-status"><span id="status-dot"></span><span id="status-text">idle</span></span>
     </div>
@@ -110,8 +127,14 @@
   <!-- ============ CENTER: CHAT ============ -->
   <main id="center">
     <header id="center-head">
-      <div class="center-brand"><span class="center-mark">A</span><span>Aidon</span>
+      <div class="center-brand"><span class="center-mark" aria-hidden="true"><svg viewBox="0 0 64 64">
+        <path d="M11 53C20 39 26 23 32 11c1-2 4-2 5 1 6 14 11 28 17 41" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M22 39c7-3 14-4 21-3" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+        <path d="M35 18c4-8 11-9 16-8-1 7-6 12-14 12" fill="currentColor"/>
+        <path d="M38 20l8-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
+      </svg></span><span>Aidon</span>
         <span class="version-label">v__AIDON_VERSION__</span><span class="online-dot"></span><span class="online-label">Autonomous Agent</span></div>
+      <div class="demo-record-controls"><button id="demo-record" type="button">Record demo</button><a id="demo-record-download" hidden>Download recording</a><span id="demo-record-status" role="status"></span></div>
     </header>
     <div id="stages"></div>
     <div id="middle-status" hidden role="status" aria-live="polite"></div>
@@ -121,7 +144,7 @@
     <footer id="composer">
       <div id="compose-box">
         <div id="composer-inputs">
-          <textarea id="goal-input" rows="3" placeholder="Start with a goal…&#10;&#10;Plan something, research a question, or ask Aidon to build a result for you. Your run stages and deliverables will appear here." autocomplete="off"></textarea>
+          <textarea id="goal-input" rows="3" placeholder="Start with a goal…&#10;&#10;Plan something, research a question, or ask Aidon to build a result for you. Your run stages and results will appear here." autocomplete="off"></textarea>
           <input id="guidance-input" type="text" placeholder="Guidance (optional) — your steps or hints; Aidon follows them and fills the gaps…" autocomplete="off">
         </div>
         <div id="composer-tools">
@@ -130,7 +153,7 @@
             <button id="camera-btn" class="composer-icon" title="Take photo" aria-label="Take photo">&#128247;</button>
             <button id="web-btn" class="composer-icon" title="Force web search" aria-label="Force web search"><svg class="globe-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.8 12h16.4M12 3.5c2.2 2.3 3.3 5.1 3.3 8.5s-1.1 6.2-3.3 8.5c-2.2-2.3-3.3-5.1-3.3-8.5S9.8 5.8 12 3.5z"></path></svg></button>
             <button id="think-btn" class="composer-icon" title="Maximum thinking" aria-label="Maximum thinking">&#129504;</button>
-            <label for="mode-chooser">Run Mode: </label><select id="mode-chooser" class="composer-icon" title="Run mode" aria-label="Run mode"><option value="ask">Ask</option><option value="plan">Plan</option><option value="execute">Execute</option></select>
+            <label for="mode-chooser">Run Mode: </label><select id="mode-chooser" class="composer-icon" title="Run mode" aria-label="Run mode"><option value="ask">Ask</option><option value="plan" selected>Plan</option><option value="execute">Execute</option></select>
             <button id="preapprove-btn" class="composer-icon preapprove-control" title="Auto-Approve" aria-label="Auto-Approve"><span class="preapprove-icon">👌</span><span>Auto-Approve</span></button>
           </div>
           <div id="composer-right">
@@ -157,18 +180,74 @@
       <div id="avatar-placeholder" aria-label="Aidon robot avatar">
         <svg class="fallback-robot" viewBox="0 0 200 200" role="img" aria-label="Aidon robot">
           <g class="robot-body-anim">
-            <rect x="28" y="35" width="16" height="42" rx="8" fill="#1a2a4a"/>
-            <rect x="156" y="35" width="16" height="42" rx="8" fill="#1a2a4a"/>
-            <rect x="40" y="18" width="120" height="72" rx="22" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
-            <rect x="55" y="28" width="90" height="52" rx="14" fill="#1a2a4a"/>
-            <ellipse class="robot-eye" cx="82" cy="54" rx="10" ry="16" fill="#7de9ff"/>
-            <ellipse class="robot-eye" cx="118" cy="54" rx="10" ry="16" fill="#7de9ff"/>
-            <path d="M88 72 Q100 78 112 72" fill="none" stroke="#7de9ff" stroke-width="3" stroke-linecap="round"/>
-            <rect x="92" y="90" width="16" height="12" fill="#c2c2b8"/>
-            <path d="M62 102 Q100 92 138 102 L138 140 Q100 155 62 140Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
-            <path d="M58 108 Q35 120 32 145 Q32 160 45 160 L58 150Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
-            <path d="M142 108 Q165 120 168 145 Q168 160 155 160 L142 150Z" fill="#f5f5e6" stroke="#d9d9c2" stroke-width="2"/>
-            <path d="M75 155 Q100 170 125 155 Q100 165 75 155Z" fill="#1a2a4a"/>
+            <defs>
+              <radialGradient id="fallback-shell" cx="35%" cy="18%" r="85%">
+                <stop offset="0" stop-color="#ffffff"/>
+                <stop offset=".46" stop-color="#f3f5f4"/>
+                <stop offset=".82" stop-color="#d7deeb"/>
+                <stop offset="1" stop-color="#aebbd4"/>
+              </radialGradient>
+              <linearGradient id="fallback-arm" x1="0" y1="0" x2="1" y2=".25">
+                <stop offset="0" stop-color="#c4d5e8"/>
+                <stop offset=".32" stop-color="#ffffff"/>
+                <stop offset=".72" stop-color="#eef1f4"/>
+                <stop offset="1" stop-color="#bbc9dd"/>
+              </linearGradient>
+              <radialGradient id="fallback-head-shell" cx="34%" cy="14%" r="88%">
+                <stop offset="0" stop-color="#ffffff"/>
+                <stop offset=".52" stop-color="#f5f5e8"/>
+                <stop offset=".84" stop-color="#dce1e6"/>
+                <stop offset="1" stop-color="#b9c4d4"/>
+              </radialGradient>
+              <linearGradient id="fallback-face" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#263a60"/>
+                <stop offset=".55" stop-color="#1a2a4a"/>
+                <stop offset="1" stop-color="#101b32"/>
+              </linearGradient>
+              <linearGradient id="fallback-ear" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="#7899bc"/>
+                <stop offset=".38" stop-color="#a9c8df"/>
+                <stop offset=".68" stop-color="#7095bc"/>
+                <stop offset="1" stop-color="#486b96"/>
+              </linearGradient>
+            </defs>
+            <g class="robot-arm-left">
+              <path d="M68 105 Q55 105 50 118 Q44 135 37 151 Q34 160 38 164 Q41 168 46 166 Q51 163 54 157 Q64 140 72 126Z" fill="url(#fallback-arm)" stroke="#c6d0df" stroke-width="1.5"/>
+              <path d="M54 119 Q50 137 41 155 Q39 160 42 161 Q47 159 50 152 L64 127Z" fill="#ffffff" opacity=".62"/>
+              <path d="M39 163 L39 165 M44 164 L44 166 M49 162 L50 164" fill="none" stroke="#1a2a4a" stroke-width="2.2" stroke-linecap="round"/>
+            </g>
+            <g class="robot-arm-right">
+              <path d="M132 105 Q145 105 150 118 Q156 135 163 151 Q166 160 162 164 Q159 168 154 166 Q149 163 146 157 Q136 140 128 126Z" fill="url(#fallback-arm)" stroke="#c6d0df" stroke-width="1.5"/>
+              <path d="M146 119 Q150 137 159 155 Q161 160 158 161 Q153 159 150 152 L136 127Z" fill="#ffffff" opacity=".62"/>
+              <path d="M161 163 L161 165 M156 164 L156 166 M151 162 L150 164" fill="none" stroke="#1a2a4a" stroke-width="2.2" stroke-linecap="round"/>
+            </g>
+            <g class="robot-head-anim">
+            <g transform="translate(6 0) scale(.94 1)">
+            <rect x="36" y="40" width="12" height="32" rx="6" fill="url(#fallback-ear)" stroke="#7894b5" stroke-width="1"/>
+            <rect x="152" y="40" width="12" height="32" rx="6" fill="url(#fallback-ear)" stroke="#7894b5" stroke-width="1"/>
+            <path d="M38 48 Q39 43 42 44" fill="none" stroke="#e5f4ff" stroke-width="1.5" stroke-linecap="round" opacity=".58"/>
+            <path d="M154 48 Q155 43 158 44" fill="none" stroke="#e5f4ff" stroke-width="1.5" stroke-linecap="round" opacity=".58"/>
+            <rect x="48" y="18" width="104" height="72" rx="21" fill="url(#fallback-head-shell)" stroke="#c4cedb" stroke-width="1.5"/>
+            <path d="M100 18 L100 9" fill="none" stroke="#1a2a4a" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="100" cy="6.5" r="3.2" fill="#7de9ff" stroke="#1a2a4a" stroke-width="1.2"/>
+            <path d="M55 39 Q58 29 71 28 H129 Q142 29 145 40" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity=".68"/>
+            <rect x="59" y="28" width="82" height="52" rx="14" fill="url(#fallback-face)" stroke="#15223b" stroke-width="1"/>
+            <path d="M68 33 Q74 30 84 30 H128 Q135 31 137 36" fill="none" stroke="#6680a5" stroke-width="1.5" stroke-linecap="round" opacity=".4"/>
+            <path d="M70 38 Q76 31 88 31 H121 Q130 31 134 36 Q114 33 96 42 Q82 49 71 47Z" fill="#d9f2ff" opacity=".2"/>
+            <path d="M71 39 Q78 33 89 33 H112 Q95 36 82 43 Q75 46 71 45Z" fill="#ffffff" opacity=".16"/>
+            <circle class="robot-eye" cx="85" cy="50" r="7.5" fill="none" stroke="#7de9ff" stroke-width="3"/>
+            <circle class="robot-eye" cx="115" cy="50" r="7.5" fill="none" stroke="#7de9ff" stroke-width="3"/>
+            <path id="fallback-mouth-smile" d="M90 67 Q100 73 110 67" fill="none" stroke="#7de9ff" stroke-width="3" stroke-linecap="round"/>
+            <path id="fallback-mouth-open" d="M94 64 Q100 62 106 64 Q109 68 106 73 Q100 77 94 73 Q91 68 94 64Z" fill="#7de9ff" opacity="0"/>
+            </g>
+            </g>
+            <rect x="89" y="88" width="22" height="14" rx="6" fill="#1a2a4a"/>
+            <ellipse cx="69" cy="108" rx="6" ry="7" fill="#1a2a4a"/>
+            <ellipse cx="131" cy="108" rx="6" ry="7" fill="#1a2a4a"/>
+            <path d="M74 104 C82 101 118 101 126 104 C140 119 139 153 127 173 C119 185 108 190 100 190 C92 190 81 185 73 173 C61 153 60 119 74 104Z" fill="url(#fallback-shell)" stroke="#c6d0df" stroke-width="1.5"/>
+            <ellipse cx="81" cy="119" rx="13" ry="6" fill="#ffffff" opacity=".72"/>
+            <path d="M71 151 C82 164 118 164 129 151 Q124 173 109 181 Q100 186 91 181 Q76 173 71 151Z" fill="#aebbd4" opacity=".24"/>
+            <path d="M81 177 Q100 188 119 177 Q114 187 100 188 Q86 187 81 177Z" fill="#1a2a4a" opacity=".92"/>
           </g>
         </svg>
       </div>
@@ -201,5 +280,6 @@
 </div>
 <script src="/static/app.js?v=__ASSET_V__"></script>
 <script src="/static/avatar.js?v=__ASSET_V__"></script>
+<script src="/static/screen-record.js?v=__ASSET_V__"></script>
 </body>
 </html>

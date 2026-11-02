@@ -14,8 +14,14 @@ def _skill_file(tmp_path, name="video_edit.md", body=None):
     path.write_text(body or (
         "# Video edit\n\n"
         "Edit video with ffmpeg: trim, crop, scale.\n\n"
+        "## Tests\n\npython3 --version\n\n"
         "## Trim\n\nffmpeg -ss ...\n"))
     return path
+
+
+class _FakeSandbox:
+    def run(self, command):
+        return {"ok": True, "output": "test passed"}
 
 
 def test_import_creates_candidate_and_file(tmp_path):
@@ -45,21 +51,51 @@ def test_trust_preserves_procedure_and_planner_sees_it(tmp_path):
     home = tmp_path / "home"
     import_skill_file(home, _skill_file(tmp_path))
     lib = SkillLibrary(home)
-    lib.promote("video_edit", {"passed": True, "evidence": "test"})
+    lib.promote("video_edit", lib.run_tests("video_edit", _FakeSandbox()))
     lib.trust("video_edit", approved=True)
     placed = home / "skills" / "video_edit.md"
     assert "Trim" in placed.read_text(), \
         "trust must not overwrite procedure text with metadata"
     texts = PluginRegistry(home).skill_texts()
     assert "video_edit.md" in texts and "Trim" in texts["video_edit.md"]
+    placed.write_text("# altered after validation\n", encoding="utf-8")
+    assert "video_edit.md" not in PluginRegistry(home).skill_texts()
 
 
-def test_trust_without_file_writes_metadata_stub(tmp_path):
+def test_modified_skill_markdown_cannot_use_stale_validation(tmp_path):
+    home = tmp_path / "home"
+    import_skill_file(home, _skill_file(tmp_path))
+    lib = SkillLibrary(home)
+    report = lib.run_tests("video_edit", _FakeSandbox())
+    path = home / "skills" / "video_edit.md"
+    path.write_text(path.read_text(encoding="utf-8") + "\nchanged\n",
+                    encoding="utf-8")
+    with pytest.raises(ValueError, match="Markdown changed"):
+        lib.promote("video_edit", report)
+
+
+def test_changed_trusted_markdown_requires_retest_and_reapproval(tmp_path):
+    home = tmp_path / "home"
+    import_skill_file(home, _skill_file(tmp_path))
+    lib = SkillLibrary(home)
+    report = lib.run_tests("video_edit", _FakeSandbox())
+    lib.promote("video_edit", report)
+    lib.trust("video_edit", approved=True)
+    path = home / "skills" / "video_edit.md"
+    path.write_text(path.read_text(encoding="utf-8") + "\ncustom step\n",
+                    encoding="utf-8")
+    report = lib.run_tests("video_edit", _FakeSandbox())
+    assert lib.promote("video_edit", report).state == "validated"
+    assert "video_edit.md" not in PluginRegistry(home).skill_texts()
+    lib.trust("video_edit", approved=True)
+    assert "video_edit.md" in PluginRegistry(home).skill_texts()
+
+
+def test_unvalidated_skill_cannot_become_trusted(tmp_path):
     home = tmp_path / "home"
     lib = SkillLibrary(home)
     from src.capabilities.skill_library import Skill
     lib.add(Skill(name="stub-skill", description="A stub"))
-    lib.promote("stub-skill", {"passed": True, "evidence": "test"})
-    lib.trust("stub-skill", approved=True)
-    stub = home / "skills" / "stub-skill.md"
-    assert stub.is_file() and "A stub" in stub.read_text()
+    with pytest.raises(ValueError, match="must pass tests"):
+        lib.trust("stub-skill", approved=True)
+    assert not (home / "skills" / "stub-skill.md").exists()

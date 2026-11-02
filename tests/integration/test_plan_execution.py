@@ -103,6 +103,85 @@ def test_loop_executes_real_steps_and_verifies(tmp_path):
     assert (tmp_path / "home" / "work" / "out.md").read_text() == "done"
 
 
+def test_trusted_skill_replans_original_goal_and_keeps_completed_draft(
+        tmp_path, monkeypatch):
+    replanned = {
+        "steps": [
+            {"tool": "write", "args": {"file": "draft.md", "text": "kept"},
+             "deliverable": "draft.md"},
+            {"tool": "write", "args": {"file": "final.md", "text": "skill-informed"},
+             "deliverable": "final.md"},
+        ],
+        "deliverables": ["draft.md", "final.md"],
+        "criteria": ["final.md contains skill-informed"],
+    }
+    runner = _runner(tmp_path, FakeClient(json.dumps(replanned)))
+    runner.extra_tools = {"adopt_skill": lambda: "not called directly"}
+    initial = Plan(
+        steps=[
+            Step(tool="write", args={"file": "draft.md", "text": "kept"},
+                 deliverable="draft.md"),
+            Step(tool="adopt_skill", args={"name": "video-editing"}),
+        ],
+        deliverables=["draft.md"],
+        parallel_ok=True,
+    )
+
+    class Plugins:
+        trusted = False
+
+        def tool_names(self):
+            return []
+
+        def skill_texts(self):
+            if self.trusted:
+                return {"video-editing": "Trusted, tested video editing procedure."}
+            return {}
+
+    runner.plugins = Plugins()
+    original_call_tool = runner._call_tool
+    calls = []
+
+    def call_tool(name, args):
+        calls.append(name)
+        if name == "adopt_skill":
+            runner.plugins.trusted = True
+            return "Trusted skill video-editing; its tested procedure is available."
+        return original_call_tool(name, args)
+
+    monkeypatch.setattr(runner, "_call_tool", call_tool)
+    report = runner._execute_plan("Create a launch video", initial)
+
+    assert report.status == "done"
+    assert calls.count("adopt_skill") == 1
+    assert calls.count("write") == 2  # draft once; only the new final is rerun
+    assert any("Trusted, tested video editing procedure" in message.content
+               for message in runner.client.calls[-1])
+    assert (tmp_path / "home" / "work" / "draft.md").read_text() == "kept"
+    assert (tmp_path / "home" / "work" / "final.md").read_text() == "skill-informed"
+
+
+def test_skill_replan_fails_closed_after_irreversible_step(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIDON_MAX_ATTEMPTS", "1")
+    runner = _runner(tmp_path, FakeClient("{}"))
+    runner.extra_tools = {"send_email": lambda: "sent",
+                          "adopt_skill": lambda: "not called directly"}
+    initial = Plan(
+        steps=[
+            Step(tool="send_email", args={}, deliverable="sent"),
+            Step(tool="adopt_skill", args={"name": "video-editing"}),
+        ],
+        deliverables=["sent"],
+    )
+    monkeypatch.setattr(
+        runner, "_call_tool",
+        lambda name, args: ("Trusted skill video-editing" if name == "adopt_skill"
+                            else "sent"))
+    report = runner._execute_plan("Send the launch email", initial)
+    assert report.status == "failed"
+    assert "cannot be safely resumed" in report.error
+
+
 def test_generated_file_path_replaces_prose_deliverable(tmp_path):
     plan = {"steps": [{
         "tool": "generate_document",
@@ -123,6 +202,65 @@ def test_generated_file_path_replaces_prose_deliverable(tmp_path):
     report = runner.run("Create an introduction PDF")
     assert report.status == "done"
     assert report.files == ["intro.pdf"]
+
+
+def test_edit_image_path_is_bound_to_workspace_deliverable(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIDON_CRITIC_ENABLED", "0")
+    runner = _runner(tmp_path, FakeClient("{}"))
+    output = runner.sandbox.workdir / "cafe_scene.jpg"
+
+    def edit_image(**_kwargs):
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"edited image bytes")
+        return f"IMAGE_SAVED: {output}"
+
+    runner.extra_tools = {"edit_image": edit_image}
+    plan = Plan(
+        steps=[Step(tool="edit_image", args={}, deliverable="cafe_scene.jpg")],
+        deliverables=["cafe_scene.jpg"],
+        criteria=["cafe_scene.jpg exists"],
+    )
+
+    report = runner._execute_plan("Change the scene in the attached image", plan)
+    assert report.status == "done", report.error
+    assert report.files == ["cafe_scene.jpg"]
+
+
+def test_image_provider_configuration_failure_keeps_actual_error(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIDON_MAX_ATTEMPTS", "3")
+    runner = _runner(tmp_path, FakeClient("{}"))
+    runner.extra_tools = {"edit_image": lambda **kwargs:
+                          "IMAGE_EDIT_FAILED: configuration: Set AIDON_IMAGE_API_KEY in .env"}
+    monkeypatch.setattr(runner, "_plan", lambda *args, **kwargs:
+                        (_ for _ in ()).throw(AssertionError("must not replan")))
+    plan = Plan(steps=[Step(tool="edit_image", args={},
+                            deliverable="cafe_scene.jpg")],
+                deliverables=["cafe_scene.jpg"])
+
+    report = runner._execute_plan("Edit the attached image", plan)
+
+    assert report.status == "failed"
+    assert report.attempts == 1
+    assert "AIDON_IMAGE_API_KEY" in report.error
+
+
+def test_refused_plugin_adoption_cannot_be_reported_as_done(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIDON_MAX_ATTEMPTS", "1")
+    runner = _runner(tmp_path, FakeClient("{}"))
+    runner.extra_tools = {
+        "adopt_tool_plugin": lambda **kwargs:
+            "adoption refused: acceptance tests failed: no behavioral assertion"}
+    plan = Plan(
+        steps=[Step(tool="write", args={"file": "tool/plugin.json",
+                                        "text": "{}"},
+                    deliverable="tool/plugin.json"),
+               Step(tool="adopt_tool_plugin", args={"path": "tool"})],
+        deliverables=["tool/plugin.json"])
+
+    report = runner._execute_plan("Create and adopt a plugin", plan)
+
+    assert report.status == "failed"
+    assert "acceptance tests failed" in report.error
 
 
 def test_document_goal_does_not_accept_list_only_plan(tmp_path):
@@ -186,6 +324,89 @@ def test_loop_with_memory_records_chat_and_experience(tmp_path):
     episodic = memory.list_points("episodic")
     assert episodic and episodic[0].payload["conversation_id"] == "dinner"
     assert memory.list_points("experience")
+
+
+def test_capability_interview_recovers_durable_answer_after_restart(tmp_path):
+    from src.interface.interview_store import InterviewStore
+
+    home = tmp_path / "home"
+    home.mkdir()
+    store = InterviewStore(home)
+    first = GoalRunner(
+        FakeClient('{"question":"Which output format?"}'),
+        Sandbox(home / "work-first"),
+        ApprovalGate(lambda *args, **kwargs: Decision("approved")),
+        home, conversation_id="chat-recovery", run_id="run-before-crash")
+
+    def interrupted_ask(prompt):
+        if prompt.startswith("[AIDON_LAB] "):
+            question = prompt.removeprefix("[AIDON_LAB] ")
+            turn_id = store.question(
+                first.run_id, first.conversation_id, question, True)
+            store.answer(turn_id, "MP4")
+            raise RuntimeError("simulated process interruption")
+        return "proceed"
+
+    first.question_ask = interrupted_ask
+    try:
+        first._capability_interview("Create a launch video", "need_skill")
+        assert False, "interview should be interrupted after its answer is saved"
+    except RuntimeError as exc:
+        assert "simulated process interruption" in str(exc)
+
+    recovered = GoalRunner(
+        FakeClient('{"brief":"Draft an MP4 editing procedure."}'),
+        Sandbox(home / "work-recovered"),
+        ApprovalGate(lambda *args, **kwargs: Decision("approved")),
+        home, conversation_id="chat-recovery", run_id="run-after-restart")
+    questions = []
+
+    def resume_ask(prompt):
+        questions.append(prompt)
+        return "proceed"
+
+    recovered.question_ask = resume_ask
+    outcome, brief = recovered._capability_interview(
+        "Create a launch video", "need_skill")
+
+    assert outcome == "approved"
+    assert brief == "Draft an MP4 editing procedure."
+    assert not any("Which output format?" in prompt for prompt in questions)
+    assert "MP4" in recovered.client.calls[-1][-1].content
+    state = store.unfinished_for_conversation(
+        "chat-recovery", goal="Create a launch video")
+    assert state["outcome"] == "approved" and state["finished"] is False
+
+
+def test_recovering_approved_acquisition_does_not_repeat_consent(tmp_path):
+    from src.interface.interview_store import InterviewStore
+
+    home = tmp_path / "home"
+    home.mkdir()
+    first_store = InterviewStore(home)
+    first = GoalRunner(
+        FakeClient('{"brief":"Use an MP4 editing checklist."}'),
+        Sandbox(home / "work-first"),
+        ApprovalGate(lambda *args, **kwargs: Decision("approved")),
+        home, conversation_id="approved-recovery", run_id="before-restart")
+    first.question_ask = lambda prompt: "proceed"
+    outcome, _ = first._capability_interview("Prepare video", "need_skill")
+    assert outcome == "approved"
+
+    recovered = GoalRunner(
+        FakeClient('{"brief":"A different brief must not replace consent."}'),
+        Sandbox(home / "work-after-restart"),
+        ApprovalGate(lambda *args, **kwargs: Decision("rejected")),
+        home, conversation_id="approved-recovery", run_id="after-restart")
+    recovered.question_ask = lambda prompt: (_ for _ in ()).throw(
+        AssertionError("saved interview must replay without another question"))
+    resumed, brief = recovered._capability_interview("Prepare video", "need_skill")
+    assert resumed == "approved"
+    assert brief == "Use an MP4 editing checklist."
+    state = first_store.unfinished_for_conversation(
+        "approved-recovery", goal="Prepare video")
+    assert state["finished"] is False
+    assert state["outcome"] == "approved"
 
 
 def test_kb_parser_needed_detection(tmp_path):

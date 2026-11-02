@@ -179,7 +179,7 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
     if not description or not str(description).strip():
         return {"ok": False, "error": "guided computer task needs a description",
                 "actions_taken": history}
-    for round_no in range(max(0, int(max_actions))):
+    for round_no in range(min(30, max(0, int(max_actions)))):
         shot = run_computer_use(
             [{"kind": "screenshot",
               **({"capture": capture} if capture is not None else {})}],
@@ -203,37 +203,41 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
         except Exception as exc:
             return {"ok": False, "error": f"screenshot unreadable: {exc}",
                     "actions_taken": history}
-        try:
-            last_description = model_chat([image_message(
-                "Describe this screen in 3-5 lines: focused app or window, "
-                "visible text and controls, any dialog or error. "
-                "No action advice.", [(png, "image/png")])])
-        except Exception as exc:
-            return {"ok": False, "error": f"vision failed: {exc}",
-                    "actions_taken": history}
+        # Desktop screenshots can be several megabytes. Resize and encode as
+        # JPEG for the vision request; retain the original PNG on disk for the
+        # user's trace. This cuts upload and model-prefill time substantially.
+        vision_bytes, vision_mime = _compact_vision_image(png)
         decide_prompt = (
-            f"Goal: {description}\nScreen now: {last_description}\n"
-            f"Actions so far: {history}\n"
-            "Reply JSON only: {\"action\": null | {\"kind\": \"click\" | \"type\" | "
-            "\"scroll\" | \"key\", \"x\": int 0-10000, \"y\": int 0-10000, "
-            "\"text\": str, \"delta\": int, \"key\": str}, \"done\": bool, "
-            "\"reason\": str}. Set done true when the goal is achieved; "
-            "otherwise give exactly one next action. A click needs x "
-            "and y; type needs text; scroll needs delta; key needs key.")
+            f"Goal: {description}\nActions so far: {history}\n"
+            "Inspect the attached current screen and choose the next action. "
+            "Reply JSON only: {\"screen\": str, \"action\": null | "
+            "{\"kind\": \"click\" | \"type\" | \"scroll\" | \"key\", "
+            "\"x\": int 0-10000, \"y\": int 0-10000, \"text\": str, "
+            "\"delta\": int, \"key\": str}, \"done\": bool, "
+            "\"reason\": str}. Describe the visible app and controls briefly "
+            "in screen. Set done true only when the goal is achieved; "
+            "otherwise return exactly one next action.")
         try:
-            decision_raw = model_chat([{"role": "user", "content": decide_prompt}])
+            decision_raw = model_chat([image_message(
+                decide_prompt, [(vision_bytes, vision_mime)])])
             decision = _parse_decision(decision_raw)
         except Exception as exc:
             _write_trace(target, description, history, last_description,
                          f"decision failed: {exc}")
             return {"ok": False, "error": f"decision failed: {exc}",
                     "actions_taken": history, "final_description": last_description}
-        if decision.get("done") or decision.get("action") is None:
+        last_description = str(decision.get("screen", "") or "").strip()
+        if decision.get("done") is True:
             _write_trace(target, description, history, last_description, "")
             return {"ok": True, "actions_taken": history,
                     "final_description": last_description,
                     "reason": decision.get("reason", "")}
-        action = decision["action"]
+        action = decision.get("action")
+        if action is None:
+            _write_trace(target, description, history, last_description,
+                         "model gave no action without confirming completion")
+            return {"ok": False, "error": "model gave no action without confirming completion",
+                    "actions_taken": history, "final_description": last_description}
         step = run_computer_use([action], approve=approve, driver=driver,
                                 screenshot_dir=str(target), secrets=secrets)
         history.append({"description": last_description, "action": action,
@@ -247,6 +251,21 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
                  "max actions reached")
     return {"ok": False, "error": "max actions reached",
             "actions_taken": history, "final_description": last_description}
+
+
+def _compact_vision_image(data: bytes, max_side: int = 1280) -> tuple[bytes, str]:
+    """Return a bounded JPEG for model input, falling back to the source PNG."""
+    try:
+        import io
+        from PIL import Image
+        with Image.open(io.BytesIO(data)) as image:
+            image = image.convert("RGB")
+            image.thumbnail((max_side, max_side))
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=78, optimize=True)
+            return output.getvalue(), "image/jpeg"
+    except Exception:
+        return data, "image/png"
 
 
 def _parse_decision(raw: str) -> dict:

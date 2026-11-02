@@ -90,7 +90,8 @@ def test_mode_stops_save_load_delete_latest(tmp_path):
 
 def test_mode_stops_update_spec_and_latest_for_conversation(tmp_path):
     from src.interface.mode_stops import (
-        latest_mode_stop_for_conversation, update_mode_stop_spec)
+        latest_mode_stop_for_conversation, mode_stops_for_conversation,
+        update_mode_stop_spec)
     stop_id = save_mode_stop(tmp_path, "ask", "plan dinner",
                              spec={"goal": "plan dinner"},
                              conversation_key="conv-1",
@@ -104,6 +105,36 @@ def test_mode_stops_update_spec_and_latest_for_conversation(tmp_path):
     assert latest_mode_stop_for_conversation(tmp_path, "conv-1")["stop_id"] == stop_id
     assert latest_mode_stop_for_conversation(tmp_path, "nobody") is None
     assert latest_mode_stop_for_conversation(tmp_path, "") is None
+
+
+def test_proceeded_mode_stop_is_hidden_from_pending_lists_and_can_retry(tmp_path):
+    from src.interface.mode_stops import (
+        latest_mode_stop_for_conversation, mode_stops_for_conversation,
+        set_mode_stop_state)
+    stop_id = save_mode_stop(tmp_path, "plan", "make a file",
+                             plan={"steps": []},
+                             conversation_key="conv-1",
+                             conversation_id="conv-1")
+    assert latest_mode_stop(tmp_path, "conv-1")["stop_id"] == stop_id
+    assert set_mode_stop_state(tmp_path, stop_id, "proceeded") is True
+    assert latest_mode_stop(tmp_path, "conv-1") is None
+    assert latest_mode_stop_for_conversation(tmp_path, "conv-1") is None
+    assert mode_stops_for_conversation(tmp_path, "conv-1") == []
+    # Failed continuation can restore the existing stop for an explicit retry.
+    assert set_mode_stop_state(tmp_path, stop_id, "pending") is True
+    assert latest_mode_stop(tmp_path, "conv-1")["stop_id"] == stop_id
+
+
+def test_mode_stop_keeps_originating_slack_thread(tmp_path):
+    from src.interface.mode_stops import mode_stops_for_conversation
+    stop_id = save_mode_stop(
+        tmp_path, "plan", "make a PDF", plan={"steps": []},
+        conversation_key="slack:D1", conversation_id="slack:D1",
+        thread_ts="1700000000.123456")
+    stops = mode_stops_for_conversation(tmp_path, "slack:D1")
+    assert [stop["stop_id"] for stop in stops] == [stop_id]
+    assert stops[0]["thread_ts"] == "1700000000.123456"
+    assert mode_stops_for_conversation(tmp_path, "slack:D2") == []
 
 
 def test_mode_stop_spec_save_round_trip(tmp_path):
@@ -329,6 +360,7 @@ def _plan_runner(tmp_path, mode):
 def test_plan_mode_stops_before_execution(tmp_path, monkeypatch):
     monkeypatch.setenv("AIDON_CRITIC_ENABLED", "0")
     runner = _plan_runner(tmp_path, "plan")
+    runner.conversation_thread_id = "1700000000.123456"
     plan = Plan(steps=[Step(tool="write", args={"file": "a.md", "text": "x\n"},
                             deliverable="a.md")],
                 deliverables=["a.md"], criteria=[])
@@ -339,6 +371,7 @@ def test_plan_mode_stops_before_execution(tmp_path, monkeypatch):
     assert not (tmp_path / "work" / "a.md").exists()
     stop = load_mode_stop(tmp_path, report.mode_stop["stop_id"])
     assert stop["plan"]["deliverables"] == ["a.md"]
+    assert stop["thread_ts"] == "1700000000.123456"
 
 
 def test_proceed_plan_executes_saved_plan(tmp_path, monkeypatch):
@@ -368,6 +401,38 @@ def test_proceed_ask_runs_with_frozen_spec(tmp_path, monkeypatch):
         "make notes", spec=Spec(goal="make notes", deliverables=["a.md"]))
     assert report.status == "done"
     assert (tmp_path / "work" / "a.md").read_text() == "x\n"
+
+
+def test_explicit_execute_prevents_semantic_plan_stop(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIDON_CRITIC_ENABLED", "0")
+
+    class _PlanDetectingRouter:
+        mode_calls = 0
+
+        def classify(self, text, judge=None):
+            return ("agentic", 1.0)
+
+        def mode_for(self, text):
+            self.mode_calls += 1
+            return "plan"
+
+    router = _PlanDetectingRouter()
+    plan_json = ('{"steps": [{"tool": "write", "args": '
+                 '{"file": "scheduler-smoke.txt", '
+                 '"text": "scheduler-ok\\n"}, '
+                 '"deliverable": "scheduler-smoke.txt"}], '
+                 '"deliverables": ["scheduler-smoke.txt"], '
+                 '"criteria": ["scheduler-smoke.txt exists"]}')
+    runner = GoalRunner(
+        FakeClient(plan_json), Sandbox(tmp_path / "work", 120),
+        ApprovalGate(lambda kind, title, body: Decision("approved")),
+        tmp_path, semantic_router=router, mode="execute")
+
+    report = runner.run("Create scheduler-smoke.txt in the workspace")
+
+    assert router.mode_calls == 0
+    assert report.status == "done"
+    assert (tmp_path / "work" / "scheduler-smoke.txt").read_text() == "scheduler-ok\n"
 
 
 # --- WebUI /proceed dispatch ---

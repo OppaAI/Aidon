@@ -1,0 +1,114 @@
+"""Discovery grounds selectable transports in registry records."""
+from src.capabilities.mcp_discovery import discover_mcp
+
+
+def test_todoist_remote_only_record_uses_hosted_server():
+    def get(url):
+        assert not url.startswith("https://registry.npmjs.org/")
+        return {"servers": [{"server": {"name": "community/todoist"}},
+                            {"server": {"name": "net.todoist/mcp", "repository": {},
+                             "remotes": [{"type": "streamable-http", "url": "https://ai.todoist.net/mcp"}]}}]}
+    options, warnings = discover_mcp(["todoist"], get)
+    assert not warnings
+    assert options[0]["name"] == "net.todoist/mcp"
+    assert options[0]["official"] is True
+    assert options[0]["connection"] == {
+        "transport": "http", "url": "https://ai.todoist.net/mcp"}
+    assert options[0]["may_use_oauth"] is True
+    assert options[0]["auth_env_names"] == []
+
+
+def test_discovery_records_sources_stars_and_exact_pinned_command():
+    def get(url):
+        if url.startswith("https://api.github.com/repos/"):
+            return {"stargazers_count": 31, "license": {"spdx_id": "MIT"}, "owner": {"login": "publisher"}}
+        if url.startswith("https://api.github.com/users/"):
+            return {"blog": "https://publisher.example"}
+        return {"servers": [{"server": {
+            "name": "io.github.publisher/notes", "version": "1.2.3", "description": "Organize notes",
+            "repository": {"url": "https://github.com/publisher/notes"},
+            "packages": [{"registryType": "npm", "identifier": "@publisher/notes", "version": "1.2.3",
+                          "environmentVariables": [{"name": "NOTES_TOKEN", "isSecret": True}]}]
+        }}]}
+    options, warnings = discover_mcp(["notes"], get)
+    assert not warnings and len(options) == 1
+    option = options[0]
+    assert option["connection"] == {"transport": "stdio", "command": "npx", "args": ["-y", "@publisher/notes@1.2.3"], "env": {"NOTES_TOKEN": "$NOTES_TOKEN"}}
+    assert option["stars"] == 31 and option["license"] == "MIT"
+    assert option["source"].endswith("io.github.publisher%2Fnotes/versions/latest")
+    assert "pricing" not in option and "reviews" not in option
+    assert option["stars_source"] == "https://github.com/publisher/notes"
+
+
+def test_discovery_does_not_invent_arguments_or_resolve_url_templates():
+    records = [{"server": {"name": "com.example/tenant", "remotes": [{"type": "streamable-http", "url": "https://{tenant}.example.com/mcp"}]}},
+               {"server": {"name": "com.example/package", "packages": [{"registryType": "npm", "identifier": "example", "version": "latest"}]}},
+               {"server": {"name": "com.example/http", "remotes": [{"type": "streamable-http", "url": "https://example.com/mcp"}]}}]
+    options, _ = discover_mcp(["example"], lambda url: {"servers": records})
+    by_name = {option["name"]: option for option in options}
+    assert by_name["com.example/tenant"]["connection"] is None
+    assert by_name["com.example/package"]["connection"] is None
+    assert by_name["com.example/http"]["connection"] == {"transport": "http", "url": "https://example.com/mcp"}
+
+
+def test_registry_failure_is_reported_without_fake_options():
+    def get(url): raise OSError("offline")
+    options, warnings = discover_mcp(["notes"], get)
+    assert options == [] and warnings
+
+
+def test_remote_is_preferred_over_secret_package_and_publisher_match_ranks_first():
+    records = [{"server": {
+        "name": "net.todoist/mcp", "title": "Todoist", "websiteUrl": "https://developer.todoist.com",
+        "repository": {"url": "https://github.com/Doist/todoist-mcp"},
+        "remotes": [{"type": "streamable-http", "url": "https://ai.todoist.net/mcp"}],
+        "packages": [{"registryType": "npm", "identifier": "@doist/todoist-mcp",
+                      "version": "13.4.0", "environmentVariables": [
+                          {"name": "TODOIST_API_KEY", "isSecret": True}]}]}},
+        {"server": {"name": "community/todoist", "repository": {"url": "https://github.com/community/todoist"}}}]
+
+    def get(url):
+        if url.startswith("https://api.github.com/repos/Doist/"):
+            return {"stargazers_count": 5, "license": {"spdx_id": "MIT"}, "owner": {"login": "Doist"}}
+        if url.startswith("https://api.github.com/repos/community/"):
+            return {"stargazers_count": 5000, "license": {"spdx_id": "MIT"}, "owner": {"login": "community"}}
+        if url == "https://api.github.com/users/Doist":
+            return {"blog": "https://www.todoist.com"}
+        return {"servers": records}
+
+    options, _ = discover_mcp(["todoist"], get)
+    todoist = next(row for row in options if row["name"] == "net.todoist/mcp")
+    assert todoist["connection"] == {"transport": "http", "url": "https://ai.todoist.net/mcp"}
+    assert todoist["auth_env_names"] == []
+    assert todoist["may_use_oauth"] is True
+    assert todoist["official"] is True
+    assert options[0] is todoist  # verified publisher outranks a much higher star count
+
+
+def test_authenticated_dns_namespace_ranks_first_without_github_stars():
+    records = [
+        {"server": {"name": "io.github.community/todoist", "title": "Community Todoist",
+                     "repository": {"url": "https://github.com/community/todoist"},
+                     "websiteUrl": "https://community.example",
+                     "packages": [{"registryType": "npm", "identifier": "community-todoist",
+                                   "version": "1.0.0"}]}},
+        {"server": {"name": "net.todoist/mcp", "title": "Todoist",
+                     "repository": {"url": "https://github.com/Doist/todoist-mcp"},
+                     "websiteUrl": "https://ai.todoist.net",
+                     "packages": [{"registryType": "npm", "identifier": "@doist/todoist-mcp",
+                                   "version": "13.4.0"}]}}
+    ]
+
+    def get(url):
+        if url.startswith("https://api.github.com/repos/community/"):
+            return {"stargazers_count": 5000, "license": {"spdx_id": "MIT"}}
+        if url.startswith("https://api.github.com/repos/Doist/"):
+            raise OSError("GitHub stars unavailable")
+        if url.startswith("https://api.github.com/users/"):
+            return {"blog": "https://publisher.example"}
+        return {"servers": records}
+
+    options, _ = discover_mcp(["todoist"], get)
+    assert options[0]["name"] == "net.todoist/mcp"
+    assert options[0]["official"] is True
+    assert options[0]["stars"] is None

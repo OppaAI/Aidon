@@ -7,8 +7,8 @@
 "use strict";
 
 const NS = "http://www.w3.org/2000/svg";
-const NODE_W = 210;
-const NODE_H = 76;
+const NODE_W = 270;
+const NODE_H = 88;
 
 const S = {
   dags: [],
@@ -40,6 +40,11 @@ async function api(path, opts) {
     throw new Error(msg);
   }
   return data;
+}
+
+function normalizeToolList(data) {
+  if (Array.isArray(data)) return data;
+  return data && Array.isArray(data.tools) ? data.tools : [];
 }
 
 function status(msg, kind) {
@@ -97,28 +102,88 @@ function renderList() {
   });
 }
 
+function isLegacyLearnedSequence(nodes) {
+  return nodes.length > 1 && nodes.every((node, index) => {
+    const expected = index + 1;
+    return (!String(node.name || "").trim()
+      && (node.id === `step-${expected}` || node.id === `step_${expected}`)
+      && !(node.deps || []).length);
+  });
+}
+
+function layoutMap(data) {
+  const raw = data && data.layout || {};
+  return Array.isArray(raw)
+    ? Object.fromEntries(raw.map((point) => [point.id, point])) : raw;
+}
+
+async function requestLayout(dag) {
+  const res = await api("/api/dags/layout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dag: { ...dag, nodes: dag.nodes.map(
+      ({ deps, ...node }) => ({ ...node, depends_on: deps || [] })) } }),
+  });
+  return layoutMap(res);
+}
+
 // ---------- open / close ----------------------------------------------------
 
 async function openDag(name) {
+  if (S.dirty && !confirm("Discard unsaved graph changes and open another workflow?")) return;
   try {
     const data = await api("/api/dags/" + encodeURIComponent(name));
     S.cur = name;
     S.dag = data.dag || data;
-    const rawLayout = data.layout || {};
-    S.layout = Array.isArray(rawLayout)
-      ? Object.fromEntries(rawLayout.map((p) => [p.id, p])) : rawLayout;
+    S.dag.nodes = (S.dag.nodes || []).map((node) => ({
+      ...node, deps: node.deps || node.depends_on || [],
+      args: node.args || {},
+    }));
+    const inferredSequence = isLegacyLearnedSequence(S.dag.nodes);
+    if (inferredSequence) {
+      S.dag.nodes.forEach((node, index) => {
+        if (index) node.deps = [S.dag.nodes[index - 1].id];
+      });
+    }
+    $("#dag-goal").value = S.dag.goal || "";
+    S.layout = layoutMap(data);
+    const needsLayout = S.dag.nodes.some((node) => {
+      const point = S.layout[node.id];
+      return !point || !Number.isFinite(Number(point.x))
+        || !Number.isFinite(Number(point.y));
+    });
+    if (needsLayout && S.dag.nodes.length) {
+      try {
+        S.layout = await requestLayout(S.dag);
+      } catch (e) {
+        // Keep the graph inspectable if the layout endpoint is unavailable;
+        // the auto-layout button can retry once the service is reachable.
+      }
+    }
     S.sel = null;
+    // Dependency inference and auto-placement are view-time repairs for
+    // legacy learned DAGs. They can be saved explicitly, but opening a graph
+    // alone must not trigger a destructive-change confirmation.
     S.dirty = false;
+    S.view = { x: 0, y: 0, k: 1 };
     renderList();
     renderGraph();
     renderInspector();
-    status("opened " + name);
+    if (inferredSequence || needsLayout) {
+      fitGraph();
+      status(inferredSequence
+        ? "legacy run order shown as dependencies · save to keep"
+        : "missing node positions arranged · save to keep", "warn");
+    } else {
+      status("opened " + name);
+    }
   } catch (e) {
     status("could not open: " + e.message, "err");
   }
 }
 
 function closeDag() {
+  if (S.dirty && !confirm("Discard unsaved graph changes?")) return;
   S.cur = null;
   S.dag = null;
   S.layout = {};
@@ -353,8 +418,14 @@ function renderInspector() {
   panel.hidden = false;
   $("#insp-id").textContent = node.id;
   $("#f-name").value = node.name || "";
+  $("#f-deliverable").value = node.deliverable || "";
   $("#f-tool").value = node.tool || "";
   $("#f-args").value = JSON.stringify(node.args || {}, null, 2);
+  $("#f-inputs").value = (node.inputs || []).join("\n");
+  $("#f-outputs").value = (node.outputs || []).join("\n");
+  $("#f-preconditions").value = (node.preconditions || []).join("\n");
+  $("#f-expected").value = node.expected || "";
+  $("#f-assumptions").value = (node.assumptions || []).join("\n");
   $("#f-executor").value = node.executor || "tool";
   $("#insp-state").textContent = "";
 
@@ -388,6 +459,22 @@ function bindInspector() {
     n.name = e.target.value;
     markDirty();
     renderGraph();
+  });
+
+  $("#f-deliverable").addEventListener("input", (e) => {
+    const n = nodeById(S.sel); if (!n) return;
+    n.deliverable = e.target.value; markDirty(); renderGraph();
+  });
+  [["#f-inputs", "inputs"], ["#f-outputs", "outputs"],
+   ["#f-preconditions", "preconditions"], ["#f-assumptions", "assumptions"]]
+    .forEach(([selector, key]) => $(selector).addEventListener("change", (e) => {
+      const n = nodeById(S.sel); if (!n) return;
+      n[key] = e.target.value.split("\n").map(x => x.trim()).filter(Boolean);
+      markDirty();
+    }));
+  $("#f-expected").addEventListener("change", (e) => {
+    const n = nodeById(S.sel); if (!n) return;
+    n.expected = e.target.value.trim(); markDirty();
   });
 
   $("#f-tool").addEventListener("change", (e) => {
@@ -479,11 +566,19 @@ async function saveDag() {
     status("nothing to save", "warn");
     return;
   }
+  const failures = validateGraph();
+  if (failures.length) {
+    status("cannot save: " + failures[0], "err");
+    return;
+  }
   try {
     const res = await api("/api/dags", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: S.cur, goal: S.dag.goal || "", nodes: S.dag.nodes || [] }),
+      body: JSON.stringify({ id: S.cur, goal: S.dag.goal || "",
+        nodes: (S.dag.nodes || []).map(({ deps, ...n }) => ({
+          ...n, depends_on: deps || [],
+        })), layout: S.layout }),
     });
     S.dirty = false;
     status("saved " + S.cur, "ok");
@@ -501,6 +596,7 @@ async function saveDag() {
 }
 
 async function newDag() {
+  if (S.dirty && !confirm("Discard unsaved graph changes and create a workflow?")) return;
   const name = prompt("Name for the new graph:");
   if (!name) return;
   try {
@@ -547,6 +643,8 @@ function addNode() {
     tool: (S.tools[0] && S.tools[0].name) || "shell",
     args: {},
     deps: [],
+    inputs: [], outputs: [], preconditions: [], assumptions: [],
+    expected: "", deliverable: "",
   };
   S.dag.nodes.push(node);
   const maxX = Object.values(S.layout).reduce(
@@ -561,17 +659,11 @@ function addNode() {
 async function autoLayout() {
   if (!S.dag) return;
   try {
-    // the server owns the layout rule - one implementation, not two
-    const res = await api("/api/dags/layout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dag: S.dag }),
-    });
-    const layout = res.layout || {};
-    S.layout = Array.isArray(layout)
-      ? Object.fromEntries(layout.map((p) => [p.id, p])) : layout;
+    // The server owns the layout rule - one implementation, not two.
+    S.layout = await requestLayout(S.dag);
     renderGraph();
     markDirty();
+    fitGraph();
     status("relaid out", "ok");
   } catch (e) {
     status("layout failed: " + e.message, "err");
@@ -589,6 +681,54 @@ function exportJson() {
   URL.revokeObjectURL(a.href);
 }
 
+function validateGraph() {
+  const nodes = S.dag?.nodes || [];
+  const errors = [];
+  const ids = nodes.map(n => String(n.id || "").trim());
+  if (!nodes.length) errors.push("workflow needs at least one node");
+  if (ids.some(id => !id)) errors.push("every node needs an id");
+  if (new Set(ids).size !== ids.length) errors.push("node ids must be unique");
+  const known = new Set(ids);
+  for (const node of nodes) {
+    for (const dep of node.deps || []) {
+      if (!known.has(dep)) errors.push(`${node.id} depends on missing node ${dep}`);
+      if (dep === node.id) errors.push(`${node.id} cannot depend on itself`);
+    }
+  }
+  const visiting = new Set(), visited = new Set();
+  function visit(id) {
+    if (visiting.has(id)) return false;
+    if (visited.has(id)) return true;
+    visiting.add(id);
+    const node = nodes.find(n => n.id === id);
+    for (const dep of (node?.deps || [])) if (known.has(dep) && !visit(dep)) return false;
+    visiting.delete(id); visited.add(id); return true;
+  }
+  if (ids.some(id => known.has(id) && !visit(id))) errors.push("workflow contains a dependency cycle");
+  const outputs = nodes.map(n => String(n.deliverable || "").trim()).filter(Boolean);
+  if (new Set(outputs).size !== outputs.length) errors.push("deliverable paths must be unique");
+  return [...new Set(errors)];
+}
+
+function fitGraph() {
+  const nodes = S.dag?.nodes || [];
+  if (!nodes.length) return;
+  const points = nodes.map(n => S.layout[n.id]).filter(Boolean);
+  if (!points.length) return;
+  const rect = svg.getBoundingClientRect();
+  const minX = Math.min(...points.map(p => p.x));
+  const minY = Math.min(...points.map(p => p.y));
+  const maxX = Math.max(...points.map(p => p.x + NODE_W));
+  const maxY = Math.max(...points.map(p => p.y + NODE_H));
+  const scale = Math.min(1.8, Math.max(0.25,
+    Math.min((rect.width - 80) / (maxX - minX + 40),
+             (rect.height - 80) / (maxY - minY + 40))));
+  S.view.k = scale;
+  S.view.x = (rect.width - (maxX - minX) * scale) / 2 - minX * scale;
+  S.view.y = (rect.height - (maxY - minY) * scale) / 2 - minY * scale;
+  applyView();
+}
+
 // ---------- boot ------------------------------------------------------------
 
 async function boot() {
@@ -597,12 +737,24 @@ async function boot() {
   $("#btn-new").addEventListener("click", newDag);
   $("#btn-add").addEventListener("click", addNode);
   $("#btn-layout").addEventListener("click", autoLayout);
+  $("#btn-fit").addEventListener("click", fitGraph);
+  $("#btn-validate").addEventListener("click", () => {
+    const errors = validateGraph();
+    status(errors.length ? errors.join(" · ") : "workflow is structurally valid", errors.length ? "err" : "ok");
+  });
   $("#btn-export").addEventListener("click", exportJson);
   $("#btn-delete").addEventListener("click", deleteDag);
   $("#search").addEventListener("input", renderList);
+  $("#dag-goal").addEventListener("input", (e) => {
+    if (!S.dag) return;
+    S.dag.goal = e.target.value; markDirty();
+  });
 
+  // Load saved workflows independently so an unavailable/malformed tool
+  // catalog cannot leave the DAG list blank during editor startup.
+  const dagListReady = loadList();
   try {
-    S.tools = await api("/api/tools");
+    S.tools = normalizeToolList(await api("/api/tools"));
   } catch (e) {
     S.tools = [];
   }
@@ -624,7 +776,7 @@ async function boot() {
   }
 
   applyView();
-  await loadList();
+  await dagListReady;
 }
 
 boot();

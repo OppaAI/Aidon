@@ -5,6 +5,7 @@ Pure tools keep ``fn(args)``; a tool with ``"context": true`` gets
 manifest declared and the owner approved. The posture decides how far
 adoption may go, and the approval card still lists every capability.
 """
+from tests.plugin_acceptance import passing_backend_factory
 
 import json
 
@@ -32,6 +33,7 @@ def _plugin_dir(tmp_path, name="gadget", capabilities=None, code="",
     manifest = {
         "name": name, "version": "1.0.0", "description": "capability test",
         "tools": [tool], "skills": [],
+        "acceptance_tests": [["python3", "-c", "from tool import gadget_tool; assert gadget_tool({}, None) == 'ok'"]],
     }
     if capabilities is not None:
         manifest["capabilities"] = capabilities
@@ -89,7 +91,7 @@ def test_pure_tool_still_one_arg(tmp_path):
                             code="def gadget_tool(args):\n    return args['x'].upper()\n")
     registry = PluginRegistry(tmp_path / "home")
     registry.adopt(directory, approve=lambda plugin, findings: True,
-                   tool_posture="developer")
+                   tool_posture="developer", test_backend_factory=passing_backend_factory)
     registry.load_all()
     assert registry.call("gadget", {"x": "hi"}) == "HI"
 
@@ -103,7 +105,7 @@ def test_context_tool_fs_is_confined(tmp_path):
               "    return ctx.read_file(args['name'])\n"))
     registry = PluginRegistry(home)
     registry.adopt(directory, approve=lambda plugin, findings: True,
-                   tool_posture="developer")
+                   tool_posture="developer", test_backend_factory=passing_backend_factory)
     registry.load_all()
     result = registry.call(
         "gadget", {"name": "note.txt", "text": "hello"},
@@ -130,7 +132,7 @@ def test_adopted_plugin_gets_declared_capabilities(tmp_path):
               "    return ctx.read_file(args['name'])\n"))
     registry = PluginRegistry(home)
     registry.adopt(directory, approve=lambda plugin, findings: True,
-                   tool_posture="developer")
+                   tool_posture="developer", test_backend_factory=passing_backend_factory)
     registry.load_all()
     plugin = registry.plugins["gadget"]
     assert (Path(plugin.directory) / ".adopted").is_file()
@@ -138,12 +140,12 @@ def test_adopted_plugin_gets_declared_capabilities(tmp_path):
     assert broker.policy.fs is True
 
 
-def test_hand_placed_plugin_gets_no_capabilities(tmp_path):
-    """A plugin copied straight into <home>/toolbox/ was never
-    approved, so its broker refuses every declared capability."""
+def test_hand_placed_plugin_is_not_imported_or_registered(tmp_path):
+    """An unadopted toolbox directory is data, never executable code."""
     home = tmp_path / "home"
     target = home / "toolbox" / "gadget"
     target.mkdir(parents=True)
+    sentinel = tmp_path / "imported.txt"
     (target / "plugin.json").write_text(json.dumps({
         "name": "gadget", "version": "1.0.0", "description": "hand placed",
         "capabilities": ["fs"],
@@ -151,15 +153,15 @@ def test_hand_placed_plugin_gets_no_capabilities(tmp_path):
                    "function": "gadget_tool", "context": True}],
     }))
     (target / "tool.py").write_text(
+        f"from pathlib import Path\nPath({str(sentinel)!r}).write_text('imported')\n"
         "def gadget_tool(args, ctx):\n"
         "    ctx.write_file('x', 'y')\n"
         "    return 'ok'\n")
     registry = PluginRegistry(home)
     registry.load_all()
-    broker = registry.context_for("gadget", home)
-    assert broker.policy.fs is False
-    with pytest.raises(PermissionError):
-        broker.write_file("x", "y")
+    assert registry.plugins == {}
+    assert registry.tool_names() == []
+    assert not sentinel.exists()
 
 
 def test_goal_runner_dispatch_refuses_hand_placed_capability(tmp_path):
@@ -181,7 +183,7 @@ def test_goal_runner_dispatch_refuses_hand_placed_capability(tmp_path):
     runner = GoalRunner(
         FakeClient(""), Sandbox(home / "work"), None, home,
         plugins=registry)
-    with pytest.raises(ValueError, match="PermissionError"):
+    with pytest.raises(ValueError, match="unknown tool"):
         runner._call_tool("gadget", {})
 
 
@@ -215,6 +217,13 @@ def test_ctx_http_host_allowlist(tmp_path):
         ctx.http_get("https://blocked.example/x")
 
 
+def test_ctx_http_blocks_private_network_targets(tmp_path):
+    ctx = PluginContext("gadget", tmp_path,
+                        CapabilityPolicy.from_capabilities(["http"]))
+    with pytest.raises(PermissionError, match="SSRF guard"):
+        ctx._checked_url("http://127.0.0.1/admin")
+
+
 def test_ctx_run_requires_capability(tmp_path):
     ctx = PluginContext("gadget", tmp_path,
                         CapabilityPolicy.from_capabilities([]))
@@ -235,7 +244,7 @@ def test_context_tool_without_broker_fails_loudly(tmp_path):
     directory = _plugin_dir(tmp_path, capabilities=["fs"])
     registry = PluginRegistry(tmp_path / "home")
     registry.adopt(directory, approve=lambda plugin, findings: True,
-                   tool_posture="developer")
+                   tool_posture="developer", test_backend_factory=passing_backend_factory)
     registry.load_all()
     with pytest.raises(ValueError):
         registry.call("gadget", {})

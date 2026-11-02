@@ -45,7 +45,8 @@ class RoutedClient(ModelClient):
     def chat(self, messages: list[Message], sampling=None) -> str:
         return self.chat_phase("", messages, sampling=sampling)
 
-    def chat_phase(self, phase: str, messages: list[Message], sampling=None) -> str:
+    def chat_phase(self, phase: str, messages: list[Message], sampling=None,
+                   usage_phase: str | None = None) -> str:
         # Forward the phase to a counting tier so its usage lands
         # in that phase's trace bucket. Without this, every tier
         # call records under the CountingClient default ("chat")
@@ -58,7 +59,8 @@ class RoutedClient(ModelClient):
             self.strong_calls += 1
             tier = self.strong_client
         if callable(getattr(tier, "take_phase_usage", None)):
-            return tier.chat(messages, phase=phase, sampling=sampling)
+            return tier.chat(messages, phase=usage_phase or phase,
+                             sampling=sampling)
         try:
             return tier.chat(messages, sampling=sampling)
         except TypeError:

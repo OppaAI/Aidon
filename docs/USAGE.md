@@ -25,7 +25,8 @@
   webhook. WhatsApp is owner only, empty owner means
   inbound disabled, never open to everyone. Slack
   replies go to the same channel, in thread. A message
-  `approve <id>` or `reject <id>` on either channel
+  `approve` or `reject` on either channel when only one approval is pending;
+  explicit `approve <id>` and `reject <id>` are also supported
   resolves a pending approval card, it does not become
   a goal. WhatsApp webhook at `/webhook/whatsapp`,
   with hub verification and, when an app secret is set,
@@ -41,6 +42,56 @@
   or Slack, and the full WebUI must not be tunneled
   unauthenticated, use a webhook-only listener in
   front, as Aidon did.
+- Completed WebUI runs include same-origin links to files
+  in the run workspace. When Slack is configured, files are
+  uploaded to the conversation's linked Slack channel, or to
+  `AIDON_SLACK_OUTBOUND_CHANNEL` when no Slack conversation
+  is linked.
+- With optional tools enabled (`AIDON_OPTIONAL_TOOLS=1`),
+  Aidon can use the full built-in toolset. Every camera activation also requires
+  a fresh `record` approval card; declining it leaves the camera
+  untouched. Captures are saved in the run workspace and included
+  with completed deliverables.
+- Webcam photo/video capture and system-audio recording are also
+  available when optional tools are off. Each use still requires a
+  fresh `record` approval. The WebUI microphone button separately
+  records voice input in the browser and is available independently
+  of this setting.
+
+## Slack polling and reply recovery
+
+For a private local deployment, polling needs no public URL or signing secret.
+Set `AIDON_SLACK_AUTOSTART=1`, `SLACK_BOT_TOKEN`, and comma-separated channel/DM
+IDs in `AIDON_SLACK_INBOUND_CHANNEL`, then restart Aidon. The bot needs access
+to those conversations and the corresponding history and messaging scopes.
+In channels, Aidon responds to general messages and messages mentioning
+`@Aidon`; messages addressed only to another teammate are ignored. Direct
+messages still work without a mention. Include `@Aidon` with approvals,
+answers, or control commands when posting in a channel.
+
+Replies use the bot Web API when a token is configured. Legacy
+`AIDON_SLACK_WEBHOOK_<conversation-id>` settings are used only for webhook-only
+outbound sending. Check configuration and pending replies with:
+
+```sh
+docker exec aidon-aidon-1 aidon slack status
+```
+
+Send polling approvals and question answers as **top-level messages** in the
+same conversation. `approve` or `reject` works when exactly one approval is
+pending; if several are pending, choose the intended card in the WebUI. You can
+also use `approve <card-id>` or `reject <card-id>` explicitly. Polling watches
+replies only in threads attached to active stopped plans. Signed Slack events
+can receive other thread replies when the appropriate message events are
+subscribed.
+
+Goals are persisted before the history cursor advances. Pending goals survive
+restart; interrupted goals require owner review before another attempt. Failed
+Slack and WhatsApp replies are saved under `AIDON_HOME/messaging/` and retried
+without running the goal again. A provider acceptance immediately before a
+process crash can still produce a duplicate reply on retry. A new polling
+channel starts at startup time; a corrupt cursor file stops polling until the
+owner restores it, rather than replaying historical requests.
 
 ## ✅ Pre-approvals, the same on every surface
 
@@ -89,9 +140,11 @@ shows, and a CLI run or a scheduled job honours it too.
   arrive. The existing buffered endpoint remains the fallback when
   streaming audio is unavailable. Karaoke text follows the same audio
   element, so it stays aligned with playback.
-- The WebUI has dark and light themes, a robot avatar fallback, an
-  optional VRM avatar viewer, and a compact final-run footer showing
-  elapsed time and token usage.
+- The WebUI opens in the warm editorial pastel light theme and keeps
+  dark mode as an option. Its serif display and rounded sans-serif
+  stacks use installed system fonts, so the interface stays offline.
+  It also has a robot avatar fallback, an optional VRM avatar viewer,
+  and a compact final-run footer showing elapsed time and token usage.
 
 ## 📎 Attachments
 
@@ -155,11 +208,15 @@ interview.
   interviewed spec.
 - CLI: `python -m src.system.main interview "Plan a dinner" --attach my-spec.md --run`,
   or `python -m src.system.main goal --spec my-spec.md "Plan a dinner"`.
-2. **Plan** — a plan with steps, deliverables, and criteria.
+2. **Plan** — a plan with steps, optional file deliverables, and criteria.
    Steps are tool calls, not strings: write, read, list,
    shell in the sandbox, and calculate, all confined to the
    workdir, with calculation by AST, never eval, plus any
    adopted plugin tools, and any skills as planner context.
+   When a task asks for a tool result rather than a file, the
+   step can omit its deliverable; Aidon returns the successful
+   tool output in the final response. File-producing steps keep
+   their deliverables and file-based verification.
 
 ## 🎛️ Run modes: Ask, Plan, Execute
 
@@ -195,12 +252,30 @@ manifest.
 At the start of each workflow, the planner receives the
 available Toolbox tool names and descriptions alongside the
 built-in tools. It should use a suitable existing tool first.
-If none fits, it follows the capability ladder and can draft,
-sandbox-test, and propose adoption of a plugin. Adoption
+If a capability is missing, Aidon directs the owner to the
+Capability Labs (`/labs`) instead of guessing which service or
+implementation to choose. The Tool Crafting Lab, Skill Learning Lab,
+and MCP Connection Lab interview the owner one question at a time;
+they can research and compare options when asked, then prepare a brief
+for approval. Approving that brief starts a workflow but does not
+replace the existing approval for plugin adoption, MCP connection,
+package installation, or live actions. Adoption
 always presents an explicit owner decision, even when graduated
 autonomy or pre-approval is enabled. Once approved, the live
 registry updates immediately. Plans validated after adoption can
 use the tool; re-plan if the current plan needs it.
+
+When a goal includes a structured JSON tool specification, Aidon
+can call `draft_tool_plugin` to ask the configured model to turn it
+into a `tool.py` implementation and a valid `plugin.json` manifest.
+The draft is written inside the current run's workdir; generation
+does not import or execute the resulting source. Aidon must inspect
+the generated code, sandbox-test it, review its requested
+capabilities, and then call `adopt_tool_plugin`. Adoption still
+passes through the scanner and an explicit owner approval card.
+Draft generation is available on interactive runs, not unattended
+scheduled runs. The generated implementation is model-written code,
+so passing the static scan is not evidence that it behaves correctly.
 
 - Adopt: `python -m src.system.main plugin scan <dir>`,
   then `python -m src.system.main plugin adopt <dir>`, then
@@ -218,6 +293,20 @@ use the tool; re-plan if the current plan needs it.
   client. File and network work stays with the sandbox
   tools and with later, explicitly approved capability
   plugins.
+- Sandbox plugins can declare `"mode": "sandbox"` and
+  capabilities such as `network` and `secret:AIDON_API_KEY`.
+  They run in the configured Modal backend, or bubblewrap locally, never
+  in Aidon's process. Every
+  call that can use network or secrets gets a fresh approval.
+  A tool may declare `"accepts_attachments": true` to receive
+  the current goal's attached images as `args["_attachments"]`
+  (relative paths inside its isolated run directory). To return
+  files to the goal workspace, return a dict such as
+  `{"text": "Edited image", "files": ["edited.png"]}`.
+  Only listed relative files are copied out. A plan may use a
+  newly authored tool after its adoption step when the tool step
+  depends on adoption; the live registry checks that adoption
+  succeeded before dispatch.
 - Tier 3 core-source editing is available when
   `AIDON_TOOL_POSTURE=selfmod` and kernel mode is off
   (`AIDON_KERNEL=0`); use it only when a goal
@@ -310,6 +399,31 @@ Aidon climbing work, through plugins, not arena code.
 What is built here is the research, live, and
 verification arena they will run in.
 
+## Desktop demo and recording
+
+On an X11 Linux desktop, run `./scripts/start-desktop-demo.sh` from a terminal
+in the graphical session. It builds and starts the Aidon container with access
+to that desktop; the usual `docker compose up -d aidon` starts it without the
+desktop overlay. The script needs `xauth`, a valid `DISPLAY`, and the session's
+X11 authorization file. Desktop access gives the container access to the X11
+session, so use it only when you intend Aidon to control that desktop. Wayland
+desktop control is not supported by this driver.
+
+In chat, ask, for example: “Open the text editor on my desktop, type ‘Hello
+from Aidon’, and read that sentence aloud.” Approve the plan and the individual
+desktop actions. The guided tool sends screenshots to the configured vision
+model, so close any windows you do not want it to see. Aidon requests speech
+in the WebUI after the desktop step; it uses the configured voice service or
+the browser's speech synthesis. Browser audio playback may require a prior
+interaction with the page.
+
+Use **Record demo** in the chat header to choose a screen or window in the
+browser's sharing dialog. Stop the recording using the button or browser
+sharing control, then select **Download recording**. Select audio sharing in
+the browser dialog if available; some browser and Linux combinations cannot
+capture desktop audio, which the recording status indicates. The video is
+created in the browser and is not uploaded automatically.
+
 ## 📊 Budgets, trace, v1 API, token auth, and MCP
 
 - Budgets: 200,000 tokens estimated, 50 steps, 3,600
@@ -336,6 +450,18 @@ verification arena they will run in.
   scope, wrapping the same v1 store as the v1 API.
   Streamable HTTP MCP is built: JSON-RPC over HTTP at
   `/mcp`, localhost only, Bearer token required.
+  Remote HTTP MCP servers that return a standard OAuth challenge can
+  use the WebUI approval card to open the provider, complete browser
+  authorization, and return to Aidon. Aidon uses authorization code
+  with PKCE and dynamic public-client registration; providers without
+  compatible OAuth metadata or registration need their supported API
+  key setup instead. Access and refresh tokens are kept in the private
+  `<AIDON_HOME>/credentials/mcp_oauth.json` file (directory mode 0700,
+  file mode 0600), not in chat or run logs. The callback is loopback-only
+  and defaults to `http://127.0.0.1:8765/oauth/mcp/callback`; configure
+  `AIDON_MCP_OAUTH_REDIRECT_URI` only when the WebUI uses another local
+  port. OAuth authorizes the server connection; remote tool actions
+  retain their normal approval gates.
 3. **Sandbox** — the plan is tested in an isolated workdir.
    Bubblewrap, when installed, is the isolated backend. A
    subprocess fallback is labeled as not isolated, never as
@@ -355,8 +481,16 @@ verification arena they will run in.
    to use Docker, `AIDON_EXECUTION_BACKEND=modal` for
    Modal, `AIDON_DOCKER_IMAGE` for the pinned image,
    `AIDON_DOCKER_NETWORK=1` only when a task needs network.
+   Each run keeps a fresh isolated workdir. In the same WebUI,
+   WhatsApp, or Slack conversation, later runs receive copies of
+   files verified from earlier successful runs, plus a short summary
+   of the last workflow. Only verified deliverables carry forward;
+   scratch files and failed-run outputs do not. The carried files are
+   copied into the new run, so edits stay isolated until that run
+   succeeds.
 4. **Verify** — a result is verified by evidence, not by
-   assertion. Deliverables must exist and be non-empty,
+   assertion. File deliverables must exist and be non-empty;
+   output-only steps must complete successfully,
    criteria are checked by code, and a ledger total is
    recomputed from its lines in cents. A vague criterion
    is reported unverified, never passed.

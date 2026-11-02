@@ -23,7 +23,32 @@
 
 ---
 
-**Autonomous AI agent. You give it one goal — it does the rest.**
+> # What this project wants to showcase for the Meta Global AI Developer Hackathon
+>
+> Built for the Meta Global AI Developer Hackathon (October 26 – November 4, 2026), Aidon submits three capabilities, all powered by Meta's models through the Meta Model API:
+>
+>- **Human Natural Language and Interview as source input** —  Understands goals in plain natural language and interviews the user in conversation to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it. Ask mode is the default: the agent asks chat questions first and works to a verified, frozen spec before planning anything, and the same conversation works in chat, on WhatsApp or Slack, or on the command line.
+>- **Grows its own capabilities with tools/skills creation** — drafting, sandbox-testing, and adopting tools and skills that plug into its agentic workflows, including niche ones tailored to a user's own task. A tool plugin is a directory with a manifest and module files: it is tested in the sandbox first, scanned for unsafe patterns, and adopted only on human approval, after which its tools are usable immediately in the current run and every later goal. Skills follow a candidate → validated → trusted lifecycle, and only trusted skills enter plan prompts.
+>- **Keeps a human in the loop for decision** — every consequential action passes through human review and approval before it goes live, with verification and rollback on failure, so the agent's autonomy never outruns its owner's consent. Nothing unproven goes live: work runs in a sandbox first, is verified by code, and only failed steps are repaired (at most 3 attempts); the approval card itself fails closed on timeout, and approvals can also be given by replying approve or reject on WhatsApp or Slack.
+>- **DAG graph generation of workflows after successful runs** — every goal becomes a directed acyclic graph of steps with dependencies, deliverables, and acceptance criteria, so the agent knows what depends on what and what "done" means for each step. Completed DAGs are saved and adapted to new goals instead of planned from scratch, which is how Aidon reuses past work and saves time and tokens and LLM calls over time.
+
+> **Meta models used:**
+>
+>- Muse Spark 1.3 — the reasoning engine: goal understanding, interviewing, plan and DAG construction, recalling and adapting past workflows, repairing failed steps, and verifying results. Lightweight phases (interpret, learn, respond, webchat) can route to a smaller fast model through the same API to keep token costs down.
+>- Muse Image 1.0 — generates and edits images and diagrams for workflows that need them, through the same API key and endpoint as the chat model, with generation approval-gated and credit-aware.
+>- Muse Voice Transcribe — speech-to-text that lets users speak to the agent in natural language instead of typing, via a transcribe tool backed by Meta's transcription API.
+>
+>*Note: Aidon is still under active development — it was built during this 10-day hackathon, and not all planned agentic capabilities are implemented yet.*
+
+> ## Demo video
+> 
+>▶️ [Watch the 3-minute demo on YouTube — coming soon](https://www.youtube.com/watch?v=YOUR_VIDEO_ID)
+>
+><!-- TODO: replace YOUR_VIDEO_ID with the real YouTube video ID after uploading -->
+
+
+
+# Autonomous AI agent. You give it one goal — it does the rest.
 
 Give Aidon a goal in plain language, in chat, on WhatsApp or Slack, or on the command line. Aidon will:
 

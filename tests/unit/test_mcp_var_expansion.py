@@ -81,7 +81,10 @@ def _mock_urlopen(monkeypatch, seen):
         return _FakeResponse({"jsonrpc": "2.0", "id": 1,
                               "result": {"serverInfo": {"name": "demo"}}})
 
-    monkeypatch.setattr(http_mod.urllib.request, "urlopen", fake_urlopen)
+    # The client uses a no-redirect opener to avoid forwarding credentials
+    # to redirect targets. Stub that opener directly so these tests remain
+    # hermetic while exercising the same transport path as production.
+    monkeypatch.setattr(http_mod._http_opener, "open", fake_urlopen)
 
 
 def test_http_client_var_token_sends_expanded_header(monkeypatch):
@@ -148,9 +151,12 @@ def test_stdio_client_env_expansion(monkeypatch):
 
 def test_stdio_client_env_reaches_server_process(monkeypatch, tmp_path):
     monkeypatch.setenv("MCP_TEST_TOKEN", "tok-123")
+    monkeypatch.setenv("UNRELATED_PRIVATE_KEY", "must-not-reach-server")
     script = tmp_path / "fake_mcp.py"
     script.write_text(
-        "import json, sys\n"
+        "import json, sys, os\n"
+        "assert 'UNRELATED_PRIVATE_KEY' not in os.environ\n"
+        "assert os.environ.get('MCP_TOKEN') == 'tok-123'\n"
         "for line in sys.stdin:\n"
         "    req = json.loads(line)\n"
         "    sys.stdout.write(json.dumps({'jsonrpc': '2.0', 'id': req['id'],"
@@ -164,3 +170,46 @@ def test_stdio_client_env_reaches_server_process(monkeypatch, tmp_path):
         assert client.token_var == "MCP_TEST_TOKEN"
     finally:
         client.close()
+
+
+def test_stdio_timeout_closes_unresponsive_server(tmp_path):
+    import sys
+    script = tmp_path / "silent.py"
+    script.write_text("import time\ntime.sleep(30)\n")
+    client = McpClient([sys.executable, str(script)], timeout=0.05)
+    with pytest.raises(TimeoutError):
+        client.start()
+    assert client.proc is None
+
+
+def test_stdio_notification_and_wrong_id(tmp_path):
+    import sys
+    script = tmp_path / "server.py"
+    script.write_text(
+        "import json,sys\n"
+        "for line in sys.stdin:\n"
+        " r=json.loads(line)\n"
+        " print(json.dumps({'jsonrpc':'2.0','method':'notice'}),flush=True)\n"
+        " print(json.dumps({'jsonrpc':'2.0','id':r['id'] if r['id']==1 else 99,'result':{}}),flush=True)\n")
+    client = McpClient([sys.executable, str(script)], timeout=1)
+    try:
+        client.start()
+        with pytest.raises(ValueError, match="ID mismatch"):
+            client.list_tools()
+    finally:
+        client.close()
+
+
+def test_stdio_write_to_nonreading_server_times_out(tmp_path):
+    import sys
+    script = tmp_path / "stalled.py"
+    script.write_text(
+        "import json,sys,time\n"
+        "request=json.loads(sys.stdin.readline())\n"
+        "print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':{}}),flush=True)\n"
+        "time.sleep(30)\n")
+    client = McpClient([sys.executable, str(script)], timeout=0.2)
+    client.start()
+    with pytest.raises(TimeoutError, match="write timed out"):
+        client.call_tool("test", {"data": "x" * 500000})
+    assert client.proc is None

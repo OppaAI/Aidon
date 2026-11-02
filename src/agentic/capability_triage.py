@@ -48,13 +48,59 @@ Division of labour, deliberately:
 
 from __future__ import annotations
 
+import re
+
 MIN_CONFIDENCE = 0.6
 BLOCK_CONFIDENCE = 0.8
 
+
+def is_image_edit_request(goal: str) -> bool:
+    """Recognize direct image edits, including edits phrased as continuations."""
+    low = str(goal or "").lower()
+    return any(term in low for term in (
+        "edit", "modify", "transform", "retouch", "adjust", "enhance",
+        "filter", "crop", "resize", "recolor", "remove background",
+        "background removal", "inpaint", "outpaint", "change the scene",
+        "change scene", "change the background", "change background",
+        "replace the background", "replace background", "do the same",
+        "same with this", "same edit", "show her whole body",
+        "show his whole body", "show their whole body", "full body",
+        "make the image wider", "make image wider", "make it wider",
+        "expand the image", "change the aspect ratio",
+    ))
+
+
+def builtin_image_edit_covers(goal: str, tool_names) -> bool:
+    """Avoid a Lab referral when image editing has a built-in tool.
+
+    Whether an image was successfully attached is a separate input problem;
+    it must not make an existing editing capability look unavailable.
+    """
+    return ("edit_image" in set(tool_names or ())
+            and is_image_edit_request(goal))
+
+
+def is_desktop_interaction_goal(goal: str) -> bool:
+    """Recognize requests that require operating a visible desktop UI."""
+    low = str(goal or "").lower()
+    return any(term in low for term in (
+        "notepad", "text editor", "mouse", "keyboard", "on my screen",
+        "on the screen", "open an app", "open the app", "type into",
+        "type in the", "click on", "click the", "computer use",
+        "control my computer",
+    )) or bool(re.search(r"\b(?:on|in) (?:my|the) (?:ubuntu |linux )?desktop\b", low))
+
+
+def builtin_computer_use_covers(goal: str, tool_names) -> bool:
+    """Don't reopen a missing-tool interview when desktop controls exist."""
+    names = set(tool_names or ())
+    return (bool(names.intersection({"computer_use", "computer_use_task"}))
+            and is_desktop_interaction_goal(goal))
+
 STATUS_CRITERIA = {
     "covered": "Every capability the goal needs is in the inventory.",
-    "need_skill": "A skill in the library, or a new skill, could cover "
-                  "a missing capability.",
+    "need_skill": "A reusable procedure might improve this work, but no "
+                  "tool, service connection, or executable action is missing.",
     "need_mcp": "An MCP server (approved or new) could cover a missing "
                 "capability.",
     "need_plugin": "A new tool plugin, built and tested in the sandbox, "
@@ -65,25 +111,27 @@ STATUS_CRITERIA = {
 
 _NOTES = {
     "need_skill": (
-        "Capability triage: this goal may need a capability not in "
-        "the current inventory. A skill may cover it — look for or "
-        "propose one before assuming the tool exists."),
+        "No reusable skill is available yet. A skill is learned from a "
+        "workflow after it succeeds; continue this goal with the actual "
+        "tools and services available. Do not create or trust a skill "
+        "before successful verification."),
     "need_mcp": (
         "Capability triage: this goal may need a capability not in "
-        "the current inventory. An MCP server may cover it — propose "
-        "a connection (approved servers reconnect; a new server needs "
-        "the user's approval with its exact command or URL) before "
-        "assuming it exists."),
+        "the current inventory. Do not guess a vendor or connect. Ask "
+        "the owner to continue in the MCP Connection Lab at "
+        "[/labs](/labs) to compare real options and agree on the exact "
+        "server before connection approval."),
     "need_plugin": (
         "Capability triage: this goal may need a capability not in "
-        "the current inventory. A new tool plugin may be needed — "
-        "draft it, sandbox-test it, and propose it for approval "
-        "instead of calling a tool that does not exist."),
+        "the current inventory. Do not choose an implementation on the "
+        "owner's behalf. Ask them to continue in the Tool Crafting Lab "
+        "at [/labs](/labs) to define the tool before drafting or "
+        "adoption approval."),
     "blocked": (
         "Capability check: this goal needs something Aidon does not "
         "have and cannot safely build, find, or connect, so I am "
         "stopping before planning rather than failing after attempts. "
-        "If you can name the missing piece (a tool, skill, or MCP "
+        "If you can name the missing piece (a tool or MCP "
         "server), I can look for it, or we can narrow the goal."),
 }
 

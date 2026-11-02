@@ -143,9 +143,10 @@ class DAGNode:
     expected: str = ""
     assumptions: list[str] = field(default_factory=list)
     executor: str = "tool"
+    name: str = ""
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "tool": self.tool, "args": self.args,
+        return {"id": self.id, "name": self.name, "tool": self.tool, "args": self.args,
                 "deliverable": self.deliverable, "depends_on": list(self.depends_on),
                 "inputs": list(self.inputs), "outputs": list(self.outputs),
                 "preconditions": list(self.preconditions), "expected": self.expected,
@@ -157,6 +158,7 @@ class DAGNode:
         # An invalid executor falls back to "tool", never raises:
         # a saved graph with a bad tier must still load.
         return cls(id=str(data.get("id", "")),
+                   name=str(data.get("name", "")),
                    tool=str(data.get("tool", "write")),
                    args=dict(data.get("args", {})),
                    deliverable=str(data.get("deliverable", "")),

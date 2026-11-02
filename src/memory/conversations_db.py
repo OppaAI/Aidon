@@ -26,6 +26,8 @@ another round trip.
 from __future__ import annotations
 
 import sqlite3
+import json
+import re
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -83,6 +85,7 @@ class ConversationStoreDB:
                     exchange_no INTEGER NOT NULL,
                     role TEXT NOT NULL,
                     text TEXT NOT NULL,
+                    route_json TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     UNIQUE (conversation_id, exchange_no)
                 );
@@ -91,6 +94,7 @@ class ConversationStoreDB:
                     conversation_id TEXT NOT NULL,
                     path TEXT NOT NULL,
                     kind TEXT NOT NULL DEFAULT '',
+                    exchange_no INTEGER,
                     created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS ideas (
@@ -106,18 +110,69 @@ class ConversationStoreDB:
                 );
                 """
             )
+            # Existing conversation databases predate persisted routing
+            # metadata. Keep their transcripts intact and add the nullable
+            # detail needed to restore route badges after a reload.
+            exchange_columns = {
+                row["name"] for row in self._conn.execute(
+                    "PRAGMA table_info(exchanges)").fetchall()
+            }
+            if "route_json" not in exchange_columns:
+                self._conn.execute(
+                    "ALTER TABLE exchanges ADD COLUMN route_json TEXT NOT NULL DEFAULT ''")
+            attachment_columns = {
+                row["name"] for row in self._conn.execute(
+                    "PRAGMA table_info(attachments)").fetchall()
+            }
+            if "exchange_no" not in attachment_columns:
+                self._conn.execute(
+                    "ALTER TABLE attachments ADD COLUMN exchange_no INTEGER")
+            self._restore_orphaned_webui_conversations()
             self._conn.commit()
+
+    def _restore_orphaned_webui_conversations(self) -> None:
+        """Restore valid chat IDs whose exchange rows outlived their parent.
+
+        Older WebUI sessions could append turns for an ID supplied by the
+        browser without first ensuring that its conversation row existed.
+        The transcript then remained in ``exchanges`` but disappeared from
+        the history list, which is built from ``conversations``. Recover
+        UUID-style WebUI IDs during normal store initialization; channel IDs
+        such as ``slack:C123`` remain outside this WebUI conversation list.
+        """
+        rows = self._conn.execute(
+            "SELECT e.conversation_id, MIN(e.created_at) AS created_at "
+            "FROM exchanges AS e "
+            "LEFT JOIN conversations AS c ON c.id = e.conversation_id "
+            "WHERE c.id IS NULL "
+            "GROUP BY e.conversation_id"
+        ).fetchall()
+        recovered = []
+        for row in rows:
+            conversation_id = str(row["conversation_id"] or "")
+            if (len(conversation_id) <= 128
+                    and re.fullmatch(r"[0-9a-fA-F-]+", conversation_id)):
+                recovered.append((conversation_id, "", row["created_at"] or _now()))
+        if recovered:
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO conversations (id, project_id, created_at) "
+                "VALUES (?, ?, ?)", recovered)
 
     # -- conversations -------------------------------------------------
 
-    def create_conversation(self) -> dict:
-        conversation_id = _new_id()
+    def create_conversation(self, conversation_id: str | None = None,
+                            return_created: bool = False) -> dict:
+        conversation_id = str(conversation_id or _new_id())
+        if (len(conversation_id) > 128 or not conversation_id
+                or any(ch not in "0123456789abcdef-" for ch in conversation_id.lower())):
+            raise ValueError("invalid conversation ID")
         with self._lock:
-            self._conn.execute(
-                "INSERT INTO conversations (id, project_id, created_at)"
+            cursor = self._conn.execute(
+                "INSERT OR IGNORE INTO conversations (id, project_id, created_at)"
                 " VALUES (?, ?, ?)", (conversation_id, "", _now()))
             self._conn.commit()
-        return {"id": conversation_id}
+        record = {"id": conversation_id}
+        return (record, cursor.rowcount == 1) if return_created else record
 
     def list_all_conversations(self) -> list[dict]:
         with self._lock:
@@ -167,8 +222,17 @@ class ConversationStoreDB:
     # -- exchanges -----------------------------------------------------
 
     def record_exchange(self, conversation_id: str, role: str,
-                        text: str) -> dict:
+                        text: str, route: dict | None = None) -> dict:
         """Append one exchange, numbered under a serialised transaction."""
+        route_data = ""
+        if isinstance(route, dict) and route.get("group"):
+            try:
+                route_data = json.dumps({
+                    "group": str(route["group"]),
+                    "confidence": max(0.0, min(1.0, float(route["confidence"]))),
+                }, separators=(",", ":"))
+            except (KeyError, TypeError, ValueError):
+                route_data = ""
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
@@ -179,16 +243,17 @@ class ConversationStoreDB:
                 number = int(row["m"]) + 1
                 self._conn.execute(
                     "INSERT INTO exchanges"
-                    " (conversation_id, exchange_no, role, text, created_at)"
-                    " VALUES (?, ?, ?, ?, ?)",
-                    (conversation_id, number, role, text, _now()))
+                    " (conversation_id, exchange_no, role, text, route_json, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (conversation_id, number, role, text, route_data, _now()))
                 self._conn.commit()
             except Exception:
                 self._conn.rollback()
                 raise
         self._refresh_summary(conversation_id)
         return {"conversation_id": conversation_id, "exchange_no": number,
-                "role": role, "text": text}
+                "role": role, "text": text,
+                "route": json.loads(route_data) if route_data else None}
 
     def history(self, conversation_id: str, limit: int = 50) -> list[dict]:
         # Reads take the same lock as writes: one sqlite3 connection is
@@ -197,10 +262,21 @@ class ConversationStoreDB:
         # ("bad parameter or other API misuse") on the connection.
         with self._lock:
             rows = self._conn.execute(
-                "SELECT exchange_no, role, text, created_at FROM exchanges"
+                "SELECT exchange_no, role, text, route_json, created_at FROM exchanges"
                 " WHERE conversation_id = ? ORDER BY exchange_no DESC LIMIT ?",
                 (conversation_id, limit)).fetchall()
-        return [dict(row) for row in reversed(rows)]
+        history = []
+        for row in reversed(rows):
+            item = dict(row)
+            route_data = item.pop("route_json", "")
+            try:
+                route = json.loads(route_data) if route_data else None
+            except (TypeError, ValueError):
+                route = None
+            if isinstance(route, dict):
+                item["route"] = route
+            history.append(item)
+        return history
 
     # -- summary -------------------------------------------------------
 
@@ -232,16 +308,40 @@ class ConversationStoreDB:
     # -- attachments and ideas -----------------------------------------
 
     def add_attachment(self, conversation_id: str, path: str,
-                       kind: str = "") -> dict:
+                       kind: str = "", exchange_no: int | None = None) -> dict:
         attachment_id = _new_id()
         with self._lock:
             self._conn.execute(
                 "INSERT INTO attachments (id, conversation_id, path, kind,"
-                " created_at) VALUES (?, ?, ?, ?, ?)",
-                (attachment_id, conversation_id, path, kind, _now()))
+                " exchange_no, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (attachment_id, conversation_id, path, kind, exchange_no, _now()))
             self._conn.commit()
         return {"id": attachment_id, "conversation_id": conversation_id,
-                "path": path, "kind": kind}
+                "path": path, "kind": kind, "exchange_no": exchange_no}
+
+    def attachments(self, conversation_id: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, path, kind, exchange_no, created_at FROM attachments"
+                " WHERE conversation_id = ? ORDER BY id", (conversation_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_attachment(self, attachment_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, conversation_id, path, kind, exchange_no, created_at"
+                " FROM attachments WHERE id = ?", (attachment_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def latest_exchange_no(self, conversation_id: str, role: str) -> int | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT MAX(exchange_no) AS n FROM exchanges"
+                " WHERE conversation_id = ? AND role = ?",
+                (conversation_id, role)).fetchone()
+        return int(row["n"]) if row and row["n"] is not None else None
 
     def add_idea(self, text: str) -> dict:
         idea_id = _new_id()

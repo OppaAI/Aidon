@@ -141,7 +141,7 @@ def test_loop_promotion_auto(tmp_path):
     memory = _memory(tmp_path)
     sandbox = Sandbox(home / "work")
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
-    runner = GoalRunner(FakeClient(""), sandbox, gate, home, memory=memory)
+    runner = GoalRunner(FakeClient('{"steps": [{"tool": "write", "args": {"file": "deliverable.md", "text": "Verified test deliverable.\\n"}, "deliverable": "deliverable.md"}], "deliverables": ["deliverable.md"], "criteria": []}'), sandbox, gate, home, memory=memory)
     report = runner.run("Write a note")
     assert report.status == "done"
     assert memory.recall("semantic", "Write a note", graph=False)

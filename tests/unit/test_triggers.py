@@ -30,6 +30,10 @@ def test_scheduler_daily_weekly_and_due_no_double_fire(tmp_path):
                                    goal="Daily run"))
     due = scheduler.check_due(datetime(2026, 10, 26, 9, 0))
     assert [j.name for j in due] == ["daily"]
+    # A claimed occurrence is replayed until the caller acknowledges it.
+    assert [j.name for j in scheduler.check_due(
+        datetime(2026, 10, 26, 9, 1))] == ["daily"]
+    assert scheduler.complete(due[0]) is True
     # Same occurrence does not fire again.
     due2 = scheduler.check_due(datetime(2026, 10, 26, 9, 1))
     assert due2 == []

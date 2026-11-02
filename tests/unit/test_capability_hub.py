@@ -1,5 +1,6 @@
 """Capability Hub index: sources, dimensions, precedence,
 health cache, search, and filters."""
+from tests.plugin_acceptance import passing_backend_factory
 
 import json
 from types import SimpleNamespace
@@ -17,6 +18,11 @@ def _approve(kind, title, body):
     return SimpleNamespace(verdict="approved")
 
 
+class _PassingSandbox:
+    def run(self, command):
+        return {"ok": True, "output": "pass"}
+
+
 def _plugin(tmp_path):
     plug = tmp_path / "toolbox" / "demo"
     plug.mkdir(parents=True)
@@ -30,15 +36,18 @@ def _plugin(tmp_path):
     (plug / "demo_mod.py").write_text(
         "def demo_fn(args):\n    return 'ok'\n")
     (plug / "demo_skill.md").write_text("# Demo skill\nDo demos.\n")
+    from src.capabilities.plugins import plugin_tree_hash
+    (plug / ".adopted").write_text(json.dumps({
+        "approved_hash": plugin_tree_hash(plug)}))
 
 
 @pytest.fixture
 def home(tmp_path):
     _plugin(tmp_path)
     lib = SkillLibrary(tmp_path)
-    lib.add(Skill(name="paper-search",
-                  description="Search academic papers"))
-    lib.promote("paper-search", {"passed": True})
+    lib.add(Skill(name="paper-search", description="Search academic papers",
+                  test_commands=["python3 --version"]))
+    lib.promote("paper-search", lib.run_tests("paper-search", _PassingSandbox()))
     lib.trust("paper-search", approved=True)
     lib.add(Skill(name="draft-skill", description="Unfinished"))
     (tmp_path / "skills" / "hand.md").write_text(
@@ -68,6 +77,7 @@ def _by_id(hub):
 def test_preloaded_registry_is_reused_without_reimport(tmp_path):
     plug = tmp_path / "toolbox" / "demo"
     plug.mkdir(parents=True)
+    marker = tmp_path / "imports.txt"
     (plug / "plugin.json").write_text(json.dumps({
         "name": "demo", "version": "1", "description": "Demo plugin",
         "tools": [{"name": "demo_tool", "module": "demo_mod.py",
@@ -75,13 +85,14 @@ def test_preloaded_registry_is_reused_without_reimport(tmp_path):
         "skills": []}))
     (plug / "demo_mod.py").write_text(
         "import os\n"
-        "open(os.path.join(os.path.dirname(__file__), "
-        "'imports.txt'), 'a').write('x')\n"
+        f"open({str(marker)!r}, 'a').write('x')\n"
         "def demo_fn(args):\n    return 'ok'\n")
     from src.capabilities.plugins import PluginRegistry
+    from src.capabilities.plugins import plugin_tree_hash
+    (plug / ".adopted").write_text(json.dumps({
+        "approved_hash": plugin_tree_hash(plug)}))
     registry = PluginRegistry(tmp_path)
     registry.load_all()
-    marker = plug / "imports.txt"
     assert marker.read_text() == "x"
     hub = CapabilityHub(tmp_path, plugins=registry)
     assert hub.get("plugin:demo") is not None
@@ -100,7 +111,9 @@ def test_invalidate_drops_health(home):
 def test_skill_retire_prunes_health(tmp_path):
     from src.capabilities.skill_library import Skill, SkillLibrary
     lib = SkillLibrary(tmp_path)
-    lib.add(Skill(name="doomed", description="Doomed."))
+    lib.add(Skill(name="doomed", description="Doomed.",
+                  test_commands=["python3 --version"]))
+    lib.promote("doomed", lib.run_tests("doomed", _PassingSandbox()))
     lib.trust("doomed", approved=True)
     hub = CapabilityHub(tmp_path)
     hub.record_health("skill:doomed", "degraded")
@@ -173,17 +186,19 @@ def test_adopt_replaces_and_resets_health(tmp_path):
         "name": "upper", "version": "1", "description": "Up",
         "tools": [{"name": "upper", "module": "tool.py",
                    "function": "upper"}],
-        "skills": ["skill.md"]}))
+        "skills": ["skill.md"],
+        "acceptance_tests": [["python3", "-c", "from tool import upper; assert upper({}) == 'HI'"]]}))
     (src / "tool.py").write_text(
         "def upper(args):\n    return 'HI'\n")
     (src / "skill.md").write_text("# Skill\n")
     registry = PluginRegistry(home)
-    ok, _, _ = registry.adopt(src, approve=lambda p, f: True)
+    ok, _, _ = registry.adopt(src, approve=lambda p, f: True, test_backend_factory=passing_backend_factory)
     assert ok is True
     hub = CapabilityHub(home)
     hub.record_health("plugin:upper", "degraded")
     hub.record_health("skill:upper/skill.md", "degraded")
-    ok, _, _ = registry.adopt(src, approve=lambda p, f: True)
+    (src / "tool.py").write_text("def upper(args):\n    return 'UPDATED'\n")
+    ok, _, _ = registry.adopt(src, approve=lambda p, f: True, test_backend_factory=passing_backend_factory)
     assert ok is True
     assert hub.get("plugin:upper")["health"] == "unknown"
     assert hub.get("skill:upper/skill.md")["health"] == "unknown"

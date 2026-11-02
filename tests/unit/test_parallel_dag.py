@@ -35,7 +35,7 @@ def _runner(tmp_path, memory, client=None):
     home.mkdir(exist_ok=True)
     sandbox = Sandbox(home / "work")
     gate = ApprovalGate(lambda kind, title, body: Decision("approved"))
-    return GoalRunner(client or FakeClient(""), sandbox, gate, home,
+    return GoalRunner(client or FakeClient('{"steps": [{"tool": "write", "args": {"file": "deliverable.md", "text": "Verified test deliverable.\\n"}, "deliverable": "deliverable.md"}], "deliverables": ["deliverable.md"], "criteria": []}'), sandbox, gate, home,
                       memory=memory)
 
 

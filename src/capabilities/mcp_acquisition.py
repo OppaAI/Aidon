@@ -81,6 +81,9 @@ from __future__ import annotations
 
 import json
 import shlex
+import hashlib
+import copy
+import re
 from pathlib import Path
 
 SAFE_TOOL_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789_")
@@ -138,13 +141,101 @@ def _default_client(config: dict):
     raise ValueError(f"unknown MCP transport: {transport!r}")
 
 
-def _describe_config(config: dict) -> str:
+def _approval_details(config: dict, test_call: dict | None) -> str:
+    """Describe exactly what will connect/run, without exposing secrets."""
+    from ..interface.mcp_http import expand_env_value
+
     transport = str(config.get("transport", "stdio")).lower()
     if transport == "stdio":
-        parts = [str(config.get("command", ""))] + \
-            [str(x) for x in (config.get("args") or [])]
-        return " ".join(p for p in parts if p)
-    return str(config.get("url", ""))
+        argv = [str(config.get("command", ""))] + [
+            str(x) for x in config.get("args") or []]
+        safe_argv = []
+        redact_next = False
+        for value in argv:
+            if redact_next:
+                safe_argv.append("[redacted]")
+                redact_next = False
+                continue
+            match = re.match(
+                r"^(--?(?:.*(?:password|secret|token|api[_-]?key|authorization)))(?:=(.*))?$",
+                value, re.IGNORECASE)
+            if match:
+                safe_argv.append(match.group(1) +
+                                 ("=[redacted]" if match.group(2) is not None else ""))
+                redact_next = match.group(2) is None
+                continue
+            try:
+                from ..memory.redaction import redact_text
+                value = redact_text(value)
+            except Exception:
+                pass
+            safe_argv.append(value)
+        target = json.dumps(
+            safe_argv, ensure_ascii=False)
+    else:
+        from urllib.parse import (parse_qsl, urlencode, urlsplit,
+                                  urlunsplit)
+        raw_url = str(config.get("url", ""))
+        try:
+            parsed = urlsplit(raw_url)
+            host = parsed.hostname or ""
+            if ":" in host and not host.startswith("["):
+                host = f"[{host}]"
+            if parsed.port:
+                host += f":{parsed.port}"
+            if parsed.username is not None or parsed.password is not None:
+                host = "[redacted]@" + host
+            query = urlencode([
+                (key, "[redacted]" if re.search(
+                    r"password|secret|token|signature|credential|auth|api[_-]?key",
+                    key, re.IGNORECASE) else value)
+                for key, value in parse_qsl(parsed.query, keep_blank_values=True)])
+            target = urlunsplit((parsed.scheme, host, parsed.path, query, ""))
+        except ValueError:
+            target = "[invalid URL; exact value bound by fingerprint]"
+    env_bindings = []
+    for key, value in sorted(dict(config.get("env") or {}).items()):
+        _, variable = expand_env_value(value)
+        env_bindings.append(
+            f"{key} <- ${variable}" if variable else
+            f"{key} <- [literal value redacted]")
+    token = config.get("token")
+    if token:
+        _, variable = expand_env_value(token)
+        env_bindings.append(
+            f"Authorization <- ${variable}" if variable else
+            "Authorization <- [literal value redacted]")
+    bound = {"config": config, "test_call": test_call}
+    fingerprint = hashlib.sha256(json.dumps(
+        bound, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        default=str).encode("utf-8")).hexdigest()
+    details = [f"Transport: {transport}", f"Target: {target}",
+               f"Config fingerprint (SHA-256): {fingerprint}"]
+    details.append("Environment bindings: " +
+                   (", ".join(env_bindings) if env_bindings else "none"))
+    if test_call is None:
+        details.append(
+            "Functional test: none; this approval only permits connect/list-tools.")
+    else:
+        details.append(
+            "Functional test: call exactly one tool once after listing it: "
+            + str(test_call["tool"]))
+        # The owner must see the action inputs before approving it. Secret-like
+        # fields are redacted; the full request is covered by the fingerprint.
+        def redact(value, key=""):
+            import re
+            if re.search(r"password|secret|token|api[_-]?key|authorization",
+                         str(key), re.IGNORECASE):
+                return "[redacted]"
+            if isinstance(value, dict):
+                return {str(k): redact(v, k) for k, v in value.items()}
+            if isinstance(value, list):
+                return [redact(item) for item in value]
+            return value
+        details.append("Test arguments: " + json.dumps(
+            redact(test_call.get("args") or {}), ensure_ascii=False,
+            sort_keys=True, default=str)[:2000])
+    return "\n".join(details)
 
 
 def _stored_config(config: dict, tools: list) -> dict:
@@ -181,6 +272,9 @@ def acquire_mcp_server(home, name: str, config: dict, approve,
     connected client is returned in the result instead
     of closed, for the caller to use and close."""
     from .capability_registry import CapabilityRegistry
+    # Freeze the exact target and bindings shown in the approval card. Callers
+    # must not be able to change the approved config before the process starts.
+    config = copy.deepcopy(dict(config))
     name = str(name).strip()
     if not name:
         raise ValueError("MCP server name is required")
@@ -191,11 +285,19 @@ def acquire_mcp_server(home, name: str, config: dict, approve,
         raise ValueError("MCP http config needs a url")
     if transport not in ("stdio", "http", "streamable-http"):
         raise ValueError(f"unknown MCP transport: {transport!r}")
+    if test_call is not None:
+        if not isinstance(test_call, dict) or not str(test_call.get("tool", "")):
+            raise ValueError("MCP functional test needs a tool name")
+        if not isinstance(test_call.get("args", {}), dict):
+            raise ValueError("MCP functional test args must be an object")
+        test_call = {"tool": str(test_call["tool"]),
+                     "args": copy.deepcopy(test_call.get("args") or {})}
     if approve is None:
         raise RuntimeError("MCP acquisition needs human approval")
     _check_approval(approve(
         "install", f"Connect MCP server {name}?",
-        f"Start/connect to MCP server {name!r}: {_describe_config(config)}"))
+        f"Start/connect to MCP server {name!r}:\n"
+        f"{_approval_details(config, test_call)}"))
     from contextlib import nullcontext
     _gov_ctx = governor.timed("mcp") if governor is not None else nullcontext()
     with _gov_ctx:
@@ -220,9 +322,17 @@ def acquire_mcp_server(home, name: str, config: dict, approve,
                     raise ValueError(
                         f"test tool {tool!r} is not an offered tool")
                 result = client.call_tool(tool, dict(test_call.get("args") or {}))
+                if isinstance(result, dict) and result.get("isError") is True:
+                    raise RuntimeError(
+                        f"MCP functional test failed for {tool!r}")
+                result_bytes = json.dumps(
+                    result, ensure_ascii=False, sort_keys=True,
+                    default=str).encode("utf-8")
                 evidence.append({"test": "call_tool", "passed": True,
                                  "tool": tool,
-                                 "result": str(result)[:200]})
+                                 "output_type": type(result).__name__,
+                                 "output_sha256": hashlib.sha256(
+                                     result_bytes).hexdigest()})
             findings = _scan_descriptions(offered)
             stored = _stored_config(config, safe)
             registry = CapabilityRegistry(home)

@@ -23,8 +23,14 @@ class X11Driver:
             raise RuntimeError("DISPLAY is not set")
 
     def _run(self, args: list[str]) -> None:
-        env = os.environ.copy()
+        # xdotool only needs the X11 connection and a small runtime context.
+        # Do not pass model, messaging, or MCP credentials to a child process.
+        env = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL")
+               if key in os.environ}
         env["DISPLAY"] = self.display
+        for key in ("XAUTHORITY",):
+            if key in os.environ:
+                env[key] = os.environ[key]
         subprocess.run([self.executable, *args], env=env, check=True,
                        capture_output=True, text=True, timeout=15)
 
@@ -39,7 +45,11 @@ class X11Driver:
         elif kind == "key":
             self._run(["key", "--clearmodifiers", str(action["key"])])
         elif kind == "scroll":
-            self._run(["scroll", str(action["delta"])])
+            delta = int(action["delta"])
+            if delta:
+                # X11 wheel buttons: 4 scrolls up, 5 scrolls down.
+                self._run(["click", "--repeat", str(min(abs(delta), 100)),
+                           "--delay", "10", "4" if delta > 0 else "5"])
         else:
             raise ValueError(f"X11 driver cannot execute {kind}")
 

@@ -59,6 +59,62 @@ def test_native_native_tool_call_is_normalized(monkeypatch):
     assert response.thinking == "brief"
 
 
+def test_native_retries_without_thinking_when_model_rejects_it(monkeypatch):
+    requests = []
+
+    class _ErrorResponse(_Response):
+        status = 400
+        reason = "Bad Request"
+        headers = {}
+
+        def __init__(self):
+            self.payload = b'{"error":"\\"test-model\\" does not support thinking"}'
+
+    def fake_post(url, body, headers, timeout):
+        requests.append(json.loads(body))
+        if len(requests) == 1:
+            return _ErrorResponse(), ("http", "fake", 80)
+        return _Response({"message": {"content": "pwd is /workspace"}}), (
+            "http", "fake", 80)
+
+    monkeypatch.setattr("src.system.model_client._post", fake_post)
+    client = NativeModelClient("http://localhost:11434", "test-model")
+    response = client.chat_response(
+        [Message("user", "Run pwd")], sampling={"think": True})
+
+    assert response.text == "pwd is /workspace"
+    assert requests[0]["think"] is True
+    assert requests[1]["think"] is False
+
+
+def test_native_does_not_retry_other_http_errors(monkeypatch):
+    class _ErrorResponse(_Response):
+        status = 400
+        reason = "Bad Request"
+        headers = {}
+
+        def __init__(self):
+            self.payload = b'{"error":"invalid model"}'
+
+    calls = []
+
+    def fake_post(url, body, headers, timeout):
+        calls.append(json.loads(body))
+        return _ErrorResponse(), ("http", "fake", 80)
+
+    monkeypatch.setattr("src.system.model_client._post", fake_post)
+    client = NativeModelClient("http://localhost:11434", "test-model")
+    try:
+        client.chat_response([Message("user", "hello")],
+                             sampling={"think": True})
+    except RuntimeError as exc:
+        assert "invalid model" in str(exc)
+    else:
+        raise AssertionError("expected invalid model error")
+
+    assert len(calls) == 1
+
+
 def test_openai_compatible_tool_call_is_normalized(monkeypatch):
     seen = {}
 

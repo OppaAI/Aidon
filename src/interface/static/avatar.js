@@ -1,4 +1,4 @@
-/* Aidon optional VRM head avatar.
+/* Aidon illustrated robot with an optional owner-provided VRM avatar.
  *
  * The user makes the male VRM himself. Zero-code-change contract:
  *   1. drop the file at aidon/webui/avatar.vrm   (or set AIDON_VRM_PATH)
@@ -7,31 +7,134 @@
  * The chat loads the VRM when one is present, as old Aidon did; without
  * one, the robot placeholder stays.
  *
- * Head-only VRM portrait: three.js + @pixiv/three-vrm, camera locked on
- * the head bone, subtle idle sway + blinking.
+ * The illustrated robot is the default. A supplied VRM replaces it when
+ * one is available.
  */
 (function () {
   "use strict";
 
   const wrap = document.getElementById("avatar-wrap");
   const canvas = document.getElementById("avatar");
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let fallbackMood = "idle";
+  window.aidonSetMood = function (name) { fallbackMood = name === "working" ? "working" : "idle"; };
+
+  // The SVG fallback gets short arm waves, side steps, and hops. Keyframes are eased
+  // between random pauses so it feels lively without being distracting.
+  function animateFallbackIdle() {
+    if (reduceMotion) return;
+    const root = document.querySelector(".robot-body-anim") || document.getElementById("robot");
+    if (!root) return;
+    const head = document.querySelector(".robot-head-anim") || document.getElementById("robot-head");
+    const left = document.querySelector(".robot-arm-left") || document.getElementById("robot-arm-left");
+    const right = document.querySelector(".robot-arm-right") || document.getElementById("robot-arm-right");
+    const pose = { x: 0, y: 0, yaw: 0, head: 0, left: 0, right: 0 };
+    let action = null;
+    let nextGesture = performance.now() + 1800;
+    let previous = performance.now();
+
+    const actions = [
+      { duration: 2300, frames: [
+        [0, 0, 0, 0, 0, 0, 0], [.18, 0, -2, 0, -4, -8, 0], [.34, 0, -2, 0, -4, -32, 0],
+        [.50, 0, -2, 0, -4, -12, 0], [.66, 0, -2, 0, -4, -32, 0], [.82, 0, -1, 0, -2, -10, 0], [1, 0, 0, 0, 0, 0, 0],
+      ] }, // wave
+      { duration: 2100, frames: [
+        [0, 0, 0, 0, 0, 0, 0], [.2, -7, -3, 0, 0, 14, -12], [.42, 7, -5, 0, 0, -12, 14],
+        [.64, -6, -3, 0, 0, 12, -12], [.82, 5, -1, 0, 0, -8, 10], [1, 0, 0, 0, 0, 0, 0],
+      ] }, // step side to side
+      { duration: 1900, frames: [
+        [0, 0, 0, 0, 0, 0, 0], [.2, 0, -7, 0, -2, -24, -24], [.44, 0, -3, 0, -2, -32, -32],
+        [.68, 0, -2, 0, -1, -16, -16], [1, 0, 0, 0, 0, 0, 0],
+      ] }, // happy hop with arms up
+    ];
+
+    function interpolate(frames, p) {
+      let i = 0;
+      while (i < frames.length - 2 && p > frames[i + 1][0]) i++;
+      const a = frames[i], b = frames[i + 1];
+      const u = Math.max(0, Math.min(1, (p - a[0]) / (b[0] - a[0])));
+      const eased = u * u * (3 - 2 * u);
+      return a.slice(1).map((v, j) => v + (b[j + 1] - v) * eased);
+    }
+
+    function tick(now) {
+      const dt = Math.min(0.05, (now - previous) / 1000);
+      previous = now;
+      if (!action && now >= nextGesture) {
+        action = { ...actions[Math.floor(Math.random() * actions.length)], started: now };
+      }
+      if (action) {
+        const p = Math.min(1, (now - action.started) / action.duration);
+        const [x, y, yaw, headAngle, leftAngle, rightAngle] = interpolate(action.frames, p);
+        pose.x = x; pose.y = y; pose.yaw = yaw;
+        pose.head = headAngle; pose.left = leftAngle; pose.right = rightAngle;
+        if (p >= 1) {
+          action = null;
+          nextGesture = now + (fallbackMood === "working" ? 6500 : 3500) + Math.random() * 7000;
+        }
+      }
+      root.style.transform = `perspective(420px) rotateY(${pose.yaw.toFixed(1)}deg) translate(${pose.x.toFixed(1)}px, ${pose.y.toFixed(1)}px)`;
+      if (head) head.style.transform = `rotate(${pose.head.toFixed(1)}deg)`;
+      if (left) left.style.transform = `rotate(${pose.left.toFixed(1)}deg)`;
+      if (right) right.style.transform = `rotate(${pose.right.toFixed(1)}deg)`;
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+  animateFallbackIdle();
+
+  // The SVG mouth uses text-derived visemes; audio level only modulates
+  // how open each pose is. A loaded VRM keeps its own morph-target driver.
+  const mouthShapes = {
+    ah: "M94 64 Q100 62 106 64 Q109 68 106 73 Q100 77 94 73 Q91 68 94 64Z",
+    ee: "M91 66 Q100 64 109 66 Q108 70 100 72 Q92 70 91 66Z",
+    oh: "M96 63 Q100 61 104 63 Q108 67 105 73 Q100 77 95 73 Q92 67 96 63Z",
+    oo: "M97 64 Q100 62 103 64 Q106 67 104 72 Q100 75 96 72 Q94 67 97 64Z",
+    fv: "M92 67 Q100 66 108 67 L106 70 Q100 71 94 70Z",
+    teeth: "M93 65 Q100 63 107 65 L106 70 Q100 72 94 70Z",
+  };
+  let mouthViseme = "closed";
+  let mouthLevel = 0;
+  function paintMouth(smileId, openId) {
+    const smile = document.getElementById(smileId);
+    const opening = document.getElementById(openId);
+    if (smile) smile.setAttribute("opacity", mouthViseme === "closed" ? "1" : "0");
+    if (opening) {
+      opening.setAttribute("d", mouthShapes[mouthViseme] || mouthShapes.teeth);
+      opening.setAttribute("opacity", mouthViseme === "closed" ? "0" : String(Math.min(1, mouthLevel * 5)));
+      const scaleY = (0.72 + mouthLevel * 0.42).toFixed(2);
+      opening.setAttribute("transform", `translate(0 ${69 - 69 * scaleY}) scale(1 ${scaleY})`);
+    }
+  }
+  window.aidonSetMouthPose = function (viseme) {
+    mouthViseme = mouthShapes[viseme] ? viseme : "closed";
+    paintMouth("fallback-mouth-smile", "fallback-mouth-open");
+    paintMouth("mouth-smile", "mouth-open");
+  };
+  // The audio envelope adds natural opening strength without reducing the
+  // mouth to a single pulsing circle.
+  window.aidonSetMouthOpen = function (level) {
+    mouthLevel = Math.max(0, Math.min(1, Number(level) || 0));
+    paintMouth("fallback-mouth-smile", "fallback-mouth-open");
+    paintMouth("mouth-smile", "mouth-open");
+  };
 
   // Load the VRM into the chat when one is present, as old Aidon did;
   // without one, the robot placeholder stays.
   async function boot() {
     let status;
     try {
-      const r = await fetch("/api/avatar/status");
-      status = await r.json();
-    } catch (e) {
-      return; // backend unreachable — placeholder stays
+      const response = await fetch("/api/avatar/status");
+      status = await response.json();
+    } catch (_) {
+      return; // The illustrated robot remains available without the API.
     }
-    if (!status || !status.present) return; // clean placeholder state
+    if (!status || !status.present) return;
     try {
       await loadModel();
       if (wrap) wrap.classList.add("has-model");
-    } catch (e) {
-      console.warn("[avatar] VRM load failed, keeping placeholder:", e);
+    } catch (error) {
+      console.warn("[avatar] VRM load failed, keeping the illustrated robot:", error);
     }
   }
 
@@ -186,6 +289,9 @@
       mouthLevel = Math.max(0, Math.min(1, level));
     };
     let blinkAt = 2.5, blinkT = -1, t = 0;
+    let idleNext = 0;
+    const idle = { x: 0, y: 0, z: 0 };
+    const idleTarget = { x: 0, y: 0, z: 0 };
     const clock = new THREE.Clock();
     const baseRX = head ? head.rotation.x : 0;
     const baseRY = head ? head.rotation.y : 0;
@@ -196,10 +302,25 @@
       t += dt;
       // subtle sway (incommensurate freqs so it never looks looped)
       if (head) {
-        const bounce = mood.mouth * 0.6;   // a happier face moves a little more
-        head.rotation.y = baseRY + (0.07 + bounce * 0.03) * Math.sin(t * 0.45);
-        head.rotation.x = baseRX + 0.035 * Math.sin(t * 0.62 + 1.3);
-        head.rotation.z = 0.02 * Math.sin(t * 0.3 + 0.5);
+        if (reduceMotion) {
+          head.rotation.x = baseRX;
+          head.rotation.y = baseRY;
+          head.rotation.z = 0;
+        } else {
+          if (t >= idleNext) {
+            idleTarget.x = (Math.random() * 2 - 1) * 0.025;
+            idleTarget.y = (Math.random() * 2 - 1) * 0.065;
+            idleTarget.z = (Math.random() * 2 - 1) * 0.018;
+            idleNext = t + 1.4 + Math.random() * 2.4;
+          }
+          const idleEase = 1 - Math.exp(-dt * 1.3);
+          idle.x += (idleTarget.x - idle.x) * idleEase;
+          idle.y += (idleTarget.y - idle.y) * idleEase;
+          idle.z += (idleTarget.z - idle.z) * idleEase;
+          head.rotation.x = baseRX + idle.x;
+          head.rotation.y = baseRY + idle.y;
+          head.rotation.z = idle.z;
+        }
       }
       // mood: ease toward the target so the smile arrives softly
       const k = Math.min(1, dt * 3);

@@ -80,9 +80,20 @@ class RunCheckpoint:
             return None
         if not isinstance(data, dict) or not data.get("run_id"):
             return None
+        raw_attempt = data.get("attempt", 1)
+        if not isinstance(raw_attempt, (int, float, str)):
+            return None
+        try:
+            attempt = max(1, int(raw_attempt))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        for key in ("passed", "verified"):
+            values = data.get(key, [])
+            if not isinstance(values, list) or any(not isinstance(x, str) for x in values):
+                return None
         phase = str(data.get("phase") or "started")
         if phase not in PHASES:
-            phase = "started"
+            return None
         return cls(
             run_id=str(data["run_id"]),
             goal=str(data.get("goal") or ""),
@@ -90,7 +101,7 @@ class RunCheckpoint:
             plan=dict(data.get("plan") or {}) if isinstance(data.get("plan"), dict) else {},
             passed=[str(x) for x in (data.get("passed") or [])],
             verified=[str(x) for x in (data.get("verified") or [])],
-            attempt=max(1, int(data.get("attempt") or 1)),
+            attempt=attempt,
             plan_fingerprint=str(data.get("plan_fingerprint") or ""),
             updated_at=str(data.get("updated_at") or ""),
         )
@@ -146,6 +157,8 @@ def plan_to_dict(plan: Any) -> dict:
             "steps": list(plan.get("steps") or []),
             "deliverables": list(plan.get("deliverables") or []),
             "criteria": list(plan.get("criteria") or []),
+            "summary": str(plan.get("summary") or ""),
+            "deliverable_descriptions": dict(plan.get("deliverable_descriptions") or {}),
         }
     steps_out = []
     for step in getattr(plan, "steps", []) or []:
@@ -155,6 +168,7 @@ def plan_to_dict(plan: Any) -> dict:
                 "args": dict(step.args or {}),
                 "deliverable": step.deliverable or "",
                 "criteria": step.criteria or "",
+                "description": getattr(step, "description", "") or "",
                 "executor": getattr(step, "executor", "tool") or "tool",
             })
         elif isinstance(step, dict):
@@ -166,6 +180,9 @@ def plan_to_dict(plan: Any) -> dict:
         "steps": steps_out,
         "deliverables": list(getattr(plan, "deliverables", []) or []),
         "criteria": list(getattr(plan, "criteria", []) or []),
+        "summary": str(getattr(plan, "summary", "") or ""),
+        "deliverable_descriptions": dict(
+            getattr(plan, "deliverable_descriptions", {}) or {}),
     }
 
 

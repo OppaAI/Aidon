@@ -10,7 +10,7 @@ from src.interface.approval import ApprovalGate, Decision
 
 
 def _runner(tmp_path, extra_tools=None):
-    return GoalRunner(FakeClient(""),
+    return GoalRunner(FakeClient('{"steps": [{"tool": "write", "args": {"file": "deliverable.md", "text": "Verified test deliverable.\\n"}, "deliverable": "deliverable.md"}], "deliverables": ["deliverable.md"], "criteria": []}'),
                       Sandbox(tmp_path / "work"),
                       ApprovalGate(lambda kind, title, body: Decision("approved", "test")),
                       tmp_path, extra_tools=extra_tools)

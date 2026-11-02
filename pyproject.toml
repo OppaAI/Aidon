@@ -29,6 +29,9 @@ memory = [
 sparse = [
     "fastembed>=0.3",
 ]
+modal = [
+    "modal==1.6.3",
+]
 kb = [
     "pypdf",
     "python-docx",
@@ -45,9 +48,15 @@ office = [
     "pytesseract",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.setuptools]
 packages = ["src", "src.system", "src.memory", "src.agentic", "src.interface", "src.capabilities", "src.social"]
 
 [tool.setuptools.package-data]
 "src.interface" = ["static/**/*"]
 "src.capabilities" = ["security_rules/*.yml"]
+
+[tool.setuptools.data-files]
+"share/aidon" = ["AGENTS.md"]

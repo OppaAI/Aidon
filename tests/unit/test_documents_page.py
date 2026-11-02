@@ -19,7 +19,7 @@ def test_documents_page_exists_with_guide_sections():
 def test_chat_nav_links_documents_route():
     index = STATIC_DIR / "index.html"
     assert 'href="/documents"' in index.read_text(encoding="utf-8")
-    webui = Path(__file__).resolve().parents[2] / "src" / "interface" / "webui.py"
-    source = webui.read_text(encoding="utf-8")
-    assert '"/documents"' in source
-    assert '"docs.html"' in source
+    interface = Path(__file__).resolve().parents[2] / "src" / "interface"
+    source = (interface / "webui_http.py").read_text(encoding="utf-8")
+    assert "parsed.path == '/documents'" in source
+    assert "_send_static('docs.html')" in source

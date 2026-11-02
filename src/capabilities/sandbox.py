@@ -14,9 +14,8 @@ Backends, in order of strength:
   every result from it is labeled as such. Never present a fallback
   run as an isolated run.
 
-A sandbox run never writes outside its workdir. The loop checks
-that by running in the workdir and by never passing a path outside
-it to the command.
+Only the isolated backend restricts filesystem access. The optional
+subprocess fallback is not a security boundary.
 """
 
 from __future__ import annotations
@@ -24,6 +23,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import signal
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,7 +46,7 @@ class Sandbox:
                  mem_mb: int = 1024, nproc: int = 256,
                  fsize_mb: int = 512, cpu_seconds: int = 0,
                  backend: str = "auto", allow_network: bool = False,
-                 require_isolation: bool = False):
+                 require_isolation: bool = True):
         self.workdir = Path(workdir)
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.timeout_seconds = timeout_seconds
@@ -97,16 +98,52 @@ class Sandbox:
         if env:
             run_env = dict(os.environ)
             run_env.update({str(k): str(v) for k, v in env.items()})
+        proc = subprocess.Popen(
+            full, cwd=self.workdir, stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=run_env,
+            start_new_session=True, preexec_fn=self._apply_resource_limits)
+        limit = 1024 * 1024
+        outputs = [bytearray(), bytearray()]
+        truncated = [False, False]
+        def drain(stream, index):
+            try:
+                while chunk := stream.read(65536):
+                    remaining = limit - len(outputs[index])
+                    outputs[index].extend(chunk[:max(0, remaining)])
+                    if len(chunk) > remaining:
+                        truncated[index] = True
+            finally:
+                stream.close()
+        readers = [threading.Thread(target=drain, args=(stream, i), daemon=True)
+                   for i, stream in enumerate((proc.stdout, proc.stderr))]
+        for reader in readers:
+            reader.start()
+        if input_text is not None:
+            def send_input():
+                try:
+                    proc.stdin.write(input_text.encode())
+                    proc.stdin.close()
+                except (OSError, ValueError):
+                    pass
+            threading.Thread(target=send_input, daemon=True).start()
+        timed_out = False
         try:
-            proc = subprocess.run(
-                full, cwd=self.workdir, capture_output=True, text=True,
-                timeout=self.timeout_seconds, input=input_text,
-                env=run_env,
-                preexec_fn=self._apply_resource_limits)
-            return SandboxResult(proc.returncode, proc.stdout, proc.stderr,
-                                 isolated)
-        except subprocess.TimeoutExpired as exc:
-            return SandboxResult(124, exc.stdout or "", "timeout", isolated)
+            proc.wait(timeout=self.timeout_seconds)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+        # Terminate descendants even if the leader exited while they held pipes.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait()
+        for reader in readers:
+            reader.join(timeout=2)
+        values = [bytes(value).decode("utf-8", errors="replace") +
+                  ("\n[output truncated]" if truncated[i] else "")
+                  for i, value in enumerate(outputs)]
+        return SandboxResult(124 if timed_out else proc.returncode, values[0],
+                             "timeout" if timed_out else values[1], isolated)
 
     def _apply_resource_limits(self) -> None:
         """Apply Aidon's optional POSIX limits to the child process.
@@ -164,6 +201,10 @@ class Sandbox:
             self.bwrap,
             "--unshare-pid", "--die-with-parent",
             "--clearenv",
+            # Start from an empty root. Binding only selected system
+            # paths prevents the sandbox from inheriting the host's
+            # /home, /tmp, and other writable locations.
+            "--tmpfs", "/",
             "--setenv", "PATH", f"{sys.prefix}/bin:/usr/local/bin:/usr/bin:/bin",
             "--setenv", "HOME", wd,
             "--setenv", "TMPDIR", "/tmp",
@@ -184,13 +225,35 @@ class Sandbox:
             else:
                 argv += ["--ro-bind-try", sysdir, sysdir]
         argv += ["--proc", "/proc", "--dev", "/dev"]
+        # Temporary files belong to this run and never share the host's
+        # /tmp. The workdir is mounted separately below.
+        argv += ["--dir", "/tmp", "--tmpfs", "/tmp"]
         # The interpreter may live outside /usr (a uv-managed venv
         # points into ~/.local/share/uv/python/...), so bind its tree
         # read-only, or `python3` inside the sandbox is a dangling
         # symlink and every generated script fails to start.
         for extra in self._interpreter_exposes():
             argv += ["--ro-bind-try", extra, extra]
-        argv += ["--bind", wd, wd, "--chdir", wd, "--", *command]
+        workdir = Path(wd)
+        protected = (Path("/usr"), Path("/bin"), Path("/sbin"),
+                     Path("/lib"), Path("/lib64"), Path("/etc"),
+                     Path("/proc"), Path("/dev"))
+        if any(workdir == root or root in workdir.parents
+               for root in protected):
+            raise ValueError(
+                "sandbox workdir cannot be inside a system mount")
+        # Recreate only the workdir's parent names in the fresh root and
+        # make them read-only. Otherwise a workdir under /tmp or /home
+        # would leave its host siblings writable inside the sandbox.
+        parents = [parent for parent in workdir.parents
+                   if parent not in (Path("/"), Path("/tmp"))]
+        for parent in reversed(parents):
+            argv += ["--dir", str(parent)]
+        argv += ["--dir", wd]
+        argv += ["--bind", wd, wd]
+        for parent in parents:
+            argv += ["--chmod", "0555", str(parent)]
+        argv += ["--chdir", wd, "--", *command]
         return argv
 
     @staticmethod

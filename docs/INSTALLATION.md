@@ -27,6 +27,91 @@ per run is post-hackathon.
 then starts the WebUI server with the same home, backend, and
 ingest path.
 
+## Docker WebUI
+
+Docker Compose runs the WebUI in a container and keeps Aidon's state in
+`./aidon-data`. This Compose setup uses Linux host networking so the WebUI
+can keep its localhost-only bind and localhost authentication behavior. It
+is intended for Docker Engine on Linux. Copy the example configuration into
+the data directory, add your model endpoint and key there, then start the
+service:
+
+```sh
+mkdir -p aidon-data
+cp examples/.env.example aidon-data/.env
+chmod 600 aidon-data/.env
+# Edit aidon-data/.env with your model endpoint, key, and model name.
+export AIDON_UID="$(id -u)" AIDON_GID="$(id -g)"
+docker compose up --build -d
+```
+
+For code development, use the development overlay after the image has been
+built once:
+
+```sh
+export AIDON_UID="$(id -u)" AIDON_GID="$(id -g)"
+docker compose -f compose.yaml -f compose.dev.yaml up -d
+```
+
+The overlay mounts `./src` read-only into the container and points Python at
+the mounted package. After editing Python code, restart the service to load
+the changes:
+
+```sh
+docker compose -f compose.yaml -f compose.dev.yaml restart aidon
+```
+
+This avoids rebuilding for ordinary source edits. Changes to dependencies,
+`pyproject.toml`, `uv.lock`, or the `Dockerfile` still require rebuilding
+with `docker compose -f compose.yaml -f compose.dev.yaml up --build -d`.
+Dependency versions are locked in `uv.lock`; after changing dependency
+metadata in `pyproject.toml`, run `uv lock` before rebuilding. The Dockerfile
+uses a BuildKit cache for downloaded packages and installs dependencies in a
+separate layer, so ordinary source rebuilds reuse the heavy ML dependencies.
+Use the same `aidon-data` directory in either mode.
+
+The Docker image includes the dense and sparse embedding packages so memory
+uses semantic embeddings instead of the test-only hash fallback. On first
+use, the embedding models are downloaded into `aidon-data`; allow extra disk
+space and network access for that initial download. If the dashboard still
+shows `HashEmbedder`, check that `.env` does not set `AIDON_EMBEDDER=hash`.
+
+If you already started an earlier Docker image and its dashboard showed
+`HashEmbedder · QdrantStore`, its local Qdrant collections were created with
+128-dimensional hash vectors. The semantic embedder uses 768 dimensions, so
+back up and move that database before switching. Stop the container, then run
+this from the repository root (the timestamped directory preserves the old
+database; `.env` is untouched):
+
+```sh
+docker compose down
+mv aidon-data/qdrant "aidon-data/qdrant-hash-backup-$(date +%Y%m%d-%H%M%S)"
+export AIDON_UID="$(id -u)" AIDON_GID="$(id -g)"
+docker compose up --build -d
+```
+
+The new Qdrant collections are created with the semantic embedder's dimension.
+Keep the backup until you have confirmed the new memory works; hash vectors
+cannot be reused as semantic vectors.
+
+Open `http://127.0.0.1:8765/`. Choose another local port by setting
+`AIDON_WEBUI_PORT` before `docker compose up`. Stop the service with
+`docker compose down`; the `aidon-data` directory remains on the host. The
+container runs as your supplied UID/GID (10001 by default), so the export
+above lets it write files owned by your host user. Keep
+the WebUI bound to localhost; do not change it to `0.0.0.0` or publish the
+full WebUI to the internet. Host networking shares the host network stack,
+so only run this container from a trusted Aidon image. This container
+packaging does not certify that Bubblewrap or any
+other execution backend can run inside your Docker host; validate the actual
+backend separately before using execution features.
+
+For a release, update `pyproject.toml`, move the corresponding notes from
+`[Unreleased]` into a versioned `CHANGELOG.md` section, run CI, then push a
+matching tag such as `v0.4.1`. The release workflow checks the tag against
+the project version and changelog, publishes the GitHub Release, and pushes
+the container image to GitHub Container Registry.
+
 At minimum, configure an endpoint, key, and model. Heavy ML packages and optional features are offered interactively by `./setup.sh`; answer yes only for capabilities you need. Use `--with-optional` to accept every optional package without prompting:
 
 - `AIDON_API_ENDPOINT` — endpoint URL for the model API
@@ -62,3 +147,15 @@ Setup and launch, in that order, are the entry points, as in the Aidon guides.
 ```
 
 A VM is not installed or provisioned by setup; the VM backend connects over SSH to a VM you already run, and a disposable VM per run is post-hackathon.
+
+
+The image installs Modal from the same frozen lockfile as the other runtime
+packages. Native installs can opt into it with `uv sync --extra modal`.
+The operating manual is included in the wheel and image. Put owner-maintained
+`SOUL.md`, `USER.md`, or an explicitly approved manual override in `AIDON_HOME`
+(`aidon-data` on the host for the default Compose deployment); these files take
+precedence over packaged defaults and persist across container replacement.
+
+Compose reports container health after checking the local listening port.
+This is a liveness check; confirm the configured model, memory store and sandbox
+with the acceptance checks in `PRODUCTION_READINESS.md`.

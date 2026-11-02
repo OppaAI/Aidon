@@ -1,8 +1,12 @@
 """Wiring tests: Gmail, MCP client, pre-approval, memory extras, research, transcript, factory, polling."""
 
 import json
+import io
 import sys
+import urllib.error
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -12,9 +16,14 @@ from src.memory.memory_extras import backup, export_points, redact, rolling_summ
 from src.interface.preapproval import PreapprovalStore
 from src.agentic.research_allow import is_allowed, load_allowlist, research_multiround
 from src.social.youtube_transcript import fetch_transcript
-from src.interface.messaging import poll_slack_once, MessagingConfig
+from src.interface.messaging import (
+    poll_slack_once, poll_slack_thread_once, MessagingConfig, send_slack)
 from src.interface.webui import WebUIServer
 from src.interface.triggers import TriggerDispatcher
+from src.interface.triggers import TriggerEvent
+from src.interface.slack_polling import (
+    configured_slack_channels, dispatch_slack_message,
+    process_polled_messages)
 
 
 def test_gmail_sender_fake(tmp_path):
@@ -78,10 +87,128 @@ def test_youtube_transcript_fake():
 def test_slack_polling_skips_bots_and_old():
     config = MessagingConfig(slack_bot_token="x")
     def fake_fetch(url, token, params):
-        return {"messages": [{"ts": "3", "text": "new"}, {"ts": "2", "text": "bot", "bot_id": "B1"}, {"ts": "1", "text": "old"}]}
+        return {"messages": [{"ts": "4", "text": "bot", "bot_id": "B1"},
+                              {"ts": "3", "text": "new"},
+                              {"ts": "2", "text": "bot", "bot_id": "B1"},
+                              {"ts": "1", "text": "old"}]}
     messages, newest = poll_slack_once(config, "C1", last_ts="1", fetch=fake_fetch)
     assert [m["text"] for m in messages] == ["new"]
-    assert newest == "3"
+    assert newest == "4"
+
+
+def test_configured_slack_channels_splits_and_deduplicates_ids():
+    assert configured_slack_channels(" C1, D1, C1 ,, ") == ("C1", "D1")
+    assert configured_slack_channels("") == ()
+
+
+def test_slack_thread_polling_returns_only_new_human_replies():
+    config = MessagingConfig(slack_bot_token="x")
+    calls = []
+
+    def fake_fetch(url, token, params):
+        calls.append((url, params))
+        return {"ok": True, "messages": [
+            {"ts": "10.0", "text": "original", "user": "U1"},
+            {"ts": "11.0", "text": "Aidon plan", "bot_id": "B1"},
+            {"ts": "12.0", "text": "proceed", "user": "U1"},
+            {"ts": "13.0", "text": "later bot response", "bot_id": "B1"},
+        ]}
+
+    messages, newest = poll_slack_thread_once(
+        config, "D1", "10.0", last_ts="11.5", fetch=fake_fetch)
+    assert [message["text"] for message in messages] == ["proceed"]
+    assert messages[0]["thread_ts"] == "10.0"
+    assert newest == "13.0"  # checkpoint even bot replies to avoid rescanning
+    assert calls[0][0].endswith("/conversations.replies")
+    assert calls[0][1]["ts"] == "10.0"
+
+
+def test_slack_polling_surfaces_api_permission_errors():
+    config = MessagingConfig(slack_bot_token="x")
+
+    with pytest.raises(RuntimeError, match="conversations.history failed: missing_scope"):
+        poll_slack_once(
+            config, "D1",
+            fetch=lambda *_args: {"ok": False, "error": "missing_scope"})
+
+
+def test_slack_http_error_logs_status_and_safe_api_code():
+    config = MessagingConfig(slack_bot_token="x")
+
+    def fail_post(*_args):
+        raise urllib.error.HTTPError(
+            "https://slack.com/api/chat.postMessage", 403, "Forbidden", {},
+            io.BytesIO(b'{"error":"missing_scope","token":"secret"}'))
+
+    result = send_slack(config, "C1", "hello", post=fail_post)
+    assert result == {"ok": False, "error": "HTTP 403: missing_scope"}
+    assert "secret" not in result["error"]
+
+
+def test_slack_bot_replies_ignore_legacy_webhooks_and_preserve_thread():
+    config = MessagingConfig(
+        slack_bot_token="bot-token",
+        slack_webhooks={"C1": "https://hooks.slack.com/services/revoked"})
+    calls = []
+
+    def post(url, token, payload):
+        calls.append((url, token, payload))
+        return {"ok": True, "ts": "2.0"}
+
+    assert send_slack(config, "C1", "reply", thread_ts="1.0", post=post)["ok"]
+    assert calls == [("https://slack.com/api/chat.postMessage", "bot-token",
+                      {"channel": "C1", "text": "reply", "thread_ts": "1.0"})]
+
+
+def test_slack_webhook_accepts_plain_ok_without_a_bot(monkeypatch):
+    config = MessagingConfig(slack_webhooks={"C1": "https://hooks.slack.com/services/test"})
+    requests = []
+
+    def open_request(request, **kwargs):
+        requests.append(request)
+        return io.BytesIO(b"ok")
+
+    monkeypatch.setattr("urllib.request.urlopen", open_request)
+    assert send_slack(config, "C1", "reply") == {"ok": True, "webhook": True}
+    assert "Authorization" not in requests[0].headers
+    assert json.loads(requests[0].data) == {"text": "reply"}
+
+
+def test_slack_poll_advances_cursor_only_after_handling_each_message():
+    cursor = {"C1": "1"}
+    handled = []
+
+    def handle(message):
+        assert cursor["C1"] < message["ts"]
+        handled.append(message["ts"])
+
+    def checkpoint(timestamp):
+        assert handled[-1] == timestamp
+        cursor["C1"] = timestamp
+
+    process_polled_messages(
+        [{"ts": "2"}, {"ts": "3"}], handle, checkpoint)
+    assert cursor["C1"] == "3"
+
+
+def test_slack_dispatch_replies_when_handler_raises():
+    dispatcher = TriggerDispatcher()
+
+    def fail(_event):
+        raise RuntimeError("private detail must not reach Slack")
+
+    dispatcher.register("slack", fail)
+    event = TriggerEvent(source="slack", goal="hello")
+    sent = []
+    dispatch_slack_message(
+        dispatcher, event, channel="C1", thread_ts="123.4",
+        sender=lambda channel, text, thread_ts=None:
+            sent.append((channel, text, thread_ts)), ack_after=1)
+    assert len(sent) == 1
+    assert sent[0][0] == "C1"
+    assert sent[0][2] == "123.4"
+    assert "internal error" in sent[0][1]
+    assert "private detail" not in sent[0][1]
 
 
 def test_factory_stages_from_trace(tmp_path):
@@ -106,3 +233,36 @@ def test_mcp_client_fake_server(tmp_path):
     client.start()
     assert client.list_tools() == [{"name": "echo"}]
     client.close()
+
+
+def test_slack_history_pagination_keeps_all_messages_and_attachments():
+    config = MessagingConfig(slack_bot_token="x")
+    calls = []
+
+    def fetch(url, token, params):
+        calls.append(params)
+        if params.get("cursor") == "next":
+            return {"ok": True, "messages": [{"ts": "9.0", "text": "older"}]}
+        return {"ok": True, "messages": [
+            {"ts": "11.0", "text": "newest"},
+            {"ts": "10.0", "text": "file", "files": [{"id": "F1"}]}],
+            "response_metadata": {"next_cursor": "next"}}
+
+    messages, newest = poll_slack_once(config, "C1", last_ts="8.0", fetch=fetch)
+    assert [m["ts"] for m in messages] == ["9.0", "10.0", "11.0"]
+    assert messages[1]["files"] == [{"id": "F1"}]
+    assert newest == "11.0"
+    assert calls[1]["oldest"] == "8.0"
+
+
+def test_slack_history_rate_limit_preserves_retry_delay(monkeypatch):
+    from src.interface.messaging import SlackRateLimited
+
+    def limited(*args, **kwargs):
+        raise urllib.error.HTTPError("https://slack.com/api/conversations.history",
+                                     429, "Too Many Requests", {"Retry-After": "90"}, io.BytesIO(b""))
+
+    monkeypatch.setattr("urllib.request.urlopen", limited)
+    with pytest.raises(SlackRateLimited) as error:
+        poll_slack_once(MessagingConfig(slack_bot_token="x"), "C1")
+    assert error.value.retry_after == 90

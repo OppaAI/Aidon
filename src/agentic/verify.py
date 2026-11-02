@@ -14,6 +14,10 @@ Criteria, simple and checkable, in plain words:
 - "ledger X total is N" -> recomputed total for X equals N,
   where N is in cents for a JSON ledger, or in the file's
   own units for a text ledger.
+- "currency items in X total at most N" -> sum of bullet-list
+  prices in X is at most N dollars.
+- "currency items in X match stated total" -> computed item
+  prices match the dollar amount on its Estimated Total line.
 Anything else is not a checkable criterion: it is
 reported as unverified, not passed, so a model cannot
 pass itself by writing a vague criterion.
@@ -47,6 +51,7 @@ import json
 import re
 import zipfile
 import zlib
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 # Extraction is best-effort and bounded: a huge binary must
@@ -299,6 +304,129 @@ def _ledger_total(workdir: Path, name: str) -> int | None:
         return None
 
 
+_CURRENCY_AMOUNT = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?"
+
+
+def _currency_cents(amount: str) -> int | None:
+    try:
+        value = Decimal(amount.replace(",", ""))
+        return int(value * 100)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _currency_list(workdir: Path, name: str) -> tuple[int | None, int | None]:
+    """Return itemized and stated totals in cents for a Markdown price list."""
+    path = resolve_in_workdir(workdir, name)
+    if path is None or not path.is_file():
+        return None, None
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None, None
+
+    item_total = 0
+    item_count = 0
+    item_pattern = re.compile(
+        rf"^\s*[-*+]\s+(.+?)\s+(?:[-–—:]\s*)?\$\s*({_CURRENCY_AMOUNT})\s*$"
+    )
+    total_pattern = re.compile(
+        rf"^\s*(?:estimated|grand|shopping)?\s*total\s*[:=]\s*"
+        rf"\$\s*({_CURRENCY_AMOUNT})\b",
+        re.IGNORECASE,
+    )
+    stated_totals: list[int] = []
+    for line in content.splitlines():
+        total_match = total_pattern.match(line)
+        if total_match:
+            cents = _currency_cents(total_match.group(1))
+            if cents is not None:
+                stated_totals.append(cents)
+            continue
+        item_match = item_pattern.match(line)
+        if item_match and not re.search(r"\btotal\b", item_match.group(1), re.IGNORECASE):
+            cents = _currency_cents(item_match.group(2))
+            if cents is None:
+                return None, None
+            item_total += cents
+            item_count += 1
+    if item_count == 0 or len(stated_totals) != 1:
+        return None, stated_totals[0] if len(stated_totals) == 1 else None
+    return item_total, stated_totals[0]
+
+
+def budget_currency_criteria(goal: str, deliverables: list[str],
+                             workdir: Path) -> list[str]:
+    """Add deterministic price checks for explicitly budgeted food plans.
+
+    The planner is asked to include these criteria, but model-generated
+    criteria are not authoritative: omitting one must not turn a budget
+    claim into a pass. Require itemized prices and one recomputable total
+    for budgeted grocery, shopping, or meal-plan deliverables.
+    """
+    goal_text = str(goal or "")
+    if not re.search(r"\b(?:grocery|groceries|shopping list|meal plan|"
+                     r"meal planning|food plan|menu)\b",
+                     goal_text, re.IGNORECASE):
+        return []
+    budget_match = re.search(
+        rf"\b(?:under|below|up to|at most|no more than|less than|"
+        rf"budget(?:\s+(?:of|is|up to|under)|\s*[:=])?|"
+        rf"maximum(?:\s+of)?)\s*"
+        rf"(?:(?:CAD|USD|EUR|GBP|AUD|NZD)\s*)?\$?\s*"
+        rf"({_CURRENCY_AMOUNT})\b",
+        goal_text, re.IGNORECASE)
+    if not budget_match:
+        return []
+    amount = budget_match.group(1)
+    criteria: list[str] = []
+    for raw_name in deliverables or []:
+        name = _relative_name(workdir, raw_name)
+        path = resolve_in_workdir(workdir, raw_name)
+        if path is None or path.suffix.lower() not in {".md", ".txt", ".csv"}:
+            continue
+        criteria.extend((
+            f"currency items in {name} total at most ${amount}",
+            f"currency items in {name} match stated total",
+        ))
+    return criteria
+
+
+def requested_shopping_item_criteria(goal: str, deliverables: list[str],
+                                     workdir: Path) -> list[str]:
+    """Require an explicitly requested item in the shopping-list section."""
+    goal_text = str(goal or "")
+    food_context = re.search(
+        r"\b(?:shopping list|grocery list|produce section|produce list|"
+        r"grocery|groceries|meal plan|food plan|menu)\b",
+        goal_text, re.IGNORECASE)
+    if not food_context:
+        food_context = any(re.search(
+            r"grocery|shopping|meal|food|menu",
+            Path(str(name)).name, re.IGNORECASE)
+            for name in (deliverables or []))
+    if not food_context:
+        return []
+    match = re.search(
+        r"\badd\s+(?!up\b)(?:the\s+)?([A-Za-z][A-Za-z -]*?)"
+        r"(?=\s+(?:to\b|with\b|and\b)|[,.;!?]|$)",
+        goal_text, re.IGNORECASE)
+    if not match:
+        return []
+    item = re.sub(r"\s+", " ", match.group(1)).strip(" -")
+    if not item:
+        return []
+    candidates = [name for name in (deliverables or [])
+                  if Path(str(name)).suffix.lower() in {".md", ".txt", ".csv"}]
+    if len(candidates) > 1:
+        named = [name for name in candidates
+                 if re.search(r"grocery|shopping|meal|food|menu",
+                              Path(str(name)).name, re.IGNORECASE)]
+        candidates = named or candidates
+    return [f"shopping list in {_relative_name(workdir, name)} contains {item}"
+            for name in candidates]
+
+
 def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
     text = str(criterion).strip()
     # Models hedge with trailing parentheticals ("... (or ... if ...)").
@@ -313,6 +441,42 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
         if stripped == text:
             break
         text = stripped
+    match = re.match(
+        r"^shopping list in\s+(.+?)\s+contains\s+(.+)$",
+        text, re.IGNORECASE)
+    if match:
+        name = _relative_name(workdir, match.group(1))
+        path = resolve_in_workdir(workdir, match.group(1))
+        item = match.group(2).strip()
+        if path is None or not path.is_file():
+            return False, f"{name} missing"
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return False, f"{name} not readable as text"
+        lines = content.splitlines()
+        section: list[str] = []
+        in_section = False
+        for line in lines:
+            heading = re.match(r"^\s*(#{1,6})\s+(.+?)\s*#*\s*$", line)
+            if heading:
+                level = len(heading.group(1))
+                title = heading.group(2).strip().lower()
+                is_list = bool(re.search(
+                    r"\b(?:shopping|grocery)\s+list\b", title))
+                if in_section and level <= 2:
+                    break
+                if is_list:
+                    in_section = True
+                    continue
+            if in_section:
+                section.append(line)
+        item_re = re.compile(
+            rf"^\s*[-*+]\s+.*\b{re.escape(item)}\b.*"
+            rf"\$\s*{_CURRENCY_AMOUNT}\s*$", re.IGNORECASE)
+        ok = any(item_re.search(line) for line in section)
+        return ok, (f"{name} shopping list includes priced {item}"
+                    if ok else f"{name} shopping list missing priced {item}")
     # Models often describe the evidence instead of naming the generated
     # file. The file-producing tool is the source of truth in this case.
     if re.search(r"(?:pdf|document|file)\s+(?:file\s+)?(?:is\s+)?(?:created|exists)\s+inside\s+(?:the\s+)?(?:workdir|workspace folder)(?:\b|$)",
@@ -366,6 +530,23 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
         path = resolve_in_workdir(workdir, match.group(1))
         ok = path is not None and path.is_file() and path.stat().st_size > 0
         return ok, f"{name} non-empty" if ok else f"{name} empty or missing"
+    match = re.match(r"^(.+?)\s+contains exactly\s+([\s\S]*)$",
+                     text, re.IGNORECASE)
+    if match:
+        name, expected = _relative_name(workdir, match.group(1)), match.group(2)
+        path = resolve_in_workdir(workdir, match.group(1))
+        if path is None or not path.is_file():
+            return False, f"{name} missing"
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return False, f"{name} not readable as text"
+        # A single terminal line ending is conventional for text files;
+        # ignore it while preserving any other differences.
+        actual = content.removesuffix("\n").removesuffix("\r")
+        ok = actual == expected
+        return ok, (f"{name} contains the exact requested text" if ok else
+                    f"{name} content mismatch: expected exact requested text")
     match = re.match(r"^(.+?)\s+does not contain\s+(.+)$", text, re.IGNORECASE)
     if match:
         # Absence check, for allergy and dietary criteria ("menu.md does
@@ -421,6 +602,35 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
             f"ledger {name} total {total}" if total == expected else \
             f"ledger {name} total {total} != {expected}"
     match = re.match(
+        rf"^currency items in\s+(.+?)\s+total at most\s+\$?({_CURRENCY_AMOUNT})$",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        name = _relative_name(workdir, match.group(1))
+        item_total, _stated_total = _currency_list(workdir, name)
+        expected = _currency_cents(match.group(2))
+        if item_total is None or expected is None:
+            return False, f"currency items in {name} total not computable"
+        ok = item_total <= expected
+        if ok:
+            return True, f"currency items in {name} total ${item_total / 100:.2f} within budget"
+        return False, f"currency items in {name} total ${item_total / 100:.2f} exceeds ${expected / 100:.2f}"
+    match = re.match(
+        r"^currency items in\s+(.+?)\s+match stated total$",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        name = _relative_name(workdir, match.group(1))
+        item_total, stated_total = _currency_list(workdir, name)
+        if item_total is None or stated_total is None:
+            return False, f"currency items in {name} or stated total not computable"
+        ok = item_total == stated_total
+        if ok:
+            return True, f"currency items in {name} match stated total ${item_total / 100:.2f}"
+        return False, f"currency items in {name} total ${item_total / 100:.2f} != stated ${stated_total / 100:.2f}"
+    match = re.match(
         r"^(?:the )?(?:final )?output message provides link to (?:the )?(.+)$",
         text, re.IGNORECASE)
     if match:
@@ -433,6 +643,69 @@ def check_criterion(workdir: Path, criterion: str) -> tuple[bool, str]:
         return ok, (f"output link target {name} available" if ok else
                     f"output link target {name} missing")
     return False, f"unverified criterion: {criterion}"
+
+
+def requested_exact_content_criteria(goal: str,
+                                     deliverables: list[str]) -> list[str]:
+    """Derive exact-text file checks from explicit user instructions.
+
+    The planner can omit or weaken criteria, so a simple request such as
+    ``file.txt containing exactly hello`` must remain verifiable by code.
+    This deliberately handles only a directly named deliverable and a
+    plain or quoted single-line literal; ambiguous prose is left to the
+    planner and model verifier.
+    """
+    source = str(goal or "")
+    clause = re.search(
+        r"\b(?:contain(?:ing|s)?|contents?\s+(?:of|are|is))\s+exactly\s+",
+        source, re.IGNORECASE)
+    if clause is None:
+        return []
+    tail = source[clause.end():].lstrip()
+    if not tail:
+        return []
+    if tail[0] in ("'", '"', "`"):
+        quote = tail[0]
+        end = tail.find(quote, 1)
+        if end < 0:
+            return []
+        expected = tail[1:end]
+    else:
+        expected = re.split(
+            r"(?:\.\s+(?=[A-Z])|[,;]?\s+(?:then|and then|and verify|"
+            r"verify|do not|don't|without)\b)",
+            tail, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+        # Unquoted final periods usually close the sentence. For literal
+        # text ending in punctuation, quote the value to remove ambiguity.
+        expected = expected.rstrip(".").rstrip()
+    if not expected:
+        return []
+
+    # Prefer the closest planner deliverable named before the clause. If the
+    # planner omitted the requested filename, recover it directly from the
+    # goal so its absence still fails verification.
+    before = source[:clause.start()]
+    candidates = []
+    for name in deliverables or []:
+        clean_name = str(name or "").replace("\\", "/").rstrip("/")
+        basename = clean_name.rsplit("/", 1)[-1]
+        if not basename:
+            continue
+        matches = list(re.finditer(re.escape(basename), before,
+                                   re.IGNORECASE))
+        if matches:
+            candidates.append((matches[-1].start(), clean_name))
+    if not candidates:
+        file_pattern = re.compile(
+            r"(?<![A-Za-z0-9_.-])"
+            r"([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*"
+            r"\.[A-Za-z0-9]{1,12})(?![A-Za-z0-9_.-])")
+        candidates = [(match.start(1), match.group(1))
+                      for match in file_pattern.finditer(before)]
+    if not candidates:
+        return []
+    _, name = max(candidates)
+    return [f"{name} contains exactly {expected}"]
 
 
 def verify_plan(workdir: Path, deliverables: list[str],

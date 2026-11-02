@@ -1,0 +1,61 @@
+# syntax=docker/dockerfile:1.7
+FROM node:24-bookworm-slim AS node-runtime
+
+FROM python:3.12-slim-bookworm
+
+# Some official MCP servers (including Todoist's stdio server) are published
+# for Node. Keep the runtime available without adding npm installs to Aidon's
+# own Python environment; npx only downloads a selected MCP package after its
+# normal connection approval.
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
+# Pin the installer so image builds stay reproducible. uv is only needed
+# during the build; the application runs from its virtual environment.
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    AIDON_HOME=/data \
+    HF_HOME=/data/.cache/huggingface \
+    FASTEMBED_CACHE_PATH=/data/.cache/fastembed \
+    UV_PROJECT_ENVIRONMENT=/opt/aidon/.venv \
+    UV_CACHE_DIR=/root/.cache/uv \
+    UV_LINK_MODE=copy \
+    NPM_CONFIG_CACHE=/data/.cache/npm \
+    PATH=/opt/aidon/.venv/bin:$PATH
+
+WORKDIR /opt/aidon
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y bubblewrap ca-certificates xdotool \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 aidon \
+    && useradd --uid 10001 --gid aidon --create-home \
+       --shell /usr/sbin/nologin aidon \
+    && mkdir -p /data \
+    && chown aidon:aidon /data
+
+COPY pyproject.toml uv.lock README.md ./
+
+# Install the locked runtime dependencies before copying application source.
+# Source edits then reuse this expensive layer, including the ML packages.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project \
+        --extra embed --extra sparse --extra vision --extra modal
+
+COPY src ./src
+COPY AGENTS.md ./
+
+# Install Aidon itself into the already populated environment. Keep the
+# production package non-editable; the dev Compose overlay supplies source.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable \
+        --extra embed --extra sparse --extra vision --extra modal
+
+USER aidon:aidon
+EXPOSE 8765
+ENTRYPOINT ["aidon"]
+CMD ["webui", "serve", "--port", "8765"]

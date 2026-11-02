@@ -3,10 +3,9 @@
 Real provider usage and chars//4 estimates are tracked
 separately and never added into one number. A finished-run
 total uses real counts when every call reported usage
-(basis "actual", agreeing with the trace rows) and the
-estimate otherwise (basis "estimated"). Streamed calls
-use provider usage when the stream carries it, and stay
-estimated otherwise.
+(basis "actual") and the estimate otherwise (basis
+"estimated"). Streamed calls use provider usage when the
+stream carries it, and estimate otherwise.
 """
 
 from src.agentic.counting import CountingClient

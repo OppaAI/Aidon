@@ -1,0 +1,29 @@
+name: Dependency audit
+
+on:
+  pull_request:
+    paths: [pyproject.toml, uv.lock, Dockerfile, .github/workflows/dependencies.yml]
+  push:
+    branches: [dev]
+    paths: [pyproject.toml, uv.lock, Dockerfile, .github/workflows/dependencies.yml]
+  schedule:
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install audit tools
+        run: python3 -m pip install uv==0.13.6 pip-audit
+      - name: Export locked Docker dependencies
+        run: uv export --frozen --no-dev --no-emit-project --extra embed --extra sparse --extra vision --extra modal --output-file /tmp/runtime-requirements.txt > /dev/null
+      - name: Audit runtime dependencies
+        run: python3 -m pip_audit --no-deps --disable-pip -r /tmp/runtime-requirements.txt

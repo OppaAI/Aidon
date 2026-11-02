@@ -1,4 +1,10 @@
-"""Webcam video capture: host-side, approval-gated at the
+"""Webcam photo and video capture primitives.
+
+The tool layer in ``system.main`` owns the mandatory human
+approval gate. These functions only capture when called; they
+never prompt, choose a device, or run automatically.
+
+Webcam video capture: host-side, approval-gated at the
 tool layer (the caller asks the human first; this module
 only records). Mirrors the system-audio recorder's shape:
 tries backends in order, never writes an empty file and
@@ -152,3 +158,53 @@ def record_webcam_clip(seconds: int, out_path, device: str = "/dev/video0",
             continue
         return str(path)
     raise RuntimeError("webcam recording failed: " + "; ".join(errors))
+
+
+def capture_webcam_photo(out_path, device: str = "/dev/video0",
+                         runner=None, cv2_module=None, which=None) -> str:
+    """Capture exactly one still frame to ``out_path``.
+
+    ffmpeg is preferred, with OpenCV as a fallback. The caller
+    must enforce human approval before invoking this host-side
+    camera operation.
+    """
+    if not str(out_path).strip():
+        raise ValueError("out_path is required")
+    if not str(device or "").strip():
+        raise ValueError("device is required")
+    path = Path(out_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    run = runner or _run
+    find = which or shutil.which
+    errors = []
+    if find("ffmpeg") is not None:
+        try:
+            proc = run(["ffmpeg", "-y", "-f", "v4l2", "-i", str(device),
+                        "-frames:v", "1", "-update", "1", str(path)],
+                       timeout=30)
+            if (proc.returncode == 0 and path.is_file()
+                    and path.stat().st_size > 0):
+                return str(path)
+            errors.append("ffmpeg did not produce an image")
+        except Exception as exc:
+            errors.append(f"ffmpeg: {type(exc).__name__}: {exc}")
+    try:
+        cv2 = cv2_module if cv2_module is not None else __import__("cv2")
+        source: object = int(device) if str(device).isdigit() else str(device)
+        cap = cv2.VideoCapture(source)
+        try:
+            if not cap.isOpened():
+                raise RuntimeError(f"camera not opened: {device}")
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                raise RuntimeError("camera frame read failed")
+            if not cv2.imwrite(str(path), frame):
+                raise RuntimeError("image writer failed")
+        finally:
+            cap.release()
+        if not path.is_file() or path.stat().st_size == 0:
+            raise RuntimeError("opencv wrote no image")
+        return str(path)
+    except Exception as exc:
+        errors.append(f"opencv: {type(exc).__name__}: {exc}")
+    raise RuntimeError("webcam photo capture failed: " + "; ".join(errors))

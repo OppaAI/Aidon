@@ -35,6 +35,8 @@
       if (!r.ok) throw new Error("tts " + r.status);
       const url = URL.createObjectURL(await r.blob());
       const audio = new Audio(url);
+      audio.playbackRate = 0.84;
+      audio.preservesPitch = true;
       currentAudio = audio;
       currentBtn = btn;
       btn.textContent = "⏹";
@@ -119,8 +121,11 @@
   document.getElementById("theme-toggle").addEventListener("click", () => {
     const cur = document.documentElement.getAttribute("data-theme");
     const nxt = cur === "dark" ? "light" : "dark";
-    document.documentElement.setAttribute("data-theme", nxt);
-    localStorage.setItem("aidon-theme", nxt);
+    if (window.AidonTheme) window.AidonTheme.set(nxt);
+    else {
+      document.documentElement.setAttribute("data-theme", nxt);
+      localStorage.setItem("aidon-theme", nxt);
+    }
   });
 
   loadDays();

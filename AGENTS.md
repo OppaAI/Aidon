@@ -85,9 +85,11 @@ approval → live → learn
     publishing (publishing always approval-gated).
   - `adopt_tool_plugin` — adopt a tested tool plugin from the workdir
     into `<AIDON_HOME>/toolbox/` (mandatory human approval, kind
-    `install`). Adopted tools register immediately. Plans validated
-    after adoption can use them; re-plan when the current plan needs a
-    newly adopted tool. Every later goal also sees the adopted tools.
+    `install`). Adopted tools register immediately. A plan can use a
+    newly adopted tool later in the same DAG when that step depends on
+    the adoption step; dispatch still checks that adoption succeeded.
+    Re-plan when the current plan cannot express that dependency. Every
+    later goal also sees the adopted tools.
 - **Meta**: `ask_user` (questions), `declare_blocked` (true dead-ends),
   `steer` (mid-run redirection, via the WebUI).
 - **Inbound chat**: `aidon slack listen` watches a Slack DM/channel
@@ -112,6 +114,19 @@ names. Plugins live in the Aidon home once adopted, never in the repo.
   is pure: it gets no sandbox, no approval gate, and no network. Use
   the standard library only. Packages you install into a mission venv
   are NOT importable by a plugin, because plugins run inside Aidon.
+- **Sandbox tools**: to use network or secret capabilities, declare
+  `"mode": "sandbox"` on the tool and the required capabilities in the
+  manifest. Aidon never imports this module in its own process; it runs
+  under the configured Modal backend, or bubblewrap when running locally.
+  Network or secret access triggers a
+  fresh `live` approval for every tool call, even after adoption. A
+  sandbox tool may set `"accepts_attachments": true` to receive the
+  current goal's attached images in `args["_attachments"]`; each file
+  is copied into the isolated run directory and removed after the call.
+  Return `{"text": "...", "files": ["relative/output.png"]}` to
+  publish explicitly named files into the goal workspace. Paths must be
+  relative to the isolated run directory. The owner sees attached image
+  names and tool arguments on the per-call approval card.
 - **Check names first**: tool names must not collide with tools in
   your tool list. Adopting a plugin whose name already exists replaces
   it, after a fresh approval.
@@ -138,6 +153,15 @@ names. Plugins live in the Aidon home once adopted, never in the repo.
 
 ## Capability ladder
 
+When a goal needs a capability that is not already available, do not
+guess the owner's preferred service or implementation. Tell them what is
+missing and direct them to the WebUI Capability Labs at `/labs`. The
+Tool Crafting, Skill Learning, and MCP Connection labs interview the
+owner one question at a time, may research options when requested, and
+produce a brief for the owner to approve before a workflow starts.
+Approval of a brief does not approve plugin adoption, MCP connection,
+package installation, or live actions; those keep their existing gates.
+
 When a goal needs something you don't have, climb in order, never skip
 a rung:
 
@@ -156,8 +180,9 @@ a rung:
    mission venv, run its Python with `.venv/bin/python` in the
    sandbox) or `apt_install`. Both run on the host, need owner
    approval, and are counted against the run's acquisition budget.
-5. **Write a tool plugin**: last resort. Draft, sandbox-test, adopt,
-   as described in Writing tool plugins.
+5. **Write a tool plugin**: last resort. First use the Capability Labs
+   to agree on the desired service and interface. Then draft,
+   sandbox-test, and adopt as described in Writing tool plugins.
 
 ## Acquisition budgets
 
@@ -215,12 +240,19 @@ repair.
 
 ## Optional tools
 
-Non-core built-in tools ship behind a flip, off by
-default: `AIDON_OPTIONAL_TOOLS=0` exposes only the core
+Non-core built-in convenience tools ship behind a flip,
+off by default: `AIDON_OPTIONAL_TOOLS=0` exposes the core
 ladder — fetch, ask, installs, MCP connect, plugin
-adoption, plus read/write. Flipping it on restores the
-full built-in set (web search, documents, social, media,
-email, webcam, YouTube). The flip never gates adopted
+adoption, plus read/write — and specialized capabilities
+that core file/shell tools cannot provide alone. These
+include AI image editing and segmentation, document/office
+and ebook formats, audio transcription/speech, external
+messaging and publishing, indexed document/feed search,
+YouTube tools, schedule management, and self-modification.
+Their existing approval and credential gates still apply.
+Flipping the setting on restores convenience tools too,
+such as chart wrappers, versioned writes, and
+deep-research orchestration. The flip never gates adopted
 plugins or trusted skills: earned tools stay usable.
 
 ## Model routing

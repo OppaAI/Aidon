@@ -4,7 +4,49 @@ import json
 from types import SimpleNamespace
 
 from src.agentic.capability_triage import (
-    build_inventory, inventory_text, triage)
+    build_inventory, builtin_computer_use_covers, builtin_image_edit_covers,
+    inventory_text, triage)
+
+
+def test_attached_image_edit_is_covered_by_registered_builtin():
+    assert builtin_image_edit_covers(
+        "Edit the attached image", {"edit_image": object()})
+    assert builtin_image_edit_covers(
+        "Can you change the scene of the image to inside a cafe?",
+        {"edit_image": object()})
+    assert builtin_image_edit_covers(
+        "Do the same with this girl, show her whole body, and make the image wider 1680x1150",
+        {"edit_image": object()})
+    assert not builtin_image_edit_covers(
+        "Edit the attached image", {"make_chart": object()})
+
+
+def test_desktop_goal_is_covered_when_computer_use_is_registered():
+    assert builtin_computer_use_covers(
+        "Open Notepad on my Ubuntu desktop and type a short note",
+        ["computer_use", "computer_use_task"])
+    assert not builtin_computer_use_covers(
+        "Open Notepad on my Ubuntu desktop and type a short note",
+        ["write_file"])
+    assert not builtin_computer_use_covers(
+        "Write a note about desktop computers",
+        ["computer_use_task"])
+
+
+def test_desktop_plan_cannot_turn_into_file_deliverables():
+    from src.agentic.planning import PlanningMixin
+    runner = SimpleNamespace(
+        kernel_mode=False,
+        extra_tools={"computer_use": object(), "computer_use_task": object()},
+        memory=None,
+        _memory_context=lambda _goal: "",
+    )
+    plan = PlanningMixin._plan(
+        runner,
+        "Open Notepad on my Ubuntu desktop and type a note about me.")
+    assert [step["tool"] for step in plan.steps] == ["computer_use_task"]
+    assert plan.steps[0]["args"]["max_actions"] == 20
+    assert plan.deliverables == []
 
 
 class _StubClef:
@@ -25,6 +67,11 @@ def _inventory():
             "mcp_servers": ["notion"]}
 
 
+class _PassingSandbox:
+    def run(self, command):
+        return {"ok": True, "output": "pass"}
+
+
 def test_inventory_reads_tools_skills_and_mcp_file(tmp_path):
     (tmp_path / "mcp_servers.json").write_text(
         json.dumps({"notion": {}, "todoist": {}}))
@@ -39,6 +86,9 @@ def test_inventory_reads_tools_skills_and_mcp_file(tmp_path):
         "def demo_fn(args):\n    return 'ok'\n")
     (plug / "pdf.md").write_text("# PDF skill\nmake pdfs with text\n")
     from src.capabilities.plugins import PluginRegistry
+    from src.capabilities.plugins import plugin_tree_hash
+    (plug / ".adopted").write_text(json.dumps({
+        "approved_hash": plugin_tree_hash(plug)}))
     registry = PluginRegistry(tmp_path)
     registry.load_all()
     tools = SimpleNamespace(names=lambda: ["write", "read"])
@@ -54,10 +104,13 @@ def test_inventory_reads_tools_skills_and_mcp_file(tmp_path):
 def test_inventory_skills_are_trusted_only(tmp_path):
     from src.capabilities.skill_library import Skill, SkillLibrary
     lib = SkillLibrary(tmp_path)
-    lib.add(Skill(name="trusted-skill", description="Trusted."))
+    lib.add(Skill(name="trusted-skill", description="Trusted.",
+                  test_commands=["python3 --version"]))
+    lib.promote("trusted-skill", lib.run_tests("trusted-skill", _PassingSandbox()))
     lib.trust("trusted-skill", approved=True)
-    lib.add(Skill(name="validated-skill", description="Staged."))
-    lib.promote("validated-skill", {"passed": True})
+    lib.add(Skill(name="validated-skill", description="Staged.",
+                  test_commands=["python3 --version"]))
+    lib.promote("validated-skill", lib.run_tests("validated-skill", _PassingSandbox()))
     lib.add(Skill(name="candidate-skill", description="Draft."))
     (tmp_path / "skills" / "hand.md").write_text("# Hand\n")
     tools = SimpleNamespace(names=lambda: ["write"])
@@ -100,6 +153,16 @@ def test_triage_covered_and_need_states():
             assert result["note"], "non-covered triage must carry a note"
 
 
+def test_skill_gap_is_a_post_success_optimization_not_an_acquisition_gate():
+    result = triage("Do a thing", _inventory(),
+                    _StubClef("need_skill", 0.9))
+    assert result["status"] == "need_skill"
+    assert "after it succeeds" in result["note"]
+    assert "continue this goal" in result["note"]
+    assert "Tool Crafting Lab" not in result["note"]
+    assert "Skill Learning Lab" not in result["note"]
+
+
 def test_triage_low_confidence_proceeds_as_covered():
     result = triage("Do a thing", _inventory(), _StubClef("blocked", 0.4))
     assert result["status"] == "covered"
@@ -109,7 +172,7 @@ def test_triage_low_confidence_proceeds_as_covered():
 def test_triage_uncertain_block_downgrades_to_plugin():
     result = triage("Do a thing", _inventory(), _StubClef("blocked", 0.7))
     assert result["status"] == "need_plugin"
-    assert "plugin" in result["note"]
+    assert "Tool Crafting Lab" in result["note"]
 
 
 def test_triage_high_confidence_block_stops():

@@ -30,7 +30,7 @@ def _slack_body():
     return {
         "event": {
             "type": "message",
-            "text": "what is in this photo",
+            "text": "<@UAIDON> what is in this photo",
             "channel": "C1",
             "user": "U1",
             "ts": "123.456",
@@ -48,6 +48,7 @@ def test_slack_image_downloaded_when_token_present(monkeypatch):
     with TemporaryDirectory() as td:
         home = Path(td)
         cfg = MessagingConfig(slack_bot_token="xoxb-test", slack_signing_secret="secret123")
+        cfg._slack_bot_user_id = "UAIDON"
         srv = WebUIServer(home, None, None, messaging_config=cfg)
         captured = {}
         srv.dispatcher.handlers["slack"] = lambda event: captured.setdefault("event", event)
@@ -62,6 +63,9 @@ def test_slack_image_downloaded_when_token_present(monkeypatch):
         assert "library_id=" in event.goal
         assert "slack_file_id=" not in event.goal
         assert event.payload["images"][0]["downloaded"] is True
+        assert event.payload["image_paths"] == [
+            str(home / "library" / "slack-F1.png")]
+        assert Path(event.payload["image_paths"][0]).is_file()
 
 
 def test_slack_image_marker_only_without_token():
@@ -69,6 +73,7 @@ def test_slack_image_marker_only_without_token():
         home = Path(td)
         srv = WebUIServer(home, None, None)  # no bot token
         srv.slack_signing_secret = "secret123"
+        srv.messaging_config._slack_bot_user_id = "UAIDON"
         captured = {}
         srv.dispatcher.handlers["slack"] = lambda event: captured.setdefault("event", event)
         body = _slack_body()

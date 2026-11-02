@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aidon — Capability Labs</title>
+<link rel="stylesheet" href="/static/style.css?v=__ASSET_V__">
+<style>
+  html, body { height:auto; }
+  body { overflow:auto; }
+  .lab-wrap { max-width: 1050px; margin: 0 auto; padding: 14px 18px 24px; font-size:14px; }
+  .lab-wrap a { color:var(--accent); text-decoration-color:color-mix(in srgb, var(--accent) 65%, transparent); text-underline-offset:2px; }
+  .lab-wrap a:hover, .lab-wrap a:focus-visible { color:var(--olive); }
+  .lab-head { display:flex; align-items:baseline; gap:14px; }
+  .lab-head a { color:var(--olive); text-decoration:none; font:700 20px var(--font-display); }
+  .lab-head span { color:var(--muted); }
+  .lab-intro { color:var(--muted); max-width:76ch; margin:4px 0 12px; font-size:13px; line-height:1.4; }
+  .lab-tabs { display:flex; flex-wrap:wrap; gap:7px; border-bottom:1px solid var(--border); padding-bottom:7px; }
+  .lab-tab { background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text); padding:7px 12px; cursor:pointer; font-size:13px; }
+  .lab-tab[aria-selected="true"] { background:var(--moss); color:var(--moss-contrast); border-color:var(--moss); }
+  .lab-panel { display:none; padding-top:10px; }
+  .lab-panel.active { display:block; }
+  .lab-panel h1 { font:700 21px var(--font-display); margin:0 0 4px; }
+  .lab-note { color:var(--muted); max-width:80ch; margin:0 0 8px; font-size:13px; line-height:1.4; }
+  .lab-hints { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+  .lab-hint { border:1px solid var(--border); border-radius:999px; padding:4px 9px; color:var(--muted); font-size:11px; }
+  .lab-chat { height:min(42vh, 400px); min-height:220px; overflow:auto; background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:10px; font-size:13px; }
+  .lab-msg { max-width:86%; padding:8px 10px; margin:6px 0; border:1px solid var(--border); border-radius:10px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; line-height:1.4; }
+  .lab-msg.assistant { background:var(--surface); }
+  .lab-msg.user { background:color-mix(in srgb, var(--moss) 14%, var(--surface)); margin-left:auto; }
+  .lab-compose { display:flex; gap:7px; margin-top:7px; }
+  .lab-compose textarea { flex:1; min-height:48px; resize:vertical; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px; font:inherit; font-size:13px; }
+  .lab-actions { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:7px; }
+  .lab-actions button, .lab-compose button { background:var(--moss); color:var(--moss-contrast); border:0; border-radius:8px; padding:7px 11px; cursor:pointer; font-size:12px; }
+  .lab-actions button.secondary { background:var(--surface); color:var(--text); border:1px solid var(--border); }
+  .lab-actions button:disabled, .lab-compose button:disabled { opacity:.55; cursor:wait; }
+  .lab-actions label { color:var(--muted); font-size:12px; }
+  .lab-status { min-height:18px; color:var(--muted); font-size:12px; margin-top:5px; }
+  .lab-next { margin-top:10px; padding:9px 11px; border-left:3px solid var(--amber); background:var(--surface); color:var(--muted); font-size:12px; }
+  .lab-brief pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
+  .mcp-options { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px; margin-top:10px; }
+  .mcp-option { border:1px solid var(--border); border-radius:9px; background:var(--surface); padding:12px; font-size:12px; overflow-wrap:anywhere; }
+  .mcp-option-head { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+  .mcp-option-head strong { font-size:14px; }
+  .mcp-official,.mcp-community { display:inline-block; border-radius:999px; padding:3px 8px; font-size:10px; font-weight:700; }
+  .mcp-official { color:#a35b00; background:#fff0c2; border:1px solid #dda83e; }
+  .mcp-community { color:var(--muted); background:var(--surface2); border:1px solid var(--border); }
+  .mcp-warning { color:var(--amber); }
+  .mcp-option p { margin:6px 0; }
+  .mcp-env-alias { display:grid; gap:4px; margin:8px 0; color:var(--muted); }
+  .mcp-env-alias input { width:min(100%,320px); padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--surface-2); color:var(--text); font:inherit; }
+  .mcp-option button { padding:7px 12px; background:var(--moss); color:var(--moss-contrast); border:0; border-radius:6px; cursor:pointer; }
+  @media(max-width:640px) { .lab-wrap{padding:12px 10px 20px}.lab-chat{height:40vh;min-height:200px}.lab-msg{max-width:96%} }
+</style>
+</head>
+<body>
+<main class="lab-wrap">
+  <div class="lab-head"><a href="/">◈ Aidon</a><span>Capability Labs</span></div>
+  <p class="lab-intro">Choose what Aidon should learn or build. The lab interviews you one question at a time, helps compare options when you ask, and turns your decisions into a brief. Approving a brief starts a normal workflow; tool adoption and new MCP connections still have their own approval cards.</p>
+  <nav class="lab-tabs" role="tablist" aria-label="Capability labs">
+    <button class="lab-tab" role="tab" aria-selected="true" data-lab="tool">Tool crafting</button>
+    <button class="lab-tab" role="tab" aria-selected="false" data-lab="skill">Skill learning</button>
+    <button class="lab-tab" role="tab" aria-selected="false" data-lab="mcp">MCP connection</button>
+  </nav>
+  <section class="lab-panel active" id="lab-tool" role="tabpanel">
+    <h1>Tool Crafting Lab</h1>
+    <p class="lab-note">Define the outcome, inputs, preferred service or software, and what the tool may access. For image editing, specify whether you want an AI image model or an editing application and name it if you have a preference. Ask for researched options if you want help choosing.</p>
+    <div class="lab-hints"><span class="lab-hint">One question at a time</span><span class="lab-hint">Can compare options</span><span class="lab-hint">Approval before adoption</span></div>
+    <div class="lab-chat" id="chat-tool" aria-live="polite"></div>
+    <div class="lab-compose"><textarea id="input-tool" placeholder="What should the tool help you do?"></textarea><button data-send="tool">Send</button></div>
+    <div class="lab-actions"><label><input type="checkbox" id="research-tool"> Research and compare options online</label><button class="secondary" data-reset="tool">Start over</button><button data-brief="tool">Approve brief &amp; start build</button></div>
+    <div class="lab-status" id="status-tool" role="status"></div>
+  </section>
+  <section class="lab-panel" id="lab-skill" role="tabpanel">
+    <h1>Skill Learning Lab</h1>
+    <p class="lab-note">Describe a repeatable job and the behavior you want. Aidon will clarify triggers, steps, examples, boundaries, and checks, then prepare a reusable skill in the documented Markdown convention, including tests where practical.</p>
+    <div class="lab-hints"><span class="lab-hint">Reusable instructions</span><span class="lab-hint">Examples and tests</span><span class="lab-hint">Review before import</span></div>
+    <div class="lab-chat" id="chat-skill" aria-live="polite"></div>
+    <div class="lab-compose"><textarea id="input-skill" placeholder="What should Aidon learn to do consistently?"></textarea><button data-send="skill">Send</button></div>
+    <div class="lab-actions"><label><input type="checkbox" id="research-skill"> Research conventions or references online</label><button class="secondary" data-reset="skill">Start over</button><button data-brief="skill">Approve brief &amp; draft skill</button></div>
+    <div class="lab-status" id="status-skill" role="status"></div>
+  </section>
+  <section class="lab-panel" id="lab-mcp" role="tabpanel">
+    <h1>MCP Connection Lab</h1>
+    <p class="lab-note">Describe the service you want to connect. Aidon searches the MCP registry, puts publisher-domain matches first, and shows the exact endpoint, publisher, license, and GitHub stars when available. Star counts link to GitHub; user reviews are not consistently published, so Aidon does not invent ratings. Connecting still requires separate approval.</p>
+    <div class="lab-hints"><span class="lab-hint">Publisher-domain matches first</span><span class="lab-hint">GitHub stars with source links</span><span class="lab-hint">Exact server reviewed before connect</span></div>
+    <div class="lab-chat" id="chat-mcp" aria-live="polite"></div>
+    <div class="mcp-options" id="mcp-options" aria-live="polite"></div>
+    <div class="lab-compose"><textarea id="input-mcp" placeholder="What do you want to connect Aidon to? e.g. organize notes across my projects"></textarea><button data-send="mcp">Send</button></div>
+    <div class="lab-actions"><label><input type="checkbox" id="research-mcp" checked> Research and compare options online</label><button class="secondary" data-reset="mcp">Start over</button><button data-brief="mcp">Approve brief &amp; prepare connection</button></div>
+    <div class="lab-status" id="status-mcp" role="status"></div>
+  </section>
+  <div class="lab-next">Brief approval authorizes Aidon to work on that brief. It does not grant access by itself: plugin adoption, MCP connections, package installs, and live actions keep their existing explicit approval gates.</div>
+</main>
+<script src="/static/labs.js?v=__ASSET_V__"></script>
+</body>
+</html>

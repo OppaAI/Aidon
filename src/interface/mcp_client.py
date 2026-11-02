@@ -16,6 +16,10 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
+import queue
+import select
+import time
 
 # Re-exported here so callers of the stdio client use the same
 # expansion as the HTTP client: "$VAR" / "${VAR}" / "Bearer $VAR"
@@ -27,7 +31,7 @@ __all__ = ["McpClient", "expand_env_value"]
 
 
 class McpClient:
-    def __init__(self, command: list[str], env: dict | None = None):
+    def __init__(self, command: list[str], env: dict | None = None, timeout: float = 30):
         if not command:
             raise ValueError("MCP server command is required")
         self.command = command
@@ -53,28 +57,102 @@ class McpClient:
             (var for var in self.env_vars.values() if var is not None), None)
         self.proc = None
         self._counter = 0
+        self.timeout = max(0.01, float(timeout))
+        self._lock = threading.Lock()
+        self._responses = queue.Queue(maxsize=128)
 
     def start(self) -> None:
-        merged_env = dict(os.environ)
+        # Pass only runtime necessities and explicitly configured bindings.
+        # A third-party MCP server must not inherit Aidon's API keys.
+        inherited = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT",
+                     "WINDIR", "USERPROFILE", "SSL_CERT_FILE", "SSL_CERT_DIR",
+                     "REQUESTS_CA_BUNDLE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+                     "http_proxy", "https_proxy", "no_proxy", "NPM_CONFIG_CACHE")
+        merged_env = {key: os.environ[key] for key in inherited if key in os.environ}
         merged_env.update(self.env)
         self.proc = subprocess.Popen(self.command, stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, text=True,
                                      env=merged_env)
-        self._call("initialize", {"protocolVersion": "2024-11-05",
-                                  "capabilities": {}, "clientInfo": {"name": "aidon", "version": "1"}})
+        proc = self.proc
+        def read_responses():
+            try:
+                while True:
+                    line = proc.stdout.readline(1048577)
+                    if not line or len(line) > 1048576 or not line.endswith("\n"):
+                        break
+                    self._responses.put_nowait(line)
+            except (OSError, ValueError, queue.Full):
+                pass
+            try:
+                self._responses.put_nowait(None)
+            except queue.Full:
+                pass
+        threading.Thread(target=read_responses, daemon=True).start()
+        try:
+            self._call("initialize", {"protocolVersion": "2024-11-05",
+                                      "capabilities": {}, "clientInfo": {"name": "aidon", "version": "1"}})
+        except Exception:
+            self.close()
+            raise
 
     def _call(self, method: str, params: dict):
-        self._counter += 1
-        request = {"jsonrpc": "2.0", "id": self._counter, "method": method, "params": params}
-        self.proc.stdin.write(json.dumps(request) + "\n")
-        self.proc.stdin.flush()
-        line = self.proc.stdout.readline()
-        if not line:
-            raise ValueError("MCP server closed the connection")
-        data = json.loads(line)
-        if "error" in data:
-            raise ValueError(f"MCP error: {data['error']}")
-        return data.get("result", {})
+        with self._lock:
+            self._counter += 1
+            request = {"jsonrpc": "2.0", "id": self._counter, "method": method, "params": params}
+            deadline = time.monotonic() + self.timeout
+            encoded = json.dumps(request) + "\n"
+            if len(encoded.encode("utf-8")) > 1048576:
+                raise ValueError("MCP request exceeds size limit")
+            proc = self.proc
+            if proc is None or proc.stdin is None:
+                raise ValueError("MCP server is not running")
+            # A worker thread around buffered TextIO.write only bounds the
+            # caller: it can remain blocked forever while holding a reference
+            # to the pipe. Use nonblocking writes on the pipe descriptor so
+            # backpressure is governed by the same request deadline.
+            payload = encoded.encode("utf-8")
+            fd = proc.stdin.fileno()
+            try:
+                os.set_blocking(fd, False)
+                view = memoryview(payload)
+                while view:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError
+                    try:
+                        written = os.write(fd, view)
+                    except BlockingIOError:
+                        _, writable, _ = select.select([], [fd], [], remaining)
+                        if not writable:
+                            raise TimeoutError
+                        continue
+                    if written <= 0:
+                        raise BrokenPipeError("MCP server closed its input")
+                    view = view[written:]
+            except TimeoutError:
+                self.close()
+                raise TimeoutError(f"MCP {method} write timed out") from None
+            except (OSError, ValueError) as exc:
+                self.close()
+                raise ValueError("MCP server closed its input") from exc
+            while True:
+                try:
+                    line = self._responses.get(timeout=max(0, deadline - time.monotonic()))
+                except queue.Empty:
+                    self.close()
+                    raise TimeoutError(f"MCP {method} timed out") from None
+                if line is None:
+                    raise ValueError("MCP server closed the connection")
+                data = json.loads(line)
+                if not isinstance(data, dict) or data.get("jsonrpc") != "2.0":
+                    raise ValueError("Invalid MCP response")
+                if "id" not in data:  # notification
+                    continue
+                if data["id"] != request["id"]:
+                    raise ValueError("MCP response ID mismatch")
+                if "error" in data:
+                    raise ValueError(f"MCP error: {data['error']}")
+                return data.get("result", {})
 
     def list_tools(self) -> list[dict]:
         return self._call("tools/list", {}).get("tools", [])
@@ -89,4 +167,5 @@ class McpClient:
                 self.proc.wait(timeout=5)
             except Exception:
                 self.proc.kill()
+                self.proc.wait(timeout=5)
             self.proc = None

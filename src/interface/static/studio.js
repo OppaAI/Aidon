@@ -6,7 +6,7 @@
 
 try {
   document.documentElement.setAttribute(
-    "data-theme", localStorage.getItem("aidon-theme") || "dark");
+    "data-theme", localStorage.getItem("aidon-theme") || "light");
 } catch (e) { /* private mode: keep the default theme */ }
 
 const API = document.body.dataset.api;
