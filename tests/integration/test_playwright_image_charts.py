@@ -120,7 +120,7 @@ def test_muse_image_edit_files_multipart(tmp_path):
     assert data == b"styled"
     assert seen["url"].endswith("/images/edits")
     assert "multipart/form-data; boundary=" in seen["headers"]["Content-Type"]
-    assert b'name="image[]"; filename="face.png"' in seen["body"]
+    assert b'name="image"; filename="face.png"' in seen["body"]
     assert b"anime style, @Image1" in seen["body"]
     assert b"\x89PNGface" in seen["body"]
     try:
@@ -129,3 +129,22 @@ def test_muse_image_edit_files_multipart(tmp_path):
         assert False, "a missing reference file must raise"
     except ValueError:
         pass
+
+
+def test_muse_image_edit_files_numbers_multiple_image_fields(tmp_path):
+    from src.capabilities.image_gen import edit_image_files
+    photos = [tmp_path / "first.png", tmp_path / "second.jpg"]
+    for path in photos:
+        path.write_bytes(b"image-bytes")
+    seen = {}
+
+    def fake_post(url, headers, body):
+        seen["body"] = body
+        return {"data": [{"b64_json": base64.b64encode(b"edited").decode()}]}
+
+    result = edit_image_files("combine both", "test-key", "https://example.com/v1",
+                              [str(path) for path in photos], post=fake_post)
+
+    assert result == b"edited"
+    assert b'name="image[0]"; filename="first.png"' in seen["body"]
+    assert b'name="image[1]"; filename="second.jpg"' in seen["body"]

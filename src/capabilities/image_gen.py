@@ -137,7 +137,8 @@ def edit_image_files(prompt: str, api_key: str, endpoint: str,
     The JSON form above passes paths/URLs through as strings, which the
     OpenAI-compatible ``/images/edits`` endpoint does not accept for local
     files. This variant reads the bytes and posts the official multipart
-    form: model, prompt, size, and one ``image[]`` file per reference.
+    form: model, prompt, size, and image files named ``image`` (one image)
+    or ``image[0]``, ``image[1]``, ... (multiple images).
 
     ``post(url, headers, body_bytes)`` is injectable for tests. Bytes and
     paths are accepted; URLs are not (download them first).
@@ -162,10 +163,11 @@ def edit_image_files(prompt: str, api_key: str, endpoint: str,
     for name, value in (("model", model), ("prompt", prompt), ("size", size)):
         body += (f"--{boundary}\r\nContent-Disposition: form-data; "
                  f'name="{name}"\r\n\r\n{value}\r\n').encode()
-    for path, data, content_type in files:
+    for index, (path, data, content_type) in enumerate(files):
         filename = path.name.replace('"', "")
+        field_name = "image" if len(files) == 1 else f"image[{index}]"
         body += (f"--{boundary}\r\nContent-Disposition: form-data; "
-                 f'name="image[]"; filename="{filename}"\r\n'
+                 f'name="{field_name}"; filename="{filename}"\r\n'
                  f"Content-Type: {content_type}\r\n\r\n").encode()
         body += data + b"\r\n"
     body += f"--{boundary}--\r\n".encode()
