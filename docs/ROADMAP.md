@@ -88,7 +88,7 @@ post-hackathon, NOT built, NOT demoed, at the end.
 
 - Adaptive DAG, steer and cancel across WebUI,
   WhatsApp, Slack, CLI, v1, and MCP, with RunControl.
-- Built in v0.4.0: Ask → Plan → Execute run-mode chain with spec
+- Built in v0.5.0: Ask → Plan → Execute run-mode chain with spec
   cards; Clef intent router, DAG matching, validate gate, and
   recovery router; Modal execution backend, capability image
   builder, and worker pool; capability registry, failure-lessons

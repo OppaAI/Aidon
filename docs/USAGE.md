@@ -265,9 +265,11 @@ autonomy or pre-approval is enabled. Once approved, the live
 registry updates immediately. Plans validated after adoption can
 use the tool; re-plan if the current plan needs it.
 
-When a goal includes a structured JSON tool specification, Aidon
-can call `draft_tool_plugin` to ask the configured model to turn it
-into a `tool.py` implementation and a valid `plugin.json` manifest.
+When you ask Aidon to create a reusable tool, you can describe what
+it should do in plain language or provide a structured JSON tool
+specification. Aidon calls `draft_tool_plugin` to ask the configured
+model to turn the request into a `tool.py` implementation, a valid
+`plugin.json` manifest, and an offline acceptance test.
 The draft is written inside the current run's workdir; generation
 does not import or execute the resulting source. Aidon must inspect
 the generated code, sandbox-test it, review its requested

@@ -806,6 +806,13 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                 # setting as written.
                 experiences = recall_experiences(
                     self.memory, goal, limit=max(recall_limit, 5))
+                _dag_candidates = [e for e in experiences
+                                   if getattr(e, "dag_nodes", None)]
+                self._trace(
+                    "dag", "matched" if _dag_candidates else "no-match",
+                    (f"Found {len(_dag_candidates)} saved workflow DAG(s) to compare"
+                     if _dag_candidates else
+                     "No matching saved DAG found; building a fresh workflow"))
                 # Clef DAG matching: re-rank the recalled workflows
                 # by fit before adaptation picks one. Jaccard recall
                 # stays the pre-filter; Clef only reorders within
@@ -846,6 +853,8 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                         if plan.deliverables:
                             self._adapted = True
                             self._adapted_from = " + ".join(source_goals)
+                            self._trace("dag", "reused",
+                                        "Reusing saved DAGs: " + self._adapted_from)
                             return self._finalize(self._execute_plan(goal, plan))
                 else:
                     # Failed-example learning: a previous run
@@ -891,6 +900,9 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                             self._adapted = True
                             self._adapted_from = experiences[0].goal
                             self._dag_summary = summary
+                            self._trace("dag", "reused",
+                                        "Reusing and adapting saved DAG: " +
+                                        self._adapted_from)
                             return self._finalize(self._execute_plan(goal, plan))
                     from .adapt import adapt_experience
                     adapted = adapt_experience(experiences[0], goal, client=self.client)
@@ -912,6 +924,9 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                         if plan.deliverables:
                             self._adapted = True
                             self._adapted_from = experiences[0].goal
+                            self._trace("dag", "reused",
+                                        "Reusing a saved workflow from: " +
+                                        self._adapted_from)
                             return self._finalize(self._execute_plan(goal, plan))
             except Exception:
                 pass

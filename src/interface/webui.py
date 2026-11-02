@@ -107,7 +107,7 @@ def _app_version() -> str:
         from importlib.metadata import version
         return version("aidon")
     except Exception:
-        return "0.4.0"
+        return "0.5.0"
 
 # Shared page style: every WebUI page gets the same base look. The chat
 # page previously shipped only avatar-animation CSS and the handler-built

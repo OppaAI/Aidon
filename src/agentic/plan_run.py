@@ -31,7 +31,7 @@ class PlanRunMixin:
         self._step_outputs = {}
         self._trace("interpret", "done", goal[:100])
         if self.memory is not None:
-            self._trace("recall", "done", "experience recall attempted")
+            self._trace("recall", "done", "Saved workflow DAG lookup completed")
         from .validator import validate_plan, ALLOWED_TOOLS
         _allowed = set(ALLOWED_TOOLS) | {"llm"}
         if self.extra_tools:
@@ -832,7 +832,7 @@ class PlanRunMixin:
                 self.memory.promote_to_ltm(episodic, kind="semantic")
             except Exception:
                 pass
-        self._trace("learn", "done", "experience recorded")
+        self._trace("learn", "done", "Successful workflow is ready to save as a reusable DAG")
         return RunReport("done", goal, current_plan, True, True,
                          files=files, attempts=attempt,
                          result_text=self._result_text_for_plan(current_plan),

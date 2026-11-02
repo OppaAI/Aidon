@@ -27,6 +27,16 @@ that section as the GitHub Release notes.
 - Preserve corrupt outboxes and failed notifications, share optimized fallback
   memory ranking, and propagate JavaScript syntax failures through CI.
 
+## [0.5.0] - 2026-11-02
+
+### Added
+
+- Natural-language tool requests and live DAG reuse/save status in the WebUI sidebar.
+
+### Changed
+
+- Bump Aidon to v0.5.0.
+
 ## [0.4.0] - 2026-10-31
 
 - Initial changelog for the existing 0.4.0 project version.

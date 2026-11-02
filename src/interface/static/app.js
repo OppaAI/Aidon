@@ -1166,12 +1166,12 @@
   const STAGE_LABELS = {
     interpret: "Understanding your request…",
     research: "Researching the web…",
-    recall: "Recalling past experience…",
+    recall: "Checking for a previous DAG…",
     plan: "Building a plan…",
     sandbox: "Testing in sandbox…",
     approval: "Waiting for your approval…",
     live: "Executing…",
-    learn: "Learning from this run…",
+    learn: "Saving this workflow as a DAG…",
     done: "Done",
     respond: "Responding…",
   };
@@ -1190,11 +1190,15 @@
     const list = document.getElementById("thinking-list");
     items.forEach((e) => {
       const phase = e.phase || e.kind || "thinking";
+      if (phase === "dag") {
+        const activity = document.getElementById("dag-activity");
+        if (activity) activity.textContent = e.detail || e.title || e.status || "DAG activity";
+      }
       if (phase !== lastTracePhase) {
         lastTracePhase = phase;
         const h = document.createElement("div");
         h.className = "think-phase";
-        h.textContent = phase;
+        h.textContent = phase === "dag" ? "DAG" : phase;
         list.appendChild(h);
       }
       const item = document.createElement("div");
@@ -2287,11 +2291,13 @@
     // keep previous messages in the thread — just scroll to the latest
     document.getElementById("thinking-list").innerHTML = "";
     document.getElementById("thinking-count").textContent = "";
+    document.getElementById("dag-activity").textContent = "Waiting for a goal";
     cardShownFor = null;
     proceedShownFor = null;
     approvalSlot.innerHTML = "";
     currentRun = data.run_id;
     setStatus("busy", "working");
+    document.getElementById("dag-activity").textContent = "Checking for a previous DAG…";
     renderStages("interpret");
     steerRow.hidden = false;
     // never orphan a poll interval if a previous run's timer is still alive
@@ -2514,6 +2520,7 @@
     thread.innerHTML = "";
     document.getElementById("thinking-list").innerHTML = "";
     document.getElementById("thinking-count").textContent = "";
+    document.getElementById("dag-activity").textContent = "Waiting for a goal";
     document.querySelectorAll(".hist-item").forEach((x) => x.classList.remove("active"));
     sendBtn.disabled = false;
     input.disabled = false;
