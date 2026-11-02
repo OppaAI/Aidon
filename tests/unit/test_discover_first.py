@@ -9,6 +9,7 @@ must point at the plugin ladder, not at a tool that is not there.
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -50,6 +51,27 @@ def test_plan_prompt_carries_discover_first(tmp_path):
     assert "Discover before building" in captured["system"]
     assert "If a listed tool does the job, use it" in captured["system"]
     assert "depends on a package you have not confirmed" in captured["system"]
+
+
+def test_image_edit_prompt_uses_available_builtin_instead_of_plugin_lab(tmp_path):
+    captured = {}
+
+    def fake_chat(phase, messages):
+        captured["system"] = messages[0].content
+        return json.dumps({"steps": [{"tool": "edit_image", "args": {}}],
+                           "deliverables": [], "criteria": []})
+
+    runner = _runner(tmp_path, False,
+                     extra_tools={"edit_image": lambda **kw: "ok"})
+    runner.plugins = SimpleNamespace(plugins={}, skill_texts=lambda: {})
+    image = tmp_path / "current-upload.png"
+    image.write_bytes(b"current image")
+    runner.image_paths = [image]
+    runner._chat = fake_chat
+    runner._plan("Edit the attached image to brighten it")
+    assert "built-in edit_image tool is available" in captured["system"]
+    assert "do not ask to create or adopt another image tool" in captured["system"]
+    assert "no built-in image editor is available" not in captured["system"]
 
 
 def test_kernel_guard_points_at_ladder_not_missing_tool(tmp_path):

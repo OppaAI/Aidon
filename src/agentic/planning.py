@@ -262,20 +262,23 @@ class PlanningMixin:
                        "the goal workspace. Keep paths relative and create outputs "
                        "inside the sandbox run directory.")
             if self.image_paths and self._is_image_edit_goal(goal):
-                system += (" For an image-editing goal with attached images, no "
-                           "built-in image editor is available: if the Toolbox has "
-                           "no suitable adopted tool, author the reusable image "
-                           "editor plugin yourself. Its tool must use mode=sandbox, "
-                           "accepts_attachments=true, network capability, and only "
-                           "the configured API environment names it needs "
-                           "(AIDON_API_KEY, AIDON_API_ENDPOINT, and optionally "
-                           "AIDON_IMAGE_MODEL, declared as secret:NAME). Research "
-                           "the configured image API format instead of guessing. "
-                           "Write and sandbox-test the plugin, adopt it, then make "
-                           "its image-edit step depend on the adoption step. The "
-                           "live approval card will show the prompt and attached "
-                           "filenames; the API may spend image credits. Return the "
-                           "edited image through the sandbox plugin files contract.")
+                if "edit_image" in self.extra_tools:
+                    system += (" For this image-editing goal, the built-in "
+                               "edit_image tool is available. Use it with the "
+                               "current attached image path(s); do not ask to "
+                               "create or adopt another image tool or plugin. "
+                               "The tool uses the configured Muse image model, "
+                               "saves its output under the Aidon images folder, "
+                               "and requires live approval before sending images "
+                               "or spending credits.")
+                else:
+                    system += (" For an image-editing goal with attached images, "
+                               "no built-in image editor is available in this run: "
+                               "if the Toolbox has no suitable adopted tool, use "
+                               "the owner-approved Tool Lab to define an image "
+                               "editor plugin or MCP connection. Do not claim an "
+                               "image editor is available unless it appears in "
+                               "the tools listed above.")
             if self.image_paths and not self._is_image_edit_goal(goal):
                 system += (" The user attached image(s) to this goal for analysis "
                            "or answering a question about them. Do not treat this "
