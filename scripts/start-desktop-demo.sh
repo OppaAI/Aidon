@@ -14,10 +14,13 @@ desktop_auth_dir=$(mktemp -d "${TMPDIR:-/tmp}/aidon-desktop-XXXXXXXX")
 trap 'rm -rf "$desktop_auth_dir"' ERR
 export AIDON_DESKTOP_XAUTHORITY="$desktop_auth_dir/Xauthority"
 touch "$AIDON_DESKTOP_XAUTHORITY"
-xauth -f "$source_authority" nlist "$DISPLAY" | sed 's/^..../ffff/' | \
+cp "$source_authority" "$desktop_auth_dir/source-authority"
+xauth -f "$desktop_auth_dir/source-authority" nlist "$DISPLAY" | sed 's/^..../ffff/' | \
   xauth -f "$AIDON_DESKTOP_XAUTHORITY" nmerge -
+rm -f "$desktop_auth_dir/source-authority"
 if [ ! -s "$AIDON_DESKTOP_XAUTHORITY" ]; then
   printf '%s\n' 'No X11 authorization was found for DISPLAY.' >&2
+  rm -rf "$desktop_auth_dir"
   exit 1
 fi
 docker compose -f compose.yaml -f compose.desktop.yaml up -d --build aidon
