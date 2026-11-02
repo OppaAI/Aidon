@@ -164,7 +164,7 @@
       <div class="top-note">Meta Global AI Developer Hackathon · 2026</div>
     </header>
     <main id="slides" aria-live="polite">
-      <section class="slide active" data-title="Meet Aidon" data-speech="Hi, I'm Aidon. Tell me what you want to get done, and I'll turn it into a safe workflow you can understand and approve.">
+      <section class="slide active" data-title="Meet Aidon" data-speech="Hello, I'm Aidon, an autonomous AI agent made by OppaAI. OppaAI is an indie developer without formal IT or AI training. Tell me a goal in plain words, and I'll work out the tools. I'll prepare a safe workflow for you to approve, and reuse what works next time.">
         <div class="copy">
           <span class="eyebrow">A goal-driven AI agent</span>
           <h1><span class="gradient">Meet</span><br>Aidon.</h1>
@@ -173,7 +173,7 @@
         </div>
         <div class="visual" aria-label="Aidon introduces the project">
           <div class="halo"></div><div class="orbit-dot"></div>
-          <div class="speech"><span class="speech-label">Aidon says</span><span class="speech-text">Hi, I'm Aidon. Tell me what you want to get done, and I'll turn it into a safe workflow you can understand and approve.</span></div>
+          <div class="speech"><span class="speech-label">Aidon says</span><span class="speech-text">Hello, I'm Aidon, an autonomous AI agent made by OppaAI.</span></div>
           <svg class="robot-stage" viewBox="0 0 200 200" role="img" aria-label="Aidon, a friendly silver robot">
             <defs>
               <radialGradient id="shell" cx="35%" cy="18%" r="85%"><stop offset="0" stop-color="#fff"/><stop offset=".46" stop-color="#f3f5f4"/><stop offset=".82" stop-color="#d7deeb"/><stop offset="1" stop-color="#aebbd4"/></radialGradient>
@@ -332,8 +332,20 @@
       const announcement = document.getElementById('announcement');
       let current = 0;
       let utterance = null;
-      let timer = null;
+      let speechSequence = 0;
       const voiceAvailable = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+      const speechParts = {
+        'Meet Aidon': [
+          "Hello, I'm Aidon, an autonomous AI agent made by OppaAI.",
+          'OppaAI is an indie developer without formal IT or AI training.',
+          "Tell me a goal in plain words, and I'll work out the tools.",
+          "I'll prepare a safe workflow for you to approve, and reuse what works next time."
+        ]
+      };
+
+      function partsFor(slide) {
+        return speechParts[slide.dataset.title] || [slide.dataset.speech];
+      }
 
       // Copy the mascot and its paint definitions into each SVG so every slide renders fully.
       const robotDefinition = document.querySelector('#robot').cloneNode(true);
@@ -353,8 +365,8 @@
       });
 
       function stopSpeaking() {
+        speechSequence++;
         if (voiceAvailable) window.speechSynthesis.cancel();
-        clearTimeout(timer);
         document.querySelectorAll('.robot-stage').forEach(robot => robot.classList.remove('talking'));
         speakButton.textContent = '▶ Listen';
         speakButton.setAttribute('aria-label', 'Listen to Aidon speak this slide');
@@ -366,7 +378,7 @@
         slides.forEach((slide, i) => {
           slide.classList.toggle('active', i === current);
           const speech = slide.querySelector('.speech-text');
-          if (speech) speech.textContent = slide.dataset.speech;
+          if (speech) speech.textContent = partsFor(slide)[0];
         });
         count.textContent = `${String(current + 1).padStart(2, '0')} / ${String(slides.length).padStart(2, '0')}`;
         fill.style.width = `${((current + 1) / slides.length) * 100}%`;
@@ -380,19 +392,41 @@
           return;
         }
         stopSpeaking();
-        const line = slides[current].dataset.speech;
-        utterance = new SpeechSynthesisUtterance(line);
-        utterance.rate = 0.94;
-        utterance.pitch = 1.05;
-        utterance.onstart = () => {
-          document.querySelector('.slide.active .robot-stage')?.classList.add('talking');
-          speakButton.textContent = '■ Stop';
-          speakButton.setAttribute('aria-label', 'Stop narration');
-        };
-        utterance.onend = utterance.onerror = () => stopSpeaking();
-        window.speechSynthesis.speak(utterance);
-        // Some browsers do not expose speech boundary events. Keep the mouth animated while the line plays.
-        timer = setTimeout(() => document.querySelector('.slide.active .robot-stage')?.classList.remove('talking'), Math.max(1800, line.length * 74));
+        const sequence = speechSequence;
+        const slide = slides[current];
+        const bubble = slide.querySelector('.speech-text');
+        const parts = partsFor(slide);
+        let partIndex = 0;
+
+        function speakNextPart() {
+          if (sequence !== speechSequence) return;
+          if (partIndex >= parts.length) {
+            stopSpeaking();
+            return;
+          }
+          const line = parts[partIndex++];
+          bubble.textContent = line;
+          utterance = new SpeechSynthesisUtterance(line);
+          utterance.rate = 0.94;
+          utterance.pitch = 1.05;
+          utterance.onstart = () => {
+            if (sequence !== speechSequence) return;
+            slide.querySelector('.robot-stage')?.classList.add('talking');
+            speakButton.textContent = '■ Stop';
+            speakButton.setAttribute('aria-label', 'Stop narration');
+          };
+          utterance.onend = () => {
+            if (sequence !== speechSequence) return;
+            slide.querySelector('.robot-stage')?.classList.remove('talking');
+            speakNextPart();
+          };
+          utterance.onerror = () => {
+            if (sequence === speechSequence) stopSpeaking();
+          };
+          window.speechSynthesis.speak(utterance);
+        }
+
+        speakNextPart();
       }
 
       document.getElementById('prev').addEventListener('click', () => show(current - 1));
