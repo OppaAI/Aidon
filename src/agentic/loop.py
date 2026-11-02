@@ -821,7 +821,20 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                     except Exception as exc:
                         self._trace("dag", "rank-skipped", str(exc)[:100])
                 failure = matching_failure(self.memory, goal)
-                _skip_adapt = bool(self.image_paths) and not self._is_image_edit_goal(goal)
+                # Desktop actions must be planned against the current screen and
+                # current request. Replaying or adapting a remembered workflow
+                # can inject stale/self-referential DAG dependencies (and can
+                # replace a GUI task with unrelated file-writing steps).
+                # Route covered desktop goals through the deterministic planner
+                # shortcut below instead of any recalled DAG path.
+                try:
+                    from .capability_triage import builtin_computer_use_covers
+                    _desktop_goal = (not self.kernel_mode and
+                                     builtin_computer_use_covers(goal, self.extra_tools))
+                except Exception:
+                    _desktop_goal = False
+                _skip_adapt = ((bool(self.image_paths) and not self._is_image_edit_goal(goal))
+                               or _desktop_goal)
                 if failure is None and not _skip_adapt:
                     # DAG composition first: when the goal spans
                     # distinct known workflows, sequencing them
