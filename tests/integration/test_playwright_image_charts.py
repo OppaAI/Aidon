@@ -1,6 +1,7 @@
 """Playwright MCP wiring, Muse Image generation, and code charts."""
 
 import base64
+import json
 import sys
 from pathlib import Path
 
@@ -102,7 +103,7 @@ def test_muse_image_edit_multiple_refs():
         pass
 
 
-def test_muse_image_edit_files_multipart(tmp_path):
+def test_muse_image_edit_files_json_data_url(tmp_path):
     from src.capabilities.image_gen import edit_image_files
     photo = tmp_path / "face.png"
     photo.write_bytes(b"\x89PNGface")
@@ -119,10 +120,12 @@ def test_muse_image_edit_files_multipart(tmp_path):
                             post=fake_post)
     assert data == b"styled"
     assert seen["url"].endswith("/images/edits")
-    assert "multipart/form-data; boundary=" in seen["headers"]["Content-Type"]
-    assert b'name="image"; filename="face.png"' in seen["body"]
-    assert b"anime style, @Image1" in seen["body"]
-    assert b"\x89PNGface" in seen["body"]
+    assert seen["headers"]["Content-Type"] == "application/json"
+    payload = json.loads(seen["body"])
+    assert payload["prompt"] == "anime style, @Image1"
+    assert payload["images"] == [{
+        "image_url": "data:image/png;base64," + base64.b64encode(b"\x89PNGface").decode()
+    }]
     try:
         edit_image_files("Hi", "test-key", "https://example.com/v1",
                          [str(tmp_path / "missing.png")], post=fake_post)
@@ -131,7 +134,7 @@ def test_muse_image_edit_files_multipart(tmp_path):
         pass
 
 
-def test_muse_image_edit_files_numbers_multiple_image_fields(tmp_path):
+def test_muse_image_edit_files_multiple_data_urls(tmp_path):
     from src.capabilities.image_gen import edit_image_files
     photos = [tmp_path / "first.png", tmp_path / "second.jpg"]
     for path in photos:
@@ -146,5 +149,7 @@ def test_muse_image_edit_files_numbers_multiple_image_fields(tmp_path):
                               [str(path) for path in photos], post=fake_post)
 
     assert result == b"edited"
-    assert b'name="image[0]"; filename="first.png"' in seen["body"]
-    assert b'name="image[1]"; filename="second.jpg"' in seen["body"]
+    payload = json.loads(seen["body"])
+    assert [image["image_url"].split(",", 1)[0] for image in payload["images"]] == [
+        "data:image/png;base64", "data:image/jpeg;base64"
+    ]

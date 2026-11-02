@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import base64
 import json
+import mimetypes
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -132,13 +134,11 @@ def edit_image(prompt: str, api_key: str, endpoint: str,
 def edit_image_files(prompt: str, api_key: str, endpoint: str,
                      reference_images: list, size: str = "1024x1024",
                      post=None, model: str = MODEL) -> bytes:
-    """Edit/compose from local image files with multipart/form-data.
+    """Edit/compose local images using Meta's documented raw-HTTP JSON form.
 
-    The JSON form above passes paths/URLs through as strings, which the
-    OpenAI-compatible ``/images/edits`` endpoint does not accept for local
-    files. This variant reads the bytes and posts the official multipart
-    form: model, prompt, size, and image files named ``image`` (one image)
-    or ``image[0]``, ``image[1]``, ... (multiple images).
+    The endpoint accepts an ``images`` array of ``image_url`` data URLs or
+    pre-uploaded ``file_id`` values. Using data URLs avoids multipart field
+    naming differences between raw HTTP clients and SDK wrappers.
 
     ``post(url, headers, body_bytes)`` is injectable for tests. Bytes and
     paths are accepted; URLs are not (download them first).
@@ -149,8 +149,6 @@ def edit_image_files(prompt: str, api_key: str, endpoint: str,
         raise ValueError("Muse Image API key is required, generation is credit-gated, never run without a key")
     if not reference_images or len(reference_images) > 10:
         raise ValueError("Muse Image edit needs 1 to 10 reference images, not 0, not more than 10")
-    import mimetypes
-    import uuid
     files = []
     for reference in reference_images:
         path = Path(reference)
@@ -158,29 +156,39 @@ def edit_image_files(prompt: str, api_key: str, endpoint: str,
             raise ValueError(f"reference image not found: {reference}")
         files.append((path, path.read_bytes(),
                       mimetypes.guess_type(path.name)[0] or "application/octet-stream"))
-    boundary = "----Aidon" + uuid.uuid4().hex
-    body = bytearray()
-    for name, value in (("model", model), ("prompt", prompt), ("size", size)):
-        body += (f"--{boundary}\r\nContent-Disposition: form-data; "
-                 f'name="{name}"\r\n\r\n{value}\r\n').encode()
-    for index, (path, data, content_type) in enumerate(files):
-        filename = path.name.replace('"', "")
-        field_name = "image" if len(files) == 1 else f"image[{index}]"
-        body += (f"--{boundary}\r\nContent-Disposition: form-data; "
-                 f'name="{field_name}"; filename="{filename}"\r\n'
-                 f"Content-Type: {content_type}\r\n\r\n").encode()
-        body += data + b"\r\n"
-    body += f"--{boundary}--\r\n".encode()
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "size": size,
+        "images": [
+            {"image_url": f"data:{content_type};base64,{base64.b64encode(data).decode('ascii')}"}
+            for _path, data, content_type in files
+        ],
+        "n": 1,
+    }
+    body = json.dumps(payload).encode("utf-8")
     url = endpoint.rstrip("/") + "/images/edits"
     headers = {"Authorization": f"Bearer {api_key}",
-               "Content-Type": f"multipart/form-data; boundary={boundary}"}
+               "Content-Type": "application/json", "Accept": "application/json"}
     if post is not None:
-        data = post(url, headers, bytes(body))
+        data = post(url, headers, body)
     else:
-        req = urllib.request.Request(url, data=bytes(body), method="POST",
+        req = urllib.request.Request(url, data=body, method="POST",
                                      headers=headers)
-        with urllib.request.urlopen(req, timeout=120) as response:
-            data = json.loads(response.read().decode())
+        try:
+            with urllib.request.urlopen(req, timeout=120) as response:
+                data = json.loads(response.read().decode())
+        except urllib.error.HTTPError as exc:
+            try:
+                parsed = json.loads(exc.read(2048).decode("utf-8", "replace"))
+                detail = parsed.get("error", {}).get("message", "") if isinstance(parsed, dict) else ""
+                if not detail and isinstance(parsed, dict):
+                    detail = parsed.get("detail", "")
+                detail = str(detail or "")[:500]
+            except Exception:
+                detail = ""
+            suffix = f": {detail}" if detail else ""
+            raise RuntimeError(f"Muse Image edit HTTP {exc.code}{suffix}") from exc
     return _image_bytes(data, "Muse Image edit")
 
 
