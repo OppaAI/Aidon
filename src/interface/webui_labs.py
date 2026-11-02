@@ -142,9 +142,19 @@ class WebUILabMixin:
             option = next((x for x in options if x.get("id") == choice), None)
             if not option or not option.get("connection"):
                 return 400, {"error": "Select a listed server with complete connection details"}
+            connection = option["connection"]
+            # The card click text is a selection command, and earlier user
+            # turns describe the goal. Neither is a technical setup
+            # requirement. Only publish-record secret placeholders belong here.
+            prior_requests = [t["text"] for t in turns[:-1]
+                              if t.get("role") == "user" and t.get("text", "").strip()]
+            env = connection.get("env") or {}
+            requirements = [f"Set {key} in Aidon's .env before connecting."
+                            for key, value in sorted(env.items())
+                            if isinstance(value, str) and value == f"${key}"]
             brief = {"name": re.sub(r"[^a-zA-Z0-9_]", "_", option["name"]),
-                     "purpose": text, "connection": option["connection"],
-                     "requirements": [t["text"] for t in turns if t["role"] == "user"],
+                     "purpose": "\n".join(prior_requests) or f"Connect to {option['title']}.",
+                     "connection": connection, "requirements": requirements,
                      "source": option["source"], "title": option["title"]}
             reply = ("Review this MCP connection before starting.\n\n"
                      + json.dumps(brief, indent=2, ensure_ascii=False)

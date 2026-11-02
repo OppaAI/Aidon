@@ -85,15 +85,26 @@ def _package_connection(package):
 
 
 def _publisher_matches_website(server, repo, get):
-    """True only when GitHub owner and registry site share a domain."""
-    match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+)/[A-Za-z0-9_.-]+(?:\.git)?/?", repo)
+    """Verify publisher control using its registry namespace or GitHub site."""
     website = str(server.get("websiteUrl", ""))
-    if not match or not website:
+    site_host = (urllib.parse.urlsplit(website).hostname or "").lower().removeprefix("www.")
+    # The official MCP Registry authenticates reverse-DNS namespaces against
+    # their publisher's domain (for example, net.todoist -> todoist.net).
+    # When the published website is on that domain, this remains verifiable
+    # even if GitHub's API is rate-limited and stars cannot be fetched.
+    namespace = str(server.get("name", "")).split("/", 1)[0].lower()
+    labels = namespace.split(".")
+    if len(labels) >= 2 and all(labels):
+        namespace_domain = ".".join(reversed(labels))
+        if (site_host == namespace_domain
+                or site_host.endswith("." + namespace_domain)):
+            return True
+    match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+)/[A-Za-z0-9_.-]+(?:\.git)?/?", repo)
+    if not match or not site_host:
         return False
     try:
         owner = get("https://api.github.com/users/" + match[1])
         profile_url = str(owner.get("blog", ""))
-        site_host = (urllib.parse.urlsplit(website).hostname or "").lower().removeprefix("www.")
         owner_host = (urllib.parse.urlsplit(profile_url if "://" in profile_url else "https://" + profile_url).hostname or "").lower().removeprefix("www.")
         return bool(site_host and owner_host and
                     (site_host == owner_host or site_host.endswith("." + owner_host)

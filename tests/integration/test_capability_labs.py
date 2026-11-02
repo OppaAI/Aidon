@@ -92,10 +92,29 @@ def test_mcp_click_uses_saved_connection_and_rejects_invented_choice(tmp_path):
     status, result = message(s, "mcp", "Use this", revision, choice="known")
     assert status == 200
     brief = result["state"]["brief"]
-    assert "Read my notes, do not modify them" in brief["requirements"]
+    assert brief["purpose"] == "Read my notes, do not modify them"
+    assert brief["requirements"] == []
     plan = lab_execution_plan("mcp", brief)
     assert plan.steps[0].tool == "mcp_connect"
     assert plan.steps[0].args["url"] == "https://example.com/mcp"
+
+
+def test_mcp_click_lists_only_published_secret_setup_requirements(tmp_path):
+    s = server(tmp_path)
+    option = {"id": "known", "name": "org.example/server", "title": "Example",
+              "connection": {"transport": "stdio", "command": "npx", "args": ["-y", "example@1.0.0"],
+                             "env": {"API_TOKEN": "$API_TOKEN", "MODE": "safe"}},
+              "source": "https://registry.modelcontextprotocol.io/record"}
+    store = InterviewStore(tmp_path)
+    revision = store.save_lab("mcp", {"id": "mcp-interview",
+        "turns": [{"role": "user", "text": "Connect my Example account and keep it read-only."}],
+        "options": [option]}, 0)
+    s.lab_model = lambda messages: pytest.fail("A selected record supplies the connection brief")
+    status, result = message(s, "mcp", "Use Example for the workflow we discussed.", revision, choice="known")
+    assert status == 200
+    brief = result["state"]["brief"]
+    assert brief["purpose"] == "Connect my Example account and keep it read-only."
+    assert brief["requirements"] == ["Set API_TOKEN in Aidon's .env before connecting."]
 
 
 def test_skill_test_backend_rejects_missing_isolation_and_honors_failure(tmp_path):

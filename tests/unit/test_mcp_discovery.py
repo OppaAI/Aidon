@@ -65,3 +65,32 @@ def test_secret_package_is_preferred_over_oauth_remote_and_publisher_match_ranks
     assert todoist["connection"]["env"] == {"TODOIST_API_KEY": "$TODOIST_API_KEY"}
     assert todoist["official"] is True
     assert options[0] is todoist  # verified publisher outranks a much higher star count
+
+
+def test_authenticated_dns_namespace_ranks_first_without_github_stars():
+    records = [
+        {"server": {"name": "io.github.community/todoist", "title": "Community Todoist",
+                     "repository": {"url": "https://github.com/community/todoist"},
+                     "websiteUrl": "https://community.example",
+                     "packages": [{"registryType": "npm", "identifier": "community-todoist",
+                                   "version": "1.0.0"}]}},
+        {"server": {"name": "net.todoist/mcp", "title": "Todoist",
+                     "repository": {"url": "https://github.com/Doist/todoist-mcp"},
+                     "websiteUrl": "https://ai.todoist.net",
+                     "packages": [{"registryType": "npm", "identifier": "@doist/todoist-mcp",
+                                   "version": "13.4.0"}]}}
+    ]
+
+    def get(url):
+        if url.startswith("https://api.github.com/repos/community/"):
+            return {"stargazers_count": 5000, "license": {"spdx_id": "MIT"}}
+        if url.startswith("https://api.github.com/repos/Doist/"):
+            raise OSError("GitHub stars unavailable")
+        if url.startswith("https://api.github.com/users/"):
+            return {"blog": "https://publisher.example"}
+        return {"servers": records}
+
+    options, _ = discover_mcp(["todoist"], get)
+    assert options[0]["name"] == "net.todoist/mcp"
+    assert options[0]["official"] is True
+    assert options[0]["stars"] is None
