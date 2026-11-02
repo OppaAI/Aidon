@@ -53,19 +53,23 @@ def register_mcp_tools(config, tools: dict, approval, governor=None) -> None:
                           "token": str(token or "")}
 
             def _factory(_cfg, _url=str(url), _token=str(token or "")):
-                from ..interface.mcp_http import McpHttpClient, McpUnauthorizedError
+                from ..interface.mcp_http import (
+                    McpHttpClient, McpUnauthorizedError, expand_env_value)
                 from ..interface.mcp_oauth import callback_uri_from_env, get_oauth_manager
                 _oauth = get_oauth_manager(config.home, callback_uri_from_env())
+                _static_token, _ = expand_env_value(_token)
+                def _token_provider():
+                    return _static_token or _oauth.access_token(_url)
                 _client = McpHttpClient(
-                    _url, token=_token or _oauth.access_token(_url) or None,
-                    token_provider=lambda: _oauth.access_token(_url))
+                    _url, token=_static_token or _oauth.access_token(_url) or None,
+                    token_provider=_token_provider)
                 try:
                     _client.initialize()
                 except McpUnauthorizedError as exc:
                     _client.close()
                     _access_token = _oauth.authorize(_url, exc.challenge, _acquire_approve)
                     _client = McpHttpClient(_url, token=_access_token,
-                        token_provider=lambda: _oauth.access_token(_url))
+                        token_provider=lambda: _oauth.access_token(_url) or _access_token)
                     _client.initialize()
                 return _client
         else:
