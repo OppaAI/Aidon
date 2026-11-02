@@ -136,16 +136,12 @@ class WebUICapabilityMixin:
                 "dags": {"count": len(dags), "recent": dags[:30]}}
 
     def handle_capability_code(self, name: str, kind: str = "tool"):
-        """Python source for a named capability handler, or None
-        when no importable handler carries that name.
+        """Source or safe configuration for a named capability.
 
-        The search covers module-level callables in the
-        capabilities and agentic packages (the handlers a plan
-        step can actually name). Extra-tool closures built
-        inside main._goal_extra_tools are not importable from
-        the server — it holds no config — so they are not
-        listed here; a name that only exists as such a closure
-        is a 404, not a wrong source.
+        Skills return stored Markdown and MCP entries return connection
+        metadata with secrets removed. Tools return adopted plugin modules
+        or importable core handlers. Goal-tool closures show their builder
+        source because they are not importable directly.
         """
         import importlib
         import inspect

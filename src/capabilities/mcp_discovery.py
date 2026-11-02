@@ -149,6 +149,7 @@ def discover_mcp(queries, get_json=None, limit=8):
                 break
         if len(results) >= limit:
             break
+    # Keep the registry's relevance order within an equal trust/star tier.
     results.sort(key=lambda item: (not item.get("official", False),
-                                   -(item.get("stars") or 0), item.get("name", "")))
+                                   -(item.get("stars") or 0)))
     return results, errors

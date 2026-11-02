@@ -47,7 +47,7 @@ function render(kind) {
       const address = connection ? (connection.url || [connection.command, ...(connection.args || [])].join(" ")) : "Connection needs additional setup";
       const envNames = Object.keys((connection && connection.env) || {});
       const provenance = option.official
-        ? '<span class="mcp-official">Official publisher match</span>'
+        ? '<span class="mcp-official">Publisher domain match</span>'
         : '<span class="mcp-community">Community / publisher not verified</span>';
       const stars = option.stars == null ? 'GitHub stars: unavailable'
         : '⭐ ' + esc(option.stars) + ' GitHub stars' + (option.stars_source ? ' · ' + safeLink(option.stars_source, 'source') : '');
