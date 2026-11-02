@@ -609,7 +609,8 @@ def main(argv: list[str] | None = None) -> int:
                         return f"No stopped run with id {_cli_pcmd['stop_id']}."
                     return "No stopped run to proceed with."
                 goal = _stop["goal"]
-                _cli_mode_once = "execute"
+                _cli_mode_once = ("plan" if _stop.get("mode") == "ask"
+                                  else "execute")
                 _cli_resume_stop_id = _stop["stop_id"]
                 if _stop["mode"] == "plan" and isinstance(_stop.get("plan"), dict) and _stop["plan"].get("steps"):
                     from ..agentic.loop import Plan as _CliPlan
@@ -644,7 +645,11 @@ def main(argv: list[str] | None = None) -> int:
                 report = runner.run(goal, spec=_cli_resume_spec)
             else:
                 report = runner.run(goal)
-            if _cli_resume_stop_id and report.status == "done":
+            if _cli_resume_stop_id and (
+                    report.status == "done"
+                    or (report.status == "stopped"
+                        and (report.mode_stop or {}).get("stop_id")
+                        != _cli_resume_stop_id)):
                 try:
                     from ..interface.mode_stops import delete_mode_stop as _cli_del_stop
                     _cli_del_stop(config.home, _cli_resume_stop_id)
@@ -655,6 +660,22 @@ def main(argv: list[str] | None = None) -> int:
             if report.status == "stopped":
                 _sid = (report.mode_stop or {}).get("stop_id", "")
                 _smode = (report.mode_stop or {}).get("mode", "") or "run"
+                if _smode == "plan":
+                    _lines = []
+                    for _index, _step in enumerate(report.plan.normalized_steps(), 1):
+                        _detail = str(getattr(_step, "description", "") or
+                                      getattr(_step, "tool", "step"))
+                        _tool = str(getattr(_step, "tool", "") or "")
+                        _deliverable = str(getattr(_step, "deliverable", "") or "")
+                        _line = f"{_index}. {_detail}"
+                        if _tool:
+                            _line += f" [{_tool}]"
+                        if _deliverable:
+                            _line += f" -> {_deliverable}"
+                        _lines.append(_line)
+                    if _lines:
+                        return ("[stopped] Plan ready:\n" + "\n".join(_lines[:12])
+                                + f"\nRun /proceed {_sid} to execute.")
                 return f"[stopped] {_smode} ready — run /proceed {_sid} to continue."
             return (f"[{report.status}] {', '.join(report.files)} {report.error}"
                     + (f"\n{report.result_text}" if report.result_text else "")).strip()

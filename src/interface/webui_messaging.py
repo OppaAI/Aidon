@@ -203,7 +203,8 @@ class WebUIMessagingMixin:
                                                 decision_reply = "No stopped run to proceed with."
                                         else:
                                             text = _stop["goal"]
-                                            wa_mode = "execute"
+                                            wa_mode = ("plan" if _stop.get("mode") == "ask"
+                                                       else "execute")
                                             wa_resume_stop_id = _stop["stop_id"]
                                             wa_resume_spec = _stop.get("spec")
                                             wa_resume_plan = _stop.get("plan")
@@ -471,7 +472,8 @@ class WebUIMessagingMixin:
                                     decision_reply = "No stopped run to proceed with."
                             else:
                                 text = _stop["goal"]
-                                sl_mode = "execute"
+                                sl_mode = ("plan" if _stop.get("mode") == "ask"
+                                           else "execute")
                                 sl_resume_stop_id = _stop["stop_id"]
                                 sl_resume_spec = _stop.get("spec")
                                 sl_resume_plan = _stop.get("plan")

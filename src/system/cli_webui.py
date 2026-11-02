@@ -583,7 +583,10 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                     server._web_runs[run_id]["mode_stop"] = enriched
             except Exception:
                 pass
-        if _resume_stop_id and report.status == "done":
+        if _resume_stop_id and (
+                report.status == "done"
+                or (report.status == "stopped"
+                    and (report.mode_stop or {}).get("stop_id") != _resume_stop_id)):
             try:
                 from ..interface.mode_stops import delete_mode_stop
                 delete_mode_stop(config.home, _resume_stop_id)
@@ -619,6 +622,24 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                 _shead = ("Plan ready" + (f" ({len(_delivs)} deliverable(s): "
                                           + ", ".join(str(d) for d in _delivs[:5])
                                           + ")" if _delivs else "") + ".")
+                _plan_lines = []
+                try:
+                    _steps = report.plan.normalized_steps()
+                except Exception:
+                    _steps = []
+                for _index, _step in enumerate(_steps, 1):
+                    _detail = str(getattr(_step, "description", "") or
+                                  getattr(_step, "tool", "step"))
+                    _tool = str(getattr(_step, "tool", "") or "")
+                    _deliverable = str(getattr(_step, "deliverable", "") or "")
+                    _line = f"{_index}. {_detail}"
+                    if _tool:
+                        _line += f" [{_tool}]"
+                    if _deliverable:
+                        _line += f" → {_deliverable}"
+                    _plan_lines.append(_line)
+                if _plan_lines:
+                    _shead += "\n\nSteps:\n" + "\n".join(_plan_lines[:12])
                 try:
                     from ..interface.mode_stops import load_mode_stop
                     _stored = load_mode_stop(config.home, _sid) or {}
@@ -636,9 +657,13 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
             if event.source == "webui":
                 _saction = "Tap Proceed below to continue."
             elif event.source in ("slack", "whatsapp"):
-                _saction = "Reply proceed to continue this plan (no ID needed)."
+                _saction = ("Reply proceed to review the plan (no ID needed)."
+                            if _stopped.get("mode") == "ask" else
+                            "Reply proceed to run this plan (no ID needed).")
             else:
-                _saction = f"Run /proceed {_sid} to continue."
+                _saction = (f"Run /proceed {_sid} to review the plan."
+                            if _stopped.get("mode") == "ask" else
+                            f"Run /proceed {_sid} to run this plan.")
             _surface_reply(f"{_shead}\n{_saction}\n" + format_run_stats(report))
         elif report.status == "chat":
             _surface_reply((report.chat_reply or "Received.") + "\n" + format_run_stats(report))
