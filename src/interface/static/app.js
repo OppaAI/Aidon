@@ -2405,6 +2405,17 @@
     guidanceInput.disabled = false;
   };
 
+  // Studio pages are separate documents. Keep the chat document (and its
+  // live run poller) open while a workflow is executing, so opening a lab or
+  // studio does not make the active run disappear from the user's view.
+  document.querySelectorAll("#main-nav a.nav-btn[href]").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      if (!currentRun || !pollTimer) return;
+      event.preventDefault();
+      window.open(link.href, "_blank", "noopener");
+    });
+  });
+
   document.getElementById("new-chat").addEventListener("click", () => {
     // never orphan a poll interval or strand the composer mid-run
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
