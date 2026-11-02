@@ -48,11 +48,13 @@ def test_secret_package_is_preferred_over_oauth_remote_and_publisher_match_ranks
         "packages": [{"registryType": "npm", "identifier": "@doist/todoist-mcp",
                       "version": "13.4.0", "environmentVariables": [
                           {"name": "TODOIST_API_KEY", "isSecret": True}]}]}},
-        {"server": {"name": "community/todoist", "repository": {"url": ""}}}]
+        {"server": {"name": "community/todoist", "repository": {"url": "https://github.com/community/todoist"}}}]
 
     def get(url):
         if url.startswith("https://api.github.com/repos/Doist/"):
             return {"stargazers_count": 5, "license": {"spdx_id": "MIT"}, "owner": {"login": "Doist"}}
+        if url.startswith("https://api.github.com/repos/community/"):
+            return {"stargazers_count": 5000, "license": {"spdx_id": "MIT"}, "owner": {"login": "community"}}
         if url == "https://api.github.com/users/Doist":
             return {"blog": "https://www.todoist.com"}
         return {"servers": records}
@@ -62,4 +64,4 @@ def test_secret_package_is_preferred_over_oauth_remote_and_publisher_match_ranks
     assert todoist["connection"]["command"] == "npx"
     assert todoist["connection"]["env"] == {"TODOIST_API_KEY": "$TODOIST_API_KEY"}
     assert todoist["official"] is True
-    assert options[0] is todoist
+    assert options[0] is todoist  # verified publisher outranks a much higher star count

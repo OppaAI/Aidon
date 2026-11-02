@@ -36,6 +36,8 @@ html[data-theme="light"] {
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 * { box-sizing: border-box; }
+a { color: var(--accent); }
+a:visited { color: color-mix(in srgb, var(--accent) 82%, var(--text)); }
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text);
   font-family: var(--font-body);

@@ -42,7 +42,12 @@ function render(kind) {
   box.scrollTop = box.scrollHeight;
   const options = document.getElementById("mcp-options");
   if (kind === "mcp") {
-    options.innerHTML = (current.options || []).map(option => {
+    options.innerHTML = (current.options || []).slice().sort((a, b) => {
+      // Trust tier always wins; GitHub stars only rank servers in the same tier.
+      const trustOrder = Number(Boolean(b.official)) - Number(Boolean(a.official));
+      if (trustOrder) return trustOrder;
+      return (Number(b.stars) || 0) - (Number(a.stars) || 0);
+    }).map(option => {
       const connection = option.connection;
       const address = connection ? (connection.url || [connection.command, ...(connection.args || [])].join(" ")) : "Connection needs additional setup";
       const envNames = Object.keys((connection && connection.env) || {});
