@@ -2,7 +2,7 @@
 
 The pre-written action list is blind: the model writes every
 click before seeing the screen. The guided loop closes that
-gap — screenshot, vision description, one decided action at a
+gap — screenshot, one vision-guided decision, one action at a
 time — and secret handles keep credential values out of
 model-visible text entirely.
 """
@@ -85,12 +85,11 @@ def test_driver_error_redacts_secret_values(tmp_path):
 def test_guided_task_sees_screen_then_acts_then_finishes(tmp_path):
     driver = _Driver()
     chat = _ScriptChat([
-        "A login form with a username field.",
         json.dumps({"action": {"kind": "type", "text": "hello"},
-                    "done": False, "reason": "fill the field"}),
-        "The form is submitted.",
+                    "done": False, "screen": "A login form with a username field.",
+                    "reason": "fill the field"}),
         json.dumps({"action": None, "done": True,
-                    "reason": "goal achieved"}),
+                    "screen": "The form is submitted.", "reason": "goal achieved"}),
     ])
     result = run_guided_task(
         "submit the form", chat,
@@ -99,7 +98,8 @@ def test_guided_task_sees_screen_then_acts_then_finishes(tmp_path):
     assert result["ok"] is True
     assert len(result["actions_taken"]) == 1
     assert driver.actions[0] == {"kind": "type", "text": "hello"}
-    assert any(part.get("type") == "image_url" for part in chat.calls[1][0].content)
+    assert len(chat.calls) == 2
+    assert any(part.get("type") == "image_url" for part in chat.calls[0][0].content)
     assert (tmp_path / "screenshot_round_0.png").exists()
     assert (tmp_path / "screenshot_round_1.png").exists()
     trace = json.loads((tmp_path / "task_trace.json").read_text())
@@ -108,7 +108,7 @@ def test_guided_task_sees_screen_then_acts_then_finishes(tmp_path):
 
 
 def test_guided_task_does_not_claim_success_without_an_action_or_done(tmp_path):
-    chat = _ScriptChat(["A desktop.", json.dumps({"action": None, "done": False})])
+    chat = _ScriptChat([json.dumps({"action": None, "done": False})])
     result = run_guided_task("open an app", chat, driver=_Driver(),
                              screenshot_dir=str(tmp_path), capture=_fake_png)
     assert not result["ok"]
@@ -127,10 +127,10 @@ def test_speech_tool_requests_exact_text_in_webui(tmp_path):
 def test_guided_task_stops_at_max_actions(tmp_path):
     driver = _Driver()
     chat = _ScriptChat([
-        "Screen.", json.dumps({"action": {"kind": "key", "key": "Tab"},
-                               "done": False, "reason": "move"}),
-        "Screen.", json.dumps({"action": {"kind": "key", "key": "Tab"},
-                               "done": False, "reason": "move"}),
+        json.dumps({"action": {"kind": "key", "key": "Tab"},
+                    "done": False, "screen": "Screen.", "reason": "move"}),
+        json.dumps({"action": {"kind": "key", "key": "Tab"},
+                    "done": False, "screen": "Screen.", "reason": "move"}),
     ])
     result = run_guided_task(
         "keep tabbing", chat,
