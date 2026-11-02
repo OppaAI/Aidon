@@ -955,13 +955,8 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
             return None
 
     def _is_image_edit_goal(self, goal: str) -> bool:
-        low = (goal or "").lower()
-        return any(w in low for w in (
-            "edit", "modify", "transform", "retouch", "adjust", "enhance",
-            "filter", "crop", "resize", "recolor", "remove background",
-            "background removal", "inpaint", "outpaint", "change the scene",
-            "change scene", "change the background", "change background",
-            "replace the background", "replace background"))
+        from .capability_triage import is_image_edit_request
+        return is_image_edit_request(goal)
 
     def _composed_plan(self, experiences, goal):
         """Build a plan by combining distinct recalled workflows, or None.

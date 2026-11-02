@@ -52,22 +52,30 @@ MIN_CONFIDENCE = 0.6
 BLOCK_CONFIDENCE = 0.8
 
 
-def builtin_image_edit_covers(goal: str, tool_names) -> bool:
-    """Avoid a Lab referral when image editing has a built-in tool.
-
-    Whether an image was successfully attached is a separate input problem;
-    it must not make an existing editing capability look unavailable.
-    """
-    if "edit_image" not in set(tool_names or ()):
-        return False
+def is_image_edit_request(goal: str) -> bool:
+    """Recognize direct image edits, including edits phrased as continuations."""
     low = str(goal or "").lower()
     return any(term in low for term in (
         "edit", "modify", "transform", "retouch", "adjust", "enhance",
         "filter", "crop", "resize", "recolor", "remove background",
         "background removal", "inpaint", "outpaint", "change the scene",
         "change scene", "change the background", "change background",
-        "replace the background", "replace background",
+        "replace the background", "replace background", "do the same",
+        "same with this", "same edit", "show her whole body",
+        "show his whole body", "show their whole body", "full body",
+        "make the image wider", "make image wider", "make it wider",
+        "expand the image", "change the aspect ratio",
     ))
+
+
+def builtin_image_edit_covers(goal: str, tool_names) -> bool:
+    """Avoid a Lab referral when image editing has a built-in tool.
+
+    Whether an image was successfully attached is a separate input problem;
+    it must not make an existing editing capability look unavailable.
+    """
+    return ("edit_image" in set(tool_names or ())
+            and is_image_edit_request(goal))
 
 STATUS_CRITERIA = {
     "covered": "Every capability the goal needs is in the inventory.",
