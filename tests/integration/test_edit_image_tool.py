@@ -134,6 +134,19 @@ def test_edit_image_accepts_upload_basename(tmp_path, monkeypatch):
     assert result.startswith("IMAGE_SAVED: ")
     saved = Path(result.split(": ", 1)[1])
     assert saved.is_relative_to(workdir)
+
+
+def test_edit_image_maps_legacy_upload_path_only_to_managed_copy(
+        tmp_path, monkeypatch):
+    config, gate, photo, tools, workdir = _setup(tmp_path, monkeypatch)
+    legacy_path = tmp_path / "old-home" / ".aidon" / "library" / "uploads" / photo.name
+
+    result = tools["edit_image"]("change the background", image=str(legacy_path))
+
+    assert result.startswith("IMAGE_SAVED: ")
+    assert Path(result.split(": ", 1)[1]).is_relative_to(workdir)
+    assert len(gate.calls) == 1
+    assert gate.calls[0]["kind"] == "live"
     assert saved.name.startswith("aidon-")
 
 

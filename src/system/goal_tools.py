@@ -330,6 +330,17 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                     hits = sorted(uploads.glob(f"*-{raw}"), key=lambda p: p.stat().st_mtime)
                     if hits:
                         path = hits[-1]
+            else:
+                # Old conversations can retain upload paths from a pre-Docker
+                # Aidon home (for example ~/.aidon). Never read that arbitrary
+                # path: remap by basename only when the same upload exists in
+                # this configured home's managed uploads directory.
+                try:
+                    path.resolve().relative_to(config.home.resolve())
+                except ValueError:
+                    migrated = uploads / path.name
+                    if migrated.is_file():
+                        path = migrated
             path = path.resolve()
             home_root = config.home.resolve()
             if path != home_root and home_root not in path.parents:

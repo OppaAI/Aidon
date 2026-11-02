@@ -469,7 +469,7 @@ class PlanningMixin:
                     args = step.get("args")
                     if not isinstance(args, dict):
                         continue
-                    for key in ("image", "images"):
+                    for key in ("image", "image_path", "images", "image_paths"):
                         value = args.get(key)
                         if isinstance(value, str):
                             try:
