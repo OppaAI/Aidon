@@ -28,6 +28,7 @@ def test_dag_html_has_editor_controls():
     assert "Validate" in DAG_HTML
     assert "Fit graph" in DAG_HTML
     assert "Expected result" in DAG_HTML
+    assert DAG_HTML.index('id="dag-list"') < DAG_HTML.index('class="dag-inspector"')
 
 
 def test_dag_store_save_validate_and_list(tmp_path):

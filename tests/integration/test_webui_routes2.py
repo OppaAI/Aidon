@@ -99,12 +99,12 @@ def test_dag_layout_layers_along_a_chain(tmp_path):
     assert status == 200
     by_id = {entry["id"]: entry for entry in payload["layout"]}
     assert by_id["a"]["layer"] == 0 and by_id["a"]["x"] == 0
-    assert by_id["b"]["layer"] == 1 and by_id["b"]["x"] == 280
-    assert by_id["c"]["layer"] == 2 and by_id["c"]["x"] == 560
+    assert by_id["b"]["layer"] == 1 and by_id["b"]["x"] == 350
+    assert by_id["c"]["layer"] == 2 and by_id["c"]["x"] == 700
     assert by_id["d"]["layer"] == 0
-    # y is the index within the layer, 90 apart.
+    # y is the index within the layer, 110 apart.
     layer0 = [e for e in payload["layout"] if e["layer"] == 0]
-    assert [e["y"] for e in layer0] == [0, 90]
+    assert [e["y"] for e in layer0] == [0, 110]
     # Topological order: a dependency precedes its dependent.
     order = [e["id"] for e in payload["layout"]]
     assert order.index("a") < order.index("b") < order.index("c")
