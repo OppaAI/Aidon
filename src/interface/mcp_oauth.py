@@ -38,6 +38,7 @@ def _json_request(url, *, method="GET", payload=None, headers=None):
         **({"Content-Type": "application/json"} if data else {}), **(headers or {})})
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
+            _https_url(response.geturl())
             raw = response.read(1024 * 1024 + 1)
     except urllib.error.HTTPError as exc:
         raise OAuthError(f"OAuth endpoint returned HTTP {exc.code}") from exc
@@ -112,6 +113,23 @@ def get_oauth_manager(home, callback_uri="http://127.0.0.1:8765/oauth/mcp/callba
         return manager
 
 
+def callback_uri_from_env():
+    """Return the loopback callback matching the WebUI listener."""
+    value = os.environ.get("AIDON_MCP_OAUTH_REDIRECT_URI", "").strip()
+    if value:
+        parsed = urllib.parse.urlsplit(value)
+        if (parsed.scheme != "http" or parsed.hostname not in
+                ("127.0.0.1", "localhost", "::1") or parsed.path != "/oauth/mcp/callback"
+                or parsed.query or parsed.fragment or parsed.username or parsed.password):
+            raise OAuthError("AIDON_MCP_OAUTH_REDIRECT_URI must be a loopback callback URL")
+        return value
+    try:
+        port = str(int(os.environ.get("AIDON_WEBUI_PORT", "8765")))
+    except (TypeError, ValueError):
+        port = "8765"
+    return f"http://127.0.0.1:{port}/oauth/mcp/callback"
+
+
 class McpOAuthManager:
     def __init__(self, home: Path, callback_uri: str):
         self.path = home / "credentials" / "mcp_oauth.json"
@@ -126,6 +144,12 @@ class McpOAuthManager:
                 self.records = {}
         except (OSError, json.JSONDecodeError):
             self.records = {}
+        try:
+            self.path.parent.chmod(0o700)
+            if self.path.exists():
+                self.path.chmod(0o600)
+        except OSError:
+            pass
 
     def _save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -171,6 +195,7 @@ class McpOAuthManager:
                 "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Aidon-MCP-OAuth"})
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
+                _https_url(response.geturl())
                 raw = response.read(1024 * 1024 + 1)
         except urllib.error.HTTPError as exc:
             raise OAuthError(f"OAuth token endpoint returned HTTP {exc.code}") from exc
@@ -219,7 +244,7 @@ class McpOAuthManager:
                   "response_type": "code", "state": state,
                   "code_challenge": code_challenge, "code_challenge_method": "S256",
                   "resource": resource.get("resource", resource_url)}
-        scopes = resource.get("scopes_supported") or metadata.get("scopes_supported") or []
+        scopes = metadata.get("scopes_supported") or []
         if scopes:
             params["scope"] = " ".join(str(scope) for scope in scopes)
         auth_url = metadata["authorization_endpoint"] + "?" + urllib.parse.urlencode(params)
@@ -271,8 +296,7 @@ class McpOAuthManager:
                 return False, "The OAuth provider did not return an authorization code."
             expected_issuer = pending["metadata"].get("issuer")
             returned_issuer = (query.get("iss") or [""])[0]
-            if (pending["metadata"].get("authorization_response_iss_parameter_supported")
-                    and returned_issuer != expected_issuer):
+            if returned_issuer and returned_issuer != expected_issuer:
                 pending["result"] = {"error": "issuer mismatch"}
             else:
                 pending["result"] = {"code": code, "error": error}
