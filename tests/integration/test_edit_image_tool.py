@@ -35,6 +35,7 @@ def _setup(tmp_path, monkeypatch, *, optional_tools=True, image_calls=None):
     config = Config(home=home)
     config.api_key = "test-key"
     config.api_base = "https://example.com/v1"
+    config.image_api_endpoint = "https://example.com/v1"
     gate = _Gate()
     workdir = home / "workspace"
     workdir.mkdir()

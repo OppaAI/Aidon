@@ -19,16 +19,18 @@ def run_media_command(args, config):
         print(builder.build_command(config.home / "unity" / args.name))
         return 0
     if args.command == "image":
-        from ..capabilities.image_gen import generate_image, edit_image, save_image
+        from ..capabilities.image_gen import generate_image, edit_image, image_api_config, save_image
         from pathlib import Path as _Path
-        if not config.api_key or not config.api_base:
-            print("Image generation needs AIDON_API_KEY and AIDON_API_ENDPOINT in .env, same key and endpoint as Spark, no separate image key.")
+        try:
+            image_endpoint, image_key = image_api_config(config)
+        except ValueError as exc:
+            print(str(exc))
             return 2
         out = _Path(args.output) if args.output else config.home / "library" / "files" / "image.png"
         if args.action == "generate":
-            data = generate_image(args.prompt, config.api_key, config.api_base, size=args.size, model=config.image_model)
+            data = generate_image(args.prompt, image_key, image_endpoint, size=args.size, model=config.image_model)
         else:
-            data = edit_image(args.prompt, config.api_key, config.api_base, reference_images=args.refs or [], size=args.size, model=config.image_model)
+            data = edit_image(args.prompt, image_key, image_endpoint, reference_images=args.refs or [], size=args.size, model=config.image_model)
         path = save_image(data, out)
         print(f"Image saved: {path}, model {config.image_model}")
         return 0

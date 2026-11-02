@@ -45,6 +45,29 @@ from pathlib import Path
 MODEL = "muse-image-1.0"
 
 
+def image_api_config(config) -> tuple[str, str]:
+    """Resolve image credentials without sending a chat provider's key elsewhere."""
+    from urllib.parse import urlsplit
+    main = str(getattr(config, "api_base", "") or "").strip().rstrip("/")
+    endpoint = str(getattr(config, "image_api_endpoint", "") or "").strip().rstrip("/")
+    key = str(getattr(config, "image_api_key", "") or "")
+    if not endpoint:
+        endpoint = (main if urlsplit(main).hostname == "api.meta.ai"
+                    else "https://api.meta.ai/v1")
+    parsed = urlsplit(endpoint)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username or parsed.password:
+        raise ValueError("AIDON_IMAGE_API_ENDPOINT must be an API base URL such as https://api.meta.ai/v1")
+    if not key and main:
+        origin = lambda url: (url.scheme, url.hostname, url.port)
+        if origin(parsed) == origin(urlsplit(main)):
+            key = str(getattr(config, "api_key", "") or "")
+    if not key:
+        raise ValueError("Set AIDON_IMAGE_API_KEY (Meta Model API key) in .env or Settings. "
+                         "The chat provider key cannot be used for Muse Image at another provider. "
+                         "AIDON_IMAGE_API_ENDPOINT defaults to https://api.meta.ai/v1.")
+    return endpoint, key
+
+
 def _image_bytes(data, label: str = "Muse Image") -> bytes:
     """Pull the first image out of an API response, or raise."""
     images = data.get("data", []) if isinstance(data, dict) else []
@@ -73,123 +96,95 @@ def generate_image(prompt: str, api_key: str, endpoint: str,
     if post is not None:
         data = post(url, headers, payload)
     else:
-        req = urllib.request.Request(url, data=json.dumps(payload).encode(),
-                                     method="POST", headers=headers)
-        with urllib.request.urlopen(req, timeout=60) as response:
-            data = json.loads(response.read().decode())
+        data = _post_image_json(url, headers, payload)
     return _image_bytes(data)
 
 
+def _reference_input(reference) -> dict:
+    if isinstance(reference, dict):
+        if set(reference) not in ({"image_url"}, {"file_id"}):
+            raise ValueError("reference needs image_url or file_id")
+        return dict(reference)
+    if isinstance(reference, str) and reference.startswith(("https://", "http://", "data:image/")):
+        return {"image_url": reference}
+    if isinstance(reference, bytes):
+        data, mime = reference, "image/png"
+    else:
+        path = Path(reference)
+        if not path.is_file():
+            raise ValueError(f"reference image not found: {reference}")
+        data = path.read_bytes()
+        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    if not data:
+        raise ValueError("reference image is empty")
+    return {"image_url": f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"}
+
+
+def _post_image_json(url, headers, payload):
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                 method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=180) as response:
+            return json.loads(response.read().decode())
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            parsed = json.loads(exc.read(4096).decode("utf-8", "replace"))
+            if isinstance(parsed, dict):
+                error = parsed.get("error", {})
+                detail = error.get("message", "") if isinstance(error, dict) else error
+                detail = detail or parsed.get("detail") or parsed.get("message") or ""
+            detail = str(detail)[:500]
+            # Provider messages occasionally echo authentication inputs.
+            key = headers.get("Authorization", "").removeprefix("Bearer ")
+            if key:
+                detail = detail.replace(key, "[redacted]")
+        except Exception:
+            pass
+        from urllib.parse import urlsplit
+        parsed_url = urlsplit(url)
+        destination = (parsed_url.hostname or "") + parsed_url.path
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"Muse Image HTTP {exc.code} at {destination}{suffix}") from None
+
+
 def edit_image(prompt: str, api_key: str, endpoint: str,
-               reference_images: list, size: str = "1024x1024", post=None, model: str = MODEL) -> bytes:
-    """Edit or compose from reference images, 1 to 10, not text-to-image alone.
+               reference_images: list, size: str = "1024x1024", post=None,
+               model: str = MODEL, output_format: str = "png") -> bytes:
+    """Edit 1–10 inputs using Meta's images/image_url JSON contract.
 
-    This is the second Muse Image endpoint, POST /v1/images/edits,
-    not POST /v1/images/generations. Generations takes a prompt
-    only, no reference image. Edits takes a prompt plus 1 to 10
-    reference images, and combines them into one scene, or edits
-    the first one, as the prompt says.
-
-    How to refer to them: in the prompt, address each reference
-    as @Image1, @Image2, and so on, numbered in input order.
-    Example: "Combine @Image1, the product, with @Image2, the
-    background, keep @Image1's label unchanged, match @Image2's
-    lighting." Tagging the role, subject, product, environment,
-    or palette, is what makes composition predictable. Untagged
-    references tend to average themselves.
-
-    reference_images is a list of image bytes, or image file
-    paths, or image URLs, 1 to 10, more than 10 raises, 0 raises.
-    Bytes and paths are sent as image files, URLs are sent as
-    image URLs, so the caller does not need to download a URL
-    first. As with generate_image, approval and credit gating
-    are the caller's job, before this call, and a live run
-    against the official Meta endpoint is still untested here,
-    so the first live edit should be checked against the
-    official dev.meta.ai images/edits field names, because
-    third-party wrappers differ, some use an images_list,
-    some use image_1 to image_10, and the official
-    OpenAI-compatible form is image files plus prompt.
+    Inputs can be local paths, bytes, public/data URLs, or image_url/file_id
+    objects. Local files are encoded here, never sent as server-side paths.
+    post(url, headers, payload_dict) can replace the HTTP transport in tests.
     """
     if not prompt.strip():
         raise ValueError("image edit prompt is required")
     if not api_key:
-        raise ValueError("Muse Image API key is required, generation is credit-gated, never run without a key")
+        raise ValueError("Muse Image API key is required")
     if not reference_images or len(reference_images) > 10:
-        raise ValueError("Muse Image edit needs 1 to 10 reference images, not 0, not more than 10")
+        raise ValueError("Muse Image edit needs 1 to 10 reference images")
+    if output_format not in ("png", "jpeg", "webp"):
+        raise ValueError("image output format must be png, jpeg, or webp")
     url = endpoint.rstrip("/") + "/images/edits"
     payload = {"model": model, "prompt": prompt, "size": size,
-               "images": list(reference_images)}
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    if post is not None:
-        data = post(url, headers, payload)
-    else:
-        req = urllib.request.Request(url, data=json.dumps(payload).encode(),
-                                     method="POST", headers=headers)
-        with urllib.request.urlopen(req, timeout=60) as response:
-            data = json.loads(response.read().decode())
+               "images": [_reference_input(ref) for ref in reference_images],
+               "n": 1, "response_format": "b64_json", "output_format": output_format}
+    headers = {"Authorization": f"Bearer {api_key}",
+               "Content-Type": "application/json", "Accept": "application/json"}
+    data = (post or _post_image_json)(url, headers, payload)
     return _image_bytes(data, "Muse Image edit")
 
 
 def edit_image_files(prompt: str, api_key: str, endpoint: str,
                      reference_images: list, size: str = "1024x1024",
-                     post=None, model: str = MODEL) -> bytes:
-    """Edit/compose local images using Meta's documented raw-HTTP JSON form.
-
-    The endpoint accepts an ``images`` array of ``image_url`` data URLs or
-    pre-uploaded ``file_id`` values. Using data URLs avoids multipart field
-    naming differences between raw HTTP clients and SDK wrappers.
-
-    ``post(url, headers, body_bytes)`` is injectable for tests. Bytes and
-    paths are accepted; URLs are not (download them first).
-    """
-    if not prompt.strip():
-        raise ValueError("image prompt is required")
-    if not api_key:
-        raise ValueError("Muse Image API key is required, generation is credit-gated, never run without a key")
-    if not reference_images or len(reference_images) > 10:
-        raise ValueError("Muse Image edit needs 1 to 10 reference images, not 0, not more than 10")
-    files = []
-    for reference in reference_images:
-        path = Path(reference)
-        if not path.is_file():
-            raise ValueError(f"reference image not found: {reference}")
-        files.append((path, path.read_bytes(),
-                      mimetypes.guess_type(path.name)[0] or "application/octet-stream"))
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "size": size,
-        "images": [
-            {"image_url": f"data:{content_type};base64,{base64.b64encode(data).decode('ascii')}"}
-            for _path, data, content_type in files
-        ],
-        "n": 1,
-    }
-    body = json.dumps(payload).encode("utf-8")
-    url = endpoint.rstrip("/") + "/images/edits"
-    headers = {"Authorization": f"Bearer {api_key}",
-               "Content-Type": "application/json", "Accept": "application/json"}
-    if post is not None:
-        data = post(url, headers, body)
-    else:
-        req = urllib.request.Request(url, data=body, method="POST",
-                                     headers=headers)
-        try:
-            with urllib.request.urlopen(req, timeout=120) as response:
-                data = json.loads(response.read().decode())
-        except urllib.error.HTTPError as exc:
-            try:
-                parsed = json.loads(exc.read(2048).decode("utf-8", "replace"))
-                detail = parsed.get("error", {}).get("message", "") if isinstance(parsed, dict) else ""
-                if not detail and isinstance(parsed, dict):
-                    detail = parsed.get("detail", "")
-                detail = str(detail or "")[:500]
-            except Exception:
-                detail = ""
-            suffix = f": {detail}" if detail else ""
-            raise RuntimeError(f"Muse Image edit HTTP {exc.code}{suffix}") from exc
-    return _image_bytes(data, "Muse Image edit")
+                     post=None, model: str = MODEL, output_format: str = "png") -> bytes:
+    """Local-file entry point; injectable transport receives JSON body bytes."""
+    paths = [Path(ref) for ref in reference_images]
+    adapter = ((lambda url, headers, payload:
+                post(url, headers, json.dumps(payload).encode("utf-8")))
+               if post is not None else None)
+    return edit_image(prompt, api_key, endpoint, paths, size, adapter,
+                      model, output_format)
 
 
 def save_image(data: bytes, path: Path) -> Path:

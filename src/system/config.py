@@ -229,6 +229,8 @@ class Config:
     webui_token: str = ""
     webui_allowed_hosts: str = ""
     image_model: str = "muse-image-1.0"
+    image_api_endpoint: str = ""
+    image_api_key: str = ""
     sam_model: str = "meta-sam"
     router_fast_phases: str = "interpret,learn,respond"
     kernel_mode: bool = False
@@ -364,6 +366,8 @@ class Config:
             webui_token=os.environ.get("AIDON_WEBUI_TOKEN", ""),
             webui_allowed_hosts=os.environ.get("AIDON_WEBUI_ALLOWED_HOSTS", ""),
             image_model=os.environ.get("AIDON_IMAGE_MODEL", "muse-image-1.0"),
+            image_api_endpoint=os.environ.get("AIDON_IMAGE_API_ENDPOINT", "") or os.environ.get("AIDON_META_ENDPOINT", ""),
+            image_api_key=os.environ.get("AIDON_IMAGE_API_KEY", "") or os.environ.get("AIDON_META_API_KEY", ""),
             sam_model=os.environ.get("AIDON_SAM_MODEL", "meta-sam"),
             router_fast_phases=os.environ.get("AIDON_ROUTER_FAST_PHASES", "interpret,learn,respond,webchat"),
             intent_router=os.environ.get("AIDON_ROUTER", "semantic"),

@@ -315,7 +315,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     # informed approval for its exact disclosed image-edit step; all
     # other calls require their own approval because they spend credits.
     try:
-        from ..capabilities.image_gen import edit_image_files, save_image as _save_image
+        from ..capabilities.image_gen import edit_image_files, image_api_config, save_image as _save_image
 
         def _image_reference(reference) -> Path:
             raw = str(reference or "").strip()
@@ -383,11 +383,10 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                 target = _image_destination(output or output_path or output_filename)
             except Exception as exc:
                 return f"IMAGE_EDIT_FAILED: {exc}"
-            key = str(getattr(config, "api_key", "") or "")
-            endpoint = str(getattr(config, "api_base", "") or "")
-            if not key or not endpoint:
-                return ("IMAGE_EDIT_FAILED: image tools need AIDON_API_KEY and "
-                        "AIDON_API_ENDPOINT in .env")
+            try:
+                endpoint, key = image_api_config(config)
+            except ValueError as exc:
+                return f"IMAGE_EDIT_FAILED: configuration: {exc}"
             if approved_image_edits:
                 approved_image_edits.pop(0)
             else:
@@ -404,7 +403,9 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                 data = edit_image_files(
                     str(prompt), key, endpoint, [str(p) for p in paths],
                     size=str(size or "1024x1024"),
-                    model=getattr(config, "image_model", "muse-image-1.0"))
+                    model=getattr(config, "image_model", "muse-image-1.0"),
+                    output_format={".jpg": "jpeg", ".jpeg": "jpeg",
+                                   ".webp": "webp"}.get(target.suffix.lower(), "png"))
                 saved = _save_image(data, target)
                 return f"IMAGE_SAVED: {saved}"
             except Exception as exc:

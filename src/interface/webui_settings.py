@@ -160,6 +160,8 @@ class WebUISettingsMixin:
             {"key": "AIDON_MODEL_TIMEOUT_S", "label": "Model timeout seconds", "type": "string", "default": "120", "desc": "Timeout for one model call, in seconds.", "secret": False},
             {"key": "AIDON_ROUTER_FAST_PHASES", "label": "Router fast phases", "type": "string", "default": "interpret,learn,respond", "desc": "Comma-separated phases routed to the fast model.", "secret": False},
             {"key": "AIDON_IMAGE_MODEL", "label": "Image model", "type": "string", "default": "muse-image-1.0", "desc": "Image generation model.", "secret": False},
+            {"key": "AIDON_IMAGE_API_ENDPOINT", "label": "Image API endpoint", "type": "string", "default": "", "desc": "Muse Image uses https://api.meta.ai/v1. Set separately when chat uses Baseten or another provider. Empty uses Meta for Muse Image.", "secret": False},
+            {"key": "AIDON_IMAGE_API_KEY", "label": "Image API key", "type": "string", "default": "", "desc": "Meta Model API key for Muse Image. Empty reuses the chat key only when both APIs have the same origin. AIDON_META_API_KEY is also recognized.", "secret": True},
             {"key": "AIDON_SAM_MODEL", "label": "SAM model", "type": "string", "default": "meta-sam", "desc": "Segmentation model for video editing.", "secret": False},
             {"key": "AIDON_SAM_BASE_URL", "label": "SAM base URL", "type": "string", "default": "https://api.meta.ai/v1", "desc": "Meta Model API base URL for SAM.", "secret": False},
             {"key": "AIDON_SAM_API_KEY", "label": "SAM API key", "type": "string", "default": "", "desc": "SAM key; empty uses the main API key.", "secret": True},
