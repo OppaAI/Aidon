@@ -65,6 +65,34 @@ def approved_lab_for_conversation(home, conversation_id):
     return None
 
 
+def lab_execution_plan(kind, brief):
+    """Materialize an approved skill or MCP brief without another interpretation."""
+    from ..agentic.run_types import Plan, Step
+    from pathlib import PurePosixPath
+    if kind == "mcp":
+        return Plan(steps=[Step(id="connect", tool="mcp_connect",
+            args={"name": brief["name"], **brief["connection"]},
+            description="Connect the selected MCP server and list its tools")])
+    if kind != "skill":
+        return None
+    name = re.sub(r"[^A-Za-z0-9_-]+", "-", str(brief["name"])).strip("-")
+    if not name:
+        raise ValueError("Skill name is empty")
+    filename = name + "/SKILL.md"
+    files = dict(brief.get("files") or {})
+    files[filename] = brief["markdown"]
+    steps = []
+    for path, content in files.items():
+        pure = PurePosixPath(str(path))
+        if pure.is_absolute() or ".." in pure.parts or "\\" in str(path) or not isinstance(content, str):
+            raise ValueError("Skill fixtures must be text files with relative workspace paths")
+        steps.append(Step(id=f"file-{len(steps)}", tool="write",
+                          args={"file": str(path), "text": content}, deliverable=str(path)))
+    steps.append(Step(id="adopt", tool="adopt_skill", args={"path": filename, "name": name},
+                      depends_on=[step.id for step in steps]))
+    return Plan(steps=steps, deliverables=list(files))
+
+
 class WebUILabMixin:
     def handle_lab_message(self, body):
         from ..agentic.planner import _extract_json

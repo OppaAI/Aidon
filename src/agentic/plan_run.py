@@ -137,7 +137,9 @@ class PlanRunMixin:
         # visible: flip AIDON_CRITIC_MODE to "always" to restore
         # a critic pass on every plan.
         _critic_enabled = bool(_resolve_count("AIDON_CRITIC_ENABLED", 1, 0))
-        _run_critic = _critic_enabled and _critic_wanted(plan, self._adapted_from)
+        lab = getattr(self, "approved_capability_brief", None)
+        fixed_lab_plan = bool(lab and lab[0] in ("skill", "mcp"))
+        _run_critic = _critic_enabled and not fixed_lab_plan and _critic_wanted(plan, self._adapted_from)
         if _critic_enabled and not _run_critic:
             self._trace("critic", "skipped",
                         "risk-based: adapted or small plan, no live steps")
@@ -275,6 +277,8 @@ class PlanRunMixin:
             self._trace("plan", "serialized",
                         "skill adoption is a replanning boundary")
         max_attempts = _resolve_count("AIDON_MAX_ATTEMPTS", MAX_ATTEMPTS, 1)
+        if fixed_lab_plan:
+            max_attempts = 1
         for attempt in range(1, max_attempts + 1):
             failures: list[str] = []
             if attempt > 1:
@@ -612,6 +616,12 @@ class PlanRunMixin:
             # must not burn every attempt on identical
             # re-execution.
             recovery_note = ""
+            if any("IMAGE_EDIT_FAILED: configuration:" in failure
+                   or re.search(r"Muse Image HTTP (?:401|403|404)\b", failure)
+                   for failure in failures):
+                # A model cannot repair provider configuration or credentials.
+                # Keep the exact error rather than attempting new paid edits.
+                break
             if getattr(self, "clef_client", None) is not None:
                 try:
                     from .clef_recovery import route_failure

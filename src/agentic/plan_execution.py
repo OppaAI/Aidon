@@ -207,7 +207,8 @@ class PlanExecutionMixin:
                 self._save_checkpoint(
                     "sandbox", goal, current_plan, passed,
                     verified=verified, attempt=attempt)
-            return "replan_skill" if skill_trusted else None
+            lab = getattr(self, "approved_capability_brief", None)
+            return "replan_skill" if skill_trusted and not (lab and lab[0] == "skill") else None
         except Exception as exc:
             msg = f"step {step.tool} failed: {exc}"
             try:
