@@ -111,6 +111,24 @@ def test_edit_image_accepts_planner_output_path_alias(tmp_path, monkeypatch):
     assert gate.calls == []
 
 
+def test_edit_image_accepts_planner_output_filename_alias(tmp_path, monkeypatch):
+    config, gate, photo, _, workdir = _setup(tmp_path, monkeypatch)
+    planned_args = {
+        "prompt": "replace the background with a cafe",
+        "image_path": photo.name,
+        "output_filename": "cafe_scene.jpg",
+    }
+    tools = _goal_extra_tools(
+        config, workdir, gate=gate,
+        approved_image_edits=[planned_args])
+
+    result = tools["edit_image"](**planned_args)
+
+    assert result == f"IMAGE_SAVED: {workdir / 'cafe_scene.jpg'}"
+    assert (workdir / "cafe_scene.jpg").read_bytes() == b"edited-bytes"
+    assert gate.calls == []
+
+
 def test_proceeded_plan_authorization_is_one_use(
         tmp_path, monkeypatch):
     config, gate, photo, _, workdir = _setup(tmp_path, monkeypatch)

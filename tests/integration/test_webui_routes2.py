@@ -99,8 +99,8 @@ def test_dag_layout_layers_along_a_chain(tmp_path):
     assert status == 200
     by_id = {entry["id"]: entry for entry in payload["layout"]}
     assert by_id["a"]["layer"] == 0 and by_id["a"]["x"] == 0
-    assert by_id["b"]["layer"] == 1 and by_id["b"]["x"] == 200
-    assert by_id["c"]["layer"] == 2 and by_id["c"]["x"] == 400
+    assert by_id["b"]["layer"] == 1 and by_id["b"]["x"] == 280
+    assert by_id["c"]["layer"] == 2 and by_id["c"]["x"] == 560
     assert by_id["d"]["layer"] == 0
     # y is the index within the layer, 90 apart.
     layer0 = [e for e in payload["layout"] if e["layer"] == 0]

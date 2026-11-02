@@ -364,7 +364,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             return target
 
         def edit_image(prompt, image="", images=None, output="", size="1024x1024",
-                       image_path="", image_paths=None, output_path=""):
+                       image_path="", image_paths=None, output_path="",
+                       output_filename=""):
             """Restyle or compose a photo. Saves in the goal workspace."""
             refs = []
             for value in (image_paths, images):
@@ -379,7 +380,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                 return "IMAGE_EDIT_FAILED: pass 1 to 10 reference image paths"
             try:
                 paths = [_image_reference(item) for item in refs]
-                target = _image_destination(output or output_path)
+                target = _image_destination(output or output_path or output_filename)
             except Exception as exc:
                 return f"IMAGE_EDIT_FAILED: {exc}"
             key = str(getattr(config, "api_key", "") or "")
