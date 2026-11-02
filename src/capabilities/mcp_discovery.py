@@ -11,29 +11,6 @@ import urllib.request
 REGISTRY = "https://registry.modelcontextprotocol.io/v0.1/servers"
 
 
-def _todoist_api_key_connection(server, get):
-    """Resolve the official documented API-key transport omitted by the registry."""
-    if server.get("name") != "net.todoist/mcp" or not any(
-        remote.get("url") == "https://ai.todoist.net/mcp"
-        for remote in server.get("remotes", [])
-    ):
-        return None
-    package = get("https://registry.npmjs.org/@doist/todoist-mcp/latest")
-    repository = str((package.get("repository") or {}).get("url", ""))
-    version = str(package.get("version", ""))
-    if (package.get("name") != "@doist/todoist-mcp"
-            or repository not in ("git+https://github.com/Doist/todoist-mcp.git",
-                                  "https://github.com/Doist/todoist-mcp")
-            or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", version)
-            or "todoist-mcp" not in (package.get("bin") or {})):
-        raise ValueError("Official Todoist package metadata could not be verified")
-    # Explicit binary: this package also ships todoist-mcp-http, so bare npx
-    # cannot always infer which executable to launch.
-    return {"transport": "stdio", "command": "npx",
-            "args": ["-y", "--package", f"@doist/todoist-mcp@{version}", "todoist-mcp"],
-            "env": {"TODOIST_API_KEY": "$TODOIST_API_KEY"}}
-
-
 def _get_json(url):
     request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "Aidon-MCP-Discovery"})
     with urllib.request.urlopen(request, timeout=15) as response:
@@ -42,23 +19,16 @@ def _get_json(url):
 
 def _connection(server):
     """Offer only fully specified transports supported by Aidon's MCP client."""
-    # Prefer a package that uses a named secret from .env over a hosted
-    # endpoint that requires an interactive OAuth exchange. Aidon's MCP HTTP
-    # client currently supports optional bearer tokens, not OAuth browser
-    # redirects; advertising that hosted endpoint as connect-ready misleads.
+    # Prefer the published hosted server when Aidon can connect to it.
     packages = list(server.get("packages", []))
-    packages.sort(key=lambda package: not any(
-        variable.get("isSecret") or variable.get("isRequired")
-        for variable in package.get("environmentVariables", [])))
-    for package in packages:
-        config = _package_connection(package)
-        if config and config.get("env"):
-            return config
     for remote in server.get("remotes", []):
         url = str(remote.get("url", ""))
         if (remote.get("type") == "streamable-http" and url.startswith("https://")
                 and "{" not in url and not remote.get("headers")):
             return {"transport": "http", "url": url}
+    packages.sort(key=lambda package: not any(
+        variable.get("isSecret") or variable.get("isRequired")
+        for variable in package.get("environmentVariables", [])))
     for package in packages:
         config = _package_connection(package)
         if config:
@@ -66,18 +36,15 @@ def _connection(server):
     return None
 
 
-def _auth_hints(server):
+def _auth_hints(server, connection):
     """Report credential names and OAuth uncertainty from published metadata."""
     names = set()
-    for package in server.get("packages", []):
-        for variable in package.get("environmentVariables", []):
-            name = str(variable.get("name", ""))
-            if (variable.get("isSecret") or variable.get("isRequired")) and re.fullmatch(
-                    r"[A-Za-z_][A-Za-z0-9_]*", name):
-                names.add(name)
-    has_http = any(remote.get("type") == "streamable-http"
-                   for remote in server.get("remotes", []))
+    if connection and connection.get("transport") == "stdio":
+        names.update(key for key, value in (connection.get("env") or {}).items()
+                     if str(value).startswith("$"))
+    has_http = bool(connection and connection.get("transport") == "http")
     auth_headers = sorted({str(key) for remote in server.get("remotes", [])
+                           if connection is None or (has_http and remote.get("url") == connection.get("url"))
                            for key in (remote.get("headers") or {})})
     return sorted(names), auth_headers, bool(has_http and not names and not auth_headers)
 
@@ -181,14 +148,15 @@ def discover_mcp(queries, get_json=None, limit=8):
                 continue
             seen.add(name)
             repo = str((server.get("repository") or {}).get("url", ""))
-            auth_env_names, auth_headers, may_use_oauth = _auth_hints(server)
+            connection = _connection(server)
+            auth_env_names, auth_headers, may_use_oauth = _auth_hints(server, connection)
             option = {"id": hashlib.sha256(name.encode()).hexdigest()[:20],
                       "name": name, "title": str(server.get("title") or name),
                       "description": str(server.get("description", ""))[:2000],
                       "author": name.split("/", 1)[0], "version": str(server.get("version", "")),
                       "repository": repo, "website": str(server.get("websiteUrl", "")),
                       "source": REGISTRY + "/" + urllib.parse.quote(name, safe="") + "/versions/latest",
-                      "connection": _connection(server), "stars": None,
+                      "connection": connection, "stars": None,
                       "stars_source": "", "license": "Unknown", "official": False}
             option.update({"auth_env_names": auth_env_names,
                            "auth_headers": auth_headers,
@@ -204,17 +172,6 @@ def discover_mcp(queries, get_json=None, limit=8):
                 except Exception:
                     pass
             option["official"] = _publisher_matches_website(server, repo, get)
-            if name == "net.todoist/mcp" and not (option["connection"] or {}).get("env"):
-                try:
-                    api_key_connection = _todoist_api_key_connection(server, get)
-                    if api_key_connection:
-                        option["connection"] = api_key_connection
-                        option["repository"] = "https://github.com/Doist/todoist-mcp"
-                        option["setup_source"] = "https://github.com/Doist/todoist-mcp/blob/main/docs/mcp-server.md"
-                        option["auth_env_names"] = ["TODOIST_API_KEY"]
-                        option["may_use_oauth"] = False
-                except Exception as exc:
-                    errors.append(f"Todoist API-key setup unavailable ({type(exc).__name__})")
             results.append(option)
             if len(results) >= limit:
                 break

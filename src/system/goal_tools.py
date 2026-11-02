@@ -38,7 +38,7 @@ CAPABILITY_TOOLS_WHEN_OPTIONAL_DISABLED = frozenset({
 def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None, governor=None, optional_tools=None,
                       plugin_registry=None, gate_context=None, test_backend_factory=None,
                       allow_skill_adoption=False,
-                      approved_image_edits=None) -> dict:
+                      approved_image_edits=None, speak_callback=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     If ``plugin_registry`` is given (a ``PluginRegistry`` instance that is
@@ -200,7 +200,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         return governor.timed(kind)
 
     register_creation_tools(config, workdir, tools, _approval, _confined,
-                            _free_path, _acq, scheduled=scheduled)
+                            _free_path, _acq, scheduled=scheduled, speak_callback=speak_callback)
     # Compatibility names from Aidon.
     if "threads_publish" in tools:
         tools["threads_post"] = tools["threads_publish"]

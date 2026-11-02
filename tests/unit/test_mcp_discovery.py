@@ -2,12 +2,9 @@
 from src.capabilities.mcp_discovery import discover_mcp
 
 
-def test_todoist_remote_only_record_offers_verified_api_key_package():
+def test_todoist_remote_only_record_uses_hosted_server():
     def get(url):
-        if url == "https://registry.npmjs.org/@doist/todoist-mcp/latest":
-            return {"name": "@doist/todoist-mcp", "version": "13.8.3",
-                    "repository": {"url": "git+https://github.com/Doist/todoist-mcp.git"},
-                    "bin": {"todoist-mcp": "dist/main.js", "todoist-mcp-http": "dist/main-http.js"}}
+        assert not url.startswith("https://registry.npmjs.org/")
         return {"servers": [{"server": {"name": "community/todoist"}},
                             {"server": {"name": "net.todoist/mcp", "repository": {},
                              "remotes": [{"type": "streamable-http", "url": "https://ai.todoist.net/mcp"}]}}]}
@@ -16,22 +13,9 @@ def test_todoist_remote_only_record_offers_verified_api_key_package():
     assert options[0]["name"] == "net.todoist/mcp"
     assert options[0]["official"] is True
     assert options[0]["connection"] == {
-        "transport": "stdio", "command": "npx",
-        "args": ["-y", "--package", "@doist/todoist-mcp@13.8.3", "todoist-mcp"],
-        "env": {"TODOIST_API_KEY": "$TODOIST_API_KEY"}}
-
-
-def test_todoist_package_with_unexpected_repository_is_not_selected():
-    def get(url):
-        if url.startswith("https://registry.npmjs.org/"):
-            return {"name": "@doist/todoist-mcp", "version": "13.8.3",
-                    "repository": {"url": "https://github.com/other/todoist"},
-                    "bin": {"todoist-mcp": "dist/main.js"}}
-        return {"servers": [{"server": {"name": "net.todoist/mcp", "remotes": [
-            {"type": "streamable-http", "url": "https://ai.todoist.net/mcp"}]}}]}
-    options, warnings = discover_mcp(["todoist"], get)
-    assert warnings
-    assert options[0]["connection"]["transport"] == "http"
+        "transport": "http", "url": "https://ai.todoist.net/mcp"}
+    assert options[0]["may_use_oauth"] is True
+    assert options[0]["auth_env_names"] == []
 
 
 def test_discovery_records_sources_stars_and_exact_pinned_command():
@@ -73,7 +57,7 @@ def test_registry_failure_is_reported_without_fake_options():
     assert options == [] and warnings
 
 
-def test_secret_package_is_preferred_over_oauth_remote_and_publisher_match_ranks_first():
+def test_remote_is_preferred_over_secret_package_and_publisher_match_ranks_first():
     records = [{"server": {
         "name": "net.todoist/mcp", "title": "Todoist", "websiteUrl": "https://developer.todoist.com",
         "repository": {"url": "https://github.com/Doist/todoist-mcp"},
@@ -94,8 +78,9 @@ def test_secret_package_is_preferred_over_oauth_remote_and_publisher_match_ranks
 
     options, _ = discover_mcp(["todoist"], get)
     todoist = next(row for row in options if row["name"] == "net.todoist/mcp")
-    assert todoist["connection"]["command"] == "npx"
-    assert todoist["connection"]["env"] == {"TODOIST_API_KEY": "$TODOIST_API_KEY"}
+    assert todoist["connection"] == {"transport": "http", "url": "https://ai.todoist.net/mcp"}
+    assert todoist["auth_env_names"] == []
+    assert todoist["may_use_oauth"] is True
     assert todoist["official"] is True
     assert options[0] is todoist  # verified publisher outranks a much higher star count
 

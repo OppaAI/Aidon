@@ -203,7 +203,7 @@ class McpOAuthManager:
             method="POST", headers={"Accept": "application/json",
                 "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Aidon-MCP-OAuth"})
         try:
-        with _safe_opener.open(request, timeout=20) as response:
+            with _safe_opener.open(request, timeout=20) as response:
                 _https_url(response.geturl())
                 raw = response.read(1024 * 1024 + 1)
         except urllib.error.HTTPError as exc:
@@ -270,24 +270,32 @@ class McpOAuthManager:
                    "auth_url": auth_url, "result": None, "created": time.time()}
         with self._lock:
             self.pending[state] = pending
+        try:
+            return self._complete_authorization(pending, key, issuer, approve)
+        finally:
+            with self._lock:
+                self.pending.pop(state, None)
+
+    def _complete_authorization(self, pending, key, issuer, approve):
+        resource_url = pending["resource_url"]
+        resource = pending["resource"]
+        metadata = pending["metadata"]
+        client_id = pending["client_id"]
+        verifier = pending["verifier"]
         decision = approve("install", "Authorize MCP account",
             "Aidon needs your authorization to connect this MCP server.\n"
             "Open the provider link first, sign in, and return here. Then approve this card "
             "so Aidon can exchange the code and connect:\n\n"
-            "Authorize: " + auth_url + "\n\n"
+            "Authorize: " + pending["auth_url"] + "\n\n"
             "Callback: " + self.callback_uri + "\n"
             "Aidon uses OAuth authorization code with PKCE. Tokens are stored in a private file in Aidon's home. "
             "This approval authorizes the connection only; remote tool actions keep their own approval gates.")
         if getattr(decision, "verdict", None) not in ("approved", "auto_approved"):
-            with self._lock:
-                self.pending.pop(state, None)
             raise OAuthError("MCP OAuth authorization was rejected")
-        if not event.wait(600):
-            with self._lock:
-                self.pending.pop(state, None)
+        if not pending["event"].wait(600):
             raise OAuthError("MCP OAuth callback timed out")
         result = pending.get("result")
-        if not result or "error" in result:
+        if not result or result.get("error") or not result.get("code"):
             raise OAuthError("OAuth authorization was cancelled or rejected")
         form = {"grant_type": "authorization_code", "code": result["code"],
                 "redirect_uri": self.callback_uri, "client_id": client_id,
@@ -299,14 +307,13 @@ class McpOAuthManager:
                  "tokens": {}}
         with self._lock:
             self._save_tokens(key, token_result, saved)
-            self.pending.pop(state, None)
         return token_result["access_token"]
 
     def finish_callback(self, query):
         state = (query.get("state") or [""])[0]
         with self._lock:
             pending = self.pending.get(state)
-            if not pending or time.time() - pending["created"] > 600:
+            if not pending or pending["result"] is not None or time.time() - pending["created"] > 600:
                 return False, "This OAuth callback is invalid or expired. Return to Aidon and try again."
             code = (query.get("code") or [""])[0]
             error = (query.get("error") or [""])[0]
@@ -319,5 +326,6 @@ class McpOAuthManager:
             else:
                 pending["result"] = {"code": code, "error": error}
             pending["event"].set()
-            return (not error, "Authorization received. Return to Aidon to finish connecting." if code
-                    else "Authorization was declined. Return to Aidon.")
+            accepted = bool(code and not pending["result"].get("error"))
+            return (accepted, "Authorization received. Return to Aidon to finish connecting." if accepted
+                    else "Authorization was declined or invalid. Return to Aidon.")

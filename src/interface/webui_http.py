@@ -37,6 +37,8 @@ def make_handler(server):
             data = html.encode()
             self.send_response(status)
             self.send_header('Content-Type', 'text/html')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Referrer-Policy', 'no-referrer')
             self.send_header('Content-Length', str(len(data)))
             self.end_headers()
             try:
@@ -52,6 +54,12 @@ def make_handler(server):
             self.send_header('Content-Length', str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+
+        def log_message(self, format, *args):
+            if getattr(self, "path", "").startswith('/oauth/mcp/callback?'):
+                print(f"{self.log_date_time_string()} MCP OAuth callback <query redacted>")
+                return
+            super().log_message(format, *args)
 
         def _send_static(self, relative: str):
             """Serve only files from the bundled WebUI assets."""
@@ -124,7 +132,8 @@ def make_handler(server):
                 safe_message = html.escape(message)
                 content = ('<main style="max-width:640px;margin:12vh auto;padding:24px">'
                            '<h1>MCP authorization</h1><p>' + safe_message + '</p>'
-                           '<p>You can close this tab and return to Aidon.</p></main>')
+                           '<p>You can close this tab and return to Aidon.</p></main>'
+                           '<script>history.replaceState(null,"",location.pathname)</script>')
                 self._send_html(200 if accepted else 400,
                                 _page_html('MCP authorization', content))
                 return

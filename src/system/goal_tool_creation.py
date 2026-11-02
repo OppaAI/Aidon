@@ -11,7 +11,7 @@ from ..capabilities.tools import ToolResult
 
 
 def register_creation_tools(config, workdir, tools, approve, confined,
-                            free_path, acq, scheduled=False):
+                            free_path, acq, scheduled=False, speak_callback=None):
     """Register output-producing tools with shared path and approval gates."""
     workdir = Path(workdir)
     _approval = approve
@@ -182,9 +182,20 @@ def register_creation_tools(config, workdir, tools, approve, confined,
         from ..capabilities.voice import transcribe, tts
 
         def tts_speak(text, voice_id=""):
+            if not str(text or "").strip():
+                return "TTS_FAILED: text is empty"
+            if speak_callback is not None:
+                if not getattr(config, "fish_api_key", "") and not getattr(config, "api_key", ""):
+                    return "TTS_FAILED: voice is not configured"
+                speak_callback(str(text))
+                return "Speech requested in the WebUI."
             result = tts(text, getattr(config, "fish_api_key", ""),
                          voice_id or getattr(config, "tts_voice_id", ""))
-            return str(result.get("ok", False))
+            if not result.get("ok") or not result.get("audio"):
+                return "TTS_FAILED: " + str(result.get("error") or "no audio returned")
+            target = _free_path(_confined("speech.mp3"))
+            target.write_bytes(result["audio"])
+            return ToolResult(f"Speech audio saved: {target}", path=target, kind="audio")
 
         def transcribe_audio(audio, key=""):
             # The old tool accepted a local audio path; the WebUI uses raw

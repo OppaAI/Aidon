@@ -170,7 +170,10 @@ class PlanningMixin:
         system += (" Every item in deliverables MUST be produced by exactly "
                    "one step; never return deliverables with an empty or "
                    "missing steps array. For GUI requests, use the "
-                   "computer_use tool when it is listed as available.")
+                   "computer_use_task for visual desktop tasks when it is available, "
+                   "so each action is chosen using the current screen. "
+                   "When asked to read text aloud after a desktop action, add "
+                   "a dependent tts_speak step containing the exact requested text.")
         system += (" Deliverables are files, not tool calls. If the user asks "
                    "for an answer or action result and no file, use an "
                    "output-only step: omit its deliverable (or use an empty "

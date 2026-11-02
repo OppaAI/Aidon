@@ -404,6 +404,8 @@ class WebUIRunMixin:
                    "think_max": think_max,
                    "research_mode": research_mode,
                    "_stream_callback": stream_delta,
+                   "_speak_callback": lambda text: record["events"].append(
+                       {"kind": "speech-request", "text": str(text)}),
                    "_route_callback": route_update,
                    "_trace_callback": trace_update,
                    "_question_callback": question_callback,

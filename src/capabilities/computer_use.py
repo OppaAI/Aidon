@@ -221,7 +221,7 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
             "otherwise give exactly one next action. A click needs x "
             "and y; type needs text; scroll needs delta; key needs key.")
         try:
-            decision_raw = model_chat([{"role": "user", "content": decide_prompt}])
+            decision_raw = model_chat([image_message(decide_prompt, [(png, "image/png")])])
             decision = _parse_decision(decision_raw)
         except Exception as exc:
             _write_trace(target, description, history, last_description,
