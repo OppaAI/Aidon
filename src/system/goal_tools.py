@@ -427,9 +427,11 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     # Turn user-authored JSON tool specifications into reviewable plugin
     # drafts. This is deliberately unavailable to unattended runs and does
     # not execute or adopt model-generated source.
-    if callable(model_chat) and not scheduled:
+    if not scheduled:
         def draft_tool_plugin(spec, output_dir=""):
             try:
+                if not callable(model_chat):
+                    return "plugin generation unavailable: no model client is configured for this run"
                 from ..capabilities.plugin_generation import (
                     default_plugin_name, generate_plugin_draft)
                 directory = str(output_dir or (
