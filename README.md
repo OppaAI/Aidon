@@ -23,7 +23,9 @@
 
 ---
 
-**Autonomous AI agent. You give it one goal — it does the rest.**
+Built for the Meta Global AI Developer Hackathon (October 26 – November 4, 2026), Aidon submits three capabilities, all powered by Meta's models through the Meta Model API: first, it understands goals in plain natural language and interviews the user in conversation to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it; second, it grows its own capabilities — drafting, sandbox-testing, and adopting tools and skills that plug into its agentic workflows, including niche ones tailored to a user's own task; and third, it keeps a human in the loop — every consequential action passes through human review and approval before it goes live, with verification and rollback on failure, so the agent's autonomy never outruns its owner's consent.
+
+# Autonomous AI agent. You give it one goal — it does the rest.
 
 Give Aidon a goal in plain language, in chat, on WhatsApp or Slack, or on the command line. Aidon will:
 
@@ -35,14 +37,16 @@ Give Aidon a goal in plain language, in chat, on WhatsApp or Slack, or on the co
 6. **Live** — execute only what was approved, verify, rollback on failure
 7. **Learn** — persist the DAG and new skills, so the next similar goal reuses and adapts, saving tokens and calls
 
-## ✨ Why Aidon
+## ✨ What is new here
 
-Aidon is built around a simple idea: useful AI should not depend on expensive hardware or expert prompting. Instead of focusing only on larger models, Aidon explores how a thoughtful harness can help the models people can access get more useful work done. People should be able to state a goal in everyday language while Aidon helps plan the work, prepare and reuse workflows, check results, and learn useful preferences over time.
-
-The aim is to make capable AI more practical for ordinary people: less prompt engineering, less repeated setup, and more help getting real tasks done. Read the full [Aidon vision and mission](docs/VISION.md).
+Aidon was created to address a simple problem: many people want to use AI to accomplish complex tasks but don't know 
+how to write effective prompts or guide an AI through the necessary steps. So I say, why not let AI itself figure out 
+the workflow on how to complete its user's goal, while utilizing as little time and tokens as possible.
+Aidon aims to bridge that gap by enabling users to express their goals in natural language while the agent plans, builds 
+the capabilities it needs, and validates its work.
 
 All code in this repo was written from scratch during the Meta Global AI Developer Hackathon (October 26–November 4, 2026). 
-The implementation is experimental and under active development; the vision describes the direction Aidon is working toward, not a claim that every part is complete.
+The implementation is still under development, with components continue to be tested as more features are added and deployed.
 
 The demo runs on Meta models through the Meta Model API. That
 is a real part of what Aidon runs, not just a build-time choice.
@@ -60,12 +64,10 @@ is a real part of what Aidon runs, not just a build-time choice.
 ## 📚 Guides
 
 - [Installation](docs/INSTALLATION.md) — prerequisites, setup, and launch.
-- [Docker deployment and releases](docs/INSTALLATION.md#docker-webui) — Compose setup and tagged-release process.
 - [Configuration](docs/CONFIGURATION.md) — models, `.env`, and the Aidon home.
 - [Usage](docs/USAGE.md) — WebUI and messaging, core loop, spec sheet, tools and plugins, triggers, research and live execution, budgets, trace, v1 API, and MCP.
 - [Security notes](docs/SECURITY.md) — trust boundaries and safe operation.
 - [Architecture](docs/ARCHITECTURE.md) — run order, components, storage, and security boundaries.
-- [Vision and mission](docs/VISION.md) — why Aidon exists, what it aims to make possible, and how to judge progress.
 - [Roadmap](docs/ROADMAP.md) — what is built, what is not built yet, and what is post-hackathon, NOT built, NOT demoed.
 
 ## 🧠 Models
