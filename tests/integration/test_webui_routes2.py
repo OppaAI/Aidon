@@ -252,6 +252,7 @@ def test_capability_code_route_live(live_server):
     base, server, home = live_server
     library = SkillLibrary(home)
     library.add(Skill(name="aurora", description="A reusable aurora procedure"))
+    (home / "skills").mkdir(parents=True, exist_ok=True)
     (home / "skills" / "aurora.md").write_text("# Aurora skill source\n")
     status, payload = _get(base, "/api/capabilities/code?name=lookup_capability")
     assert status == 200 and "def lookup_capability" in payload["code"]

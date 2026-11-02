@@ -3302,10 +3302,12 @@
           const file = new File([blob], a.name, {
             type: a.mime || blob.type || "application/octet-stream",
           });
-          if (window.aidonQueueAttachments && window.aidonQueueAttachments([file])) {
-            document.querySelector('.nav-btn[data-view="chat"]')?.click();
-            window.aidonShowMiddleStatus("Added " + a.name + " to chat attachments");
-          }
+          if (typeof window.aidonQueueAttachments !== "function")
+            throw new Error("Chat attachment controls are not ready; refresh the page");
+          if (!window.aidonQueueAttachments([file])) return;
+          document.querySelector('.nav-btn[data-view="chat"]')?.click();
+          document.getElementById("goal-input")?.focus({ preventScroll: true });
+          window.aidonShowMiddleStatus("Added " + a.name + " to chat attachments");
         } catch (error) {
           window.aidonShowMiddleStatus("Could not attach " + a.name + ": " +
             (error && error.message ? error.message : error), "error");
