@@ -120,7 +120,9 @@ def _publisher_matches_website(server, repo, get):
     if len(labels) >= 2 and all(labels):
         namespace_domain = ".".join(reversed(labels))
         remote_hosts = [(urllib.parse.urlsplit(str(remote.get("url", ""))).hostname or "").lower()
-                        for remote in server.get("remotes", [])]
+                        for remote in server.get("remotes", [])
+                        if str(remote.get("url", "")).startswith("https://")
+                        and "{" not in str(remote.get("url", ""))]
         if (site_host == namespace_domain
                 or site_host.endswith("." + namespace_domain)
                 or any(host == namespace_domain or host.endswith("." + namespace_domain)

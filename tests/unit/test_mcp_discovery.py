@@ -61,9 +61,10 @@ def test_discovery_does_not_invent_arguments_or_resolve_url_templates():
                {"server": {"name": "com.example/package", "packages": [{"registryType": "npm", "identifier": "example", "version": "latest"}]}},
                {"server": {"name": "com.example/http", "remotes": [{"type": "streamable-http", "url": "https://example.com/mcp"}]}}]
     options, _ = discover_mcp(["example"], lambda url: {"servers": records})
-    assert options[0]["connection"] is None
-    assert options[1]["connection"] is None
-    assert options[2]["connection"] == {"transport": "http", "url": "https://example.com/mcp"}
+    by_name = {option["name"]: option for option in options}
+    assert by_name["com.example/tenant"]["connection"] is None
+    assert by_name["com.example/package"]["connection"] is None
+    assert by_name["com.example/http"]["connection"] == {"transport": "http", "url": "https://example.com/mcp"}
 
 
 def test_registry_failure_is_reported_without_fake_options():
