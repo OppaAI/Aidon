@@ -52,6 +52,7 @@
     if (middleStatusTimer) clearTimeout(middleStatusTimer);
     middleStatusTimer = setTimeout(() => { middleStatus.hidden = true; }, 7000);
   }
+  window.aidonShowMiddleStatus = showMiddleStatus;
   function loadDashboardStatus() {
     fetch("/api/status").then((r) => r.json()).then((data) => {
       document.querySelectorAll("[data-status]").forEach((node) => {
@@ -1863,6 +1864,9 @@
     refreshPreview();
     return added;
   }
+  // The sidebar artifact list lives in a separate IIFE; expose the same
+  // validated queue path used by the picker and drag/drop.
+  window.aidonQueueAttachments = queueAttachments;
   function refreshPreview() {
     imgPreview.innerHTML = "";
     imgPreview.hidden = pendingImages.length === 0 && pendingFiles.length === 0;
@@ -3298,10 +3302,12 @@
           const file = new File([blob], a.name, {
             type: a.mime || blob.type || "application/octet-stream",
           });
-          if (queueAttachments([file]))
-            showMiddleStatus("Added " + a.name + " to chat attachments");
+          if (window.aidonQueueAttachments && window.aidonQueueAttachments([file])) {
+            document.querySelector('.nav-btn[data-view="chat"]')?.click();
+            window.aidonShowMiddleStatus("Added " + a.name + " to chat attachments");
+          }
         } catch (error) {
-          showMiddleStatus("Could not attach " + a.name + ": " +
+          window.aidonShowMiddleStatus("Could not attach " + a.name + ": " +
             (error && error.message ? error.message : error), "error");
         }
       });
