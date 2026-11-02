@@ -1457,10 +1457,20 @@
       if (el) el.textContent = text;
     }
     function markProceeded() {
+      const planSteps = stop.plan && Array.isArray(stop.plan.steps)
+        ? stop.plan.steps : [];
+      const includesImageEdit = planSteps.some((step) =>
+        step && typeof step === "object" && step.tool === "edit_image");
       shell.innerHTML =
         '<div class="kind">' + esc(stop.mode) + ' proceeded</div>' +
         '<h3>' + (isAsk ? 'Interview proceeded' : 'Plan proceeded') + '</h3>' +
-        '<p class="spec-note">Aidon is continuing the run.</p>';
+        '<p class="spec-note">Aidon is continuing the run. The approved plan is shown below.</p>' +
+        (includesImageEdit
+          ? '<p class="spec-note">This plan sends the attached image(s) to the configured Muse Image endpoint and spends image credits.</p>'
+          : "") +
+        ((spec || stop.plan)
+          ? '<div class="spec-detail">' +
+            renderStopDetail({ spec: spec, plan: stop.plan }) + "</div>" : "");
     }
     function render() {
       if (isAsk && spec && editing) {
