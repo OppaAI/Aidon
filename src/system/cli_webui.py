@@ -326,6 +326,16 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         if isinstance(event.payload.get("resume_spec"), dict):
             from ..agentic.interview import Spec as _ResumeSpec
             _resume_spec = _ResumeSpec.from_dict(event.payload["resume_spec"])
+        if _resume_stop_id:
+            # Non-WebUI channels enter through the same dispatcher, but
+            # do not pass through WebUIRunMixin.start_goal(). Consume
+            # their stop here as well so repeated replies cannot resume
+            # the same plan concurrently.
+            try:
+                from ..interface.mode_stops import set_mode_stop_state
+                set_mode_stop_state(config.home, _resume_stop_id, "proceeded")
+            except Exception:
+                pass
         _approved_image_edits = []
         if _resume_plan is not None:
             for _step in _resume_plan.normalized_steps():
@@ -564,7 +574,12 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                 _shead = ("Plan ready" + (f" ({len(_delivs)} deliverable(s): "
                                           + ", ".join(str(d) for d in _delivs[:5])
                                           + ")" if _delivs else "") + ".")
-                _plan_steps = (_stopped.get("plan") or {}).get("steps", [])
+                try:
+                    from ..interface.mode_stops import load_mode_stop
+                    _stored = load_mode_stop(config.home, _sid) or {}
+                except Exception:
+                    _stored = {}
+                _plan_steps = (_stored.get("plan") or {}).get("steps", [])
                 if any(isinstance(_step, dict)
                        and _step.get("tool") == "edit_image"
                        for _step in _plan_steps):

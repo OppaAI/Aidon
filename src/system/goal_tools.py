@@ -310,9 +310,10 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     except Exception:
         pass
 
-    # Style/photo edits are host-side: the image API needs the key, the
-    # network, and a home-wide output folder, none of which the sandbox
-    # exposes. Credits are spent, so every call is approval-gated.
+    # Style/photo edits are host-side: the image API needs the key and
+    # network, neither of which the sandbox exposes. A plan Proceed is
+    # informed approval for its exact disclosed image-edit step; all
+    # other calls require their own approval because they spend credits.
     try:
         from ..capabilities.image_gen import edit_image_files, save_image as _save_image
 

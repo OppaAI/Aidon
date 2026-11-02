@@ -270,8 +270,12 @@ class PlanningMixin:
                                "Do not ask to "
                                "create or adopt another image tool or plugin. "
                                "The tool uses the configured Muse image model "
-                               "and saves its output in the goal workspace, "
-                               "and requires live approval before sending images "
+                               "and saves its output in the goal workspace. "
+                               "A Plan card discloses that the image is sent to "
+                               "the configured endpoint and spends image credits; "
+                               "Proceed authorizes the exact edit_image step in "
+                               "that saved plan. Outside a proceeded plan, the "
+                               "tool asks for live approval before sending images "
                                "or spending credits.")
                 else:
                     system += (" For an image-editing goal with attached images, "
