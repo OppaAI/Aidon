@@ -95,6 +95,21 @@ class WebUIMessagingMixin:
                             print("WhatsApp inbound ignored: sender failed owner check")
                             continue
                         print("WhatsApp inbound owner message accepted")
+                        # A bare approve/reject is also a valid answer to an
+                        # active Lab question. Give the waiting question first
+                        # refusal; otherwise _resolve_decision consumes it as
+                        # an approval-card command and the interview never
+                        # receives the owner's answer.
+                        if text.strip().casefold() in {"approve", "reject"}:
+                            answered = self.answer_question(
+                                "whatsapp:" + str(sender), text)
+                            if answered is not None:
+                                from .phrasing import question_ack as _qack
+                                ack = _qack()
+                                replies.append(ack)
+                                if self.whatsapp_sender is not None:
+                                    self.whatsapp_sender(sender, ack)
+                                continue
                         decision_reply = self._resolve_decision(text)
                         if decision_reply is None:
                             decision_reply = self._resolve_control(text)
@@ -359,6 +374,18 @@ class WebUIMessagingMixin:
                     text = _strip_mention(text, bot_user_id)
                 except Exception:
                     return 200, {"ok": True, "ignored": "not_mentioned"}
+            # See the WhatsApp path above: bare answers belong to a waiting
+            # interview before they can be interpreted as approval commands.
+            if text.strip().casefold() in {"approve", "reject"}:
+                answered = self.answer_question("slack:" + channel, text)
+                if answered is not None:
+                    from .phrasing import question_ack as _qack
+                    ack = _qack()
+                    if self.slack_sender is not None:
+                        self.slack_sender(channel, ack, thread_ts)
+                    self._record_surface_exchange("slack:" + channel, "user", text)
+                    self._record_surface_exchange("slack:" + channel, "assistant", ack)
+                    return 200, {"replies": [ack]}
             decision_reply = self._resolve_decision(text)
             if decision_reply is None:
                 decision_reply = self._resolve_control(text)

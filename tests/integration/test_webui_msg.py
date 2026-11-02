@@ -179,6 +179,70 @@ def test_whatsapp_approve_resolves_card(tmp_path):
         httpd.shutdown()
 
 
+def test_bare_reject_answers_waiting_lab_question_on_whatsapp(tmp_path):
+    from src.interface.messaging import MessagingConfig
+    home = tmp_path / "home"
+    home.mkdir()
+    replies = []
+    server = WebUIServer(
+        home, messaging_config=MessagingConfig(whatsapp_owner="+16045551234"),
+        whatsapp_sender=lambda to, text: replies.append((to, text)))
+    server._web_runs["lab-run"] = {"run_id": "lab-run", "events": [], "trace": []}
+    answers = []
+    asker = threading.Thread(target=lambda: answers.append(
+        server.ask_question("lab-run", "whatsapp:+16045551234",
+                            "May I open the Tool Crafting Lab?")), daemon=True)
+    asker.start()
+    for _ in range(100):
+        if server.waiting_question("lab-run"):
+            break
+        time.sleep(0.01)
+    assert server.waiting_question("lab-run") == "May I open the Tool Crafting Lab?"
+
+    payload = {"entry": [{"changes": [{"value": {"messages": [
+        {"from": "+16045551234", "text": {"body": "reject"}}]}}]}]}
+    status, result = server.handle_whatsapp_post(payload)
+    asker.join(timeout=5)
+
+    assert status == 200
+    assert result["replies"]
+    assert "approval" not in result["replies"][0].lower()
+    assert answers == ["reject"]
+    assert replies[-1] == ("+16045551234", result["replies"][0])
+    assert server.waiting_question("lab-run") is None
+
+
+def test_bare_reject_answers_waiting_lab_question_on_slack(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    replies = []
+    server = WebUIServer(
+        home, slack_sender=lambda channel, text, thread_ts=None:
+        replies.append((channel, text, thread_ts)))
+    server._web_runs["lab-run"] = {"run_id": "lab-run", "events": [], "trace": []}
+    answers = []
+    asker = threading.Thread(target=lambda: answers.append(
+        server.ask_question("lab-run", "slack:D1",
+                            "May I open the Tool Crafting Lab?")), daemon=True)
+    asker.start()
+    for _ in range(100):
+        if server.waiting_question("lab-run"):
+            break
+        time.sleep(0.01)
+    assert server.waiting_question("lab-run") == "May I open the Tool Crafting Lab?"
+
+    status, result = server.handle_slack_message({"event": {
+        "type": "message", "text": "reject", "channel": "D1", "ts": "10.0"}})
+    asker.join(timeout=5)
+
+    assert status == 200
+    assert result["replies"]
+    assert "approval" not in result["replies"][0].lower()
+    assert answers == ["reject"]
+    assert replies[-1] == ("D1", result["replies"][0], "10.0")
+    assert server.waiting_question("lab-run") is None
+
+
 def test_bare_approve_resolves_the_only_pending_card(tmp_path):
     import threading
 
