@@ -161,6 +161,26 @@ def test_finalize_success_learns_and_failure_does_not(tmp_path):
     assert len(DagStore(tmp_path).list_dags()) == 1, "failure learns nothing"
 
 
+def test_finalize_saves_sequential_plan_edges_in_learned_dag(tmp_path):
+    runner = _runner(tmp_path)
+    plan = Plan(steps=[
+        {"id": "inspect", "tool": "read_file", "args": {"path": "plan.md"}},
+        {"id": "update", "tool": "write_file", "args": {"path": "plan.md"},
+         "deliverable": "plan.md"},
+        {"id": "verify", "tool": "read_file", "args": {"path": "plan.md"},
+         "deps": ["update"]},
+    ], deliverables=["plan.md"], criteria=[])
+
+    report = runner._finalize(RunReport(
+        "done", "edit and verify a saved meal plan", plan, True, True))
+
+    dag_id = report.learned_dag.split(":", 1)[1]
+    nodes = DagStore(tmp_path).get(dag_id)["nodes"]
+    assert [node["id"] for node in nodes] == ["inspect", "update", "verify"]
+    assert [node["depends_on"] for node in nodes] == [
+        [], ["inspect"], ["update"]]
+
+
 def test_finalize_learn_failure_never_fails_run(tmp_path):
     runner = _runner(tmp_path)
     plan = _plan()

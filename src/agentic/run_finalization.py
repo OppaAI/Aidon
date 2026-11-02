@@ -107,9 +107,23 @@ class RunFinalizationMixin:
         if report.status == "done":
             try:
                 from .dag_store import DagStore
-                nodes = [{"tool": s.tool, "args": dict(s.args),
-                          "deliverable": s.deliverable}
-                         for s in report.plan.normalized_steps()]
+                steps = report.plan.normalized_steps()
+                nodes = []
+                sequential = not bool(getattr(report.plan, "parallel_ok", False))
+                for index, step in enumerate(steps):
+                    node_id = step.id or f"step-{index + 1}"
+                    dependencies = list(step.depends_on or [])
+                    # A free-form plan is executed in listed order. Preserve
+                    # that proven order when saving it as a reusable DAG;
+                    # DAG-derived plans keep their explicit parallel edges.
+                    if sequential and index:
+                        previous_id = steps[index - 1].id or f"step-{index}"
+                        if previous_id not in dependencies:
+                            dependencies.append(previous_id)
+                    nodes.append({"id": node_id, "tool": step.tool,
+                                  "args": dict(step.args),
+                                  "deliverable": step.deliverable,
+                                  "depends_on": dependencies})
                 if nodes:
                     action, dag_id = DagStore(self.home).learn(
                         report.goal, nodes)

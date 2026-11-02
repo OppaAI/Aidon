@@ -201,8 +201,10 @@ class Plan:
                                     step.get("title", "")),
                     executor=str(step.get("executor", "tool")),
                     id=str(step.get("id", "") or f"step-{index}"),
-                    depends_on=[str(d) for d in step.get("depends_on", [])]
-                    if isinstance(step.get("depends_on", []), list) else []))
+                    depends_on=[str(d) for d in
+                                step.get("depends_on", step.get("deps", []))]
+                    if isinstance(step.get("depends_on", step.get("deps", [])), list)
+                    else []))
             else:
                 out.append(Step(tool="write", args={"file": "deliverable.md",
                                                     "text": str(step)},

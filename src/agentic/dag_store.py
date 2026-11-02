@@ -162,11 +162,12 @@ class DagStore:
         norm = []
         for index, node in enumerate(nodes or []):
             if isinstance(node, dict):
-                item = {"id": f"step-{index + 1}",
+                item = {"id": str(node.get("id") or f"step-{index + 1}"),
                         "tool": str(node.get("tool", "write")),
                         "args": dict(node.get("args", {})) if isinstance(node.get("args", {}), dict) else {},
                         "deliverable": str(node.get("deliverable", "")),
-                        "depends_on": list(node.get("depends_on", [])) if isinstance(node.get("depends_on", []), list) else []}
+                        "depends_on": list(node.get("depends_on", node.get("deps", [])))
+                        if isinstance(node.get("depends_on", node.get("deps", [])), list) else []}
             else:
                 item = {"id": f"step-{index + 1}",
                         "tool": str(getattr(node, "tool", "write")),

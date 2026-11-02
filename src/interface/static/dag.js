@@ -102,6 +102,31 @@ function renderList() {
   });
 }
 
+function isLegacyLearnedSequence(nodes) {
+  return nodes.length > 1 && nodes.every((node, index) => {
+    const expected = index + 1;
+    return (!String(node.name || "").trim()
+      && (node.id === `step-${expected}` || node.id === `step_${expected}`)
+      && !(node.deps || []).length);
+  });
+}
+
+function layoutMap(data) {
+  const raw = data && data.layout || {};
+  return Array.isArray(raw)
+    ? Object.fromEntries(raw.map((point) => [point.id, point])) : raw;
+}
+
+async function requestLayout(dag) {
+  const res = await api("/api/dags/layout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dag: { ...dag, nodes: dag.nodes.map(
+      ({ deps, ...node }) => ({ ...node, depends_on: deps || [] })) } }),
+  });
+  return layoutMap(res);
+}
+
 // ---------- open / close ----------------------------------------------------
 
 async function openDag(name) {
@@ -114,16 +139,41 @@ async function openDag(name) {
       ...node, deps: node.deps || node.depends_on || [],
       args: node.args || {},
     }));
+    const inferredSequence = isLegacyLearnedSequence(S.dag.nodes);
+    if (inferredSequence) {
+      S.dag.nodes.forEach((node, index) => {
+        if (index) node.deps = [S.dag.nodes[index - 1].id];
+      });
+    }
     $("#dag-goal").value = S.dag.goal || "";
-    const rawLayout = data.layout || {};
-    S.layout = Array.isArray(rawLayout)
-      ? Object.fromEntries(rawLayout.map((p) => [p.id, p])) : rawLayout;
+    S.layout = layoutMap(data);
+    const needsLayout = S.dag.nodes.some((node) => {
+      const point = S.layout[node.id];
+      return !point || !Number.isFinite(Number(point.x))
+        || !Number.isFinite(Number(point.y));
+    });
+    if (needsLayout && S.dag.nodes.length) {
+      try {
+        S.layout = await requestLayout(S.dag);
+      } catch (e) {
+        // Keep the graph inspectable if the layout endpoint is unavailable;
+        // the auto-layout button can retry once the service is reachable.
+      }
+    }
     S.sel = null;
-    S.dirty = false;
+    S.dirty = inferredSequence || needsLayout;
+    S.view = { x: 0, y: 0, k: 1 };
     renderList();
     renderGraph();
     renderInspector();
-    status("opened " + name);
+    if (inferredSequence || needsLayout) {
+      fitGraph();
+      status(inferredSequence
+        ? "legacy run order shown as dependencies · save to keep"
+        : "missing node positions arranged · save to keep", "warn");
+    } else {
+      status("opened " + name);
+    }
   } catch (e) {
     status("could not open: " + e.message, "err");
   }
@@ -606,18 +656,11 @@ function addNode() {
 async function autoLayout() {
   if (!S.dag) return;
   try {
-    // the server owns the layout rule - one implementation, not two
-    const res = await api("/api/dags/layout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dag: { ...S.dag, nodes: S.dag.nodes.map(
-        ({ deps, ...n }) => ({ ...n, depends_on: deps || [] })) } }),
-    });
-    const layout = res.layout || {};
-    S.layout = Array.isArray(layout)
-      ? Object.fromEntries(layout.map((p) => [p.id, p])) : layout;
+    // The server owns the layout rule - one implementation, not two.
+    S.layout = await requestLayout(S.dag);
     renderGraph();
     markDirty();
+    fitGraph();
     status("relaid out", "ok");
   } catch (e) {
     status("layout failed: " + e.message, "err");
