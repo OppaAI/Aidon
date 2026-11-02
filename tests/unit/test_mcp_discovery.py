@@ -2,6 +2,38 @@
 from src.capabilities.mcp_discovery import discover_mcp
 
 
+def test_todoist_remote_only_record_offers_verified_api_key_package():
+    def get(url):
+        if url == "https://registry.npmjs.org/@doist/todoist-mcp/latest":
+            return {"name": "@doist/todoist-mcp", "version": "13.8.3",
+                    "repository": {"url": "git+https://github.com/Doist/todoist-mcp.git"},
+                    "bin": {"todoist-mcp": "dist/main.js", "todoist-mcp-http": "dist/main-http.js"}}
+        return {"servers": [{"server": {"name": "community/todoist"}},
+                            {"server": {"name": "net.todoist/mcp", "repository": {},
+                             "remotes": [{"type": "streamable-http", "url": "https://ai.todoist.net/mcp"}]}}]}
+    options, warnings = discover_mcp(["todoist"], get)
+    assert not warnings
+    assert options[0]["name"] == "net.todoist/mcp"
+    assert options[0]["official"] is True
+    assert options[0]["connection"] == {
+        "transport": "stdio", "command": "npx",
+        "args": ["-y", "--package", "@doist/todoist-mcp@13.8.3", "todoist-mcp"],
+        "env": {"TODOIST_API_KEY": "$TODOIST_API_KEY"}}
+
+
+def test_todoist_package_with_unexpected_repository_is_not_selected():
+    def get(url):
+        if url.startswith("https://registry.npmjs.org/"):
+            return {"name": "@doist/todoist-mcp", "version": "13.8.3",
+                    "repository": {"url": "https://github.com/other/todoist"},
+                    "bin": {"todoist-mcp": "dist/main.js"}}
+        return {"servers": [{"server": {"name": "net.todoist/mcp", "remotes": [
+            {"type": "streamable-http", "url": "https://ai.todoist.net/mcp"}]}}]}
+    options, warnings = discover_mcp(["todoist"], get)
+    assert warnings
+    assert options[0]["connection"]["transport"] == "http"
+
+
 def test_discovery_records_sources_stars_and_exact_pinned_command():
     def get(url):
         if url.startswith("https://api.github.com/repos/"):

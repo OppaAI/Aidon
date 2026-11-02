@@ -213,6 +213,16 @@ def test_mcp_connect_rejects_test_args_without_named_tool(tmp_path):
     assert result == "MCP_REFUSED: test_args requires test_tool"
 
 
+def test_mcp_missing_api_key_does_not_start_package_or_wait_for_approval(tmp_path, monkeypatch):
+    monkeypatch.delenv("TODOIST_API_KEY", raising=False)
+    config = _Config()
+    config.home = tmp_path
+    result = _goal_extra_tools(config, tmp_path / "work")["mcp_connect"](
+        "todoist", command="npx", args=["-y", "--package", "@doist/todoist-mcp@13.8.3", "todoist-mcp"],
+        env={"TODOIST_API_KEY": "$TODOIST_API_KEY"})
+    assert result == "MCP_REFUSED: configure TODOIST_API_KEY in Aidon's .env before connecting"
+
+
 def test_capability_interview_removes_unverified_source_links():
     from src.agentic.loop import GoalRunner
 
