@@ -4,7 +4,8 @@ import json
 from types import SimpleNamespace
 
 from src.agentic.capability_triage import (
-    build_inventory, builtin_image_edit_covers, inventory_text, triage)
+    build_inventory, builtin_computer_use_covers, builtin_image_edit_covers,
+    inventory_text, triage)
 
 
 def test_attached_image_edit_is_covered_by_registered_builtin():
@@ -18,6 +19,18 @@ def test_attached_image_edit_is_covered_by_registered_builtin():
         {"edit_image": object()})
     assert not builtin_image_edit_covers(
         "Edit the attached image", {"make_chart": object()})
+
+
+def test_desktop_goal_is_covered_when_computer_use_is_registered():
+    assert builtin_computer_use_covers(
+        "Open Notepad on my Ubuntu desktop and type a short note",
+        ["computer_use", "computer_use_task"])
+    assert not builtin_computer_use_covers(
+        "Open Notepad on my Ubuntu desktop and type a short note",
+        ["write_file"])
+    assert not builtin_computer_use_covers(
+        "Write a note about desktop computers",
+        ["computer_use_task"])
 
 
 class _StubClef:

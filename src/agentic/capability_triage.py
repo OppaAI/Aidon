@@ -48,6 +48,8 @@ Division of labour, deliberately:
 
 from __future__ import annotations
 
+import re
+
 MIN_CONFIDENCE = 0.6
 BLOCK_CONFIDENCE = 0.8
 
@@ -76,6 +78,20 @@ def builtin_image_edit_covers(goal: str, tool_names) -> bool:
     """
     return ("edit_image" in set(tool_names or ())
             and is_image_edit_request(goal))
+
+
+def builtin_computer_use_covers(goal: str, tool_names) -> bool:
+    """Don't reopen a missing-tool interview when desktop controls exist."""
+    names = set(tool_names or ())
+    if not names.intersection({"computer_use", "computer_use_task"}):
+        return False
+    low = str(goal or "").lower()
+    return any(term in low for term in (
+        "notepad", "text editor", "mouse", "keyboard", "on my screen",
+        "on the screen", "open an app", "open the app", "type into",
+        "type in the", "click on", "click the", "computer use",
+        "control my computer",
+    )) or bool(re.search(r"\b(?:on|in) (?:my|the) (?:ubuntu |linux )?desktop\b", low))
 
 STATUS_CRITERIA = {
     "covered": "Every capability the goal needs is in the inventory.",

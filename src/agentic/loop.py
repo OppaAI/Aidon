@@ -701,12 +701,19 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                 from ..interface.interview_store import InterviewStore
                 _saved = InterviewStore(self.home).unfinished_for_conversation(getattr(self, "conversation_id", ""), goal=goal)
                 _clef = getattr(self, "clef_client", None)
-                from .capability_triage import builtin_image_edit_covers
+                from .capability_triage import (
+                    builtin_computer_use_covers, builtin_image_edit_covers)
                 if builtin_image_edit_covers(goal, self.extra_tools):
                     # A saved Lab interview must not outrank a tool this run
                     # can already call.
                     _triage = {"status": "covered", "confidence": 1.0,
                                "note": "Built-in edit_image covers this attached-image edit."}
+                elif builtin_computer_use_covers(goal, _inventory["tools"]):
+                    # A saved Lab interview must not outrank desktop
+                    # controls available in this run (for example after
+                    # switching to the X11-enabled Docker configuration).
+                    _triage = {"status": "covered", "confidence": 1.0,
+                               "note": "Computer-use tools cover this desktop task."}
                 elif _saved and _saved.get("goal") == goal and _saved.get("kind") in ("need_plugin", "need_skill", "need_mcp"):
                     _triage = {"status": _saved["kind"], "confidence": 1.0, "note": "Resume saved interview"}
                 elif _clef is not None:
