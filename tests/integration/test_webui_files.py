@@ -178,10 +178,11 @@ def test_chat_image_attachment_survives_history_reload_and_is_served(live_server
     image.write_bytes(b"fake-jpeg")
     db = ConversationStoreDB(home)
     conversation = db.create_conversation()["id"]
-    db.record_exchange(conversation, "user", "What is in this picture?")
+    db.record_exchange(
+        conversation, "user",
+        "What is in this picture?\n\nAttached image paths (available to "
+        "image-aware sandbox plugins after approval):\n" + str(image))
     exchange_no = db.latest_exchange_no(conversation, "user")
-    attachment = db.add_attachment(conversation, str(image), kind="image",
-                                   exchange_no=exchange_no)
 
     # Exercise the same restore path as a page refresh, then fetch only by
     # opaque attachment ID (the HTTP request cannot provide a filesystem path).
