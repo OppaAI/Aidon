@@ -577,7 +577,12 @@ class PlanRunMixin:
                     else:
                         self._trace("verify", "criterion-repair-failed",
                                     "; ".join(failures2)[:200])
-            if ok and not model_failed:
+            # File verification cannot erase a failed execution step. A
+            # tool may refuse an adoption or MCP connection after earlier
+            # steps wrote their deliverables; reporting that run as done
+            # would turn a draft into a claimed installation. Preserve the
+            # step failure even when every file on disk is valid.
+            if ok and not model_failed and not failures:
                 self._save_checkpoint(
                     "verified", goal, current_plan, passed,
                     verified=verified, attempt=attempt)
@@ -621,7 +626,11 @@ class PlanRunMixin:
                    for failure in failures):
                 # A model cannot repair provider configuration or credentials.
                 # Keep the exact error rather than attempting new paid edits.
-                break
+                return RunReport("failed", goal, current_plan, False, False,
+                                 files=sorted(passed),
+                                 error="; ".join(failures)[:500],
+                                 attempts=attempt,
+                                 backend=self._backend_name())
             if getattr(self, "clef_client", None) is not None:
                 try:
                     from .clef_recovery import route_failure

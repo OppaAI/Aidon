@@ -50,13 +50,15 @@ function render(kind) {
         + ' · Version: ' + esc(option.version) + '</p><code>' + esc(address) + '</code><p>'
         + 'License: ' + esc(option.license) + ' · GitHub stars: ' + esc(option.stars == null ? "Unavailable" : option.stars)
         + '</p><p>Pricing: ' + esc(option.pricing) + '</p><p>Reviews: ' + esc(option.reviews) + '</p><p>'
+        + (option.pricing_source ? safeLink(option.pricing_source, "Pricing source") + ' · ' : '')
+        + (option.reviews_source ? safeLink(option.reviews_source, "Review source") + ' · ' : '')
         + safeLink(option.source, "Registry record") + ' · ' + safeLink(option.repository, "Repository")
         + (option.website ? ' · ' + safeLink(option.website, "Publisher website") : '') + '</p>'
         + '<button data-choice="' + esc(option.id) + '"' + ((!connection || busy.mcp) ? ' disabled' : '') + '>Use this server</button></article>';
     }).join("");
   }
   document.querySelector('[data-brief="' + kind + '"]').disabled = busy[kind] || !current.brief || Boolean(current.build);
-  document.querySelector('[data-send="' + kind + '"]').disabled = Boolean(busy[kind]);
+  document.querySelector('[data-send="' + kind + '"]').disabled = Boolean(busy[kind] || current.closed);
   document.querySelector('[data-reset="' + kind + '"]').disabled = Boolean(busy[kind]);
   if (current.build) showBuild(kind, current.build);
 }
@@ -130,6 +132,7 @@ async function initialize(kind) {
   busy[kind] = true;
   try { state[kind] = JSON.parse(localStorage.getItem("aidon-lab-" + kind) || "null") || fresh(); }
   catch (_) { state[kind] = fresh(); }
+  if (!state[kind].id) state[kind].id = fresh().id;
   revisions[kind] = 0;
   render(kind);
   try {

@@ -226,6 +226,43 @@ def test_edit_image_path_is_bound_to_workspace_deliverable(tmp_path, monkeypatch
     assert report.files == ["cafe_scene.jpg"]
 
 
+def test_image_provider_configuration_failure_keeps_actual_error(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIDON_MAX_ATTEMPTS", "3")
+    runner = _runner(tmp_path, FakeClient("{}"))
+    runner.extra_tools = {"edit_image": lambda **kwargs:
+                          "IMAGE_EDIT_FAILED: configuration: Set AIDON_IMAGE_API_KEY in .env"}
+    monkeypatch.setattr(runner, "_plan", lambda *args, **kwargs:
+                        (_ for _ in ()).throw(AssertionError("must not replan")))
+    plan = Plan(steps=[Step(tool="edit_image", args={},
+                            deliverable="cafe_scene.jpg")],
+                deliverables=["cafe_scene.jpg"])
+
+    report = runner._execute_plan("Edit the attached image", plan)
+
+    assert report.status == "failed"
+    assert report.attempts == 1
+    assert "AIDON_IMAGE_API_KEY" in report.error
+
+
+def test_refused_plugin_adoption_cannot_be_reported_as_done(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIDON_MAX_ATTEMPTS", "1")
+    runner = _runner(tmp_path, FakeClient("{}"))
+    runner.extra_tools = {
+        "adopt_tool_plugin": lambda **kwargs:
+            "adoption refused: acceptance tests failed: no behavioral assertion"}
+    plan = Plan(
+        steps=[Step(tool="write", args={"file": "tool/plugin.json",
+                                        "text": "{}"},
+                    deliverable="tool/plugin.json"),
+               Step(tool="adopt_tool_plugin", args={"path": "tool"})],
+        deliverables=["tool/plugin.json"])
+
+    report = runner._execute_plan("Create and adopt a plugin", plan)
+
+    assert report.status == "failed"
+    assert "acceptance tests failed" in report.error
+
+
 def test_document_goal_does_not_accept_list_only_plan(tmp_path):
     plan = {"steps": [{"tool": "list", "args": {},
                         "deliverable": "workdir_listing_verification"}],

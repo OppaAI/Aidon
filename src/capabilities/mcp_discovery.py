@@ -28,6 +28,7 @@ def _connection(server):
         name = str(package.get("identifier", ""))
         version = str(package.get("version", ""))
         if (package.get("registryType") not in ("npm", "pypi")
+                or (package.get("transport") or {}).get("type", "stdio") != "stdio"
                 or not re.fullmatch(r"[@A-Za-z0-9_./-]+", name)
                 or not re.fullmatch(r"[A-Za-z0-9_.+-]+", version)
                 or version in ("latest", "main")
@@ -66,6 +67,8 @@ def _connection(server):
 
 def discover_mcp(queries, get_json=None, limit=8):
     get = get_json or _get_json
+    if isinstance(queries, str):
+        queries = [queries]
     results, errors, seen = [], [], set()
     for query in list(queries)[:3]:
         query = str(query).strip()[:80]

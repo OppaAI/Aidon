@@ -25,6 +25,21 @@ def _python_code_has_check(code: str) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.Assert) and _python_check_is_dynamic(node.test):
             return True
+        if isinstance(node, ast.Try):
+            # An expected exception is also a behavioral assertion when
+            # the success path explicitly raises and the expected error
+            # is caught by a specific handler. This lets a bad-input test
+            # prove that a tool rejects invalid data without accepting a
+            # try/except block that silently swallows every outcome.
+            if (any(isinstance(part, ast.Call)
+                    for statement in node.body for part in ast.walk(statement))
+                    and any(isinstance(part, ast.Raise)
+                            for statement in node.body
+                            for part in ast.walk(statement))
+                    and any(isinstance(handler.type, ast.Name)
+                            and handler.type.id not in {"Exception", "BaseException"}
+                            for handler in node.handlers)):
+                return True
         if isinstance(node, ast.Call):
             func = node.func
             if (isinstance(func, ast.Attribute)

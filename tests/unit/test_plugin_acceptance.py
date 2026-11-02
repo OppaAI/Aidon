@@ -52,6 +52,28 @@ def test_acceptance_that_does_not_reference_tool_is_refused(tmp_path):
         verify_candidate(root, Backend())
 
 
+def test_acceptance_can_assert_expected_bad_input_exception(tmp_path):
+    root = candidate(tmp_path)
+    (root / "tool.py").write_text(
+        "def upper(args):\n"
+        "    value = args.get('text', '')\n"
+        "    if not isinstance(value, str):\n"
+        "        raise ValueError('text must be a string')\n"
+        "    return value.upper()\n")
+    (root / "test_tool.py").write_text(
+        "from tool import upper\n"
+        "assert upper({'text':'aidon'}) == 'AIDON'\n"
+        "try:\n"
+        "    upper({'text': 123})\n"
+        "    raise AssertionError('expected ValueError')\n"
+        "except ValueError:\n"
+        "    pass\n")
+
+    evidence = verify_candidate(root, Backend())
+
+    assert evidence["tests"]
+
+
 def test_isolated_network_disabled_bubblewrap_is_accepted(tmp_path):
     class Bubblewrap(Backend):
         name = "bubblewrap"
