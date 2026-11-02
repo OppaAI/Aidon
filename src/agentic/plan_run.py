@@ -189,7 +189,8 @@ class PlanRunMixin:
         has_document_step = any(
             str(step.tool).lower() in {"generate_document", "write_file"}
             for step in plan.normalized_steps())
-        if document_request and not has_document_step:
+        if (document_request and not has_document_step
+                and not getattr(self, "approved_capability_brief", None)):
             if "generate_document" not in self.extra_tools:
                 return RunReport(
                     "failed", goal, plan, False, False,

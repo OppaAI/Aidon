@@ -1799,8 +1799,8 @@
         // startup-time "on demand" snapshot stale until page reload.
         loadDashboardStatus();
         try {
-          const key = currentConversationId
-            ? "aidon-run-state-" + currentConversationId : "";
+          const conversationId = window.aidonConversation ? window.aidonConversation().conversation_id : "";
+          const key = conversationId ? "aidon-run-state-" + conversationId : "";
           if (key) localStorage.setItem(key, JSON.stringify({
             status: run.status, stage: run.stage || "done",
             route: run.route || null, trace: runTraceHistory,
