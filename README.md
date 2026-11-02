@@ -41,6 +41,8 @@
 >*Note: Aidon is still under active development — it was built during this 10-day hackathon, and not all planned agentic capabilities are implemented yet.*
 
 > ## Demo video
+>
+> 🎞️ [Open the standalone Aidon intro deck](demo/index.html)
 > 
 >▶️ [Watch the 3-minute demo on YouTube — coming soon](https://www.youtube.com/watch?v=YOUR_VIDEO_ID)
 >
