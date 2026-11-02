@@ -65,7 +65,7 @@ function render(kind) {
         + (envNames.length ? '<p>Needs environment variable(s): <code>' + esc(envNames.join(", ")) + '</code>. Put values in Aidon .env; secret values stay hidden.</p>' : '')
         + envBindings.map(([target, value]) => '<label class="mcp-env-alias">Your .env variable name for <code>' + esc(target) + '</code><input type="text" data-env-target="' + esc(target) + '" value="' + esc(value.slice(1)) + '" autocomplete="off" spellcheck="false"></label>').join("")
         + (option.auth_headers && option.auth_headers.length ? '<p>Published endpoint requires header(s): <code>' + esc(option.auth_headers.join(", ")) + '</code>. Aidon needs a supported credential setup before connecting.</p>' : '')
-        + (option.may_use_oauth ? '<p class="mcp-warning">The registry lists an HTTP endpoint but no API key variable. It may require browser OAuth. Aidon cannot complete MCP OAuth yet; check the setup source before choosing it.</p>' : '')
+        + (option.may_use_oauth ? '<p class="mcp-warning">This server may require browser OAuth. Aidon can start the standard OAuth authorization flow when the server publishes compatible metadata; some providers may still require extra setup.</p>' : '')
         + (!connection ? '<p class="mcp-warning">This entry does not have a connection method Aidon can start automatically.</p>' : '')
         + '<p>'
         + safeLink(option.source, "Registry record") + ' · ' + safeLink(option.repository, "Repository")

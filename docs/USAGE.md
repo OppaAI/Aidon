@@ -413,6 +413,18 @@ verification arena they will run in.
   scope, wrapping the same v1 store as the v1 API.
   Streamable HTTP MCP is built: JSON-RPC over HTTP at
   `/mcp`, localhost only, Bearer token required.
+  Remote HTTP MCP servers that return a standard OAuth challenge can
+  use the WebUI approval card to open the provider, complete browser
+  authorization, and return to Aidon. Aidon uses authorization code
+  with PKCE and dynamic public-client registration; providers without
+  compatible OAuth metadata or registration need their supported API
+  key setup instead. Access and refresh tokens are kept in the private
+  `<AIDON_HOME>/credentials/mcp_oauth.json` file (directory mode 0700,
+  file mode 0600), not in chat or run logs. The callback is loopback-only
+  and defaults to `http://127.0.0.1:8765/oauth/mcp/callback`; configure
+  `AIDON_MCP_OAUTH_REDIRECT_URI` only when the WebUI uses another local
+  port. OAuth authorizes the server connection; remote tool actions
+  retain their normal approval gates.
 3. **Sandbox** — the plan is tested in an isolated workdir.
    Bubblewrap, when installed, is the isolated backend. A
    subprocess fallback is labeled as not isolated, never as

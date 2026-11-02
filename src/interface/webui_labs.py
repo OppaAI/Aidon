@@ -169,7 +169,7 @@ class WebUILabMixin:
             brief = {"name": re.sub(r"[^a-zA-Z0-9_]", "_", option["name"]),
                      "purpose": "\n".join(prior_requests) or f"Connect to {option['title']}.",
                      "connection": connection, "requirements": requirements,
-                     "authentication_note": ("This endpoint publishes no credential variable. If it requires browser OAuth, Aidon cannot complete that flow yet."
+                     "authentication_note": ("This endpoint publishes no credential variable. If it requires browser OAuth, Aidon will request authorization when the server supports standard OAuth metadata and public-client registration; some providers may need additional setup."
                                              if option.get("may_use_oauth") else
                                              "Credential variable names come from the published server record; place their values in Aidon's .env."
                                              if requirements else

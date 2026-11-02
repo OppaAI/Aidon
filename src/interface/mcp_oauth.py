@@ -23,6 +23,14 @@ class OAuthError(RuntimeError):
     pass
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        return None
+
+
+_safe_opener = urllib.request.build_opener(_NoRedirect())
+
+
 def _https_url(url: str) -> str:
     parsed = urllib.parse.urlsplit(str(url))
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
@@ -37,7 +45,7 @@ def _json_request(url, *, method="GET", payload=None, headers=None):
         "Accept": "application/json", "User-Agent": "Aidon-MCP-OAuth",
         **({"Content-Type": "application/json"} if data else {}), **(headers or {})})
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with _safe_opener.open(request, timeout=15) as response:
             _https_url(response.geturl())
             raw = response.read(1024 * 1024 + 1)
     except urllib.error.HTTPError as exc:
@@ -65,7 +73,7 @@ def _well_known(issuer: str, suffix: str) -> str:
         "/.well-known/" + suffix, "", ""))
 
 
-def _resource_metadata(resource_url: str, challenge: str) -> dict:
+def _resource_metadata(resource_url: str, challenge: str) -> tuple[dict, str]:
     match = re.search(r'resource_metadata="([^"]+)"', challenge or "", re.I)
     if match:
         metadata_url = match.group(1)
@@ -183,7 +191,8 @@ class McpOAuthManager:
             try:
                 fresh = self._token_post(token_endpoint, {
                     "grant_type": "refresh_token", "refresh_token": refresh,
-                    "client_id": record["client_id"]})
+                    "client_id": record["client_id"],
+                    "resource": record.get("resource", resource_url)})
                 self._save_tokens(key, fresh, record)
                 return fresh.get("access_token", "")
             except OAuthError:
@@ -194,7 +203,7 @@ class McpOAuthManager:
             method="POST", headers={"Accept": "application/json",
                 "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Aidon-MCP-OAuth"})
         try:
-            with urllib.request.urlopen(request, timeout=20) as response:
+        with _safe_opener.open(request, timeout=20) as response:
                 _https_url(response.geturl())
                 raw = response.read(1024 * 1024 + 1)
         except urllib.error.HTTPError as exc:
@@ -213,10 +222,13 @@ class McpOAuthManager:
 
     def _save_tokens(self, key, tokens, record):
         previous = record.get("tokens", {})
-        if not tokens.get("refresh_token") and previous.get("refresh_token"):
-            tokens["refresh_token"] = previous["refresh_token"]
-        tokens["expires_at"] = time.time() + max(0, int(tokens.get("expires_in", 3600)))
-        record["tokens"] = tokens
+        saved = {name: tokens[name] for name in
+                 ("access_token", "refresh_token", "token_type", "scope")
+                 if tokens.get(name)}
+        if not saved.get("refresh_token") and previous.get("refresh_token"):
+            saved["refresh_token"] = previous["refresh_token"]
+        saved["expires_at"] = time.time() + max(0, int(tokens.get("expires_in", 3600)))
+        record["tokens"] = saved
         self.records[key] = record
         self._save()
 
@@ -244,7 +256,10 @@ class McpOAuthManager:
                   "response_type": "code", "state": state,
                   "code_challenge": code_challenge, "code_challenge_method": "S256",
                   "resource": resource.get("resource", resource_url)}
-        scopes = metadata.get("scopes_supported") or []
+        scopes = resource.get("scopes_supported") or metadata.get("scopes_supported") or []
+        requested_scope = re.search(r'\bscope="([^"]+)"', challenge or "", re.I)
+        if requested_scope:
+            scopes = requested_scope.group(1).split()
         if scopes:
             params["scope"] = " ".join(str(scope) for scope in scopes)
         auth_url = metadata["authorization_endpoint"] + "?" + urllib.parse.urlencode(params)
@@ -257,10 +272,12 @@ class McpOAuthManager:
             self.pending[state] = pending
         decision = approve("install", "Authorize MCP account",
             "Aidon needs your authorization to connect this MCP server.\n"
-            "Open the provider page, sign in, and return here after authorization:\n\n"
+            "Open the provider link first, sign in, and return here. Then approve this card "
+            "so Aidon can exchange the code and connect:\n\n"
             "Authorize: " + auth_url + "\n\n"
             "Callback: " + self.callback_uri + "\n"
-            "Aidon uses OAuth authorization code with PKCE. Tokens are stored in a private file in Aidon's home.")
+            "Aidon uses OAuth authorization code with PKCE. Tokens are stored in a private file in Aidon's home. "
+            "This approval authorizes the connection only; remote tool actions keep their own approval gates.")
         if getattr(decision, "verdict", None) not in ("approved", "auto_approved"):
             with self._lock:
                 self.pending.pop(state, None)
@@ -274,7 +291,8 @@ class McpOAuthManager:
             raise OAuthError("OAuth authorization was cancelled or rejected")
         form = {"grant_type": "authorization_code", "code": result["code"],
                 "redirect_uri": self.callback_uri, "client_id": client_id,
-                "code_verifier": verifier}
+                "code_verifier": verifier,
+                "resource": resource.get("resource", resource_url)}
         token_result = self._token_post(metadata["token_endpoint"], form)
         saved = {"client_id": client_id, "token_endpoint": metadata["token_endpoint"],
                  "issuer": issuer, "resource": resource.get("resource", resource_url),

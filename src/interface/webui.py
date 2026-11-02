@@ -1035,4 +1035,6 @@ class WebUIServer(WebUIRunMixin, WebUILabMixin, WebUIMessagingMixin, WebUISettin
     def serve(self, port: int = 8002, host: str = "127.0.0.1") -> None:
         # Threading, so a goal run waiting on an approval card
         # does not block the /api/approve request that resolves it.
+        import os
+        os.environ["AIDON_WEBUI_PORT"] = str(port)
         ThreadingHTTPServer((host, port), self.make_handler()).serve_forever()

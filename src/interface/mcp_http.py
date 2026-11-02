@@ -35,6 +35,14 @@ import urllib.request
 
 PROTOCOL_VERSION = "2024-11-05"
 
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        return None
+
+
+_http_opener = urllib.request.build_opener(_NoRedirect())
+
 # A $VAR reference: "$NAME" or "${NAME}", NAME = [A-Z0-9_]+.
 _VAR_REF_RE = re.compile(r"\$(?:\{([A-Z0-9_]+)\}|([A-Z0-9_]+))")
 
@@ -165,7 +173,7 @@ class McpHttpClient:
             self.endpoint, data=json.dumps(payload).encode(),
             method="POST", headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as resp:
+            with _http_opener.open(request, timeout=self.timeout) as resp:
                 session = resp.headers.get("Mcp-Session-Id")
                 if session:
                     self.session_id = session

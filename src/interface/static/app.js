@@ -1284,10 +1284,17 @@
     // (the permanent button sends the edited/PERMANENT decision the
     // gate already understands; no typing, no second click).
     const isDomain = pending.kind === "domain";
+    const approvalBody = String(pending.body || "").split("\n").map((line) => {
+      const match = line.match(/^Authorize: (https:\/\/\S+)$/);
+      if (!match) return esc(line);
+      const href = match[1];
+      return 'Authorize: <a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">'
+        + esc(href) + "</a>";
+    }).join("\n");
     card.innerHTML =
       '<div class="kind">approval required — ' + esc(pending.kind) + "</div>" +
       "<h3>" + esc(pending.title) + "</h3>" +
-      "<pre>" + esc(pending.body) + "</pre>" +
+      "<pre>" + approvalBody + "</pre>" +
       (isDomain ? "" :
         '<textarea id="edit-text" placeholder="Edited text — press Submit to send…"></textarea>' +
         '<div id="edit-submit-row" class="row" style="display:none; justify-content:flex-end">' +
