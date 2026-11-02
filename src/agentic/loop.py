@@ -700,8 +700,7 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                 _saved = InterviewStore(self.home).unfinished_for_conversation(getattr(self, "conversation_id", ""), goal=goal)
                 _clef = getattr(self, "clef_client", None)
                 from .capability_triage import builtin_image_edit_covers
-                if builtin_image_edit_covers(goal, self.image_paths,
-                                             self.extra_tools):
+                if builtin_image_edit_covers(goal, self.extra_tools):
                     # A saved Lab interview must not outrank a tool this run
                     # can already call.
                     _triage = {"status": "covered", "confidence": 1.0,

@@ -52,9 +52,13 @@ MIN_CONFIDENCE = 0.6
 BLOCK_CONFIDENCE = 0.8
 
 
-def builtin_image_edit_covers(goal: str, image_paths, tool_names) -> bool:
-    """Avoid a Lab referral when an attached-image edit has a built-in tool."""
-    if not image_paths or "edit_image" not in set(tool_names or ()):
+def builtin_image_edit_covers(goal: str, tool_names) -> bool:
+    """Avoid a Lab referral when image editing has a built-in tool.
+
+    Whether an image was successfully attached is a separate input problem;
+    it must not make an existing editing capability look unavailable.
+    """
+    if "edit_image" not in set(tool_names or ()):
         return False
     low = str(goal or "").lower()
     return any(term in low for term in (
