@@ -6,6 +6,13 @@
 
   const thread = document.getElementById("thread");
   const input = document.getElementById("goal-input");
+  function focusGoalInput() {
+    requestAnimationFrame(() => {
+      if (!input.disabled && !input.hidden) {
+        input.focus({ preventScroll: true });
+      }
+    });
+  }
   const defaultGoalPlaceholder = "Start with a goal…\n\nPlan something, research a question, or ask Aidon to build a result for you. Your run stages and results will appear here.";
   const guidanceInput = document.getElementById("guidance-input");
   const sendBtn = document.getElementById("send");
@@ -1858,6 +1865,7 @@
         // while answering: an answer is a chat message, not a new
         // goal with guidance.
         const waiting = !!run.waiting_question;
+        const composerWasDisabled = input.disabled;
         waitingForLab = !!run.waiting_lab;
         sendBtn.disabled = !waiting;
         input.disabled = !waiting;
@@ -1865,8 +1873,10 @@
         input.placeholder = waiting
           ? "Answer Aidon's question…"
           : defaultGoalPlaceholder;
+        if (waiting && composerWasDisabled) focusGoalInput();
       }
       if (run.status !== "running") {
+        const composerWasDisabled = input.disabled;
         waitingForLab = false;
         // Lazy capabilities (especially memory) can initialize during a
         // run. Refresh their dashboard labels now instead of leaving the
@@ -1886,6 +1896,7 @@
         input.disabled = false;
         guidanceInput.disabled = false;
         input.placeholder = defaultGoalPlaceholder;
+        if (composerWasDisabled) focusGoalInput();
         steerRow.hidden = true;
         // A stopped run's Proceed card is not stale: it is the way back
         // in, so the terminal cleanup leaves it standing. Every other
