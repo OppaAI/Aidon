@@ -23,6 +23,6 @@ if [ ! -s "$AIDON_DESKTOP_XAUTHORITY" ]; then
   rm -rf "$desktop_auth_dir"
   exit 1
 fi
-docker compose -f docker/compose.yaml -f docker/compose.desktop.yaml up -d --build aidon aidon-webhooks
+docker compose --profile desktop up -d --build aidon-desktop aidon-webhooks
 trap - ERR
-printf '%s\n' 'Desktop access enabled for this Aidon container. Restart it with ordinary Compose to disable desktop access.'
+printf '%s\n' "Desktop profile started. Stop it with 'docker compose --profile desktop down' before starting the standard profile."

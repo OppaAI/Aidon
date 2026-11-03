@@ -42,7 +42,7 @@ cp examples/.env.example aidon-data/.env
 chmod 600 aidon-data/.env
 # Edit aidon-data/.env with your model endpoint, key, and model name.
 export AIDON_UID="$(id -u)" AIDON_GID="$(id -g)"
-docker compose -f docker/compose.yaml up --build -d
+docker compose up --build -d
 ```
 
 The WebUI (`aidon`) and public WhatsApp/Slack listener (`aidon-webhooks`)
@@ -50,28 +50,38 @@ are separate processes. Update both after source changes; rebuilding or
 restarting only `aidon` leaves WhatsApp running the previous version:
 
 ```sh
-docker compose -f docker/compose.yaml up -d --build aidon aidon-webhooks
+docker compose up -d --build aidon aidon-webhooks
 ```
 
-For code development, use the development overlay after the image has been
-built once:
+For code development, use the development profile after the image has been
+built once. Stop containers from another profile before switching:
 
 ```sh
+docker compose down
 export AIDON_UID="$(id -u)" AIDON_GID="$(id -g)"
-docker compose -f docker/compose.yaml -f docker/compose.dev.yaml up -d
+docker compose --profile dev up -d aidon-dev aidon-webhooks-dev
 ```
 
-The overlay mounts `./src` read-only into both containers and points Python at
-the mounted package. After editing Python code, restart both services to load
-the changes:
+The development profile mounts `./src` read-only into both containers and
+points Python at the mounted package. After editing Python code, restart both
+services to load the changes:
 
 ```sh
-docker compose -f docker/compose.yaml -f docker/compose.dev.yaml restart aidon aidon-webhooks
+docker compose --profile dev restart aidon-dev aidon-webhooks-dev
 ```
+
+For an isolated Aidon home, stop the active profile and run:
+
+```sh
+docker compose down
+docker compose --profile clean up -d aidon-clean aidon-webhooks-clean
+```
+
+This profile stores state in `./aidon-clean-data` instead of `./aidon-data`.
 
 This avoids rebuilding for ordinary source edits. Changes to dependencies,
 `pyproject.toml`, `uv.lock`, or `docker/Dockerfile` still require rebuilding
-with `docker compose -f docker/compose.yaml -f docker/compose.dev.yaml up --build -d`.
+with `docker compose --profile dev up --build -d aidon-dev aidon-webhooks-dev`.
 Dependency versions are locked in `uv.lock`; after changing dependency
 metadata in `pyproject.toml`, run `uv lock` before rebuilding. `docker/Dockerfile`
 uses a BuildKit cache for downloaded packages and installs dependencies in a
@@ -92,10 +102,10 @@ this from the repository root (the timestamped directory preserves the old
 database; `.env` is untouched):
 
 ```sh
-docker compose -f docker/compose.yaml down
+docker compose down
 mv aidon-data/qdrant "aidon-data/qdrant-hash-backup-$(date +%Y%m%d-%H%M%S)"
 export AIDON_UID="$(id -u)" AIDON_GID="$(id -g)"
-docker compose -f docker/compose.yaml up --build -d
+docker compose up --build -d
 ```
 
 The new Qdrant collections are created with the semantic embedder's dimension.
@@ -103,8 +113,8 @@ Keep the backup until you have confirmed the new memory works; hash vectors
 cannot be reused as semantic vectors.
 
 Open `http://127.0.0.1:8765/`. Choose another local port by setting
-`AIDON_WEBUI_PORT` before `docker compose -f docker/compose.yaml up`. Stop
-the service with `docker compose -f docker/compose.yaml down`; the
+`AIDON_WEBUI_PORT` before `docker compose up`. Stop the service with
+`docker compose down`; the
 `aidon-data` directory remains on the host. The
 container runs as your supplied UID/GID (10001 by default), so the export
 above lets it write files owned by your host user. Keep

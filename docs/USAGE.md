@@ -404,10 +404,13 @@ verification arena they will run in.
 
 ## Desktop demo and recording
 
-On an X11 Linux desktop, run `./docker/start-desktop-demo.sh` from a terminal
-in the graphical session. It builds and starts the Aidon container with access
-to that desktop; the usual `docker compose up -d aidon` starts it without the
-desktop overlay. The script needs `xauth`, a valid `DISPLAY`, and the session's
+On an X11 Linux desktop, stop the currently running profile with
+`docker compose down`, then run `./docker/start-desktop-demo.sh` from a terminal
+in the graphical session. It builds and starts the desktop-profile UI plus the
+webhook listener; ordinary `docker compose up -d` starts the UI without desktop
+access. Run `docker compose --profile desktop down` to stop the desktop-profile
+containers before starting the standard UI. The script needs `xauth`, a valid
+`DISPLAY`, and the session's
 X11 authorization file. Desktop access gives the container access to the X11
 session, so use it only when you intend Aidon to control that desktop. Wayland
 desktop control is not supported by this driver.

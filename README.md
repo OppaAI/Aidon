@@ -88,7 +88,7 @@ The demo uses Meta's Model API at runtime for Muse Spark reasoning and optional 
 
 ## 📚 Guides
 
-- [Features](FEATURES.md) — the four hackathon capabilities and Mermaid workflow diagrams.
+- [Features](docs/FEATURES.md) — the four hackathon capabilities and Mermaid workflow diagrams.
 - [Installation](docs/INSTALLATION.md) — prerequisites, setup, and launch.
 - [Configuration](docs/CONFIGURATION.md) — models, `.env`, and the Aidon home.
 - [Usage](docs/USAGE.md) — WebUI and messaging, core loop, spec sheet, tools and plugins, triggers, research and live execution, budgets, trace, v1 API, and MCP.
@@ -127,7 +127,8 @@ Code lives in `src/`, grouped, not flat:
 - `src/interface/` — WebUI, messaging, v1 API, MCP, triggers, scheduler, approval, run control
 - `src/capabilities/` — sandbox and execution, tools and plugins, search, voice, GitHub, email, image, charts, Unity, Playwright MCP, SAM, video
 - `src/social/` — one-way social publishing, Threads and Instagram, plus YouTube search, metadata, and transcripts
-- `docker/` — Dockerfile, Compose configurations, build ignore rules, and the opt-in desktop demo launcher
+- `docker/` — Dockerfile, build ignore rules, and the opt-in desktop demo launcher
+- `compose.yaml` — the single Docker Compose file, with standard, development, desktop, and clean-home profiles
 
 Run it with `python -m src.system.main goal "..."`, or `./launch.sh goal "..."`. `src/` itself has no modules at the top level, only `__init__.py` and the groups.
 
