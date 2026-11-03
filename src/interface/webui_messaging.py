@@ -95,6 +95,20 @@ class WebUIMessagingMixin:
                             print("WhatsApp inbound ignored: sender failed owner check")
                             continue
                         print("WhatsApp inbound owner message accepted")
+                        # Mode commands are controls, never answers to a
+                        # waiting interview. Parse them before answer_question.
+                        from .surfaces import parse_mode_command, set_mode
+                        early_mode_command = parse_mode_command(text)
+                        if early_mode_command and early_mode_command["action"] == "set":
+                            mode = early_mode_command["mode"]
+                            set_mode(self.home, "whatsapp:" + str(sender), mode)
+                            mode_reply = ("Execute mode on for this chat — goals run directly."
+                                          if mode == "execute" else
+                                          f"{mode.capitalize()} mode on for this chat.")
+                            replies.append(mode_reply)
+                            if self.whatsapp_sender is not None:
+                                self.whatsapp_sender(sender, mode_reply)
+                            continue
                         # A bare approve/reject is also a valid answer to an
                         # active Lab question. Give the waiting question first
                         # refusal; otherwise _resolve_decision consumes it as
@@ -120,7 +134,17 @@ class WebUIMessagingMixin:
                         # An answer to a waiting question is not a new
                         # goal: deliver it to the waiter, ack in natural
                         # language, and skip dispatching a new run.
-                        if decision_reply is None:
+                        if decision_reply is None and early_mode_command is not None:
+                            with self._question_lock:
+                                waiter = self._question_by_conversation.get(
+                                    "whatsapp:" + str(sender))
+                                waiting_run = waiter["run_id"] if waiter else None
+                            if waiting_run:
+                                decision_reply = (
+                                    "An interview is already waiting for your answer. "
+                                    f"Reply to its question, or send cancel {waiting_run} "
+                                    "before starting a new /ask goal.")
+                        if decision_reply is None and early_mode_command is None:
                             answered = self.answer_question(
                                 "whatsapp:" + str(sender), text)
                             if answered is not None:
