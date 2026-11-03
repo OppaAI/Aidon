@@ -347,9 +347,10 @@ def test_ask_mode_stops_with_spec(tmp_path, monkeypatch):
         def __init__(self, *args, **kwargs):
             pass
 
-        def start_from_message(self, message, ask, approve=None):
+        def start_from_message(self, message, ask, approve=None, use_memory=True):
             assert ask("what should it cover?") == "everything"
             assert approve is None
+            assert use_memory is False
             return SimpleNamespace(
                 spec=Spec(goal=message, deliverables=["notes.md"]))
 

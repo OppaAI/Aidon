@@ -110,12 +110,12 @@ def send_draft(home: Path, draft: dict, owner_email: str = "",
         body = text.split("\n\n", 1)[1] if "\n\n" in text else text
     except Exception as exc:
         return {"ok": False, "error": type(exc).__name__}
-    if sender is None:
-        return {"ok": False, "error": "Gmail sender is not configured; draft kept, not sent"}
     if to.casefold() != (owner_email or "").casefold():
         detail = f"To: {to}\nSubject: {draft['subject']}\n\n{body}"
         if approve is None or not approve("email_send", detail):
             return {"ok": False, "error": "not approved"}
+    if sender is None:
+        return {"ok": False, "error": "no sender configured (Gmail sender is not configured); draft kept, not sent"}
     result = sender(to, draft["subject"], body)
     if result.get("ok"):
         sent = _load_sent(home)

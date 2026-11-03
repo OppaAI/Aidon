@@ -212,10 +212,12 @@ class ToolDispatchMixin:
             if str(exc).startswith("unknown tool:") and name in self.extra_tools:
                 # Extra tools are outside the confined set, so a
                 # post or send tool is approval-gated here, before
-                # dispatch, fail-closed on rejection. email_send owns its
-                # recipient-aware approval and draft validation internally.
+                # dispatch, fail-closed on rejection. The built-in email
+                # sender owns a recipient-aware approval with the saved
+                # message body; arbitrary tools named email_send do not.
                 if (any(word in name for word in ("post", "send", "publish"))
-                        and name != "email_send"):
+                        and not getattr(self.extra_tools.get(name),
+                                        "_handles_approval", False)):
                     decision = self._ask_for_approval(
                         "live", f"Extra tool {name}",
                         self._approval_body(f"Run extra tool {name} with {args}?"),

@@ -288,6 +288,9 @@ def register_creation_tools(config, workdir, tools, approve, confined,
                         f"Gmail send failed ({type(exc).__name__}); "
                         "check Sent before retrying. Draft retained."}
 
+        # Avoid a second generic send gate; send_draft asks once with the
+        # fully resolved recipient, subject, and body for external mail.
+        email_send._handles_approval = True
         tools["email_make_draft"] = email_make_draft
         tools["email_read"] = email_read
         tools["email_send"] = email_send
