@@ -144,3 +144,10 @@ aidon-clean-data/trace/c7170d89.jsonl
 aidon-clean-data/trace/f6827a9e.jsonl
 aidon-clean-data/workspace/2026-11-03_07-25-47_210547/.versions.json
 aidon-clean-data/workspace/2026-11-03_07-25-47_210547/point1.html
+aidon-clean-data/qdrant/.lock
+aidon-clean-data/qdrant/meta.json
+aidon-clean-data/qdrant/collection/episodic/storage.sqlite
+aidon-clean-data/qdrant/collection/experience/storage.sqlite
+aidon-clean-data/qdrant/collection/knowledge/storage.sqlite
+aidon-clean-data/qdrant/collection/semantic/storage.sqlite
+aidon-clean-data/qdrant/collection/working/storage.sqlite
