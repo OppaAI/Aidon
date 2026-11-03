@@ -21,9 +21,11 @@ Aidon can write files, execute generated commands in a sandbox, and connect to e
   on the plaintext; the container is then verified by
   properties plus a sandbox decrypt-and-hash round-trip;
   plaintext is never sent to the model verifier; the
-  default cipher is AES-256-GCM unless you specify
-  another; in Ask mode Aidon asks which algorithm
-  when none is specified.
+  planner guidance names AES-256-GCM as the default unless
+  another cipher is specified. Ask-mode interview guidance
+  tells the model to ask which algorithm to use when none
+  is specified, but neither choice is enforced by code;
+  the model may interpret or omit that guidance.
 - Opaque files are judged on properties only, never
   failed for unreadability.
 

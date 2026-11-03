@@ -10,27 +10,34 @@ goal starts from what actually worked.
 
 ```mermaid
 flowchart LR
-    A[🎯 Goal] --> B[🧭 Interpret]
-    B --> C[💬 Interview / Spec]
-    C --> D[🧠 Recall]
-    D --> E[🔎 Research]
-    E --> F[📋 Plan DAG]
-    F --> G[🧪 Sandbox]
-    G --> H[✅ Verify]
-    H -->|failed| I[🔧 Repair]
-    I --> G
-    H --> J{👤 Approval}
-    J -->|rejected / timeout| K[🛑 Stop]
-    J -->|approved| L[🚀 Live]
-    L --> M[📚 Learn]
+    A[🎯 Goal] --> B{Run mode}
+    B -->|Ask| C[💬 Interview and freeze spec]
+    C --> D{Spec approval}
+    D -->|reject| X[🛑 Stop]
+    D -->|approve and proceed| E[🧠 Recall and research]
+    B -->|Plan default / Execute| E
+    E --> F[📋 Build and validate plan DAG]
+    F --> G{Run mode}
+    G -->|Plan: stop for review| Y[⏸️ Wait for proceed]
+    Y --> H[🧪 Sandbox]
+    G -->|Execute: continue| H
+    H --> I[✅ Verify]
+    I -->|failed| J[🔧 Repair failed steps]
+    J --> H
+    I --> K{Live action approval}
+    K -->|rejected / timeout| X
+    K -->|approved| L[🚀 Live action]
+    L --> M[📚 Learn and save successful workflow]
 ```
 
 1. Interpret: a chat message, an attached spec sheet,
-   a trigger event, or a v1 or MCP goal submission.
-2. Interview: chat questions, no clock, no cards, to a
-   frozen spec, or a user-written spec sheet attached
-   in chat, which skips the interview. Spec approval
-   is a decision card, with a spec sheet as its body.
+   a trigger event, or a v1 or MCP goal submission. Plan
+   mode is the interactive default; Ask and Execute are
+   explicit alternatives.
+2. Ask mode only: chat questions, without an approval
+   clock, produce a frozen spec. The user can approve the
+   spec on a decision card; proceeding then enters Plan
+   mode. An attached spec sheet can supply requirements.
 3. Recall: previous Experiences, episodic memory, and
    research sources for a similar goal, before planning
    fresh.
@@ -51,8 +58,10 @@ flowchart LR
    only after code passes, and never overrides code.
 8. Repair: only failed steps are repaired, passed
    files are untouched, at most 3 attempts in total.
-9. Approval: a decision card, fail-closed on timeout,
-   before any live action.
+9. Review and approval: Plan mode stops for plan review;
+   Ask mode has a separate spec confirmation. A decision
+   card also gates consequential live actions and fails
+   closed on timeout.
 10. Live: only a closed list of live actions, copy a
     verified file to a spec-named output with a
     snapshot backup, and record a notification.
@@ -90,12 +99,14 @@ flowchart TB
   model/configuration path. WebUI TTS can stream Fish Audio chunks,
   while the final response footer reports elapsed time and token usage.
   These are presentation features, not a separate execution backend.
-- Memory: Qdrant for all collections, working,
+- Memory: Qdrant vector collections for working,
   episodic, semantic, experience, and knowledge, with
   hybrid dense plus sparse recall, forgetting curve,
   grace, and explicit prune. Library files live in
-  the Aidon home, never in the repo, never in a
-  central service.
+  the Aidon home. SQLite is the durable memory fallback
+  when the Qdrant client package is not installed (it does
+  not detect an unreachable Qdrant server) and also stores conversations
+  and application records. No memory service is hosted by Aidon.
 - Tools: sandbox tools are arena plumbing, write,
   read, list, shell, and calculate, all confined to
   the workdir. Capability tools are plugins, adopted

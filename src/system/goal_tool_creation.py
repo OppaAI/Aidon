@@ -100,20 +100,6 @@ def register_creation_tools(config, workdir, tools, approve, confined,
     except Exception:
         pass
     try:
-        from ..capabilities.github_tools import fetch_file, search_repos
-
-        def github_search(query, token=""):
-            return search_repos(query, token=token or getattr(config, "github_token", "") or "")
-
-        def github_fetch(owner, repo, path, ref="main", token=""):
-            return fetch_file(owner, repo, path, ref=ref,
-                              token=token or getattr(config, "github_token", "") or "")
-
-        tools["github_search"] = github_search
-        tools["github_fetch"] = github_fetch
-    except Exception:
-        pass
-    try:
         from ..social.social import publish_instagram, publish_threads
 
         def threads_publish(text):

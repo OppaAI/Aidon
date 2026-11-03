@@ -39,11 +39,13 @@ def _tools(tmp_path, gate=None):
 def test_extra_tools_contains_expected_names(tmp_path):
     tools = _tools(tmp_path)
     for name in ("make_bar_chart", "make_line_chart", "generate_document",
-                 "build_ebook", "github_search", "github_fetch",
+                 "build_ebook",
                  "threads_publish", "instagram_publish", "tts_speak",
                  "transcribe_audio", "email_make_draft", "email_send",
                  "ask_user", "declare_blocked", "schedule_job"):
         assert name in tools, f"missing extra tool {name}"
+    assert "github_search" not in tools
+    assert "github_fetch" not in tools
     # Office builders are guarded: if office.py is absent they
     # are skipped, never faked; in this repo it exists, so they
     # are wired, confined to the workdir like the charts.

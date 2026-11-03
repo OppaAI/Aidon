@@ -53,27 +53,37 @@ restarting only `aidon` leaves WhatsApp running the previous version:
 docker compose up -d --build aidon aidon-webhooks
 ```
 
-For code development, use the development overlay after the image has been
-built once:
+For code development, use the development profile after the image has been
+built once. Stop containers from another profile before switching:
 
 ```sh
+docker compose down
 export AIDON_UID="$(id -u)" AIDON_GID="$(id -g)"
-docker compose -f compose.yaml -f compose.dev.yaml up -d
+docker compose --profile dev up -d aidon-dev aidon-webhooks-dev
 ```
 
-The overlay mounts `./src` read-only into both containers and points Python at
-the mounted package. After editing Python code, restart both services to load
-the changes:
+The development profile mounts `./src` read-only into both containers and
+points Python at the mounted package. After editing Python code, restart both
+services to load the changes:
 
 ```sh
-docker compose -f compose.yaml -f compose.dev.yaml restart aidon aidon-webhooks
+docker compose --profile dev restart aidon-dev aidon-webhooks-dev
 ```
+
+For an isolated Aidon home, stop the active profile and run:
+
+```sh
+docker compose down
+docker compose --profile clean up -d aidon-clean aidon-webhooks-clean
+```
+
+This profile stores state in `./aidon-clean-data` instead of `./aidon-data`.
 
 This avoids rebuilding for ordinary source edits. Changes to dependencies,
-`pyproject.toml`, `uv.lock`, or the `Dockerfile` still require rebuilding
-with `docker compose -f compose.yaml -f compose.dev.yaml up --build -d`.
+`pyproject.toml`, `uv.lock`, or `docker/Dockerfile` still require rebuilding
+with `docker compose --profile dev up --build -d aidon-dev aidon-webhooks-dev`.
 Dependency versions are locked in `uv.lock`; after changing dependency
-metadata in `pyproject.toml`, run `uv lock` before rebuilding. The Dockerfile
+metadata in `pyproject.toml`, run `uv lock` before rebuilding. `docker/Dockerfile`
 uses a BuildKit cache for downloaded packages and installs dependencies in a
 separate layer, so ordinary source rebuilds reuse the heavy ML dependencies.
 Use the same `aidon-data` directory in either mode.
@@ -104,7 +114,8 @@ cannot be reused as semantic vectors.
 
 Open `http://127.0.0.1:8765/`. Choose another local port by setting
 `AIDON_WEBUI_PORT` before `docker compose up`. Stop the service with
-`docker compose down`; the `aidon-data` directory remains on the host. The
+`docker compose down`; the
+`aidon-data` directory remains on the host. The
 container runs as your supplied UID/GID (10001 by default), so the export
 above lets it write files owned by your host user. Keep
 the WebUI bound to localhost; do not change it to `0.0.0.0` or publish the
@@ -114,11 +125,10 @@ packaging does not certify that Bubblewrap or any
 other execution backend can run inside your Docker host; validate the actual
 backend separately before using execution features.
 
-For a release, update `pyproject.toml`, move the corresponding notes from
-`[Unreleased]` into a versioned `CHANGELOG.md` section, run CI, then push a
-matching tag such as `v0.4.1`. The release workflow checks the tag against
-the project version and changelog, publishes the GitHub Release, and pushes
-the container image to GitHub Container Registry.
+For a release, update the version in `pyproject.toml`, run CI, then push a
+matching tag such as `v0.6.0`. The release workflow checks the tag against
+the project version, creates release notes from merged pull requests, and
+publishes the container image to GitHub Container Registry.
 
 At minimum, configure an endpoint, key, and model. Heavy ML packages and optional features are offered interactively by `./setup.sh`; answer yes only for capabilities you need. Use `--with-optional` to accept every optional package without prompting:
 
@@ -165,5 +175,5 @@ The operating manual is included in the wheel and image. Put owner-maintained
 precedence over packaged defaults and persist across container replacement.
 
 Compose reports container health after checking the local listening port.
-This is a liveness check; confirm the configured model, memory store and sandbox
-with the acceptance checks in `PRODUCTION_READINESS.md`.
+This is a liveness check; separately confirm the configured model, memory
+store, and selected sandbox backend in your deployment environment.
