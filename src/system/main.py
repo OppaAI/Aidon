@@ -674,7 +674,7 @@ def main(argv: list[str] | None = None) -> int:
                             _line += f" -> {_deliverable}"
                         _lines.append(_line)
                     if _lines:
-                        return ("[stopped] Plan ready:\n" + "\n".join(_lines[:12])
+                        return ("[stopped] Plan ready:\n" + "\n".join(_lines)
                                 + f"\nRun /proceed {_sid} to execute.")
                 return f"[stopped] {_smode} ready — run /proceed {_sid} to continue."
             return (f"[{report.status}] {', '.join(report.files)} {report.error}"

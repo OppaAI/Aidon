@@ -68,3 +68,15 @@ def test_launch_uses_installed_desktop_id_without_shell_or_secrets(tmp_path, mon
     with pytest.raises(ValueError, match="installed"):
         driver({"kind": "launch_app", "app_id": "/tmp/arbitrary.desktop"})
     assert len(calls) == 1
+
+
+def test_applications_include_desktop_ids_in_subdirectories(tmp_path, monkeypatch):
+    nested = tmp_path / "applications" / "gnome" / "utilities"
+    nested.mkdir(parents=True)
+    (nested / "terminal.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Terminal\nExec=terminal\n")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_DIRS", str(tmp_path))
+    driver = X11Driver(executable="xdotool", display=":99")
+    assert driver.applications() == [
+        {"id": "gnome-utilities-terminal.desktop", "name": "Terminal"}]

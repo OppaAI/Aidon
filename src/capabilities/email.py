@@ -110,7 +110,14 @@ def send_draft(home: Path, draft: dict, owner_email: str = "",
         body = text.split("\n\n", 1)[1] if "\n\n" in text else text
     except Exception as exc:
         return {"ok": False, "error": type(exc).__name__}
-    if to.casefold() != (owner_email or "").casefold():
+    def same_owner_address(address: str, owner: str) -> bool:
+        local, separator, domain = address.rpartition("@")
+        owner_local, owner_separator, owner_domain = (owner or "").rpartition("@")
+        if not separator or not owner_separator:
+            return address == owner
+        return local == owner_local and domain.casefold() == owner_domain.casefold()
+
+    if not same_owner_address(to, owner_email):
         detail = f"To: {to}\nSubject: {draft['subject']}\n\n{body}"
         if approve is None or not approve("email_send", detail):
             return {"ok": False, "error": "not approved"}

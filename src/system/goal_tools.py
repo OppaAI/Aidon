@@ -525,7 +525,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             finally:
                 if backend is not None:
                     backend.cleanup()
-            if not ask_plugin_approval(gate, None, preflight):
+            if not ask_plugin_approval(gate, None, preflight,
+                                       context=gate_context):
                 return "adoption refused: Adoption rejected by owner"
             if governor is not None:
                 governor.acquire("tool")

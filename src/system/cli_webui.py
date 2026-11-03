@@ -642,7 +642,7 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                         _line += f" → {_deliverable}"
                     _plan_lines.append(_line)
                 if _plan_lines:
-                    _shead += "\n\nSteps:\n" + "\n".join(_plan_lines[:12])
+                    _shead += "\n\nSteps:\n" + "\n".join(_plan_lines)
                 try:
                     from ..interface.mode_stops import load_mode_stop
                     _stored = load_mode_stop(config.home, _sid) or {}

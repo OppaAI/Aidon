@@ -46,17 +46,19 @@ class X11Driver:
             "XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(":") if root]
         found = {}
         for root in roots:
-            for path in sorted((root / "applications").glob("*.desktop")):
-                if path.name in found:
+            app_root = root / "applications"
+            for path in sorted(app_root.rglob("*.desktop")):
+                app_id = path.relative_to(app_root).as_posix().replace("/", "-")
+                if app_id in found:
                     continue
                 try:
                     parser = configparser.ConfigParser(interpolation=None)
                     parser.read(path, encoding="utf-8")
                     entry = parser["Desktop Entry"]
                     if entry.get("Type") != "Application" or entry.get("Hidden") == "true":
-                        found[path.name] = None
+                        found[app_id] = None
                         continue
-                    found[path.name] = {"id": path.name, "name": entry.get("Name", path.stem)}
+                    found[app_id] = {"id": app_id, "name": entry.get("Name", path.stem)}
                 except (OSError, KeyError, configparser.Error):
                     continue
         return [app for app in found.values() if app]

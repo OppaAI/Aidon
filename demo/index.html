@@ -33,7 +33,7 @@
     .brand { display: flex; align-items: center; gap: 11px; letter-spacing: .12em; font-size: 12px; font-weight: 750; text-transform: uppercase; color: #d9dcf1; }
     .brand-mark { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid rgba(125,233,255,.44); border-radius: 10px; color: var(--cyan); box-shadow: 0 0 25px rgba(125,233,255,.12); }
     .top-note { color: var(--muted); font-size: 13px; }
-    main { display: grid; place-items: center; min-height: 0; }
+    main { display: grid; place-items: center; align-content: start; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: clamp(12px, 3vh, 28px) 0; }
     .slide { width: min(1120px, 100%); min-height: min(640px, 73vh); display: none; grid-template-columns: minmax(0, 1.05fr) minmax(300px, .95fr); align-items: center; gap: clamp(16px, 5vw, 64px); animation: arrive .45s ease both; }
     .slide.active { display: grid; }
     @keyframes arrive { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
@@ -411,7 +411,9 @@
         slides.forEach((slide, i) => {
           slide.classList.toggle('active', i === current);
           const speech = slide.querySelector('.speech-text');
-          if (speech) speech.textContent = partsFor(slide)[0];
+          if (speech) speech.textContent = voiceAvailable
+            ? partsFor(slide)[0]
+            : partsFor(slide).filter(Boolean).join(' ');
         });
         count.textContent = `${String(current + 1).padStart(2, '0')} / ${String(slides.length).padStart(2, '0')}`;
         fill.style.width = `${((current + 1) / slides.length) * 100}%`;
@@ -466,6 +468,9 @@
       document.getElementById('next').addEventListener('click', () => show(current + 1));
       speakButton.addEventListener('click', () => speakButton.textContent.includes('Stop') ? stopSpeaking() : speak());
       document.addEventListener('keydown', event => {
+        const interactive = event.target instanceof Element && event.target.closest(
+          'button, a, input, textarea, select, [contenteditable="true"]');
+        if (event.key === ' ' && interactive) return;
         if (event.key === 'ArrowRight' || event.key === ' ') { event.preventDefault(); show(current + 1); }
         if (event.key === 'ArrowLeft') { event.preventDefault(); show(current - 1); }
         if (event.key === 'Escape') stopSpeaking();

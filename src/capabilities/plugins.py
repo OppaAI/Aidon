@@ -230,7 +230,8 @@ def preflight_plugin(source_dir: Path) -> Preflight:
                      body="\n".join(body_lines))
 
 
-def ask_plugin_approval(gate, approve, preflight: Preflight) -> bool:
+def ask_plugin_approval(gate, approve, preflight: Preflight,
+                        context: dict | None = None) -> bool:
     """Ask the owner about a preflighted plugin. Adoption is an
     explicit install decision, so graduated autonomy and preapproval
     cannot approve it implicitly."""
@@ -257,6 +258,7 @@ def ask_plugin_approval(gate, approve, preflight: Preflight) -> bool:
                 preflight.body,
                 action_class="plugin",
                 force_ask=True,
+                **({"context": context} if context else {}),
             )
         except TypeError:
             try:

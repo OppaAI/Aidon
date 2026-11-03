@@ -1655,7 +1655,8 @@
     approvalSlot.innerHTML = "";
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     function restoreCard() {
-      if (currentCard && !approvalSlot.querySelector(".approval-card")) {
+      if (currentCard && currentRun === runId
+          && !approvalSlot.querySelector(".approval-card")) {
         approvalSlot.appendChild(currentCard);
         cardShownFor = runId + cardId;
       }
@@ -1674,8 +1675,10 @@
           // Server has no pending approval: this card is dead (the gate
           // failed closed on timeout, or it was already decided). Remove
           // it instead of leaving tappable buttons that all fail again.
-          cardShownFor = null;
-          approvalSlot.innerHTML = "";
+          if (currentRun === runId) {
+            cardShownFor = null;
+            approvalSlot.innerHTML = "";
+          }
         } else restoreCard();
         decidingCardId = null;
         return;
@@ -3086,6 +3089,7 @@
     localStorage.setItem("aidon-conversation", currentConversationId);
     if (window.aidonStopPolling) window.aidonStopPolling();
     markActiveConversation();
+    document.getElementById("dag-activity").textContent = "Waiting for a goal";
     thread.innerHTML = "";
     const atts = conv.attachments || [];
     const byImport = {};

@@ -81,7 +81,7 @@ def _spec_text(spec) -> tuple[dict, str]:
         try:
             data = json.loads(text)
         except json.JSONDecodeError:
-            if text.startswith(("{", "[")):
+            if text.startswith("{"):
                 raise ValueError("tool specification looks like malformed JSON")
             data = {"name": _slug(text.splitlines()[0][:64]), "purpose": text}
         if isinstance(data, str) and data.strip():

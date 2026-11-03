@@ -107,6 +107,32 @@ def test_guided_task_sees_screen_then_acts_then_finishes(tmp_path):
     assert len(trace["steps"]) == 1
 
 
+def test_guided_task_can_launch_from_desktop_with_no_focused_window(tmp_path):
+    class FocuslessDriver(_Driver):
+        def applications(self):
+            return [{"id": "org.gnome.gedit.desktop", "name": "Text Editor"}]
+
+        def capture_focus(self):
+            raise RuntimeError("Cannot identify the focused desktop window")
+
+    driver = FocuslessDriver()
+    chat = _ScriptChat([
+        json.dumps({"action": {"kind": "launch_app",
+                                "app_id": "org.gnome.gedit.desktop"},
+                    "done": False, "screen": "Empty desktop.",
+                    "reason": "Open the editor"}),
+        json.dumps({"action": None, "done": True,
+                    "screen": "Text Editor is open.", "reason": "Ready"}),
+    ])
+    result = run_guided_task(
+        "Open the text editor", chat, driver=driver,
+        approve=lambda kind, detail: True,
+        screenshot_dir=str(tmp_path), capture=_fake_png)
+    assert result["ok"], result
+    assert driver.actions == [{"kind": "launch_app",
+                               "app_id": "org.gnome.gedit.desktop"}]
+
+
 def test_guided_task_does_not_claim_success_without_an_action_or_done(tmp_path):
     chat = _ScriptChat([json.dumps({"action": None, "done": False})])
     result = run_guided_task("open an app", chat, driver=_Driver(),
@@ -213,6 +239,29 @@ def test_desktop_approval_restores_observed_window_before_typing(tmp_path):
     assert result["ok"]
     assert events == ["observe editor", "approve in browser", "restore editor",
                       "type into editor"]
+
+
+def test_launch_only_batch_does_not_require_existing_focus(tmp_path, monkeypatch):
+    from src.interface.approval import Decision
+    events = []
+
+    class Driver(_Driver):
+        def capture_focus(self):
+            raise RuntimeError("no focused window")
+
+    class Gate:
+        def ask(self, kind, title, body, **kwargs):
+            events.append("approved")
+            return Decision("approved")
+
+    monkeypatch.setattr("src.capabilities.x11_driver.X11Driver", Driver)
+    config = SimpleNamespace(home=tmp_path, computer_driver="x11",
+                             kernel_mode=False)
+    tools = _goal_extra_tools(config, tmp_path, gate=Gate(), optional_tools=False)
+    result = json.loads(tools["computer_use"]([{
+        "kind": "launch_app", "app_id": "org.gnome.gedit.desktop"}]))
+    assert result["ok"]
+    assert events == ["approved"]
 
 
 def test_lost_desktop_focus_never_types_into_approval_browser():

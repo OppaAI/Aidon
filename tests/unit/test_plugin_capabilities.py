@@ -8,6 +8,7 @@ adoption may go, and the approval card still lists every capability.
 from tests.plugin_acceptance import passing_backend_factory
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -77,6 +78,29 @@ def test_policy_rejects_unknown_capability():
 def test_policy_secret_requires_name():
     with pytest.raises(ValueError):
         CapabilityPolicy.from_capabilities(["secret"])
+
+
+def test_plain_language_plugin_request_may_start_with_square_bracket():
+    from src.capabilities.plugin_generation import _spec_text
+    data, text = _spec_text("[Grocery prices]\nLook up produce prices at my selected store.")
+    assert data["purpose"] == text
+    assert data["name"].lower() == "grocery-prices"
+
+
+def test_plugin_approval_forwards_run_context():
+    from src.capabilities.plugins import ask_plugin_approval
+    seen = {}
+
+    class Gate:
+        def ask(self, kind, title, body, **kwargs):
+            seen.update(kwargs)
+            return SimpleNamespace(verdict="approved")
+
+    preflight = SimpleNamespace(plugin=SimpleNamespace(name="demo"),
+                                findings=[], approved_hash="hash", body="Review")
+    assert ask_plugin_approval(
+        Gate(), None, preflight, context={"run_id": "run-7"})
+    assert seen["context"] == {"run_id": "run-7"}
 
 
 def test_manifest_capabilities_loaded(tmp_path):

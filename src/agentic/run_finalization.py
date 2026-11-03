@@ -125,8 +125,11 @@ class RunFinalizationMixin:
                                   "deliverable": step.deliverable,
                                   "depends_on": dependencies})
                 if nodes:
-                    self._trace("dag", "saving",
-                                "Saving this successful workflow as a reusable DAG")
+                    try:
+                        self._trace("dag", "saving",
+                                    "Saving this successful workflow as a reusable DAG")
+                    except Exception:
+                        pass
                     action, dag_id = DagStore(self.home).learn(
                         report.goal, nodes)
                     if dag_id:

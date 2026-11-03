@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 from ..system.model_client import Message
 from .run_types import Plan, _resolve_count
@@ -144,7 +145,11 @@ class PlanningMixin:
         # the planner to honor a long, generic tool-selection prompt.
         if not self.kernel_mode:
             from .capability_triage import builtin_computer_use_covers
-            if ("computer_use_task" in self.extra_tools
+            _needs_speech = bool(re.search(
+                r"\b(?:read (?:it|that|the text) aloud|read aloud|"
+                r"speak (?:it|that|the text) aloud|speak out the text)\b",
+                str(goal), re.IGNORECASE))
+            if (not _needs_speech and "computer_use_task" in self.extra_tools
                     and builtin_computer_use_covers(goal, self.extra_tools)):
                 task = str(goal).strip()
                 task += ("\nUse visible desktop controls: open applications through the "

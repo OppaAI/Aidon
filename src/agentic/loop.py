@@ -549,7 +549,8 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
             self.last_route = ("agentic", 1.0)
             if callable(getattr(self, "route_callback", None)):
                 self.route_callback(self.last_route)
-        if desktop_goal and (self.kernel_mode or "computer_use_task" not in self.extra_tools):
+        if (desktop_goal and getattr(self, "mode", None) != "ask"
+                and (self.kernel_mode or "computer_use_task" not in self.extra_tools)):
             reason = ("Desktop control is disabled by kernel mode. Set AIDON_KERNEL=0."
                       if self.kernel_mode else
                       "The guided desktop tool is unavailable in this running process. "
@@ -829,6 +830,11 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                 # setting as written.
                 experiences = recall_experiences(
                     self.memory, goal, limit=max(recall_limit, 5))
+                try:
+                    self._trace("recall", "done",
+                                "Saved workflow DAG lookup completed")
+                except Exception:
+                    pass
                 _dag_candidates = [e for e in experiences
                                    if getattr(e, "dag_nodes", None)]
                 self._trace(

@@ -36,7 +36,19 @@ def register_computer_tools(config, tools, approve, confined, model_chat=None, o
                 return None
         # Approval moves focus to the browser. Restore the original window
         # once, before observing or controlling the desktop.
-        window = driver.capture_focus() if hasattr(driver, "capture_focus") else None
+        actions = args.get("actions") or []
+        launch_only = (tool == "computer_use" and bool(actions)
+                       and all(isinstance(action, dict)
+                               and action.get("kind") == "launch_app"
+                               for action in actions))
+        window = None
+        if not launch_only and hasattr(driver, "capture_focus"):
+            try:
+                window = driver.capture_focus()
+            except Exception:
+                # Guided tasks can launch the first app on an empty desktop.
+                if tool != "computer_use_task":
+                    raise
         ok, why = _approval(
             "live_execute", "Allow desktop control for this task",
             detail + "\nThis authorizes the whole task, without approval for each click or keystroke.",

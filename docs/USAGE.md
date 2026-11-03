@@ -412,8 +412,10 @@ session, so use it only when you intend Aidon to control that desktop. Wayland
 desktop control is not supported by this driver.
 
 In chat, ask, for example: “Open the text editor on my desktop, type ‘Hello
-from Aidon’, and read that sentence aloud.” Approve the plan and the individual
-desktop actions. The guided tool sends screenshots to the configured vision
+from Aidon’, and read that sentence aloud.” Approve the plan and the desktop
+task. A guided task uses one approval for its click, typing, key, and app-launch
+actions; a direct computer-use batch uses one approval when it includes an
+irreversible action. The guided tool sends screenshots to the configured vision
 model, so close any windows you do not want it to see. Aidon requests speech
 in the WebUI after the desktop step; it uses the configured voice service or
 the browser's speech synthesis. Browser audio playback may require a prior
@@ -661,8 +663,10 @@ Use WebUI, or the configured owner WhatsApp/Slack chat, to request:
 
 These requests use the current screenshot to choose each mouse/keyboard action.
 The next screenshot confirms the result; OBS recording is never blindly toggled.
-Desktop actions retain their approval cards, which can be answered through the
-originating chat. In Ask/Plan mode, proceed through the spec/plan stops first.
+A guided desktop task uses one approval card for the whole task. A direct
+computer-use batch uses one approval card for the batch when it includes an
+irreversible action. Both cards can be answered through the originating chat.
+In Ask/Plan mode, proceed through the spec/plan stops first.
 Configure the OBS scene, display capture, output folder, and audio before the demo.
 Screen capture and typing occur on the host desktop, including when requested
 from WhatsApp or Slack. Round screenshots and the action trace are kept in the

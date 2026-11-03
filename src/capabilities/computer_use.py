@@ -210,9 +210,10 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
         if callable(getattr(driver, "capture_focus", None)):
             try:
                 focus_window = driver.capture_focus()
-            except Exception as exc:
-                return {"ok": False, "error": f"desktop focus unavailable: {exc}",
-                        "actions_taken": history}
+            except Exception:
+                # An empty desktop has no focused window yet. Still inspect it:
+                # the next guided action may be launch_app, which needs no focus.
+                focus_window = None
         shot = run_computer_use(
             [{"kind": "screenshot",
               **({"capture": capture} if capture is not None else {})}],

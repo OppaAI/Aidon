@@ -38,6 +38,10 @@ def test_desktop_action_detection_does_not_depend_on_tools():
     assert is_desktop_action_request("Can you open notepad on my desktop?")
     assert not is_desktop_action_request("What is gedit?")
     assert not is_desktop_action_request("How to open gedit on Ubuntu?")
+    assert not is_desktop_action_request("Can you show me how to open gedit?")
+    assert is_desktop_action_request("Drag the window on my desktop")
+    assert not is_desktop_action_request("Stop recording system audio")
+    assert is_desktop_action_request("Stop recording in OBS Studio")
 
 
 def test_desktop_plan_cannot_turn_into_file_deliverables():
@@ -54,6 +58,44 @@ def test_desktop_plan_cannot_turn_into_file_deliverables():
     assert [step["tool"] for step in plan.steps] == ["computer_use_task"]
     assert plan.steps[0]["args"]["max_actions"] == 20
     assert plan.deliverables == []
+
+
+def test_desktop_shortcut_leaves_read_aloud_compounds_to_planner():
+    from src.agentic.planning import PlanningMixin
+    class Runner(PlanningMixin):
+        kernel_mode = False
+        extra_tools = {"computer_use_task": object(), "tts_speak": object()}
+        memory = None
+        plugins = None
+        image_paths = []
+        guidance = ""
+        budget = None
+
+        def __init__(self):
+            self.planner_called = False
+
+        def _memory_context(self, _goal):
+            return ""
+
+        def _attachment_message(self, message):
+            return SimpleNamespace(content=message)
+
+        def _trace(self, *_args):
+            pass
+
+        def _chat(self, *_args):
+            self.planner_called = True
+            return json.dumps({"steps": [
+                {"tool": "computer_use_task", "args": {"description": "Open gedit"}},
+                {"tool": "tts_speak", "args": {"text": "Hello from Aidon"},
+                 "depends_on": ["step-1"]}], "deliverables": [], "criteria": []})
+
+    runner = Runner()
+    plan = runner._plan(
+        "Open gedit, type Hello from Aidon, then read it aloud.")
+    assert runner.planner_called
+    assert [step["tool"] for step in plan.steps] == [
+        "computer_use_task", "tts_speak"]
 
 
 class _StubClef:
