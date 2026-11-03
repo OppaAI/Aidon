@@ -125,12 +125,26 @@ class RunFinalizationMixin:
                                   "deliverable": step.deliverable,
                                   "depends_on": dependencies})
                 if nodes:
+                    try:
+                        self._trace("dag", "saving",
+                                    "Saving this successful workflow as a reusable DAG")
+                    except Exception:
+                        pass
                     action, dag_id = DagStore(self.home).learn(
                         report.goal, nodes)
                     if dag_id:
                         report.learned_dag = f"{action}:{dag_id}"
-            except Exception:
-                pass
+                        self._trace("dag", action,
+                                    f"Saved reusable DAG '{dag_id}' ({action})")
+                    else:
+                        self._trace("dag", "not-saved",
+                                    "This successful workflow could not be saved as a reusable DAG")
+            except Exception as exc:
+                try:
+                    self._trace("dag", "failed",
+                                f"Could not save the reusable DAG ({type(exc).__name__})")
+                except Exception:
+                    pass
             # Background fact extraction for the whole agentic run
             # (not per step): same mechanism as chat turns, once at
             # the end. Procedural learning above is separate.

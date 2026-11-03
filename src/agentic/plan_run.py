@@ -30,8 +30,6 @@ class PlanRunMixin:
             self.budget.start()
         self._step_outputs = {}
         self._trace("interpret", "done", goal[:100])
-        if self.memory is not None:
-            self._trace("recall", "done", "experience recall attempted")
         from .validator import validate_plan, ALLOWED_TOOLS
         _allowed = set(ALLOWED_TOOLS) | {"llm"}
         if self.extra_tools:
@@ -277,7 +275,12 @@ class PlanRunMixin:
             self._trace("plan", "serialized",
                         "skill adoption is a replanning boundary")
         max_attempts = _resolve_count("AIDON_MAX_ATTEMPTS", MAX_ATTEMPTS, 1)
-        if fixed_lab_plan:
+        if fixed_lab_plan or any(step.tool in {
+                "computer_use", "computer_use_task", "email_send"}
+                for step in plan.normalized_steps()):
+            # Replaying desktop actions may repeat typing/clicks, and a
+            # Gmail send may have succeeded remotely before its response
+            # was lost. Neither action is retried automatically.
             max_attempts = 1
         for attempt in range(1, max_attempts + 1):
             failures: list[str] = []
@@ -603,6 +606,17 @@ class PlanRunMixin:
                                  error=("criteria not checkable: "
                                         + "; ".join(failures))[:500],
                                  attempts=attempt)
+            executed_side_effects = {
+                "computer_use", "computer_use_task", "email_send"}
+            if any(step.tool in executed_side_effects
+                   for step in current_plan.normalized_steps()):
+                return RunReport(
+                    "failed", goal, current_plan, False, False,
+                    files=sorted(passed),
+                    error=("; ".join(failures)
+                           + "; automatic retry stopped because the executed "
+                           "plan contains side-effect actions")[:500],
+                    attempts=attempt, backend=self._backend_name())
             if attempt == max_attempts:
                 return RunReport("failed", goal, current_plan, False, False,
                                  files=sorted(passed),
@@ -832,7 +846,7 @@ class PlanRunMixin:
                 self.memory.promote_to_ltm(episodic, kind="semantic")
             except Exception:
                 pass
-        self._trace("learn", "done", "experience recorded")
+        self._trace("learn", "done", "Successful workflow is ready to save as a reusable DAG")
         return RunReport("done", goal, current_plan, True, True,
                          files=files, attempts=attempt,
                          result_text=self._result_text_for_plan(current_plan),

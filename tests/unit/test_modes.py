@@ -59,6 +59,31 @@ def test_mode_flags_round_trip_and_clear(tmp_path):
     assert mode_enabled(tmp_path, "conv-1") == ""
 
 
+def test_whatsapp_sticky_ask_reaches_next_dinner_goal(tmp_path):
+    from src.interface.messaging import MessagingConfig
+    from src.interface.triggers import TriggerDispatcher
+    from src.interface.webui import WebUIServer
+    events = []
+    dispatcher = TriggerDispatcher()
+    dispatcher.register("whatsapp", events.append)
+    owner = "16045551234"
+    server = WebUIServer(tmp_path, dispatcher=dispatcher,
+                         messaging_config=MessagingConfig(whatsapp_owner=owner))
+
+    def send(text):
+        return server.handle_whatsapp_post({"entry": [{"changes": [{"value": {
+            "messages": [{"from": owner, "text": {"body": text}}]}}]}]})
+
+    status, reply = send("/ask")
+    assert status == 200 and "Ask mode on" in reply["replies"][0]
+    assert events == []
+    goal = "Give me ideas for Thanksgiving dinner, budget $200"
+    status, reply = send(goal)
+    assert status == 200 and len(events) == 1
+    assert events[0].goal == goal
+    assert events[0].payload["mode"] == "ask"
+
+
 def test_mode_flags_preserve_other_sections(tmp_path):
     flags_file = tmp_path / "think_flags.json"
     flags_file.write_text(json.dumps({"think": {"conv-1": True}}))
@@ -322,9 +347,10 @@ def test_ask_mode_stops_with_spec(tmp_path, monkeypatch):
         def __init__(self, *args, **kwargs):
             pass
 
-        def start_from_message(self, message, ask, approve=None):
+        def start_from_message(self, message, ask, approve=None, use_memory=True):
             assert ask("what should it cover?") == "everything"
             assert approve is None
+            assert use_memory is False
             return SimpleNamespace(
                 spec=Spec(goal=message, deliverables=["notes.md"]))
 

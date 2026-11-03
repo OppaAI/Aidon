@@ -53,6 +53,34 @@ def test_plan_prompt_carries_discover_first(tmp_path):
     assert "depends on a package you have not confirmed" in captured["system"]
 
 
+def test_unusable_plan_reply_gets_one_json_only_retry(tmp_path):
+    replies = iter([
+        "I will review the codebase and prepare the slide.",
+        json.dumps({
+            "summary": "Create a grounded HTML slide.",
+            "steps": [{"tool": "write", "args": {
+                "name": "point1.html", "text": "<h1>Point 1</h1>"},
+                "deliverable": "point1.html"}],
+            "deliverables": ["point1.html"],
+            "criteria": ["point1.html exists"],
+        }),
+    ])
+    calls = []
+
+    def fake_chat(phase, messages):
+        calls.append((phase, messages))
+        return next(replies)
+
+    runner = _runner(tmp_path, False)
+    runner._chat = fake_chat
+    plan = runner._plan("Read the codebase and create an HTML slide")
+
+    assert len(calls) == 2
+    assert "JSON object only" in calls[1][1][-1].content
+    assert plan.steps[0]["tool"] == "write"
+    assert plan.deliverables == ["point1.html"]
+
+
 def test_image_edit_prompt_uses_available_builtin_instead_of_plugin_lab(tmp_path):
     captured = {}
 

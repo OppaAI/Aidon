@@ -83,12 +83,18 @@ def builtin_image_edit_covers(goal: str, tool_names) -> bool:
 def is_desktop_interaction_goal(goal: str) -> bool:
     """Recognize requests that require operating a visible desktop UI."""
     low = str(goal or "").lower()
-    return any(term in low for term in (
+    if any(term in low for term in (
         "notepad", "text editor", "mouse", "keyboard", "on my screen",
         "on the screen", "open an app", "open the app", "type into",
         "type in the", "click on", "click the", "computer use",
-        "control my computer",
-    )) or bool(re.search(r"\b(?:on|in) (?:my|the) (?:ubuntu |linux )?desktop\b", low))
+        "control my computer", "gedit", "obs studio", "open obs",
+    )) or re.search(r"\b(?:on|in) (?:my|the) (?:ubuntu |linux )?desktop\b", low):
+        return True
+    # Mentioning recording alone often means Aidon's audio recorder. Require
+    # desktop context before treating recording as a GUI request.
+    if re.search(r"\b(?:start|stop) recording\b", low):
+        return bool(re.search(r"\b(?:obs|screen|desktop|window|demo)\b", low))
+    return bool(re.search(r"\brecord (?:the )?(?:screen|desktop|window)\b", low))
 
 
 def builtin_computer_use_covers(goal: str, tool_names) -> bool:
@@ -96,6 +102,20 @@ def builtin_computer_use_covers(goal: str, tool_names) -> bool:
     names = set(tool_names or ())
     return (bool(names.intersection({"computer_use", "computer_use_task"}))
             and is_desktop_interaction_goal(goal))
+
+
+def is_desktop_action_request(goal: str) -> bool:
+    """Identify requested GUI actions independently of driver availability."""
+    text = str(goal or "").strip().lower()
+    if not is_desktop_interaction_goal(text):
+        return False
+    if re.match(
+            r"^(?:(?:can|could|would) you (?:show|explain|describe|tell me)\b|"
+            r"how (?:do|does|can|to)|what (?:is|are)|explain|describe)\b",
+            text):
+        return False
+    return bool(re.search(
+        r"\b(?:open|launch|type|click|press|scroll|control|move|drag|start|stop)\b", text))
 
 STATUS_CRITERIA = {
     "covered": "Every capability the goal needs is in the inventory.",

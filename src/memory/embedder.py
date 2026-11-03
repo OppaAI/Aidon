@@ -71,6 +71,16 @@ def sparse_weights(text: str) -> dict[str, float]:
     return weights
 
 
+def keyword_sparse_vector(text: str) -> tuple[list[int], list[float]]:
+    """Hash keyword weights, combining collisions into unique indices."""
+    buckets: dict[int, float] = {}
+    for token, weight in sparse_weights(text).items():
+        index = int(hashlib.sha256(token.encode()).hexdigest()[:8], 16) % 100000
+        buckets[index] = buckets.get(index, 0.0) + weight
+    indices = sorted(buckets)
+    return indices, [buckets[index] for index in indices]
+
+
 def _normalize(vec: list[float]) -> list[float]:
     norm = math.sqrt(sum(v * v for v in vec)) or 1.0
     return [v / norm for v in vec]
@@ -109,11 +119,7 @@ class Embedder:
         A real SPLADE embedder overrides this with learned
         sparse weights, see SpladeEmbedder and HybridEmbedder.
         """
-        weights = sparse_weights(text)
-        items = sorted(
-            (int(hashlib.sha256(t.encode()).hexdigest()[:8], 16) % 100000,
-             w) for t, w in weights.items())
-        return ([i for i, _ in items], [w for _, w in items])
+        return keyword_sparse_vector(text)
 
 
 class HashEmbedder(Embedder):

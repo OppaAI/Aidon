@@ -6,6 +6,13 @@
 
   const thread = document.getElementById("thread");
   const input = document.getElementById("goal-input");
+  function focusGoalInput() {
+    requestAnimationFrame(() => {
+      if (!input.disabled && !input.hidden) {
+        input.focus({ preventScroll: true });
+      }
+    });
+  }
   const defaultGoalPlaceholder = "Start with a goal…\n\nPlan something, research a question, or ask Aidon to build a result for you. Your run stages and results will appear here.";
   const guidanceInput = document.getElementById("guidance-input");
   const sendBtn = document.getElementById("send");
@@ -87,6 +94,8 @@
   let lastRoute = null;
   let runTraceHistory = [];
   let cardShownFor = null;
+  let decidingCardId = null;
+  const decidedCardIds = new Set();
   let proceedShownFor = null;
   const streamMessages = {};
 
@@ -1166,12 +1175,12 @@
   const STAGE_LABELS = {
     interpret: "Understanding your request…",
     research: "Researching the web…",
-    recall: "Recalling past experience…",
+    recall: "Checking for a previous DAG…",
     plan: "Building a plan…",
     sandbox: "Testing in sandbox…",
     approval: "Waiting for your approval…",
     live: "Executing…",
-    learn: "Learning from this run…",
+    learn: "Saving this workflow as a DAG…",
     done: "Done",
     respond: "Responding…",
   };
@@ -1190,11 +1199,15 @@
     const list = document.getElementById("thinking-list");
     items.forEach((e) => {
       const phase = e.phase || e.kind || "thinking";
+      if (phase === "dag") {
+        const activity = document.getElementById("dag-activity");
+        if (activity) activity.textContent = e.detail || e.title || e.status || "DAG activity";
+      }
       if (phase !== lastTracePhase) {
         lastTracePhase = phase;
         const h = document.createElement("div");
         h.className = "think-phase";
-        h.textContent = phase;
+        h.textContent = phase === "dag" ? "DAG" : phase;
         list.appendChild(h);
       }
       const item = document.createElement("div");
@@ -1275,8 +1288,10 @@
   }
 
   function showApprovalCard(run, pending) {
-    if (cardShownFor === run.run_id + pending.title) return;
-    cardShownFor = run.run_id + pending.title;
+    if (pending.id === decidingCardId || decidedCardIds.has(pending.id)) return;
+    const cardKey = run.run_id + pending.id;
+    if (cardShownFor === cardKey) return;
+    const replay = Array.isArray(run.replay) ? run.replay : [];
     approvalSlot.innerHTML = ""; // only one active card per run — replace, don't stack
     const card = document.createElement("div");
     card.className = "card approval-card";
@@ -1300,8 +1315,8 @@
         '<textarea id="edit-text" placeholder="Edited text — press Submit to send…"></textarea>' +
         '<div id="edit-submit-row" class="row" style="display:none; justify-content:flex-end">' +
         '<button data-d="submit-edited" style="flex:none; padding:9px 18px">Submit</button></div>') +
-      '<details><summary>Run replay — what Aidon did (' + run.replay.length +
-      ' tool calls)</summary>' + renderReplay(run.replay) + "</details>" +
+      '<details><summary>Run replay — what Aidon did (' + replay.length +
+      ' tool calls)</summary>' + renderReplay(replay) + "</details>" +
       '<div class="row">' +
       (isDomain
         ? '<button class="approve" data-d="approved">Approve Temporary</button>' +
@@ -1312,6 +1327,8 @@
           '<button class="reject" data-d="rejected">Reject</button>') +
       "</div>";
     approvalSlot.appendChild(card);
+    cardShownFor = cardKey;
+    card.dataset.cardId = pending.id;
     const speakBtn = playButton(pending.title + ". " + pending.body, null);
     card.querySelector(".row").appendChild(speakBtn);
     // A waiting decision is worth hearing about - always, not only
@@ -1627,32 +1644,57 @@
   };
 
   async function decide(runId, decision, editedText) {
+    const currentCard = approvalSlot.querySelector(".approval-card");
+    const cardId = currentCard ? currentCard.dataset.cardId : "";
+    if (decidingCardId !== null) return;
+    decidingCardId = cardId;
+    // The server releases the desktop action as soon as it accepts this
+    // request. Remove AND paint away the modal before sending, so the
+    // approved click cannot land on this overlay or screenshot it again.
+    cardShownFor = null;
+    approvalSlot.innerHTML = "";
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    function restoreCard() {
+      if (currentCard && currentRun === runId
+          && !approvalSlot.querySelector(".approval-card")) {
+        approvalSlot.appendChild(currentCard);
+        cardShownFor = runId + cardId;
+      }
+    }
     try {
       const r = await fetch("/api/runs/" + runId + "/approval", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision, edited_text: editedText || "" }),
+        body: JSON.stringify({ decision, edited_text: editedText || "", card_id: cardId }),
       });
       if (!r.ok) {
         const data = await r.json().catch(() => ({}));
         showMiddleStatus("Approval failed: " + (data.detail || data.error || r.status), "error");
         if (r.status === 409) {
+          decidedCardIds.add(cardId);
           // Server has no pending approval: this card is dead (the gate
           // failed closed on timeout, or it was already decided). Remove
           // it instead of leaving tappable buttons that all fail again.
-          cardShownFor = null;
-          approvalSlot.innerHTML = "";
-        }
+          if (currentRun === runId) {
+            cardShownFor = null;
+            approvalSlot.innerHTML = "";
+          }
+        } else restoreCard();
+        decidingCardId = null;
         return;
       }
     } catch (e) {
+      restoreCard();
+      decidingCardId = null;
       showMiddleStatus("Approval failed: " + e.message, "error");
       return;
     }
+    decidedCardIds.add(cardId);
+    decidingCardId = null;
     // Decision accepted — drop the card and reset the shown-card tracking so
     // a repeated gate of the same kind renders fresh instead of hanging.
-    cardShownFor = null;
-    approvalSlot.innerHTML = "";
+    // A following action may already have created a different card while
+    // this response was in flight. Never clear that new decision.
   }
 
   async function poll() {
@@ -1826,6 +1868,7 @@
         // while answering: an answer is a chat message, not a new
         // goal with guidance.
         const waiting = !!run.waiting_question;
+        const composerWasDisabled = input.disabled;
         waitingForLab = !!run.waiting_lab;
         sendBtn.disabled = !waiting;
         input.disabled = !waiting;
@@ -1833,8 +1876,10 @@
         input.placeholder = waiting
           ? "Answer Aidon's question…"
           : defaultGoalPlaceholder;
+        if (waiting && composerWasDisabled) focusGoalInput();
       }
       if (run.status !== "running") {
+        const composerWasDisabled = input.disabled;
         waitingForLab = false;
         // Lazy capabilities (especially memory) can initialize during a
         // run. Refresh their dashboard labels now instead of leaving the
@@ -1854,6 +1899,7 @@
         input.disabled = false;
         guidanceInput.disabled = false;
         input.placeholder = defaultGoalPlaceholder;
+        if (composerWasDisabled) focusGoalInput();
         steerRow.hidden = true;
         // A stopped run's Proceed card is not stale: it is the way back
         // in, so the terminal cleanup leaves it standing. Every other
@@ -2287,11 +2333,13 @@
     // keep previous messages in the thread — just scroll to the latest
     document.getElementById("thinking-list").innerHTML = "";
     document.getElementById("thinking-count").textContent = "";
+    document.getElementById("dag-activity").textContent = "Waiting for a goal";
     cardShownFor = null;
     proceedShownFor = null;
     approvalSlot.innerHTML = "";
     currentRun = data.run_id;
     setStatus("busy", "working");
+    document.getElementById("dag-activity").textContent = "Checking for a previous DAG…";
     renderStages("interpret");
     steerRow.hidden = false;
     // never orphan a poll interval if a previous run's timer is still alive
@@ -2514,6 +2562,7 @@
     thread.innerHTML = "";
     document.getElementById("thinking-list").innerHTML = "";
     document.getElementById("thinking-count").textContent = "";
+    document.getElementById("dag-activity").textContent = "Waiting for a goal";
     document.querySelectorAll(".hist-item").forEach((x) => x.classList.remove("active"));
     sendBtn.disabled = false;
     input.disabled = false;
@@ -3040,6 +3089,7 @@
     localStorage.setItem("aidon-conversation", currentConversationId);
     if (window.aidonStopPolling) window.aidonStopPolling();
     markActiveConversation();
+    document.getElementById("dag-activity").textContent = "Waiting for a goal";
     thread.innerHTML = "";
     const atts = conv.attachments || [];
     const byImport = {};

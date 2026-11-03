@@ -25,7 +25,8 @@
 
 > # What this project wants to showcase for the Meta Global AI Developer Hackathon
 >
-> Built for the Meta Global AI Developer Hackathon (October 26 – November 4, 2026), Aidon submits three capabilities, all powered by Meta's models through the Meta Model API:
+> Built for the Meta Global AI Developer Hackathon (The entire codebase was made between October 26 – November 4, 2026).  
+This project showcases four capabilities. Meta models power its main agentic reasoning and optional image and speech to text features, alongside the supporting models and services described below:
 >
 >- **Human Natural Language and Interview as source input** —  Understands goals in plain natural language and interviews the user in conversation to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it. Ask mode is the default: the agent asks chat questions first and works to a verified, frozen spec before planning anything, and the same conversation works in chat, on WhatsApp or Slack, or on the command line.
 >- **Grows its own capabilities with tools/skills creation** — drafting, sandbox-testing, and adopting tools and skills that plug into its agentic workflows, including niche ones tailored to a user's own task. A tool plugin is a directory with a manifest and module files: it is tested in the sandbox first, scanned for unsafe patterns, and adopted only on human approval, after which its tools are usable immediately in the current run and every later goal. Skills follow a candidate → validated → trusted lifecycle, and only trusted skills enter plan prompts.
@@ -34,13 +35,15 @@
 
 > **Meta models used:**
 >
->- Muse Spark 1.3 — the reasoning engine: goal understanding, interviewing, plan and DAG construction, recalling and adapting past workflows, repairing failed steps, and verifying results. Lightweight phases (interpret, learn, respond, webchat) can route to a smaller fast model through the same API to keep token costs down.
+>- Muse Spark 1.3 — the reasoning engine: goal understanding, interviewing, plan and DAG construction, recalling and adapting past workflows, repairing failed steps, and verifying results. Lightweight phases can use a fast model tier to keep costs down.
 >- Muse Image 1.0 — generates and edits images and diagrams for workflows that need them, through the same API key and endpoint as the chat model, with generation approval-gated and credit-aware.
 >- Muse Voice Transcribe — speech-to-text that lets users speak to the agent in natural language instead of typing, via a transcribe tool backed by Meta's transcription API.
 >
 >*Note: Aidon is still under active development — it was built during this 10-day hackathon, and not all planned agentic capabilities are implemented yet.*
 
 > ## Demo video
+>
+> 🎞️ [Open the standalone Aidon intro deck](demo/index.html)
 > 
 >▶️ [Watch the 3-minute demo on YouTube — coming soon](https://www.youtube.com/watch?v=YOUR_VIDEO_ID)
 >
@@ -71,8 +74,7 @@ the capabilities it needs, and validates its work.
 All code in this repo was written from scratch during the Meta Global AI Developer Hackathon (October 26–November 4, 2026). 
 The implementation is still under development, with components continue to be tested as more features are added and deployed.
 
-The demo runs on Meta models through the Meta Model API. That
-is a real part of what Aidon runs, not just a build-time choice.
+The demo uses Meta's Model API at runtime for Muse Spark reasoning and optional Muse Image and transcription, alongside the supporting services listed below.
 
 ## 🚀 Quickstart
 
@@ -95,20 +97,31 @@ is a real part of what Aidon runs, not just a build-time choice.
 
 ## 🧠 Models
 
-- **Agent, submission and demo:** Muse Spark 1.3, standard.
+- **Main agentic model, submission and demo:** Muse Spark 1.3, standard.
 - **Agent, tests only:** Muse Spark 1.3 Contributor, same capabilities, much cheaper. Switch by changing `AIDON_MODEL` only. Contributor inputs and outputs are used to train models, so tests must use non-sensitive test data only.
 - **Speech, when voice is on:** Muse Voice Transcribe, speech-to-text only.
 - **Images, optional, only if a workflow requires one:** Muse Image 1.0, as a tool, not as the agent.
 - **Segmentation, for video editing:** SAM, via the Meta Model API Responses API.
 
-Aidon is self-hosted by design: clone it to your own computer or server, run it there, and use the WebUI or call the API. There is no central Aidon cloud, and your data is not sent to one. Your memory, workdirs, and keys stay on your machine, under your Aidon home, outside this repository.
+## 🧰 Supporting stack (non-Meta)
+
+Meta is one part of Aidon's model and infrastructure stack. The other components handle local conversation, decision routing, memory, voice output, and execution:
+
+- **Front-end chat:** Ollama with Llama 3.2 handles lightweight conversational turns locally in the configured setup. This keeps the more expensive Muse Spark calls focused on agentic planning and tool work. Aidon supports Ollama's native chat API; this model choice is configuration, not a fixed default.
+- **Decision model:** Clef 9B in the deployed setup handles compact routing and ranking decisions, including intent routing and workflow selection. The model ID is configurable. Modal serves the Clef inference endpoint.
+- **Embedding model and vector store (RAG):** Google EmbeddingGemma 2 (`google/embeddinggemma-2`), loaded locally through Sentence Transformers and PyTorch, turns text and images into dense embedding vectors. Qdrant is the vector store that indexes and retrieves those vectors. SQLite provides durable fallback memory and stores conversations, interviews, and run/skill records. Optional FastEmbed/SPLADE adds learned sparse retrieval; keyword vectors are used when it is not enabled.
+- **Speech output:** Fish Audio provides text-to-speech. Muse Voice Transcribe, listed above, handles speech-to-text.
+- **Sandbox and inference hosting:** Modal runs the configured remote sandbox and Clef inference service. For local execution, Aidon also supports Bubblewrap and Docker; an SSH connection can target a VM the owner already operates.
+- **Other optional integrations and libraries:** Tavily or SearXNG for web search; YouTube Data API, Gmail API, and Slack API for their respective features; Playwright MCP for browser automation; Three.js and three-vrm for the optional 3D avatar viewer. FFmpeg and Pillow support video and image processing. These integrations require their own local configuration or credentials when used.
+
+Aidon has no central Aidon-hosted service: run the app and WebUI on your own computer or server. Local model, memory, and sandbox options keep their data on that machine. If you select Modal, the configured sandbox workdir is sent to Modal for remote execution; integrations such as Fish Audio, Gmail, or Slack also send the data required for that feature to their providers. Keys remain in your local Aidon configuration, outside this repository.
 
 ## 🗂️ Layout
 
 Code lives in `src/`, grouped, not flat:
 
 - `src/system/` — config, model client, and `main.py`, the entry point
-- `src/memory/` — Qdrant memory, embedder, entity graph, KB, experience, redaction
+- `src/memory/` — Qdrant vector memory, EmbeddingGemma embeddings, SQLite fallback and application records, entity graph, KB, experience, redaction
 - `src/agentic/` — goal loop, DAG, adapt, swarm, interview, validation, budgets, trace, research
 - `src/interface/` — WebUI, messaging, v1 API, MCP, triggers, scheduler, approval, run control
 - `src/capabilities/` — sandbox and execution, tools and plugins, search, voice, GitHub, email, image, charts, Unity, Playwright MCP, SAM, video

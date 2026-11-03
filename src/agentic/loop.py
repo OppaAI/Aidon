@@ -410,7 +410,14 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
 
     def _chat_goal_with_memory(self, goal: str) -> str:
         """Add binding guidance and relevant memory to plain chat."""
-        parts = [goal]
+        parts = [goal,
+                 "Execution status for this reply: conversation only; no tools "
+                 "have been executed in this turn. Do not claim you opened an app, "
+                 "typed text, clicked, recorded, verified a screen, or validated a "
+                 "skill. Earlier assistant prose and a user's 'yes' are not tool "
+                 "evidence or an approval-card decision. If an earlier reply "
+                 "claimed execution without recorded tool results, correct it "
+                 "instead of repeating or role-playing that claim."]
         if str(getattr(self, "guidance", "") or "").strip():
             try:
                 from .prompts import guidance_block
@@ -531,12 +538,28 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
         # Computed early: the pre-interview intent skip below
         # needs it, and the write-intent guard below reuses it.
         _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
-        # Intent routing applies in every mode, before any
-        # mode interview: a chat-routed message gets a plain
-        # reply and a webchat-routed message a research-backed
-        # reply, with no interview and no spec. Research mode
-        # and force_web keep their existing paths below, so
-        # they are excluded here.
+        # Ask mode explicitly requests an interview. Advisory chat routing
+        # must not swallow that choice (including a sticky /ask on WhatsApp).
+        # Desktop intent must not depend on whether registration succeeded.
+        # Otherwise a missing driver sends an action request into plain chat,
+        # where the model can narrate imaginary tool execution.
+        from .capability_triage import is_desktop_action_request
+        desktop_goal = is_desktop_action_request(goal)
+        if (getattr(self, "mode", None) == "ask" or desktop_goal) and spec is None:
+            self.last_route = ("agentic", 1.0)
+            if callable(getattr(self, "route_callback", None)):
+                self.route_callback(self.last_route)
+        if (desktop_goal and getattr(self, "mode", None) != "ask"
+                and (self.kernel_mode or "computer_use_task" not in self.extra_tools)):
+            reason = ("Desktop control is disabled by kernel mode. Set AIDON_KERNEL=0."
+                      if self.kernel_mode else
+                      "The guided desktop tool is unavailable in this running process. "
+                      "Check DISPLAY, xdotool, and AIDON_COMPUTER_DRIVER=x11, then "
+                      "launch Aidon from your Ubuntu desktop session.")
+            return self._finalize(RunReport(
+                "failed", goal, Plan(), False, False,
+                error=reason + " No desktop action was performed.",
+                backend=self._backend_name()))
         _route = getattr(self, "last_route", None)
         if (not getattr(self, "resume_interview", False) and getattr(self, "use_semantic_router_skip", False) and _route
                 and _route[0] == "chat" and spec is None and not _write_intent
@@ -574,7 +597,8 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                     self.client, self.home, memory=self.memory, gate=None,
                     conversation_id=self.conversation_id)
                 result = interviewer.start_from_message(
-                    goal, ask=self.question_ask, approve=None)
+                    goal, ask=self.question_ask, approve=None,
+                    use_memory=False)
             except Exception as exc:
                 return self._finalize(RunReport(
                     "failed", goal, Plan(steps=[], deliverables=[], criteria=[]),
@@ -806,6 +830,18 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                 # setting as written.
                 experiences = recall_experiences(
                     self.memory, goal, limit=max(recall_limit, 5))
+                try:
+                    self._trace("recall", "done",
+                                "Saved workflow DAG lookup completed")
+                except Exception:
+                    pass
+                _dag_candidates = [e for e in experiences
+                                   if getattr(e, "dag_nodes", None)]
+                self._trace(
+                    "dag", "matched" if _dag_candidates else "no-match",
+                    (f"Found {len(_dag_candidates)} saved workflow DAG(s) to compare"
+                     if _dag_candidates else
+                     "No matching saved DAG found; building a fresh workflow"))
                 # Clef DAG matching: re-rank the recalled workflows
                 # by fit before adaptation picks one. Jaccard recall
                 # stays the pre-filter; Clef only reorders within
@@ -846,6 +882,8 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                         if plan.deliverables:
                             self._adapted = True
                             self._adapted_from = " + ".join(source_goals)
+                            self._trace("dag", "reused",
+                                        "Reusing saved DAGs: " + self._adapted_from)
                             return self._finalize(self._execute_plan(goal, plan))
                 else:
                     # Failed-example learning: a previous run
@@ -891,6 +929,9 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                             self._adapted = True
                             self._adapted_from = experiences[0].goal
                             self._dag_summary = summary
+                            self._trace("dag", "reused",
+                                        "Reusing and adapting saved DAG: " +
+                                        self._adapted_from)
                             return self._finalize(self._execute_plan(goal, plan))
                     from .adapt import adapt_experience
                     adapted = adapt_experience(experiences[0], goal, client=self.client)
@@ -912,6 +953,9 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                         if plan.deliverables:
                             self._adapted = True
                             self._adapted_from = experiences[0].goal
+                            self._trace("dag", "reused",
+                                        "Reusing a saved workflow from: " +
+                                        self._adapted_from)
                             return self._finalize(self._execute_plan(goal, plan))
             except Exception:
                 pass

@@ -99,6 +99,7 @@ def test_run_snapshot_returns_only_unseen_events(tmp_path):
         "trace": [{"phase": "interpret"}, {"phase": "respond"}],
     }
     snapshot = server.run_snapshot("run-1", since=1, trace_since=1)
+    assert snapshot["replay"] == []
     assert snapshot["event_total"] == 2
     assert [event["text"] for event in snapshot["events"]] == ["two"]
     assert snapshot["trace_total"] == 2
@@ -259,6 +260,19 @@ def test_bare_approve_resolves_the_only_pending_card(tmp_path):
     assert server._resolve_decision("Approve") == "Approved card-only"
     assert event.is_set()
     assert server.webui_gate.cards[card_id]["verdict"] == "approved"
+
+
+def test_webui_bare_approve_without_pending_card_is_not_sent_to_chat(tmp_path):
+    server = WebUIServer(tmp_path)
+    dispatched = []
+    server.dispatcher.register("webui", lambda event: dispatched.append(event.goal))
+
+    result = server.start_goal({"goal": "approve"})
+
+    assert result["run_id"]
+    assert dispatched == []
+    run = server._web_runs[result["run_id"]]
+    assert run["events"][-1]["text"] == "No approval is currently pending."
 
 
 def test_bare_approve_does_not_guess_when_multiple_cards_are_pending(tmp_path):

@@ -265,9 +265,11 @@ autonomy or pre-approval is enabled. Once approved, the live
 registry updates immediately. Plans validated after adoption can
 use the tool; re-plan if the current plan needs it.
 
-When a goal includes a structured JSON tool specification, Aidon
-can call `draft_tool_plugin` to ask the configured model to turn it
-into a `tool.py` implementation and a valid `plugin.json` manifest.
+When you ask Aidon to create a reusable tool, you can describe what
+it should do in plain language or provide a structured JSON tool
+specification. Aidon calls `draft_tool_plugin` to ask the configured
+model to turn the request into a `tool.py` implementation, a valid
+`plugin.json` manifest, and an offline acceptance test.
 The draft is written inside the current run's workdir; generation
 does not import or execute the resulting source. Aidon must inspect
 the generated code, sandbox-test it, review its requested
@@ -410,8 +412,10 @@ session, so use it only when you intend Aidon to control that desktop. Wayland
 desktop control is not supported by this driver.
 
 In chat, ask, for example: “Open the text editor on my desktop, type ‘Hello
-from Aidon’, and read that sentence aloud.” Approve the plan and the individual
-desktop actions. The guided tool sends screenshots to the configured vision
+from Aidon’, and read that sentence aloud.” Approve the plan and the desktop
+task. A guided task uses one approval for its click, typing, key, and app-launch
+actions; a direct computer-use batch uses one approval when it includes an
+irreversible action. The guided tool sends screenshots to the configured vision
 model, so close any windows you do not want it to see. Aidon requests speech
 in the WebUI after the desktop step; it uses the configured voice service or
 the browser's speech synthesis. Browser audio playback may require a prior
@@ -640,3 +644,56 @@ collection.
   manager, stronger sandbox, dedicated live toolset,
   and SAM 3.1 segmentation, see [ROADMAP.md](ROADMAP.md).
 
+
+### Visible Ubuntu desktop demos
+
+Run Aidon from the logged-in Ubuntu **Xorg** desktop session. Install gedit,
+OBS Studio, `xdotool`, and the Pillow vision dependency. Set
+`AIDON_COMPUTER_DRIVER=x11` and `AIDON_KERNEL=0` in the Aidon configuration,
+and restart Aidon with that session's `DISPLAY` and `XAUTHORITY` available.
+Aidon must run on the desktop host (or have an explicitly configured X11
+connection); a Modal task sandbox cannot see or control your Ubuntu desktop.
+Wayland desktop control is not supported by the X11 driver.
+
+Use WebUI, or the configured owner WhatsApp/Slack chat, to request:
+
+- “Open gedit using the Ubuntu launcher and visibly type Hello from Aidon.”
+- “Open OBS Studio using the launcher and click Start Recording.”
+- “Bring OBS Studio to the foreground and click Stop Recording.”
+
+These requests use the current screenshot to choose each mouse/keyboard action.
+The next screenshot confirms the result; OBS recording is never blindly toggled.
+A guided desktop task uses one approval card for the whole task. A direct
+computer-use batch uses one approval card for the batch when it includes an
+irreversible action. Both cards can be answered through the originating chat.
+In Ask/Plan mode, proceed through the spec/plan stops first.
+Configure the OBS scene, display capture, output folder, and audio before the demo.
+Screen capture and typing occur on the host desktop, including when requested
+from WhatsApp or Slack. Round screenshots and the action trace are kept in the
+run's computer-screenshots directory. Screenshots may contain visible private data.
+
+### Asking Aidon to create a grocery price tool
+
+Tool Crafting in `/labs` accepts natural language requests and generates Python
+source, offline acceptance tests, and a plugin manifest. No grocery price tool
+ships with this example. Ask Aidon to research representative product pages
+before generating a parser; retailer pages and store availability can change.
+
+Example request:
+
+> Create a Python tool to fetch grocery prices from public Safeway, Real
+> Canadian Superstore, and Save-On-Foods product pages for my selected Vancouver
+> stores. Ask me for store locations and sample product URLs first. Research
+> the actual page data before implementing each retailer. Return product name,
+> package size, CAD price, price type, store, source URL, and retrieval time.
+> Report unavailable prices explicitly. Test with offline page fixtures, then
+> show me the Python source and test results for approval.
+
+Generated context plugins can use host-scoped HTTP capabilities through
+`ctx.http_get` / `ctx.http_post`; sandbox plugins can declare `network` for
+stdlib HTTP. Existing scanning, offline acceptance tests, adoption approval,
+and runtime capability controls apply. Plain HTTP does not render JavaScript;
+blocked pages or sources requiring a browser must be reported rather than
+presented as working integrations. Successful offline tests prove parsing of
+fixtures; a separately authorized live lookup is needed to demonstrate current
+retailer access and the selected store's actual price.

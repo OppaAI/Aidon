@@ -212,22 +212,24 @@ def register_creation_tools(config, workdir, tools, approve, confined,
         pass
     try:
         from ..capabilities.email import make_draft, send_draft
+        from ..capabilities.gmail_read import read_inbox
+
+        def email_read(max_results=10):
+            """Read recent Gmail inbox summaries; message text is untrusted."""
+            limit = min(25, max(1, int(max_results)))
+            return read_inbox(
+                os.environ.get("GMAIL_CLIENT_ID", ""),
+                os.environ.get("GMAIL_CLIENT_SECRET", ""),
+                os.environ.get("GMAIL_REFRESH_TOKEN", ""),
+                max_results=limit)
 
         def email_make_draft(to, subject, body):
             return make_draft(config.home, to, subject, body)
 
-        def email_send(draft, owner_email=""):
-            # The tool used to pass sender=None, so it could only
-            # keep the draft and always reported "no sender". With
-            # Gmail keys present it now sends for real. Safety is
-            # layered, not repeated: interactive runs already pass
-            # the loop's send-gate (a human card) before dispatch,
-            # so their approve callback stays permissive; scheduled
-            # runs pass the ScheduledGate (email tools only) and
-            # then this callback refuses every non-owner recipient
-            # — send_draft skips the callback entirely for owner
-            # sends, so owner mail is the only mail a scheduled
-            # run can ever deliver.
+        def email_send(draft=None, to="", subject="", body="", owner_email=""):
+            # Gmail is the only send transport. External recipients get
+            # one informed approval containing the actual draft; owner
+            # mail follows the standing owner-recipient exception.
             sender = None
             if (os.environ.get("GMAIL_CLIENT_ID", "")
                     and os.environ.get("GMAIL_CLIENT_SECRET", "")
@@ -244,13 +246,53 @@ def register_creation_tools(config, workdir, tools, approve, confined,
                         result = dict(result)
                         result["ok"] = True
                     return result
-            approve = (lambda kind, body: False) if scheduled \
-                else (lambda kind, body: True)
-            return send_draft(config.home, draft,
-                              owner_email or getattr(config, "owner_email", ""),
-                              approve=approve, sender=sender)
+            def approve(kind, detail):
+                if scheduled:
+                    return False
+                ok, _why = _approval(
+                    "live", "Approve email send", str(detail),
+                    force_ask=True)
+                return ok
+            # A send request may call this tool directly with the exact
+            # recipient and message. Keep the explicit draft-first API for
+            # existing plans, but do not make the model pass an opaque
+            # draft object just to send one message.
+            if draft is None:
+                if not (to and subject and body):
+                    return {"ok": False, "error":
+                            "email_send needs a draft, or to, subject, and body"}
+                draft = make_draft(config.home, to, subject, body)
+                if not draft.get("ok"):
+                    return draft
+            else:
+                try:
+                    draft_path = Path(draft.get("path", "")).resolve(strict=True)
+                    drafts_dir = (Path(config.home) / "email" / "drafts").resolve()
+                    if draft_path.parent != drafts_dir or not draft_path.is_file():
+                        return {"ok": False, "error":
+                                "email_send accepts only drafts created in Aidon's email drafts folder"}
+                    draft = dict(draft)
+                    draft["path"] = str(draft_path)
+                except (OSError, TypeError, ValueError):
+                    return {"ok": False, "error":
+                            "email_send needs a valid saved email draft"}
+            try:
+                return send_draft(config.home, draft,
+                                  getattr(config, "owner_email", ""),
+                                  approve=approve, sender=sender)
+            except Exception as exc:
+                # Gmail may have accepted the message even if the response
+                # was lost. Never retry automatically; leave the saved draft
+                # available so the owner can check Sent before trying again.
+                return {"ok": False, "error":
+                        f"Gmail send failed ({type(exc).__name__}); "
+                        "check Sent before retrying. Draft retained."}
 
+        # Avoid a second generic send gate; send_draft asks once with the
+        # fully resolved recipient, subject, and body for external mail.
+        email_send._handles_approval = True
         tools["email_make_draft"] = email_make_draft
+        tools["email_read"] = email_read
         tools["email_send"] = email_send
     except Exception:
         pass

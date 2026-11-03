@@ -41,6 +41,13 @@ def test_pending_cards_lists_open_card():
         thread.join(timeout=5)
 
 
+def test_approval_card_renderer_handles_runs_without_replay():
+    app = (Path(__file__).resolve().parents[2] /
+           "src/interface/static/app.js").read_text(encoding="utf-8")
+    assert "const replay = Array.isArray(run.replay) ? run.replay : [];" in app
+    assert "replay.length +" in app
+
+
 def test_approved_card_leaves_pending_list():
     gate = WebUIGate(timeout_seconds=60)
     thread = threading.Thread(target=gate._decide, args=("live", "T", "B"))
@@ -188,6 +195,39 @@ def test_approvals_route_round_trip(live_server):
         if thread.is_alive():
             gate.approve(_wait_for_card(gate), "rejected")
             thread.join(timeout=5)
+
+
+def test_run_approval_cannot_decide_another_runs_card(live_server):
+    base, server = live_server
+    gate = server.webui_gate
+    threads = []
+    try:
+        for run_id in ("other", "desktop"):
+            thread = threading.Thread(target=gate._decide,
+                                      args=("live_execute", "Approve desktop action", "key"),
+                                      kwargs={"context": {"run_id": run_id}})
+            thread.start()
+            threads.append(thread)
+            deadline = time.monotonic() + 3
+            while not gate.pending_cards(run_id=run_id) and time.monotonic() < deadline:
+                time.sleep(0.01)
+        other = gate.pending_cards(run_id="other")[0]
+        desktop = gate.pending_cards(run_id="desktop")[0]
+        server._web_runs["desktop"] = {"run_id": "desktop", "events": [], "trace": []}
+        assert server.run_snapshot("desktop")["pending"]["id"] == desktop["id"]
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post(base, "/api/runs/desktop/approval",
+                  {"decision": "approved", "card_id": other["id"]})
+        assert exc.value.code == 409
+        status, result = _post(base, "/api/runs/desktop/approval",
+                               {"decision": "approved", "card_id": desktop["id"]})
+        assert status == 200 and result["ok"]
+        assert gate.pending_cards(run_id="desktop") == []
+        assert gate.pending_cards(run_id="other") == [other]
+    finally:
+        gate.cancel_all()
+        for thread in threads:
+            thread.join(timeout=3)
 
 
 def test_chat_page_polls_and_decides_approvals():

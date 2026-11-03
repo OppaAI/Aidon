@@ -118,6 +118,16 @@ def _read_doc(name: str) -> str:
     return ""
 
 
+def _user_identity_section(user_text: str) -> str:
+    """Mark the profile as belonging to the human, never to Aidon."""
+    if not user_text:
+        return ""
+    return ("\n# The human user (not the agent)\n"
+            "This profile describes the person you are assisting. You are Aidon; "
+            "do not introduce yourself as, or claim to be, the user. Address the "
+            "user by the preference stated below.\n" + user_text)
+
+
 def build_system_prompt(persona: str = "", manual: str = "",
                         user_text: str = "") -> str:
     """The full prompt: identity line, persona, operating manual,
@@ -131,7 +141,7 @@ def build_system_prompt(persona: str = "", manual: str = "",
         parts.append("\n# Operating manual\n" + manual)
     user_text = user_text or _read_doc("USER.md")
     if user_text:
-        parts.append("\n# The user\n" + user_text)
+        parts.append(_user_identity_section(user_text))
     return "\n".join(parts)
 
 
@@ -158,7 +168,7 @@ def build_digest_prompt(manual: str = "", user_text: str = "") -> str:
                 parts.append("\n" + section.rstrip())
     user_text = user_text or _read_doc("USER.md")
     if user_text:
-        parts.append("\n# The user\n" + user_text)
+        parts.append(_user_identity_section(user_text))
     return "\n".join(parts)
 
 
@@ -171,7 +181,7 @@ def build_minimal_prompt(phase: str = "", user_text: str = "") -> str:
         parts.append(f"You are in the {phase} phase.")
     user_text = user_text or _read_doc("USER.md")
     if user_text:
-        parts.append("\n# The user\n" + user_text)
+        parts.append(_user_identity_section(user_text))
     return "\n".join(parts)
 
 
@@ -200,7 +210,7 @@ def build_identity_prompt(phase: str = "", user_text: str = "",
                 parts.append("\n" + section.rstrip())
     user_text = user_text or _read_doc("USER.md")
     if user_text:
-        parts.append("\n# The user\n" + user_text)
+        parts.append(_user_identity_section(user_text))
     return "\n".join(parts)
 
 

@@ -114,6 +114,18 @@ def test_email_draft_owner_and_corrected(tmp_path):
     assert draft3["subject"].startswith("Corrected:")
 
 
+def test_email_owner_match_preserves_local_part_case(tmp_path):
+    draft = email_mod.make_draft(
+        tmp_path, "Owner@example.invalid", "Hi", "Hello")
+    approvals = []
+    result = email_mod.send_draft(
+        tmp_path, draft, owner_email="owner@EXAMPLE.invalid",
+        approve=lambda *args: approvals.append(args) or True,
+        sender=lambda *args: {"ok": True})
+    assert result["ok"]
+    assert len(approvals) == 1
+
+
 def test_email_changed_attachment_is_corrected(tmp_path):
     home = tmp_path / "home"
     attachment = tmp_path / "report.pdf"

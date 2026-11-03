@@ -1,14 +1,15 @@
 """Intent routing in every mode, and no live approval without live actions.
 
 A chat- or webchat-routed message gets a direct reply even when the
-chooser is on Ask: the intent skip runs before the mode interview.
-An agentic-routed message still interviews in Ask mode. And a run
+chooser is on Plan. Ask mode always interviews, even when the router
+classifies a dinner idea request as chat or webchat. And a run
 whose plan has no live actions never asks "Approve live execution?",
 a gate whose force_ask would otherwise repeat the mode-stop approval
 for an empty set (and bypass even an Auto-Approve grant).
 """
 
 import json
+import pytest
 from types import SimpleNamespace
 
 from src.interface.approval import ApprovalGate, Decision
@@ -34,14 +35,14 @@ class _Route:
         return (self.route, self.confidence)
 
 
-def test_ask_mode_chat_route_skips_interview(tmp_path):
+def test_plan_mode_chat_route_skips_interview(tmp_path):
     def _never_ask(question):
         raise AssertionError("interview must not run for a chat-routed greeting")
 
     runner = _runner(tmp_path, FakeClient("hey, doing well"),
                      semantic_router=_Route("chat"),
                      use_semantic_router_skip=True,
-                     mode="ask", question_ask=_never_ask,
+                     mode="plan", question_ask=_never_ask,
                      conversation_id="greeting")
     report = runner.run("Hey Aidon, how are you doing today?")
     assert report.status == "chat"
@@ -93,14 +94,14 @@ def test_plain_chat_route_includes_recalled_cross_chat_fact(tmp_path, monkeypatc
     assert "Do not reinterpret a word from the question" in sent
 
 
-def test_ask_mode_webchat_route_skips_interview(tmp_path):
+def test_plan_mode_webchat_route_skips_interview(tmp_path):
     def _never_ask(question):
         raise AssertionError("interview must not run for a webchat-routed question")
 
     runner = _runner(tmp_path, FakeClient("sunny and clear"),
                      semantic_router=_Route("webchat"),
                      use_semantic_router_skip=True,
-                     mode="ask", question_ask=_never_ask,
+                     mode="plan", question_ask=_never_ask,
                      researcher=lambda goal: "Vancouver weather: sunny",
                      conversation_id="weather")
     report = runner.run("What is the weather in Vancouver today?")
@@ -109,7 +110,8 @@ def test_ask_mode_webchat_route_skips_interview(tmp_path):
     assert not report.mode_stop
 
 
-def test_ask_mode_agentic_route_still_interviews(tmp_path):
+@pytest.mark.parametrize("route", ["agentic", "chat", "webchat"])
+def test_ask_mode_always_interviews(tmp_path, route):
     class _InterviewClient(FakeClient):
         def __init__(self):
             self.calls = 0
@@ -127,11 +129,12 @@ def test_ask_mode_agentic_route_still_interviews(tmp_path):
                                         "budget_cents": 10000}})
 
     runner = _runner(tmp_path, _InterviewClient(),
-                     semantic_router=_Route("agentic", 1.0),
+                     semantic_router=_Route(route, 1.0),
                      use_semantic_router_skip=True,
                      mode="ask", question_ask=lambda q: "roast beef",
                      conversation_id="dinner")
-    report = runner.run("Plan a dinner")
+    report = runner.run("Give me ideas for Thanksgiving dinner with a $200 budget")
+    assert runner.last_route == ("agentic", 1.0)
     assert report.status == "stopped"
     assert report.mode_stop
     assert report.mode_stop["mode"] == "ask"
@@ -157,3 +160,55 @@ def test_live_approval_skipped_when_no_live_actions(tmp_path):
     report = runner.run("Write out")
     assert report.status == "done"
     assert ("live", "Approve live execution?") not in asked
+
+
+def test_desktop_control_cannot_be_swallowed_by_chat_route(tmp_path):
+    runner = _runner(tmp_path, FakeClient("I cannot open apps"),
+                     semantic_router=_Route("chat"),
+                     use_semantic_router_skip=True, mode="plan",
+                     extra_tools={"computer_use_task": lambda **kwargs: "unused"})
+    report = runner.run("Open gedit on my Ubuntu desktop")
+    assert report.status == "stopped"
+    assert runner.last_route == ("agentic", 1.0)
+    assert report.plan.normalized_steps()[0].tool == "computer_use_task"
+
+
+@pytest.mark.parametrize("kernel_mode,tools", [(False, {}), (True, {"computer_use_task": object()})])
+def test_unavailable_desktop_never_fabricates_execution_in_chat(tmp_path, kernel_mode, tools):
+    client = FakeClient('[Visible gedit window opens, shows the typed message]')
+    runner = _runner(tmp_path, client, semantic_router=_Route("chat"),
+                     use_semantic_router_skip=True, mode="plan",
+                     kernel_mode=kernel_mode, extra_tools=tools)
+    report = runner.run(
+        'On the Ubuntu desktop, visibly open gedit and type "Hello from Aidon." '
+        'Show me each desktop action and ask for approval before clicking or typing. '
+        'Afterward, check the screen and tell me whether the text appeared.')
+    assert report.status == "failed"
+    assert "No desktop action was performed" in report.error
+    assert not report.chat_reply
+    assert runner.last_route == ("agentic", 1.0)
+    assert client.calls == []
+
+
+def test_chat_followup_does_not_treat_prose_as_tool_evidence(tmp_path):
+    client = FakeClient("No desktop action was executed.")
+    runner = _runner(tmp_path, client, semantic_router=_Route("chat"),
+                     use_semantic_router_skip=True,
+                     conversation_context='Assistant: [Visible gedit window opens]')
+    report = runner.run("Yes")
+    assert report.status == "chat"
+    assert "no tools have been executed in this turn" in str(client.calls)
+    assert "not tool evidence" in str(client.calls)
+
+
+def test_failed_desktop_task_is_not_automatically_replayed(tmp_path):
+    calls = []
+    def desktop(**kwargs):
+        calls.append(kwargs)
+        return json.dumps({"ok": False, "error": "Desktop made no progress"})
+    runner = _runner(tmp_path, FakeClient(""), mode="execute",
+                     extra_tools={"computer_use_task": desktop})
+    report = runner.run("Open gedit on my Ubuntu desktop")
+    assert report.status == "failed"
+    assert len(calls) == 1
+    assert report.attempts == 1

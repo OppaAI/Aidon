@@ -231,6 +231,15 @@ class WebUIRunMixin:
         if answered_run is not None:
             return {"run_id": answered_run, "conversation_id": conversation_id,
                     "goal": goal, "lab_answer": answering_lab}
+        # A bare approval/rejection is a control command, not a new chat
+        # goal. If no live question waiter consumed it above, resolve it
+        # against the approval gate (which gives a deterministic
+        # "nothing pending" reply instead of letting the model answer from
+        # unrelated recalled history).
+        decision_reply = self._resolve_decision(goal)
+        if decision_reply is not None:
+            return self._simple_command_response(
+                conversation_id, raw_goal, decision_reply)
         resume_interview = goal.strip().lower() == "/resume-interview"
         if resume_interview:
             from .interview_store import InterviewStore
@@ -328,7 +337,7 @@ class WebUIRunMixin:
         if self.run_control is not None:
             self.run_control.register(run_id, goal, conversation_id)
         record = {"run_id": run_id, "goal": goal, "conversation_id": conversation_id,
-                  "status": "running", "events": [], "trace": []}
+                  "status": "running", "events": [], "trace": [], "replay": []}
         self._web_runs[run_id] = record
         stream_state = {"text": "", "active": False}
 
@@ -408,6 +417,7 @@ class WebUIRunMixin:
                        {"kind": "speech-request", "text": str(text)}),
                    "_route_callback": route_update,
                    "_trace_callback": trace_update,
+                   "_desktop_action_callback": lambda item: record["replay"].append(dict(item)),
                    "_question_callback": question_callback,
                    "resume_interview": resume_interview,
                    "skill_source_run_id": skill_source_run_id,
@@ -464,6 +474,7 @@ class WebUIRunMixin:
                                    control.get("stage", out.get("stage", "interpret")))})
         out.setdefault("events", [])
         out.setdefault("trace", [])
+        out.setdefault("replay", [])
         if record is None and control is not None:
             from .interview_store import InterviewStore
             saved_turns = InterviewStore(self.home).transcript(run_id)
@@ -491,6 +502,6 @@ class WebUIRunMixin:
         with self._question_lock:
             waiter = self._question_waiters.get(run_id)
             out["waiting_lab"] = bool(waiter and waiter.get("lab"))
-        pending = self.webui_gate.pending_cards()
+        pending = self.webui_gate.pending_cards(run_id=run_id)
         out["pending"] = pending[0] if pending else None
         return out

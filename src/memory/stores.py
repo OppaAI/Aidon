@@ -12,7 +12,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .embedder import sparse_weights
+from .embedder import keyword_sparse_vector, sparse_weights
 
 COLLECTIONS = ("working", "episodic", "semantic", "experience",
                "knowledge")
@@ -259,12 +259,7 @@ class SQLiteStore(InMemoryStore):
 def _sparse_from_text(text: str):
     # Keyword sparse, via the base embedder helper, without
     # constructing an embedder instance.
-    weights = sparse_weights(text)
-    import hashlib
-    items = sorted(
-        (int(hashlib.sha256(t.encode()).hexdigest()[:8], 16) % 100000, w)
-        for t, w in weights.items())
-    return ([i for i, _ in items], [w for _, w in items])
+    return keyword_sparse_vector(text)
 
 
 _CLIENTS: dict[str, object] = {}

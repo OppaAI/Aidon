@@ -45,6 +45,14 @@ export AIDON_UID="$(id -u)" AIDON_GID="$(id -g)"
 docker compose up --build -d
 ```
 
+The WebUI (`aidon`) and public WhatsApp/Slack listener (`aidon-webhooks`)
+are separate processes. Update both after source changes; rebuilding or
+restarting only `aidon` leaves WhatsApp running the previous version:
+
+```sh
+docker compose up -d --build aidon aidon-webhooks
+```
+
 For code development, use the development overlay after the image has been
 built once:
 
@@ -53,12 +61,12 @@ export AIDON_UID="$(id -u)" AIDON_GID="$(id -g)"
 docker compose -f compose.yaml -f compose.dev.yaml up -d
 ```
 
-The overlay mounts `./src` read-only into the container and points Python at
-the mounted package. After editing Python code, restart the service to load
+The overlay mounts `./src` read-only into both containers and points Python at
+the mounted package. After editing Python code, restart both services to load
 the changes:
 
 ```sh
-docker compose -f compose.yaml -f compose.dev.yaml restart aidon
+docker compose -f compose.yaml -f compose.dev.yaml restart aidon aidon-webhooks
 ```
 
 This avoids rebuilding for ordinary source edits. Changes to dependencies,

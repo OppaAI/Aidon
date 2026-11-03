@@ -373,8 +373,11 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
             except Exception:
                 pass
         _approved_image_edits = []
+        _approved_desktop_tasks = []
         if _resume_plan is not None:
             for _step in _resume_plan.normalized_steps():
+                if _step.tool in {"computer_use", "computer_use_task"}:
+                    _approved_desktop_tasks.append({"tool": _step.tool, "args": dict(_step.args)})
                 if getattr(_step, "tool", "") != "edit_image":
                     continue
                 # Proceed authorizes the image-edit step shown in the saved
@@ -426,7 +429,7 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                             clef_client=_clef_client,
                             use_semantic_router_skip=True,
                             run_id=run_id, run_control=run_control,
-                            researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins, gate_context=_gate_context, test_backend_factory=lambda: make_backend(config.execution_backend, run_sandbox, image=config.docker_image, allow_network=False, modal_app=config.modal_app, modal_cpu=config.modal_cpu, modal_memory_mb=config.modal_memory_mb), allow_skill_adoption=_allow_skill_adoption, approved_image_edits=_approved_image_edits, speak_callback=event.payload.get("_speak_callback")), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, guidance=str(event.payload.get("guidance", "") or ""), route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor, resume_interview=bool(event.payload.get("resume_interview")), conversation_thread_id=str(event.payload.get("thread_ts", "") or ""))
+                            researcher=_web_researcher, extra_tools=_goal_extra_tools(config, run_sandbox.workdir, gate=_gate, researcher=_web_researcher, question_answer=event.payload.get("_question_callback") or _question_callback, phrase=_phrase, model_chat=lambda messages: client.chat(messages), governor=_governor, plugin_registry=plugins, gate_context=_gate_context, test_backend_factory=lambda: make_backend(config.execution_backend, run_sandbox, image=config.docker_image, allow_network=False, modal_app=config.modal_app, modal_cpu=config.modal_cpu, modal_memory_mb=config.modal_memory_mb), allow_skill_adoption=_allow_skill_adoption, approved_image_edits=_approved_image_edits, approved_desktop_tasks=_approved_desktop_tasks, speak_callback=event.payload.get("_speak_callback"), desktop_action_callback=event.payload.get("_desktop_action_callback")), router=model_router, versioned_writes=True, network_available=_network_available(execution_backend, run_sandbox), image_paths=event.payload.get("image_paths") or [], force_web=bool(event.payload.get("force_web")), think_max=bool(event.payload.get("think_max")), research_mode=bool(event.payload.get("research_mode")), deep_researcher=make_deep_researcher(config), stream_callback=event.payload.get("_stream_callback"), conversation_context=conversation_context, guidance=str(event.payload.get("guidance", "") or ""), route_callback=event.payload.get("_route_callback"), trace_callback=event.payload.get("_trace_callback"), gate_context=_gate_context, mode=event.payload.get("mode"), question_ask=event.payload.get("_question_callback") or _question_callback, conversation_key=_conversation_key, resume_plan=_resume_plan, acquisition_governor=_governor, resume_interview=bool(event.payload.get("resume_interview")), conversation_thread_id=str(event.payload.get("thread_ts", "") or ""))
         runner.approved_capability_brief = _approved_lab
         if _approved_lab and runner.resume_plan is None:
             from ..interface.webui_labs import lab_execution_plan
@@ -583,7 +586,10 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                     server._web_runs[run_id]["mode_stop"] = enriched
             except Exception:
                 pass
-        if _resume_stop_id and report.status == "done":
+        if _resume_stop_id and (
+                report.status == "done"
+                or (report.status == "stopped"
+                    and (report.mode_stop or {}).get("stop_id") != _resume_stop_id)):
             try:
                 from ..interface.mode_stops import delete_mode_stop
                 delete_mode_stop(config.home, _resume_stop_id)
@@ -619,6 +625,24 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                 _shead = ("Plan ready" + (f" ({len(_delivs)} deliverable(s): "
                                           + ", ".join(str(d) for d in _delivs[:5])
                                           + ")" if _delivs else "") + ".")
+                _plan_lines = []
+                try:
+                    _steps = report.plan.normalized_steps()
+                except Exception:
+                    _steps = []
+                for _index, _step in enumerate(_steps, 1):
+                    _detail = str(getattr(_step, "description", "") or
+                                  getattr(_step, "tool", "step"))
+                    _tool = str(getattr(_step, "tool", "") or "")
+                    _deliverable = str(getattr(_step, "deliverable", "") or "")
+                    _line = f"{_index}. {_detail}"
+                    if _tool:
+                        _line += f" [{_tool}]"
+                    if _deliverable:
+                        _line += f" → {_deliverable}"
+                    _plan_lines.append(_line)
+                if _plan_lines:
+                    _shead += "\n\nSteps:\n" + "\n".join(_plan_lines)
                 try:
                     from ..interface.mode_stops import load_mode_stop
                     _stored = load_mode_stop(config.home, _sid) or {}
@@ -636,9 +660,13 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
             if event.source == "webui":
                 _saction = "Tap Proceed below to continue."
             elif event.source in ("slack", "whatsapp"):
-                _saction = "Reply proceed to continue this plan (no ID needed)."
+                _saction = ("Reply proceed to review the plan (no ID needed)."
+                            if _stopped.get("mode") == "ask" else
+                            "Reply proceed to run this plan (no ID needed).")
             else:
-                _saction = f"Run /proceed {_sid} to continue."
+                _saction = (f"Run /proceed {_sid} to review the plan."
+                            if _stopped.get("mode") == "ask" else
+                            f"Run /proceed {_sid} to run this plan.")
             _surface_reply(f"{_shead}\n{_saction}\n" + format_run_stats(report))
         elif report.status == "chat":
             _surface_reply((report.chat_reply or "Received.") + "\n" + format_run_stats(report))

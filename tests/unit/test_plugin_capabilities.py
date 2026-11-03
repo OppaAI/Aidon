@@ -8,6 +8,7 @@ adoption may go, and the approval card still lists every capability.
 from tests.plugin_acceptance import passing_backend_factory
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -77,6 +78,29 @@ def test_policy_rejects_unknown_capability():
 def test_policy_secret_requires_name():
     with pytest.raises(ValueError):
         CapabilityPolicy.from_capabilities(["secret"])
+
+
+def test_plain_language_plugin_request_may_start_with_square_bracket():
+    from src.capabilities.plugin_generation import _spec_text
+    data, text = _spec_text("[Grocery prices]\nLook up produce prices at my selected store.")
+    assert data["purpose"] == text
+    assert data["name"].lower() == "grocery-prices"
+
+
+def test_plugin_approval_forwards_run_context():
+    from src.capabilities.plugins import ask_plugin_approval
+    seen = {}
+
+    class Gate:
+        def ask(self, kind, title, body, **kwargs):
+            seen.update(kwargs)
+            return SimpleNamespace(verdict="approved")
+
+    preflight = SimpleNamespace(plugin=SimpleNamespace(name="demo"),
+                                findings=[], approved_hash="hash", body="Review")
+    assert ask_plugin_approval(
+        Gate(), None, preflight, context={"run_id": "run-7"})
+    assert seen["context"] == {"run_id": "run-7"}
 
 
 def test_manifest_capabilities_loaded(tmp_path):
@@ -279,3 +303,19 @@ def test_preflight_card_lists_capabilities(tmp_path):
     assert "Capabilities:" in preflight.body
     assert "fs (plugin data dir)" in preflight.body
     assert "secret:TOKEN" in preflight.body
+
+
+@pytest.mark.parametrize("method", ["http_get", "http_post"])
+def test_ctx_http_bounds_remote_response(tmp_path, monkeypatch, method):
+    import io
+    from src.capabilities import plugin_runtime
+
+    ctx = PluginContext("gadget", tmp_path,
+                        CapabilityPolicy.from_capabilities(["http:example.com"]))
+    monkeypatch.setattr(plugin_runtime, "_MAX_HTTP_RESPONSE_BYTES", 16)
+    monkeypatch.setattr(ctx, "_checked_url", lambda url: url)
+    monkeypatch.setattr(ctx, "_open", lambda *args: io.BytesIO(b"x" * 17))
+    with pytest.raises(ValueError, match="response exceeds"):
+        getattr(ctx, method)("https://example.com")
+    monkeypatch.setattr(ctx, "_open", lambda *args: io.BytesIO(b"x" * 16))
+    assert getattr(ctx, method)("https://example.com") == "x" * 16

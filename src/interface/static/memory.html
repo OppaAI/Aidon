@@ -11,10 +11,14 @@
   html, body { height: auto; }
   body { overflow: auto; }
   .cap-wrap { max-width: 880px; margin: 0 auto; padding: 24px 20px 60px; }
-  .cap-head { display: flex; align-items: baseline; gap: 14px; }
-  .cap-head h1 { font-size: 22px; margin: 0; }
-  .cap-head a { color: var(--muted); text-decoration: none; font-size: 13px; }
-  .cap-head a:hover { color: var(--accent); }
+  .cap-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+  .cap-head h1 { font-size:22px; margin:0; }
+  .cap-home { color:var(--olive); text-decoration:none; font:700 19px var(--font-display); white-space:nowrap; }
+  .cap-home:hover { color:var(--accent); }
+  .memory-tabs { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0 10px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+  .memory-tab { display:inline-block; background:var(--surface); border:1px solid var(--border); color:var(--text); border-radius:7px; padding:6px 10px; cursor:pointer; font:inherit; font-size:13px; text-decoration:none; }
+  .memory-tab[aria-current="page"] { border-color:var(--accent); color:var(--accent); }
+  .memory-tab:hover,.memory-tab:focus-visible { border-color:var(--accent); color:var(--accent); }
   .cap-sub { color: var(--muted); font-size: 13px; margin: 6px 0 18px; }
   .cap-card { background: var(--panel); border: 1px solid var(--line);
     border-radius: 12px; padding: 12px 14px; margin-bottom: 10px;
@@ -59,9 +63,13 @@
 <div class="cap-wrap">
   <div class="cap-head">
     <h1>🧠 Memory Studio <span id="studio-count"></span></h1>
-    <a href="/">← back to Aidon</a>
-    <a href="/graph">Graph view</a>
+    <a class="cap-home" href="/">◈ Aidon</a>
   </div>
+  <nav class="memory-tabs" aria-label="Memory views">
+    <a class="memory-tab" href="/memory" aria-current="page">Episodes</a>
+    <a class="memory-tab" href="/knowledge">Knowledge</a>
+    <a class="memory-tab" href="/graph">Graph view</a>
+  </nav>
   <p class="cap-sub">The episodes Aidon remembers from past goals and
     conversations — each one distilled when the work finished, and
     recalled into later work when it's relevant.

@@ -16,7 +16,7 @@ from __future__ import annotations
 import base64
 import json
 import urllib.request
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 
 def _get(url: str, token: str = "", get=None, headers_extra: dict | None = None):
@@ -53,7 +53,10 @@ def search_repos(query: str, token: str = "", get=None) -> dict:
 def fetch_file(owner: str, repo: str, path: str, ref: str = "main",
                token: str = "", get=None) -> dict:
     try:
-        body, _ = _get(f"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={ref}",
+        url = (f"https://api.github.com/repos/{quote(owner, safe='')}/"
+               f"{quote(repo, safe='')}/contents/{quote(path, safe='/')}?"
+               + urlencode({"ref": ref}))
+        body, _ = _get(url,
                        token, get=get,
                        headers_extra={"Accept": "application/vnd.github.raw"})
         if isinstance(body, dict):

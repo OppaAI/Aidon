@@ -143,7 +143,8 @@ class InterviewRunner:
         text = "".join(chunks)
         return text if text.strip() else self.client.chat(messages)
 
-    def start_from_message(self, message: str, ask, approve=None) -> InterviewResult:
+    def start_from_message(self, message: str, ask, approve=None,
+                          use_memory: bool = True) -> InterviewResult:
         """Entry point: a chat message starts the interview.
 
         ``ask`` is a chat callback, question -> answer string,
@@ -165,7 +166,7 @@ class InterviewRunner:
         # card at the end is where they approve or reject it.
         memory_context: dict = {}
         initial_spec = Spec(goal=message.strip())
-        if self.memory is not None:
+        if self.memory is not None and use_memory:
             try:
                 context = self.memory.conversation_context(self.conversation_id)
                 memory_context["previous_exchanges"] = [
@@ -223,15 +224,22 @@ class InterviewRunner:
         # the interview is in chat history from the start.
         self._record_exchange("user", message, exchanges)
         for _ in range(self.max_questions):
+            memory_rule = (
+                "Use only the current goal and the user's answers in this "
+                "interview to fill the spec. Do not fill or skip a question "
+                "from stored memory, past conversations, saved specs, or past "
+                "experiences. Ask the user when required information is missing."
+                if not use_memory else
+                "Fill non-critical fields from the spec and from_memory context "
+                "instead of asking about them: prefilled values are proposals "
+                "the user reviews on the sheet.")
             reply = self._reply([
                 Message("system",
                         "You are interviewing the user to build a frozen "
                         "spec. Reply as JSON with keys question and spec. "
                         "If the spec is complete, question is null and "
-                        "complete is true. Fill non-critical fields from "
-                        "the spec and from_memory context instead of asking "
-                        "about them: prefilled values are proposals the user "
-                        "reviews on the sheet. Ask one question at a time, "
+                        "complete is true. " + memory_rule +
+                        " Ask one question at a time, "
                         "in chat, and only for a field that is missing AND "
                         "would change the work or is irreversible. If the goal involves encryption and no algorithm is specified, ask which encryption algorithm to use, offering AES-256-GCM as the default."),
                 Message("user", json.dumps({

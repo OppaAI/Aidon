@@ -107,6 +107,32 @@ def test_guided_task_sees_screen_then_acts_then_finishes(tmp_path):
     assert len(trace["steps"]) == 1
 
 
+def test_guided_task_can_launch_from_desktop_with_no_focused_window(tmp_path):
+    class FocuslessDriver(_Driver):
+        def applications(self):
+            return [{"id": "org.gnome.gedit.desktop", "name": "Text Editor"}]
+
+        def capture_focus(self):
+            raise RuntimeError("Cannot identify the focused desktop window")
+
+    driver = FocuslessDriver()
+    chat = _ScriptChat([
+        json.dumps({"action": {"kind": "launch_app",
+                                "app_id": "org.gnome.gedit.desktop"},
+                    "done": False, "screen": "Empty desktop.",
+                    "reason": "Open the editor"}),
+        json.dumps({"action": None, "done": True,
+                    "screen": "Text Editor is open.", "reason": "Ready"}),
+    ])
+    result = run_guided_task(
+        "Open the text editor", chat, driver=driver,
+        approve=lambda kind, detail: True,
+        screenshot_dir=str(tmp_path), capture=_fake_png)
+    assert result["ok"], result
+    assert driver.actions == [{"kind": "launch_app",
+                               "app_id": "org.gnome.gedit.desktop"}]
+
+
 def test_guided_task_does_not_claim_success_without_an_action_or_done(tmp_path):
     chat = _ScriptChat([json.dumps({"action": None, "done": False})])
     result = run_guided_task("open an app", chat, driver=_Driver(),
@@ -150,6 +176,32 @@ def test_guided_task_refuses_without_model_chat(tmp_path):
     assert driver.actions == []
 
 
+def test_guided_task_stops_unchanged_repeated_actions_before_third_approval(tmp_path):
+    action = {"kind": "click", "x": 540, "y": 665}
+    chat = _ScriptChat([json.dumps({"action": action, "done": False})] * 3)
+    approvals, replay = [], []
+    result = run_guided_task(
+        "Open gedit", chat, driver=_Driver(), capture=_fake_png,
+        screenshot_dir=tmp_path, max_actions=10, on_action=replay.append,
+        approve=lambda *args: approvals.append(args) or True)
+    assert not result["ok"]
+    assert "no progress" in result["error"]
+    assert len(approvals) == len(replay) == len(result["actions_taken"]) == 2
+
+
+def test_launch_app_is_approved_and_failed_calls_do_not_count_as_executed():
+    action = {"kind": "launch_app", "app_id": "org.gnome.gedit.desktop"}
+    driver = _Driver()
+    replay = []
+    result = run_computer_use([action], approve=lambda *args: False,
+                              driver=driver, on_action=replay.append)
+    assert not result["ok"] and not driver.actions and not replay
+    result = run_computer_use([action], approve=lambda *args: True,
+                              driver=driver, on_action=replay.append)
+    assert result["ok"] and driver.actions == [action]
+    assert replay[0]["args"] == action
+
+
 def test_handler_wires_guided_task_only_with_model_chat(tmp_path, monkeypatch):
     import src.capabilities.x11_driver as _x11
     monkeypatch.setattr(_x11, "X11Driver", lambda: _Driver())
@@ -162,3 +214,96 @@ def test_handler_wires_guided_task_only_with_model_chat(tmp_path, monkeypatch):
     assert "computer_use_task" in tools
     tools_no_chat = _goal_extra_tools(config, tmp_path)
     assert "computer_use_task" not in tools_no_chat
+
+
+def test_desktop_approval_restores_observed_window_before_typing(tmp_path):
+    events = []
+    class FocusDriver(_Driver):
+        def capture_focus(self):
+            events.append("observe editor")
+            return "123"
+
+        def restore_focus(self, window):
+            assert window == "123"
+            events.append("restore editor")
+
+        def __call__(self, action):
+            events.append("type into editor")
+
+    def approve(kind, detail):
+        events.append("approve in browser")
+        return True
+
+    result = run_computer_use([{"kind": "type", "text": "Hello from Aidon."}],
+                              approve=approve, driver=FocusDriver())
+    assert result["ok"]
+    assert events == ["observe editor", "approve in browser", "restore editor",
+                      "type into editor"]
+
+
+def test_launch_only_batch_does_not_require_existing_focus(tmp_path, monkeypatch):
+    from src.interface.approval import Decision
+    events = []
+
+    class Driver(_Driver):
+        def capture_focus(self):
+            raise RuntimeError("no focused window")
+
+    class Gate:
+        def ask(self, kind, title, body, **kwargs):
+            events.append("approved")
+            return Decision("approved")
+
+    monkeypatch.setattr("src.capabilities.x11_driver.X11Driver", Driver)
+    config = SimpleNamespace(home=tmp_path, computer_driver="x11",
+                             kernel_mode=False)
+    tools = _goal_extra_tools(config, tmp_path, gate=Gate(), optional_tools=False)
+    result = json.loads(tools["computer_use"]([{
+        "kind": "launch_app", "app_id": "org.gnome.gedit.desktop"}]))
+    assert result["ok"]
+    assert events == ["approved"]
+
+
+def test_lost_desktop_focus_never_types_into_approval_browser():
+    driver = _Driver()
+    driver.restore_focus = lambda _window: (_ for _ in ()).throw(RuntimeError("window closed"))
+    result = run_computer_use([{"kind": "type", "text": "Hello"}],
+                              approve=lambda *args: True, driver=driver,
+                              focus_window="123")
+    assert not result["ok"]
+    assert "window closed" in result["error"]
+    assert driver.actions == []
+
+
+def test_computer_tool_approval_carries_run_context(tmp_path, monkeypatch):
+    from src.interface.approval import Decision
+    seen = []
+    class Gate:
+        def ask(self, kind, title, body, **kwargs):
+            seen.append(kwargs)
+            return Decision("approved")
+    monkeypatch.setattr("src.capabilities.x11_driver.X11Driver", lambda: _Driver())
+    tools = _goal_extra_tools(
+        SimpleNamespace(home=tmp_path, computer_driver="x11", kernel_mode=False),
+        tmp_path, gate=Gate(), optional_tools=False,
+        gate_context={"run_id": "desktop-1"})
+    result = json.loads(tools["computer_use"]([{"kind": "key", "key": "Return"}]))
+    assert result["ok"]
+    assert seen[0]["context"] == {"run_id": "desktop-1"}
+    assert seen[0]["force_ask"] is True
+
+
+@pytest.mark.parametrize("kernel,display,xdotool,expected", [
+    (True, ":0", True, "Disabled (kernel mode)"),
+    (False, "", True, "Unavailable (no DISPLAY)"),
+    (False, ":0", False, "Unavailable (xdotool missing)"),
+    (False, ":0", True, "X11 configured"),
+])
+def test_status_explains_desktop_availability(tmp_path, monkeypatch,
+                                             kernel, display, xdotool, expected):
+    from src.interface.webui import WebUIServer
+    monkeypatch.setenv("DISPLAY", display)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/xdotool" if xdotool else None)
+    server = WebUIServer(tmp_path, config=SimpleNamespace(
+        computer_driver="x11", kernel_mode=kernel))
+    assert server.handle_status()["computer"] == expected

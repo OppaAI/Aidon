@@ -27,6 +27,7 @@ CAPABILITY_TOOLS_WHEN_OPTIONAL_DISABLED = frozenset({
     "build_ebook", "make_docx", "make_latex", "make_slides",
     "make_spreadsheet", "transcribe_audio", "tts_speak",
     "email_make_draft", "email_send", "slack_send", "slack_send_file",
+    "email_read",
     "whatsapp_send", "whatsapp_send_media", "threads_publish",
     "threads_post", "instagram_publish", "instagram_post",
     "youtube_learn", "youtube_upload", "fetch_feed", "search_document",
@@ -38,7 +39,8 @@ CAPABILITY_TOOLS_WHEN_OPTIONAL_DISABLED = frozenset({
 def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None, governor=None, optional_tools=None,
                       plugin_registry=None, gate_context=None, test_backend_factory=None,
                       allow_skill_adoption=False,
-                      approved_image_edits=None, speak_callback=None) -> dict:
+                      approved_image_edits=None, speak_callback=None,
+                      desktop_action_callback=None, approved_desktop_tasks=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     If ``plugin_registry`` is given (a ``PluginRegistry`` instance that is
@@ -183,8 +185,10 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                 kind, title, f"{lead}\n\n{body}",
                 action_class=action_class,
                 force_ask=force_ask,
+                **({"context": gate_context} if gate_context else {}),
             )
-            return decision.verdict in ("approved", "auto_approved"), decision.verdict
+            return (decision.verdict in ("approved", "auto_approved"),
+                    getattr(decision, "reason", "") or decision.verdict)
         except Exception as exc:
             return False, f"approval failed: {exc}"
 
@@ -207,7 +211,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     if "instagram_publish" in tools:
         tools["instagram_post"] = tools["instagram_publish"]
 
-    register_computer_tools(config, tools, _approval, _confined, model_chat)
+    register_computer_tools(config, tools, _approval, _confined, model_chat,
+                            on_action=desktop_action_callback, approved_tasks=approved_desktop_tasks)
 
     # Recording host audio is a sensitive side effect. Keep the old
     # mandatory approval boundary even though the recorder itself lives in
@@ -520,7 +525,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             finally:
                 if backend is not None:
                     backend.cleanup()
-            if not ask_plugin_approval(gate, None, preflight):
+            if not ask_plugin_approval(gate, None, preflight,
+                                       context=gate_context):
                 return "adoption refused: Adoption rejected by owner"
             if governor is not None:
                 governor.acquire("tool")

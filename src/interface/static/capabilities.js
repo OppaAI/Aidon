@@ -148,6 +148,16 @@ async function load() {
   const mcps = (data.mcp_servers || []).map(m => typeof m === "string" ? {name:m} : m).sort((a,b) => String(a.name).localeCompare(String(b.name)));
   const retired = skills.filter(s => s.state === "retired");
   const liveSkills = skills.filter(s => s.state !== "retired");
+  const dags=data.dags||{count:0,recent:[]};
+  const tabCounts = {tools: tools.length, skills: liveSkills.length,
+    mcp: mcps.length, other: Number(dags.count || 0)};
+  const tabLabels = {tools: "🧰 Tools", skills: "📘 Skills",
+    mcp: "🔌 MCP", other: "🗂 Other"};
+  document.querySelectorAll(".cap-tab[data-cap-tab]").forEach(button => {
+    const key = button.dataset.capTab;
+    if (Object.prototype.hasOwnProperty.call(tabCounts, key))
+      button.textContent = tabLabels[key] + " (" + tabCounts[key] + ")";
+  });
   if (data.kernel_mode) document.getElementById("kernel-banner").style.display = "block";
   const lists = [["tool",tools,"tools-list","tools-detail","No tools registered."],["skill",liveSkills,"skills-list","skills-detail","No saved skills yet."],["mcp",mcps,"mcp-list","mcp-detail","No connected MCP servers yet."]];
   lists.forEach(([kind,items,listId,detailId,emptyText]) => { const list=document.getElementById(listId); renderList(list,items,kind,emptyText); activateFirst(kind,list,items,document.getElementById(detailId)); });
@@ -156,7 +166,6 @@ async function load() {
     const divider = document.createElement("p"); divider.className="cap-empty"; divider.textContent="Retired"; list.appendChild(divider);
     retired.forEach(skill => { const button=document.createElement("button"); button.type="button"; button.dataset.kind="skill"; button.dataset.index=String(skills.indexOf(skill)); button.innerHTML='<span class="cap-list-name">'+icon(skill.name,"skill")+' '+esc(skill.name)+'</span><span class="cap-list-sub">retired</span>'; button.addEventListener("click",event=>{event.stopPropagation(); showDetails("skill",skill,document.getElementById("skills-detail"),button);}); list.appendChild(button); });
   }
-  const dags=data.dags||{count:0,recent:[]};
   document.getElementById("dags-count").textContent="("+(dags.count||0)+")";
   const d=document.getElementById("dags");
   d.innerHTML=(dags.recent||[]).length ? dags.recent.map(x=>'<div class="cap-dagrow"><span class="cap-list-name">🔀 '+esc(x.name)+'</span><span class="cap-goal">'+esc(x.goal)+'</span></div>').join("") : '<p class="cap-empty">No saved workflows yet.</p>';

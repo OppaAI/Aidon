@@ -1,0 +1,8 @@
+# Run the Docker services against the separate clean Aidon home.
+services:
+  aidon:
+    volumes:
+      - ./aidon-clean-data:/data
+  aidon-webhooks:
+    volumes:
+      - ./aidon-clean-data:/data

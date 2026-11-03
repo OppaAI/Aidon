@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101323">
+  <title>Meet Aidon — Hackathon Demo</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f5f4f1;
+      --muted: #a5a8b9;
+      --panel: rgba(26, 30, 49, .88);
+      --line: rgba(204, 211, 243, .14);
+      --cyan: #7de9ff;
+      --violet: #b9a2ff;
+      --coral: #ffaf91;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; }
+    body {
+      overflow: hidden;
+      color: var(--ink);
+      background:
+        radial-gradient(ellipse at 72% 15%, rgba(79, 92, 185, .24), transparent 38%),
+        radial-gradient(ellipse at 12% 86%, rgba(101, 60, 140, .22), transparent 34%),
+        #101323;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button { color: inherit; font: inherit; }
+    .deck { min-height: 100%; display: grid; grid-template-rows: auto 1fr auto; padding: 28px clamp(20px, 5vw, 76px) 24px; }
+    .topbar, .controls { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+    .brand { display: flex; align-items: center; gap: 11px; letter-spacing: .12em; font-size: 12px; font-weight: 750; text-transform: uppercase; color: #d9dcf1; }
+    .brand-mark { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid rgba(125,233,255,.44); border-radius: 10px; color: var(--cyan); box-shadow: 0 0 25px rgba(125,233,255,.12); }
+    .top-note { color: var(--muted); font-size: 13px; }
+    main { display: grid; place-items: center; align-content: start; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: clamp(12px, 3vh, 28px) 0; }
+    .slide { width: min(1120px, 100%); min-height: min(640px, 73vh); display: none; grid-template-columns: minmax(0, 1.05fr) minmax(300px, .95fr); align-items: center; gap: clamp(16px, 5vw, 64px); animation: arrive .45s ease both; }
+    .slide.active { display: grid; }
+    @keyframes arrive { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+    .copy { position: relative; z-index: 1; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 9px; color: var(--cyan); letter-spacing: .16em; text-transform: uppercase; font-size: 11px; font-weight: 800; }
+    .eyebrow::before { content: ""; width: 24px; height: 1px; background: currentColor; }
+    h1, h2 { margin: 22px 0 18px; font-weight: 650; letter-spacing: -.055em; line-height: .99; }
+    h1 { font-size: clamp(58px, 9vw, 112px); }
+    h2 { font-size: clamp(44px, 6.4vw, 76px); max-width: 700px; }
+    .nowrap { white-space: nowrap; }
+    .spec-slide, .control-slide { grid-template-columns: minmax(0, 1.25fr) minmax(280px, .75fr); }
+    .control-title { max-width: none; white-space: nowrap; letter-spacing: -.09em; }
+    .gradient { background: linear-gradient(100deg, #f8f5ee 8%, #a9ebff 57%, #c9b0ff 96%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .subtitle { max-width: 590px; color: #c1c4d3; font-size: clamp(18px, 2vw, 23px); line-height: 1.55; }
+    .support { max-width: 550px; color: var(--muted); font-size: 16px; line-height: 1.75; }
+    .title-tags { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 30px; }
+    .tag { border: 1px solid var(--line); background: rgba(255,255,255,.035); border-radius: 99px; padding: 8px 13px; color: #d3d6e4; font-size: 12px; }
+    .visual { min-height: 500px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; }
+    .halo { position: absolute; width: min(39vw, 430px); aspect-ratio: 1; border: 1px solid rgba(125,233,255,.13); border-radius: 50%; box-shadow: inset 0 0 90px rgba(113,138,255,.08), 0 0 90px rgba(115,128,255,.09); }
+    .halo::before, .halo::after { content: ""; position: absolute; inset: 9%; border: 1px solid rgba(185,162,255,.12); border-radius: 50%; }
+    .halo::after { inset: 20%; border-color: rgba(125,233,255,.11); }
+    .orbit-dot { position: absolute; width: 9px; height: 9px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 18px var(--cyan); top: 21%; right: 16%; }
+    .robot-stage { z-index: 1; width: min(310px, 31vw); filter: drop-shadow(0 25px 35px rgba(0,0,0,.35)); }
+    .robot-character { transform-origin: 100px 190px; animation: bob 4.4s ease-in-out infinite; }
+    .robot-head { transform-origin: 100px 54px; animation: nod 6s ease-in-out infinite; }
+    .eye { transform-box: fill-box; transform-origin: center; animation: blink 4.8s infinite; }
+    .mouth-open { opacity: 0; }
+    .robot-stage.talking .mouth-open { opacity: 1; animation: talk .21s ease-in-out infinite alternate; }
+    .robot-stage.talking .mouth-smile { opacity: 0; }
+    @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+    @keyframes nod { 0%,100% { transform: rotate(0); } 35% { transform: rotate(-2deg); } 70% { transform: rotate(1.3deg); } }
+    @keyframes blink { 0%,92%,98%,100% { transform: scaleY(1); } 94%,96% { transform: scaleY(.08); } }
+    @keyframes talk { from { transform: scaleY(.48); } to { transform: scaleY(1); } }
+    .speech { position: relative; z-index: 2; top: auto; left: auto; width: min(360px, 88%); margin: 0 auto -5px; padding: 15px 18px; border: 1px solid rgba(125,233,255,.24); border-radius: 18px 18px 18px 4px; background: rgba(26, 31, 52, .97); color: #e5e8f4; font-size: 14px; line-height: 1.5; box-shadow: 0 18px 48px rgba(0,0,0,.25); }
+    .speech::after { content: ""; position: absolute; left: 23px; bottom: -8px; width: 14px; height: 14px; border-right: 1px solid rgba(125,233,255,.24); border-bottom: 1px solid rgba(125,233,255,.24); background: #1a1f34; transform: rotate(45deg); }
+    .speech-label { display: block; margin-bottom: 7px; color: var(--cyan); font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    .detail-slide .visual { flex-direction: row; gap: 8px; min-height: 400px; }
+    .detail-slide .speech { width: min(230px, 58%); margin: 0; font-size: 13px; }
+    .detail-slide .speech::after { display: none; }
+    .detail-slide .robot-stage { width: min(205px, 40%); }
+    .spec-slide.detail-slide .visual { gap: 6px; }
+    .spec-slide.detail-slide .speech { width: 58%; font-size: 12px; }
+    .spec-slide.detail-slide .robot-stage { width: 38%; }
+    .journey { margin-top: 25px; max-width: 550px; }
+    .journey-label { margin-bottom: 9px; color: #868ba4; font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    .flow-steps { display: flex; align-items: center; gap: 7px; }
+    .flow-step { flex: 1; min-width: 0; min-height: 45px; display: grid; place-items: center; padding: 8px; border: 1px solid rgba(125,233,255,.2); border-radius: 12px; background: rgba(125,233,255,.045); color: #dbe3f1; text-align: center; font-size: 11px; line-height: 1.3; }
+    .flow-arrow { color: var(--cyan); font-size: 16px; }
+    .detail-flow { display: grid; gap: 13px; margin: 14px 0 0; padding: 0; list-style: none; }
+    .detail-step { position: relative; min-height: 49px; display: grid; grid-template-columns: 27px 1fr; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid rgba(185,162,255,.17); border-radius: 12px; background: linear-gradient(100deg,rgba(255,255,255,.045),rgba(125,233,255,.025)); }
+    .detail-step:not(:last-child)::after { content: "↓"; position: absolute; left: 16px; bottom: -15px; z-index: 2; height: 15px; color: var(--cyan); font-size: 13px; line-height: 15px; }
+    .step-no { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 9px; background: rgba(125,233,255,.1); color: var(--cyan); font-size: 10px; font-weight: 800; }
+    .step-copy strong { display: block; color: #e8eaf4; font-size: 12px; line-height: 1.2; }
+    .step-copy small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.35; }
+    .feature-card { display: flex; align-items: center; gap: 14px; max-width: 480px; margin-top: 16px; padding: 10px 15px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,.035); }
+    .feature-icon { flex: 0 0 68px; width: 68px; height: 68px; border-radius: 12px; background-image: url("assets/showcase-cartoon-grid.png"); background-size: 200% 200%; background-repeat: no-repeat; filter: drop-shadow(0 5px 8px rgba(0,0,0,.2)); }
+    .feature-icon.conversation { background-position: left top; }
+    .feature-icon.creation { background-position: right top; }
+    .feature-icon.approval { background-position: left bottom; }
+    .feature-icon.dag { background-position: right bottom; }
+    .feature-card strong { display: block; margin-bottom: 4px; font-size: 14px; }
+    .feature-card span { color: var(--muted); font-size: 13px; line-height: 1.4; }
+    .controls { align-self: end; border-top: 1px solid var(--line); padding-top: 16px; }
+    .progress-wrap { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: 12px; }
+    .progress { width: min(220px, 26vw); height: 3px; overflow: hidden; border-radius: 9px; background: rgba(255,255,255,.12); }
+    .progress span { display: block; height: 100%; background: linear-gradient(90deg,var(--cyan),var(--violet)); transition: width .3s ease; }
+    .buttons { display: flex; gap: 9px; }
+    .control { min-width: 42px; height: 42px; display: inline-grid; place-items: center; padding: 0 14px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.04); cursor: pointer; transition: background .2s, border-color .2s, transform .2s; }
+    .control:hover { border-color: rgba(125,233,255,.45); background: rgba(125,233,255,.1); transform: translateY(-1px); }
+    .control.primary { min-width: 120px; border-color: rgba(125,233,255,.42); background: linear-gradient(110deg,rgba(88,190,221,.18),rgba(162,135,242,.2)); }
+    .control:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+    .key-hint { color: #787d93; font-size: 11px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    @media (max-width: 760px) {
+      .deck { padding: 17px 20px 15px; }
+      .top-note, .key-hint { display: none; }
+      .slide, .slide.active { grid-template-columns: 1fr; gap: 0; align-content: center; min-height: 0; }
+      .visual { grid-row: 1; min-height: 0; padding: 4px 0 8px; }
+      .robot-stage { width: 165px; }
+      .halo { width: 220px; }
+      .speech { width: min(310px, 95%); font-size: 12px; padding: 10px 13px; }
+      h1 { margin: 8px 0 12px; font-size: clamp(52px, 16vw, 84px); }
+      h2 { margin: 12px 0; font-size: clamp(39px, 12vw, 60px); }
+      .spec-slide, .control-slide { grid-template-columns: 1fr; }
+      .spec-slide .visual { gap: 8px; }
+      .spec-slide .speech { width: 72%; font-size: 10px; }
+      .spec-slide .robot-stage { width: 82px; }
+      .control-title { font-size: clamp(39px, 12vw, 60px); letter-spacing: -.10em; }
+      .subtitle { font-size: 16px; }
+      .support { margin: 10px 0; font-size: 14px; line-height: 1.55; }
+      .journey { margin-top: 13px; }
+      .detail-flow { gap: 11px; margin-top: 10px; }
+      .detail-step { min-height: 43px; gap: 8px; padding: 6px 8px; }
+      .step-no { width: 23px; height: 23px; }
+      .step-copy strong { font-size: 11px; }
+      .step-copy small { font-size: 10px; line-height: 1.3; }
+      .flow-steps { gap: 4px; }
+      .flow-step { min-height: 42px; padding: 6px 4px; font-size: 10px; }
+      .flow-arrow { font-size: 13px; }
+      .feature-card { margin-top: 11px; padding: 8px 10px; }
+      .title-tags { margin-top: 16px; }
+      .tag { padding: 6px 10px; }
+      .feature-icon { flex-basis: 54px; width: 54px; height: 54px; }
+      .detail-slide .visual { flex-direction: row; gap: 8px; min-height: 0; padding: 2px 0 5px; }
+      .detail-slide .speech { width: 72%; margin: 0; padding: 8px 10px; font-size: 10px; line-height: 1.4; }
+      .detail-slide .robot-stage { width: 82px; }
+      .detail-slide h2 { margin: 7px 0; font-size: clamp(34px, 9vw, 46px); }
+      .detail-slide .support { margin: 7px 0 4px; line-height: 1.4; }
+      .detail-slide .detail-flow { gap: 7px; margin-top: 8px; }
+      .detail-slide .detail-step { min-height: 37px; padding: 4px 7px; }
+      .detail-slide .step-copy small { font-size: 9px; line-height: 1.2; }
+    }
+    @media (max-height: 680px) and (min-width: 761px) {
+      .deck { padding-top: 16px; padding-bottom: 14px; }
+      .slide { min-height: 0; }
+      .visual { min-height: 340px; }
+      .robot-stage { width: 280px; }
+      .halo { width: 340px; }
+      h2 { font-size: clamp(40px, 5.4vw, 66px); }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <div class="deck">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">A</span> OppaAI <span aria-hidden="true">/</span> Aidon</div>
+      <div class="top-note">Meta Global AI Developer Hackathon · 2026</div>
+    </header>
+    <main id="slides" aria-live="polite">
+      <section class="slide active" data-title="Meet Aidon" data-speech="Hello, I'm Aidon, an autonomous AI agent made by OppaAI. OppaAI is an indie developer without formal IT or AI training. Tell me a goal in plain words, and I'll work out the tools. I'll prepare a safe workflow for you to approve, and reuse what works next time.">
+        <div class="copy">
+          <span class="eyebrow">A goal-driven AI agent</span>
+          <h1><span class="gradient">Meet</span><br>Aidon.</h1>
+          <p class="subtitle">From a plain-language goal to a safe, reusable workflow.</p>
+          <div class="title-tags"><span class="tag">Natural conversation</span><span class="tag">Human-approved actions</span><span class="tag">Learns workflows</span></div>
+        </div>
+        <div class="visual" aria-label="Aidon introduces the project">
+          <div class="halo"></div><div class="orbit-dot"></div>
+          <div class="speech"><span class="speech-label">Aidon says</span><span class="speech-text">Hello, I'm Aidon, an autonomous AI agent made by OppaAI.</span></div>
+          <svg class="robot-stage" viewBox="0 0 200 200" role="img" aria-label="Aidon, a friendly silver robot">
+            <defs>
+              <radialGradient id="shell" cx="35%" cy="18%" r="85%"><stop offset="0" stop-color="#fff"/><stop offset=".46" stop-color="#f3f5f4"/><stop offset=".82" stop-color="#d7deeb"/><stop offset="1" stop-color="#aebbd4"/></radialGradient>
+              <linearGradient id="arm" x1="0" y1="0" x2="1" y2=".25"><stop stop-color="#c4d5e8"/><stop offset=".32" stop-color="#fff"/><stop offset=".72" stop-color="#eef1f4"/><stop offset="1" stop-color="#bbc9dd"/></linearGradient>
+              <radialGradient id="head" cx="34%" cy="14%" r="88%"><stop stop-color="#fff"/><stop offset=".52" stop-color="#f5f5e8"/><stop offset=".84" stop-color="#dce1e6"/><stop offset="1" stop-color="#b9c4d4"/></radialGradient>
+              <linearGradient id="face" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#263a60"/><stop offset=".55" stop-color="#1a2a4a"/><stop offset="1" stop-color="#101b32"/></linearGradient>
+              <linearGradient id="ear" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#7899bc"/><stop offset=".38" stop-color="#a9c8df"/><stop offset=".68" stop-color="#7095bc"/><stop offset="1" stop-color="#486b96"/></linearGradient>
+            </defs>
+            <g id="robot" class="robot-character">
+              <path d="M68 103Q53 103 47 117L35 150q-4 13 2 15t16-9l19-32zm64 0q15 0 21 14l12 33q4 9-2 13t-16-9l-19-30z" fill="url(#arm)" stroke="#c6d0df" stroke-width="1.5"/>
+              <g id="head" class="robot-head">
+                <rect x="36" y="40" width="12" height="32" rx="6" fill="url(#ear)"/><rect x="152" y="40" width="12" height="32" rx="6" fill="url(#ear)"/>
+                <rect x="48" y="18" width="104" height="72" rx="21" fill="url(#head)" stroke="#c4cedb" stroke-width="1.5"/>
+                <path d="M100 18V9" stroke="#1a2a4a" stroke-width="2"/><circle cx="100" cy="6.5" r="3.2" fill="#7de9ff" stroke="#1a2a4a" stroke-width="1.2"/>
+                <rect x="59" y="28" width="82" height="52" rx="14" fill="url(#face)" stroke="#15223b"/>
+                <circle class="eye" cx="85" cy="50" r="7.5" fill="none" stroke="#7de9ff" stroke-width="3"/><circle class="eye" cx="115" cy="50" r="7.5" fill="none" stroke="#7de9ff" stroke-width="3"/>
+                <path id="mouth-smile" class="mouth-smile" d="M90 67Q100 73 110 67" fill="none" stroke="#7de9ff" stroke-width="3" stroke-linecap="round"/>
+                <ellipse id="mouth-open" class="mouth-open" cx="100" cy="69" rx="5" ry="1.5" fill="#7de9ff"/>
+              </g>
+              <rect x="89" y="88" width="22" height="14" rx="6" fill="#1a2a4a"/>
+              <path d="M74 104c8-3 44-3 52 0 14 15 13 49 1 69-8 12-19 17-27 17s-19-5-27-17c-12-20-13-54 1-69z" fill="url(#shell)" stroke="#c6d0df" stroke-width="1.5"/>
+              <ellipse cx="81" cy="119" rx="13" ry="6" fill="#fff" opacity=".7"/><path d="M81 177q19 11 38 0-5 11-19 11t-19-11z" fill="#1a2a4a"/>
+            </g>
+          </svg>
+        </div>
+      </section>
+
+      <section class="slide" data-title="Start with a conversation" data-speech="Step one: just tell me what you need, in your own words. I'll ask a few short questions, then confirm the plan with you before I start. Let me show you.">
+        <div class="copy">
+          <span class="eyebrow">01 · Natural-language interview</span>
+          <h2>Start with a <span class="gradient">conversation.</span></h2>
+          <p class="support">No workflow design or technical prompts required. Aidon asks focused questions, fills in the missing details, and turns the conversation into a clear spec before planning.</p>
+          <div class="journey"><div class="journey-label">How it flows</div><div class="flow-steps"><span class="flow-step">Your goal</span><span class="flow-arrow">→</span><span class="flow-step">A few questions</span><span class="flow-arrow">→</span><span class="flow-step">Clear spec</span></div></div>
+          <div class="feature-card"><div class="feature-icon conversation" role="img" aria-label="A person and Aidon having a conversation"></div><div><strong>Ask mode</strong><span>A short, guided interview shapes the goal around the person asking.</span></div></div>
+        </div>
+        <div class="visual"><div class="halo"></div><div class="orbit-dot"></div><div class="speech"><span class="speech-label">Aidon says</span><span class="speech-text"></span></div><svg class="robot-stage" viewBox="0 0 200 200" role="img" aria-label="Aidon speaking"><use href="#robot"></use></svg></div>
+      </section>
+
+      <section class="slide detail-slide spec-slide" data-title="How the interview becomes a spec" data-speech="The interview in five steps: ask, fill the gaps, summarize, confirm, then plan.">
+        <div class="copy">
+          <span class="eyebrow">01 · The interview, step by step</span>
+          <h2>From a request<br><span class="gradient nowrap">to an agreed spec.</span></h2>
+          <p class="support">Aidon closes gaps in the goal before creating a workflow. The user can correct the summary or add a constraint before planning begins.</p>
+          <ol class="detail-flow">
+            <li class="detail-step"><span class="step-no">01</span><span class="step-copy"><strong>Say what you want</strong><small>Describe the outcome in everyday language.</small></span></li>
+            <li class="detail-step"><span class="step-no">02</span><span class="step-copy"><strong>Surface the missing details</strong><small>Aidon checks scope, constraints, preferences, and audience.</small></span></li>
+            <li class="detail-step"><span class="step-no">03</span><span class="step-copy"><strong>Answer focused questions</strong><small>Clarify one useful detail at a time in the conversation.</small></span></li>
+            <li class="detail-step"><span class="step-no">04</span><span class="step-copy"><strong>Review the spec</strong><small>Aidon summarizes the goal and the choices you supplied.</small></span></li>
+            <li class="detail-step"><span class="step-no">05</span><span class="step-copy"><strong>Confirm, then plan</strong><small>Once it is clear, Aidon turns the spec into a DAG.</small></span></li>
+          </ol>
+        </div>
+        <div class="visual"><div class="halo"></div><div class="orbit-dot"></div><div class="speech"><span class="speech-label">Aidon says</span><span class="speech-text"></span></div><svg class="robot-stage" viewBox="0 0 200 200" role="img" aria-label="Aidon speaking"><use href="#robot"></use></svg></div>
+      </section>
+
+      <section class="slide" data-title="Build the missing capability" data-speech="Step two: when I hit something I can't do, I build the missing tool myself, test it in a sandbox, and ask before I keep it. Watch.">
+        <div class="copy">
+          <span class="eyebrow">02 · Tools and skills</span>
+          <h2>Build the <span class="gradient">missing capability.</span></h2>
+          <p class="support">When a task needs something new, Aidon can draft a reusable tool or skill, test it in a sandbox, and make the proposed change visible for review.</p>
+          <div class="journey"><div class="journey-label">How it flows</div><div class="flow-steps"><span class="flow-step">Draft tool or skill</span><span class="flow-arrow">→</span><span class="flow-step">Sandbox test</span><span class="flow-arrow">→</span><span class="flow-step">Owner approval</span></div></div>
+          <div class="feature-card"><div class="feature-icon creation" role="img" aria-label="Aidon building and testing a new tool"></div><div><strong>Draft → test → review</strong><span>New capabilities earn their place through tests and owner approval.</span></div></div>
+        </div>
+        <div class="visual"><div class="halo"></div><div class="orbit-dot"></div><div class="speech"><span class="speech-label">Aidon says</span><span class="speech-text"></span></div><svg class="robot-stage" viewBox="0 0 200 200" role="img" aria-label="Aidon speaking"><use href="#robot"></use></svg></div>
+      </section>
+
+      <section class="slide detail-slide" data-title="How a new tool or skill is made" data-speech="Every new skill is drafted, tested on good and bad input, scanned, and approved by the owner before I can use it.">
+        <div class="copy">
+          <span class="eyebrow">02 · Capability creation, step by step</span>
+          <h2>Earn a place in the <span class="gradient">toolbox.</span></h2>
+          <p class="support">The draft stays in the workspace until it passes checks and the owner approves adoption. Once adopted, the capability can be used by later goals.</p>
+          <ol class="detail-flow">
+            <li class="detail-step"><span class="step-no">01</span><span class="step-copy"><strong>Identify a capability gap</strong><small>Check existing tools and skills before creating anything new.</small></span></li>
+            <li class="detail-step"><span class="step-no">02</span><span class="step-copy"><strong>Draft the tool or skill</strong><small>Create its interface, manifest, and reusable instructions.</small></span></li>
+            <li class="detail-step"><span class="step-no">03</span><span class="step-copy"><strong>Test in isolation</strong><small>Try normal cases, invalid input, and expected failures.</small></span></li>
+            <li class="detail-step"><span class="step-no">04</span><span class="step-copy"><strong>Scan and present evidence</strong><small>Show source findings and test results on the review card.</small></span></li>
+            <li class="detail-step"><span class="step-no">05</span><span class="step-copy"><strong>Owner approves adoption</strong><small>Approval adds the capability to Aidon's available toolbox.</small></span></li>
+          </ol>
+        </div>
+        <div class="visual"><div class="halo"></div><div class="orbit-dot"></div><div class="speech"><span class="speech-label">Aidon says</span><span class="speech-text"></span></div><svg class="robot-stage" viewBox="0 0 200 200" role="img" aria-label="Aidon speaking"><use href="#robot"></use></svg></div>
+      </section>
+
+      <section class="slide control-slide" data-title="You are in control" data-speech="Step three: you stay in control. Before anything consequential goes live, I show you exactly what will happen, and I only act if you approve. I'll now hand over to my human partner, Oppa, to show you how I work.">
+        <div class="copy">
+          <span class="eyebrow">03 · Human approval</span>
+          <h2 class="control-title">You are <span class="gradient">in control.</span></h2>
+          <p class="support">Aidon prepares and verifies work in a sandbox. Consequential live actions pause for a human decision, with the proposed action shown before approval.</p>
+          <div class="journey"><div class="journey-label">How it flows</div><div class="flow-steps"><span class="flow-step">Verify safely</span><span class="flow-arrow">→</span><span class="flow-step">You review</span><span class="flow-arrow">→</span><span class="flow-step">Live action</span></div></div>
+          <div class="feature-card"><div class="feature-icon approval" role="img" aria-label="A person approving a safe action with Aidon"></div><div><strong>Verify first. Approve before live actions.</strong><span>The agent's autonomy stays within the boundaries you set.</span></div></div>
+        </div>
+        <div class="visual"><div class="halo"></div><div class="orbit-dot"></div><div class="speech"><span class="speech-label">Aidon says</span><span class="speech-text"></span></div><svg class="robot-stage" viewBox="0 0 200 200" role="img" aria-label="Aidon speaking"><use href="#robot"></use></svg></div>
+      </section>
+
+      <section class="slide detail-slide" data-title="How approval gates live actions" data-speech="I check it in a sandbox, show you the exact live action, then stop on reject—or run it and verify on approve.">
+        <div class="copy">
+          <span class="eyebrow">03 · Human control, step by step</span>
+          <h2>Verify first. Ask before <span class="gradient">acting.</span></h2>
+          <p class="support">The approval request is tied to the action Aidon plans to take. A rejection ends that path; approval is required before the live action runs.</p>
+          <ol class="detail-flow">
+            <li class="detail-step"><span class="step-no">01</span><span class="step-copy"><strong>Prepare the requested work</strong><small>Build a plan with steps, outputs, and clear criteria.</small></span></li>
+            <li class="detail-step"><span class="step-no">02</span><span class="step-copy"><strong>Run unproven steps safely</strong><small>Use the sandbox to check the parts that need proof.</small></span></li>
+            <li class="detail-step"><span class="step-no">03</span><span class="step-copy"><strong>Verify the result</strong><small>Check outputs against the plan's acceptance criteria.</small></span></li>
+            <li class="detail-step"><span class="step-no">04</span><span class="step-copy"><strong>Show the live action</strong><small>Present the action and its scope on an approval card.</small></span></li>
+            <li class="detail-step"><span class="step-no">05</span><span class="step-copy"><strong>Approve or reject</strong><small>Rejection stops the action; approval allows it to proceed.</small></span></li>
+            <li class="detail-step"><span class="step-no">06</span><span class="step-copy"><strong>Execute and check again</strong><small>Confirm the live outcome and recover if it fails.</small></span></li>
+          </ol>
+        </div>
+        <div class="visual"><div class="halo"></div><div class="orbit-dot"></div><div class="speech"><span class="speech-label">Aidon says</span><span class="speech-text"></span></div><svg class="robot-stage" viewBox="0 0 200 200" role="img" aria-label="Aidon speaking"><use href="#robot"></use></svg></div>
+      </section>
+
+      <section class="slide" data-title="Learn a better way next time" data-speech="Step four: I learn and adapt. A successful run gives me a workflow I can save and reuse. Next time, I adapt it instead of starting over. Here's the second run.">
+        <div class="copy">
+          <span class="eyebrow">04 · DAGs and learning</span>
+          <h2>Make the next run <span class="gradient">smarter.</span></h2>
+          <p class="support">Each goal becomes a directed acyclic graph: steps, dependencies, and acceptance criteria. Aidon saves successful workflows and adapts them when a similar goal returns.</p>
+          <div class="journey"><div class="journey-label">How it flows</div><div class="flow-steps"><span class="flow-step">Saved DAG</span><span class="flow-arrow">→</span><span class="flow-step">Adapt steps</span><span class="flow-arrow">→</span><span class="flow-step">Reuse workflow</span></div></div>
+          <div class="feature-card"><div class="feature-icon dag" role="img" aria-label="Aidon presenting a connected workflow graph"></div><div><strong>Plan → complete → reuse</strong><span>See what depends on what, and build on successful runs.</span></div></div>
+        </div>
+        <div class="visual"><div class="halo"></div><div class="orbit-dot"></div><div class="speech"><span class="speech-label">Aidon says</span><span class="speech-text"></span></div><svg class="robot-stage" viewBox="0 0 200 200" role="img" aria-label="Aidon speaking"><use href="#robot"></use></svg></div>
+      </section>
+
+      <section class="slide detail-slide" data-title="How saved DAGs are reused" data-speech="I save a DAG—a map of steps and dependencies. When a similar goal comes in, I retrieve it, adapt the differences, and run it again.">
+        <div class="copy">
+          <span class="eyebrow">04 · DAG reuse, step by step</span>
+          <h2>Save the path. <span class="gradient">Adapt next time.</span></h2>
+          <p class="support">A DAG makes dependencies and completion criteria explicit. A successful workflow becomes a starting point for similar goals instead of a blank page.</p>
+          <ol class="detail-flow">
+            <li class="detail-step"><span class="step-no">01</span><span class="step-copy"><strong>Turn the goal into a DAG</strong><small>Break it into steps, dependencies, deliverables, and criteria.</small></span></li>
+            <li class="detail-step"><span class="step-no">02</span><span class="step-copy"><strong>Complete and verify the run</strong><small>Check the deliverables against the criteria for each step.</small></span></li>
+            <li class="detail-step"><span class="step-no">03</span><span class="step-copy"><strong>Save the successful workflow</strong><small>Keep the DAG with the completed run for future recall.</small></span></li>
+            <li class="detail-step"><span class="step-no">04</span><span class="step-copy"><strong>Recall it for a similar goal</strong><small>Use prior steps as context when the next goal arrives.</small></span></li>
+            <li class="detail-step"><span class="step-no">05</span><span class="step-copy"><strong>Adapt to the new request</strong><small>Adjust the steps and dependencies to match its differences.</small></span></li>
+            <li class="detail-step"><span class="step-no">06</span><span class="step-copy"><strong>Run the updated workflow</strong><small>Start from proven structure, then learn from the new result.</small></span></li>
+          </ol>
+        </div>
+        <div class="visual"><div class="halo"></div><div class="orbit-dot"></div><div class="speech"><span class="speech-label">Aidon says</span><span class="speech-text"></span></div><svg class="robot-stage" viewBox="0 0 200 200" role="img" aria-label="Aidon speaking"><use href="#robot"></use></svg></div>
+      </section>
+    </main>
+    <footer class="controls">
+      <div class="progress-wrap"><span id="count">01 / 09</span><div class="progress" aria-label="Presentation progress"><span id="progress-fill" style="width:11.11%"></span></div><span id="slide-title">Meet Aidon</span></div>
+      <div class="buttons">
+        <span class="key-hint">← → to navigate · Esc to stop voice</span>
+        <button class="control" id="prev" type="button" aria-label="Previous slide">←</button>
+        <button class="control primary" id="speak" type="button" aria-label="Listen to Aidon speak this slide">▶ Listen</button>
+        <button class="control" id="next" type="button" aria-label="Next slide">→</button>
+      </div>
+    </footer>
+    <div class="sr-only" id="announcement" aria-live="assertive"></div>
+  </div>
+  <script>
+    (() => {
+      const slides = [...document.querySelectorAll('.slide')];
+      const count = document.getElementById('count');
+      const fill = document.getElementById('progress-fill');
+      const title = document.getElementById('slide-title');
+      const speakButton = document.getElementById('speak');
+      const announcement = document.getElementById('announcement');
+      let current = 0;
+      let utterance = null;
+      let speechSequence = 0;
+      const voiceAvailable = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+      const speechParts = {
+        'Meet Aidon': [
+          "Hello, I'm Aidon, an autonomous AI agent made by OppaAI.",
+          'OppaAI is an indie developer without formal IT or AI training.',
+          "Tell me a goal in plain words, and I'll work out the tools.",
+          "I'll prepare a safe workflow for you to approve, and reuse what works next time."
+        ],
+        'Start with a conversation': [
+          'Step one: just tell me what you need, in your own words.',
+          "I'll ask a few short questions, then confirm the plan with you before I start.",
+          'Let me show you.'
+        ],
+        'How the interview becomes a spec': [
+          'The interview in five steps: ask, fill the gaps, summarize, confirm, then plan.'
+        ],
+        'Build the missing capability': [
+          "Step two: when I hit something I can't do, I build the missing tool myself, test it in a sandbox, and ask before I keep it.",
+          'Watch.'
+        ],
+        'How a new tool or skill is made': [
+          'Every new skill is drafted, tested on good and bad input, scanned, and approved by the owner before I can use it.'
+        ],
+        'You are in control': [
+          'Step three: you stay in control.',
+          'Before anything consequential goes live, I show you exactly what will happen, and I only act if you approve.',
+          "I'll now hand over to my human partner, Oppa, to show you how I work."
+        ],
+        'How approval gates live actions': [
+          'I check it in a sandbox, show you the exact live action, then stop on reject—or run it and verify on approve.'
+        ],
+        'Learn a better way next time': [
+          'Step four: I learn and adapt.',
+          'A successful run gives me a workflow I can save and reuse.',
+          'Next time, I adapt it instead of starting over.',
+          "Here's the second run."
+        ],
+        'How saved DAGs are reused': [
+          'I save a DAG—a map of steps and dependencies.',
+          'When a similar goal comes in, I retrieve it, adapt the differences, and run it again.'
+        ]
+      };
+
+      function partsFor(slide) {
+        return speechParts[slide.dataset.title] || [slide.dataset.speech];
+      }
+
+      // Copy the mascot and its paint definitions into each SVG so every slide renders fully.
+      const robotDefinition = document.querySelector('#robot').cloneNode(true);
+      const robotPaint = document.querySelector('.robot-stage defs').cloneNode(true);
+      document.querySelectorAll('.robot-stage').forEach((stage, i) => {
+        if (i > 0) {
+          const use = stage.querySelector('use');
+          const holder = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+          holder.setAttribute('class', 'robot-copy');
+          const copy = robotDefinition.cloneNode(true);
+          copy.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
+          copy.removeAttribute('id');
+          copy.insertBefore(robotPaint.cloneNode(true), copy.firstChild);
+          holder.appendChild(copy);
+          use.replaceWith(holder);
+        }
+      });
+
+      function stopSpeaking() {
+        speechSequence++;
+        if (voiceAvailable) window.speechSynthesis.cancel();
+        document.querySelectorAll('.robot-stage').forEach(robot => robot.classList.remove('talking'));
+        speakButton.textContent = '▶ Listen';
+        speakButton.setAttribute('aria-label', 'Listen to Aidon speak this slide');
+      }
+
+      function show(index) {
+        stopSpeaking();
+        current = (index + slides.length) % slides.length;
+        slides.forEach((slide, i) => {
+          slide.classList.toggle('active', i === current);
+          const speech = slide.querySelector('.speech-text');
+          if (speech) speech.textContent = voiceAvailable
+            ? partsFor(slide)[0]
+            : partsFor(slide).filter(Boolean).join(' ');
+        });
+        count.textContent = `${String(current + 1).padStart(2, '0')} / ${String(slides.length).padStart(2, '0')}`;
+        fill.style.width = `${((current + 1) / slides.length) * 100}%`;
+        title.textContent = slides[current].dataset.title;
+        announcement.textContent = `${slides[current].dataset.title}. ${slides[current].dataset.speech}`;
+      }
+
+      function speak() {
+        if (!voiceAvailable) {
+          announcement.textContent = 'Voice playback is not available in this browser. Aidon’s spoken introduction is shown in the speech bubble.';
+          return;
+        }
+        stopSpeaking();
+        const sequence = speechSequence;
+        const slide = slides[current];
+        const bubble = slide.querySelector('.speech-text');
+        const parts = partsFor(slide);
+        let partIndex = 0;
+
+        function speakNextPart() {
+          if (sequence !== speechSequence) return;
+          if (partIndex >= parts.length) {
+            stopSpeaking();
+            return;
+          }
+          const line = parts[partIndex++];
+          bubble.textContent = line;
+          utterance = new SpeechSynthesisUtterance(line);
+          utterance.rate = 0.94;
+          utterance.pitch = 1.05;
+          utterance.onstart = () => {
+            if (sequence !== speechSequence) return;
+            slide.querySelector('.robot-stage')?.classList.add('talking');
+            speakButton.textContent = '■ Stop';
+            speakButton.setAttribute('aria-label', 'Stop narration');
+          };
+          utterance.onend = () => {
+            if (sequence !== speechSequence) return;
+            slide.querySelector('.robot-stage')?.classList.remove('talking');
+            speakNextPart();
+          };
+          utterance.onerror = () => {
+            if (sequence === speechSequence) stopSpeaking();
+          };
+          window.speechSynthesis.speak(utterance);
+        }
+
+        speakNextPart();
+      }
+
+      document.getElementById('prev').addEventListener('click', () => show(current - 1));
+      document.getElementById('next').addEventListener('click', () => show(current + 1));
+      speakButton.addEventListener('click', () => speakButton.textContent.includes('Stop') ? stopSpeaking() : speak());
+      document.addEventListener('keydown', event => {
+        const interactive = event.target instanceof Element && event.target.closest(
+          'button, a, input, textarea, select, [contenteditable="true"]');
+        if (event.key === ' ' && interactive) return;
+        if (event.key === 'ArrowRight' || event.key === ' ') { event.preventDefault(); show(current + 1); }
+        if (event.key === 'ArrowLeft') { event.preventDefault(); show(current - 1); }
+        if (event.key === 'Escape') stopSpeaking();
+        if (event.key.toLowerCase() === 's') speak();
+      });
+      if (!voiceAvailable) speakButton.title = 'Your browser does not support speech synthesis; use the speech bubble text.';
+      show(0);
+    })();
+  </script>
+</body>
+</html>

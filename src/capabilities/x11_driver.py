@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 
 class X11Driver:
@@ -22,7 +23,7 @@ class X11Driver:
         if not self.display:
             raise RuntimeError("DISPLAY is not set")
 
-    def _run(self, args: list[str]) -> None:
+    def _environment(self) -> dict:
         # xdotool only needs the X11 connection and a small runtime context.
         # Do not pass model, messaging, or MCP credentials to a child process.
         env = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL")
@@ -31,17 +32,75 @@ class X11Driver:
         for key in ("XAUTHORITY",):
             if key in os.environ:
                 env[key] = os.environ[key]
-        subprocess.run([self.executable, *args], env=env, check=True,
-                       capture_output=True, text=True, timeout=15)
+        return env
+
+    def _run(self, args: list[str]):
+        return subprocess.run([self.executable, *args], env=self._environment(), check=True,
+                              capture_output=True, text=True, timeout=15)
+
+    def applications(self) -> list[dict]:
+        """Published desktop IDs only; arbitrary commands are never accepted."""
+        import configparser
+        roots = [Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))]
+        roots += [Path(root) for root in os.environ.get(
+            "XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(":") if root]
+        found = {}
+        for root in roots:
+            app_root = root / "applications"
+            for path in sorted(app_root.rglob("*.desktop")):
+                app_id = path.relative_to(app_root).as_posix().replace("/", "-")
+                if app_id in found:
+                    continue
+                try:
+                    parser = configparser.ConfigParser(interpolation=None)
+                    parser.read(path, encoding="utf-8")
+                    entry = parser["Desktop Entry"]
+                    if entry.get("Type") != "Application" or entry.get("Hidden") == "true":
+                        found[app_id] = None
+                        continue
+                    found[app_id] = {"id": app_id, "name": entry.get("Name", path.stem)}
+                except (OSError, KeyError, configparser.Error):
+                    continue
+        return [app for app in found.values() if app]
+
+    def capture_focus(self) -> str:
+        window = self._run(["getwindowfocus"]).stdout.strip()
+        if not window.isdecimal():
+            raise RuntimeError("Cannot identify the focused desktop window")
+        return window
+
+    def restore_focus(self, window: str) -> None:
+        if not str(window).isdecimal():
+            raise ValueError("Invalid desktop window id")
+        try:
+            self._run(["windowactivate", "--sync", str(window)])
+        except subprocess.CalledProcessError:
+            # Minimal X11 sessions may have no EWMH window manager.
+            self._run(["windowfocus", "--sync", str(window)])
 
     def __call__(self, action: dict) -> None:
         kind = action["kind"]
-        if kind == "click":
+        if kind == "launch_app":
+            app_id = str(action.get("app_id", ""))
+            if app_id not in {app["id"] for app in self.applications()}:
+                raise ValueError("Application must be an installed desktop ID")
+            launcher = shutil.which("gtk-launch")
+            if not launcher:
+                raise RuntimeError("gtk-launch is unavailable")
+            env = self._environment()
+            for key in ("HOME", "XDG_DATA_HOME", "XDG_DATA_DIRS", "XDG_RUNTIME_DIR",
+                        "DBUS_SESSION_BUS_ADDRESS"):
+                if key in os.environ:
+                    env[key] = os.environ[key]
+            subprocess.run([launcher, app_id], env=env, check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=15)
+        elif kind == "click":
             self._run(["mousemove", "--sync", str(action["x"]), str(action["y"])])
             self._run(["click", "1"])
         elif kind == "type":
             self._run(["type", "--clearmodifiers", "--delay", "10",
-                       str(action["text"])])
+                       "--", str(action["text"])])
         elif kind == "key":
             self._run(["key", "--clearmodifiers", str(action["key"])])
         elif kind == "scroll":

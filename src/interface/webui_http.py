@@ -155,7 +155,7 @@ def make_handler(server):
                 self._send_static('index.html')
             elif parsed.path == '/documents':
                 self._send_static('docs.html')
-            elif parsed.path in ('/dag', '/capabilities', '/labs', '/memory', '/knowledge', '/reports', '/practice', '/graph'):
+            elif parsed.path in ('/dag', '/capabilities', '/labs', '/scheduler', '/memory', '/knowledge', '/reports', '/practice', '/graph'):
                 self._send_static(parsed.path.lstrip('/') + '.html')
             elif parsed.path == '/settings':
                 from .webui_settings_page import render_settings_page
@@ -322,6 +322,32 @@ def make_handler(server):
                 _research_query = _parse_qs_research(parsed.query)
                 conv = str(_research_query.get('conversation_id', [''])[0])
                 self._send_json(200, {'research_mode': _get_research(server.home, conv)})
+            elif parsed.path == '/api/scheduled-tasks':
+                from datetime import datetime
+                from .triggers import Scheduler
+                now = datetime.now()
+                jobs = []
+                for job in Scheduler(server.home).jobs:
+                    try:
+                        # A naive timestamp is interpreted as wall time in
+                        # the job's zone. Supply an instant for zoned jobs so
+                        # servers in UTC do not shift Vancouver schedules.
+                        next_run = job.next_due(now.astimezone() if job.tz else now)
+                    except Exception:
+                        next_run = None
+                    jobs.append({
+                        'name': str(job.name),
+                        'kind': str(job.kind or 'goal'),
+                        'goal': str(job.goal),
+                        'schedule': str(job.schedule),
+                        'timezone': str(job.tz or 'Server local time'),
+                        'next_run': next_run.isoformat(timespec='minutes') if next_run else '',
+                        'last_run': str(job.last_run or ''),
+                        'until': str(job.until or ''),
+                        'pending': bool(job.pending_run),
+                    })
+                jobs.sort(key=lambda item: (item['name'].casefold(), item['schedule']))
+                self._send_json(200, {'jobs': jobs})
             elif parsed.path == '/api/practice':
                 self._send_json(200, server.handle_practice_list())
             elif parsed.path == '/api/lab-session':
@@ -610,7 +636,10 @@ def make_handler(server):
                 self._send_json(200 if 'run_id' in result else 400, result)
             elif parsed.path.startswith('/api/runs/') and parsed.path.endswith('/approval'):
                 run_id = parsed.path[len('/api/runs/'):-len('/approval')].strip('/')
-                pending = server.webui_gate.pending_cards()
+                pending = server.webui_gate.pending_cards(run_id=run_id)
+                card_id = str(body.get('card_id', '') or '')
+                if card_id:
+                    pending = [card for card in pending if card['id'] == card_id]
                 if not pending:
                     self._send_json(409, {'error': 'no pending approval'})
                 else:

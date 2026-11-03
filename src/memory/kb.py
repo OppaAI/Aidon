@@ -294,6 +294,10 @@ class KnowledgeBase:
             digest = file_hash(path)
             if manifest.get(path.name) != digest:
                 ingested += self.ingest_file(path)
+        # Each successful ingest persists its new hash. Reload those updates
+        # before pruning, otherwise saving the pre-scan snapshot below erases
+        # them and unchanged files are parsed and embedded again on every scan.
+        manifest = self._manifest()
         # Prune chunks for files that are gone from knowledge/.
         present = {p.name for p in self.path.iterdir() if p.is_file()}
         for file_name in list(manifest.keys()):
