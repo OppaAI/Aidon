@@ -539,16 +539,44 @@ class PlanningMixin:
         reply = self._chat(_phase, [Message("system", system), user_message])
         if self.budget is not None:
             self.budget.add_tokens(reply)
+
+        def parse_plan_json(text):
+            try:
+                data = json.loads(text)
+            except (json.JSONDecodeError, TypeError):
+                from .planner import _extract_json
+                data = _extract_json(text)
+            if (not isinstance(data, dict)
+                    or not isinstance(data.get("steps"), list)
+                    or not data["steps"]):
+                raise ValueError("plan must be an object with nonempty steps")
+            return data
+
         try:
-            data = json.loads(reply)
-        except json.JSONDecodeError:
+            data = parse_plan_json(reply)
+        except (ValueError, json.JSONDecodeError, TypeError):
             # Some models wrap the requested JSON in a short preface or a
             # code fence. Recover a real object when possible, but never
             # pretend a generic file-writing plan satisfies the user's goal.
+            # A non-image goal gets one bounded JSON-only correction attempt;
+            # planning is side-effect-free, so this cannot repeat tool calls.
+            correction = (
+                "Your previous response could not be read as a plan. Re-read "
+                "the original request and return one complete JSON object only, "
+                "with keys summary, deliverable_descriptions, steps, "
+                "deliverables, criteria, and skills. Each step must use a "
+                "listed tool and include its arguments. Do not include prose "
+                "or a code fence.")
+            if self.budget is not None:
+                self.budget.add_tokens(correction)
+            reply = self._chat(
+                _phase, [Message("system", system), user_message,
+                         Message("user", correction)])
+            if self.budget is not None:
+                self.budget.add_tokens(reply)
             try:
-                from .planner import _extract_json
-                data = _extract_json(reply)
-            except (ValueError, json.JSONDecodeError):
+                data = parse_plan_json(reply)
+            except (ValueError, json.JSONDecodeError, TypeError):
                 fallback = self._fallback_image_edit_plan(
                     goal, spec=spec, failure_context=failure_context)
                 if fallback is not None:
@@ -560,8 +588,8 @@ class PlanningMixin:
                     "plan", "failed",
                     "The model did not return a usable plan; no steps were run.")
                 raise ValueError(
-                    "planner: model did not return a usable JSON plan; "
-                    "no steps were run") from None
+                    "planner: model did not return a usable JSON plan after one "
+                    "correction attempt; no steps were run") from None
         try:
             steps = data.get("steps", [])
             # The plan validator correctly rejects arbitrary absolute paths,
