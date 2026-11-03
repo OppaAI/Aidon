@@ -28,10 +28,10 @@
 > Built for the Meta Global AI Developer Hackathon (The entire codebase was made between October 26 – November 4, 2026).  
 This project showcases four capabilities. Meta models power its main agentic reasoning and optional image and speech to text features, alongside the supporting models and services described below:
 >
->- **Human Natural Language and Interview as source input** —  Understands goals in plain natural language and interviews the user in conversation to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it. Ask mode is the default: the agent asks chat questions first and works to a verified, frozen spec before planning anything, and the same conversation works in chat, on WhatsApp or Slack, or on the command line.
+>- **Human Natural Language and Interview as source input** — Understands goals in plain natural language and can interview the user to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it. Plan mode is the default; users can choose Ask mode for a guided interview that produces a verified spec before planning. The same conversation works in chat, on WhatsApp or Slack, or on the command line.
 >- **Grows its own capabilities with tools/skills creation** — drafting, sandbox-testing, and adopting tools and skills that plug into its agentic workflows, including niche ones tailored to a user's own task. A tool plugin is a directory with a manifest and module files: it is tested in the sandbox first, scanned for unsafe patterns, and adopted only on human approval, after which its tools are usable immediately in the current run and every later goal. Skills follow a candidate → validated → trusted lifecycle, and only trusted skills enter plan prompts.
 >- **Keeps a human in the loop for decision** — every consequential action passes through human review and approval before it goes live, with verification and rollback on failure, so the agent's autonomy never outruns its owner's consent. Nothing unproven goes live: work runs in a sandbox first, is verified by code, and only failed steps are repaired (at most 3 attempts); the approval card itself fails closed on timeout, and approvals can also be given by replying approve or reject on WhatsApp or Slack.
->- **DAG graph generation of workflows after successful runs** — every goal becomes a directed acyclic graph of steps with dependencies, deliverables, and acceptance criteria, so the agent knows what depends on what and what "done" means for each step. Completed DAGs are saved and adapted to new goals instead of planned from scratch, which is how Aidon reuses past work and saves time and tokens and LLM calls over time.
+>- **DAG graph generation of workflows after successful runs** — plans are represented as directed acyclic graphs of steps with dependencies, deliverables, and acceptance criteria, so the agent knows what depends on what and what "done" means for each step. Eligible successful workflows are saved and can be recalled and adapted to similar goals, reducing repeated planning work over time.
 
 > **Meta models used:**
 >
@@ -55,7 +55,7 @@ This project showcases four capabilities. Meta models power its main agentic rea
 
 Give Aidon a goal in plain language, in chat, on WhatsApp or Slack, or on the command line. Aidon will:
 
-1. **Interview** — Ask mode is the default: chat questions first, to a verified spec; skip with an attached spec sheet, or run straight through in Execute mode
+1. **Choose a mode** — Plan mode is the default. Choose Ask mode for a guided interview that turns chat answers into a verified spec; an attached spec sheet can also provide the requirements, or run straight through in Execute mode.
 2. **Research and recall** — web search and YouTube, plus hybrid Qdrant recall over past episodes and knowledge, facts only if a source excerpt contains them
 3. **Plan** — steps, deliverables, and criteria, as a DAG, not a loose list
 4. **Sandbox** — execute in bubblewrap, Docker, subprocess, or on a VM over SSH, verify by code (with an optional model second opinion, off by default), repair only failed steps, at most 3 attempts
@@ -88,6 +88,7 @@ The demo uses Meta's Model API at runtime for Muse Spark reasoning and optional 
 
 ## 📚 Guides
 
+- [Features](FEATURES.md) — the four hackathon capabilities and Mermaid workflow diagrams.
 - [Installation](docs/INSTALLATION.md) — prerequisites, setup, and launch.
 - [Configuration](docs/CONFIGURATION.md) — models, `.env`, and the Aidon home.
 - [Usage](docs/USAGE.md) — WebUI and messaging, core loop, spec sheet, tools and plugins, triggers, research and live execution, budgets, trace, v1 API, and MCP.
@@ -126,6 +127,7 @@ Code lives in `src/`, grouped, not flat:
 - `src/interface/` — WebUI, messaging, v1 API, MCP, triggers, scheduler, approval, run control
 - `src/capabilities/` — sandbox and execution, tools and plugins, search, voice, GitHub, email, image, charts, Unity, Playwright MCP, SAM, video
 - `src/social/` — one-way social publishing, Threads and Instagram, plus YouTube search, metadata, and transcripts
+- `docker/` — Dockerfile, Compose configurations, build ignore rules, and the opt-in desktop demo launcher
 
 Run it with `python -m src.system.main goal "..."`, or `./launch.sh goal "..."`. `src/` itself has no modules at the top level, only `__init__.py` and the groups.
 

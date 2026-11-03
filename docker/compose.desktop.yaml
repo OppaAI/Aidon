@@ -8,4 +8,4 @@ services:
       AIDON_KERNEL: "0"
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:ro
-      - "${AIDON_DESKTOP_XAUTHORITY:?Use scripts/start-desktop-demo.sh from your desktop session}:/run/aidon-xauthority:ro"
+      - "${AIDON_DESKTOP_XAUTHORITY:?Use docker/start-desktop-demo.sh from your desktop session}:/run/aidon-xauthority:ro"

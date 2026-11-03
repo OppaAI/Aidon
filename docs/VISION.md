@@ -42,4 +42,4 @@ These questions should guide which capabilities Aidon deepens, simplifies, makes
 
 ## Current status
 
-This document describes Aidon's direction. The repository is experimental, and its current capabilities do not yet prove that every model size or workflow will meet this vision. The roadmap and production-readiness notes describe what is implemented and what still needs validation.
+This document describes Aidon's direction. The repository is experimental, and its current capabilities do not yet prove that every model size or workflow will meet this vision. The feature guide and roadmap describe the current implementation and the work that remains.

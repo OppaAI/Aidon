@@ -3,9 +3,9 @@ services:
     environment:
       PYTHONPATH: /opt/aidon
     volumes:
-      - ./src:/opt/aidon/src:ro
+      - ../src:/opt/aidon/src:ro
   aidon-webhooks:
     environment:
       PYTHONPATH: /opt/aidon
     volumes:
-      - ./src:/opt/aidon/src:ro
+      - ../src:/opt/aidon/src:ro

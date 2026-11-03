@@ -1,6 +1,10 @@
+name: aidon
+
 services:
   aidon:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     restart: unless-stopped
     # Match the owner of the bind-mounted aidon-data directory on AIVA.
     user: "${AIDON_UID:-1000}:${AIDON_GID:-1000}"
@@ -9,7 +13,7 @@ services:
       AIDON_HOME: /data
     command: ["webui", "serve", "--port", "${AIDON_WEBUI_PORT:-8765}"]
     volumes:
-      - ./aidon-data:/data
+      - ../aidon-data:/data
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=256m
@@ -29,7 +33,9 @@ services:
   # service means the webhook-only process survives container and host
   # restarts, while the full WebUI stays private on port 8765.
   aidon-webhooks:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     restart: unless-stopped
     # Match the UID/GID used by the main Aidon service so both processes
     # can access the shared bind-mounted home and outboxes.
@@ -39,7 +45,7 @@ services:
       AIDON_HOME: /data
     command: ["webui", "serve", "--webhook-only", "--port", "8766"]
     volumes:
-      - ./aidon-data:/data
+      - ../aidon-data:/data
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=256m

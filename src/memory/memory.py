@@ -57,17 +57,13 @@ removed, it never runs on its own, and it never deletes
 promoted LTM or library files, only memory points.
 
 Promotion, episodic -> LTM:
-At the end of a completed run, Aidon may ask the user whether
-to put that run's episodic memories into LTM. If the
-environment flag AIDON_AUTO_PROMOTE_TO_LTM is "1", promotion
-happens automatically, without asking. Otherwise the default
-is to ask, via a caller-supplied ask callback, and a "no"
-leaves episodic memories chat-scoped only. Promotion
-copies a point to the semantic collection (for a fact) or
-to the experience collection (for a workflow), and marks
-the episodic point as promoted, it does not delete the
-episodic original, and it copies the payload, so a library
-link survives promotion.
+The goal runner promotes eligible episodic records to the
+semantic collection when a run or chat exchange completes.
+Successful workflows are also stored as Experiences and
+reusable DAGs. Promotion copies the point and marks the
+episodic point as promoted; it does not delete the episodic
+original, and it copies the payload, so a library link
+survives promotion.
 
 Chats, without a second store:
 Conversation ids are payload fields on working
@@ -85,10 +81,12 @@ bytes; it holds the image vector and the library link, so
 recall returns the file reference alongside the text.
 
 If qdrant_client is not installed, the store falls back to
-an in-memory store with the same collection / point / search
-shape, so tests run offline. When qdrant_client is installed,
+SQLite with the same collection / point / search shape, so
+memory remains durable. When qdrant_client is installed,
 the real Qdrant store is used, local mode by default, with
-one shared client per path or URL per process.
+one shared client per path or URL per process. Separate
+conversation and application records are also persisted in
+SQLite under the Aidon home.
 """
 
 from __future__ import annotations
@@ -128,7 +126,7 @@ def _shape_overlap(a: set[str], b: set[str]) -> float:
 
 
 class Memory:
-    """STM + episodic + semantic + experience + knowledge, Qdrant for all."""
+    """STM + episodic + semantic + experience + knowledge memory."""
 
     def __init__(self, home: Path, embedder: Embedder | None = None,
                  store=None, entity_graph=None):
