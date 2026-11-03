@@ -5,13 +5,25 @@
 [![Repo](https://img.shields.io/badge/Repo-OppaAI%2FAidon-D9578C)](https://github.com/OppaAI/Aidon)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/Status-experimental-orange.svg)
+
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu&logoColor=white)](https://ubuntu.com/)
 [![NVIDIA](https://img.shields.io/badge/NVIDIA-accelerated-76B900?logo=nvidia&logoColor=white)](https://www.nvidia.com/)<br>
 [![Sandbox](https://img.shields.io/badge/Sandbox-Modal%20%7C%20Docker-2496ED?logo=docker&logoColor=white)](https://modal.com/products/sandboxes)
 [![Docker](https://img.shields.io/badge/Docker-supported-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![Meta Models](https://img.shields.io/badge/Meta%20Models-Muse%20Spark%20Open-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
-[![Memory](https://img.shields.io/badge/Memory-Qdrant-8E75B2)](https://qdrant.tech/)
+[![Memory](https://img.shields.io/badge/Memory-Qdrant%20%7C%20SQLite-8E75B2)](https://qdrant.tech/)
+
+[![Baseten](https://img.shields.io/badge/Inference-Baseten-6366F1)](https://www.baseten.co/)
+[![Modal](https://img.shields.io/badge/Cloud%20Compute-Modal-16A34A)](https://modal.com/)
+
+[![Chat Model](https://img.shields.io/badge/Chat%20Model-Llama%203.2-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
+[![Agentic Model](https://img.shields.io/badge/Agentic%20Model-Muse%20Spark%20Open-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
+[![Image Model](https://img.shields.io/badge/Image%20Model-Muse%20Image%201.0-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
+[![ASR Model](https://img.shields.io/badge/ASR%20Model-Muse%20Voice%20Transcribe-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
+[![Segmentation Model](https://img.shields.io/badge/Segmentation%20Model-SAM-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
+[![TTS Provider](https://img.shields.io/badge/TTS%20Provider-Fish%20Audio-00A6A6)](https://fish.audio/)
+[![Decision Model](https://img.shields.io/badge/Decision%20Model-Clef%209B-7C3AED)](https://modal.com/)
+[![Embedding Model](https://img.shields.io/badge/Embedding%20Model-EmbeddingGemma%202-4285F4?logo=google&logoColor=white)](https://huggingface.co/google/embeddinggemma-2)
 
 ---
 
