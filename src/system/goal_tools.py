@@ -27,6 +27,7 @@ CAPABILITY_TOOLS_WHEN_OPTIONAL_DISABLED = frozenset({
     "build_ebook", "make_docx", "make_latex", "make_slides",
     "make_spreadsheet", "transcribe_audio", "tts_speak",
     "email_make_draft", "email_send", "slack_send", "slack_send_file",
+    "email_read",
     "whatsapp_send", "whatsapp_send_media", "threads_publish",
     "threads_post", "instagram_publish", "instagram_post",
     "youtube_learn", "youtube_upload", "fetch_feed", "search_document",

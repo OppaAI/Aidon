@@ -277,10 +277,13 @@ class PlanRunMixin:
             self._trace("plan", "serialized",
                         "skill adoption is a replanning boundary")
         max_attempts = _resolve_count("AIDON_MAX_ATTEMPTS", MAX_ATTEMPTS, 1)
-        if fixed_lab_plan or any(step.tool in {"computer_use", "computer_use_task"}
-                                 for step in plan.normalized_steps()):
+        if fixed_lab_plan or any(step.tool in {
+                "computer_use", "computer_use_task", "email_send"}
+                for step in plan.normalized_steps()):
             # GUI actions change live desktop state. Replaying a failed task
             # can repeat typing/clicks and present the same approvals again.
+            # An email send can also have succeeded remotely before a
+            # network error reached us, so never retry a send automatically.
             max_attempts = 1
         for attempt in range(1, max_attempts + 1):
             failures: list[str] = []
