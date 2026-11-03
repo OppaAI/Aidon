@@ -89,6 +89,7 @@
   let pollInFlight = false;
   let lastEventCount = 0;
   let lastTraceCount = 0;
+  let finalReplySeenFor = null;
   let lastTracePhase = null;
   let routeShownFor = null;
   let lastRoute = null;
@@ -1591,8 +1592,12 @@
         proceedShownFor = null;
         cardShownFor = null;
         currentRun = data.run_id;
+        finalReplySeenFor = null;
         lastEventCount = 0;
         lastTraceCount = 0;
+        lastTracePhase = null;
+        runTraceHistory = [];
+        lastRoute = null;
         setStatus("busy", "working");
         renderStages("interpret");
         steerRow.hidden = false;
@@ -1726,6 +1731,7 @@
             addMsg("user", e.text, e.t);
         }
         else if (e.kind === "aidon-stream" || e.kind === "aidon" || e.kind === "aidon-final") {
+          if (e.kind === "aidon-final") finalReplySeenFor = polledRun;
           const sid = e.stream_id || "";
           let streamKey = sid;
           if (!streamMessages[streamKey] && e.kind === "aidon-final" &&
@@ -1879,6 +1885,33 @@
         if (waiting && composerWasDisabled) focusGoalInput();
       }
       if (run.status !== "running") {
+        // A terminal status should normally arrive after the dispatcher has
+        // appended its final chat event. If an exception or transport race
+        // loses that event, don't leave the owner with only a status light.
+        // Stopped runs are different: their Proceed card is the response.
+        if (run.status !== "stopped" && finalReplySeenFor !== polledRun) {
+          const failure = [...runTraceHistory].reverse().find((item) =>
+            String(item.status || "").toLowerCase() === "failed" &&
+            (item.detail || item.title || item.error));
+          let fallback;
+          if (run.status === "failed") {
+            fallback = "This run failed before Aidon could send its final response.";
+            if (failure) {
+              const detail = String(failure.detail || failure.title || failure.error);
+              fallback += " " + detail;
+            } else {
+              fallback += " Check the Thinking panel for the failure details.";
+            }
+          } else if (run.status === "cancelled") {
+            fallback = "This run was cancelled before Aidon sent a final response.";
+          } else if (run.status === "rejected") {
+            fallback = "This run was rejected before Aidon sent a final response.";
+          } else {
+            fallback = "The run finished, but Aidon did not send a final response.";
+          }
+          finalReplySeenFor = polledRun;
+          addMsgTyped("aidon", fallback, null, true, lastRoute);
+        }
         const composerWasDisabled = input.disabled;
         waitingForLab = false;
         // Lazy capabilities (especially memory) can initialize during a
@@ -2324,6 +2357,7 @@
       return;
     }
     lastEventCount = 0;
+    finalReplySeenFor = null;
     labCard = null;
     lastTraceCount = 0;
     lastTracePhase = null;
@@ -2338,6 +2372,7 @@
     proceedShownFor = null;
     approvalSlot.innerHTML = "";
     currentRun = data.run_id;
+    finalReplySeenFor = null;
     setStatus("busy", "working");
     document.getElementById("dag-activity").textContent = "Checking for a previous DAG…";
     renderStages("interpret");
@@ -2358,6 +2393,7 @@
   window.aidonReconnectInterview = (active) => {
     if (!active || !active.run_id) return;
     currentRun = active.run_id;
+    finalReplySeenFor = null;
     lastEventCount = active.event_total || 0;
     lastTraceCount = active.trace_total || 0;
     waitingForLab = !!active.lab;

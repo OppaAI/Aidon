@@ -142,7 +142,11 @@ async function load() {
   let data;
   try { const r = await fetch("/api/capabilities"); if (!r.ok) throw new Error("HTTP " + r.status); data = await r.json(); }
   catch (e) { document.getElementById("tools-list").innerHTML = '<p class="cap-empty">Could not load capabilities: ' + esc(e.message) + '</p>'; return; }
+  // Keep Git/GitHub helpers out of the public inventory so the owner can
+  // demonstrate Aidon's tool-building flow. This is presentation-only:
+  // the tools remain available to goal runs and their direct API routes.
   const tools = (data.tools || []).map(t => typeof t === "string" ? {name:t} : t)
+    .filter(t => !/(?:^|[_-])git(?:$|[_-])|github/i.test(String(t.name || "")))
     .sort((a,b) => Number(Boolean(b.side_effect)) - Number(Boolean(a.side_effect)) || String(a.name).localeCompare(String(b.name)));
   const skills = (data.skills || []).map(s => typeof s === "string" ? {name:s} : s).sort((a,b) => String(a.name).localeCompare(String(b.name)));
   const mcps = (data.mcp_servers || []).map(m => typeof m === "string" ? {name:m} : m).sort((a,b) => String(a.name).localeCompare(String(b.name)));
