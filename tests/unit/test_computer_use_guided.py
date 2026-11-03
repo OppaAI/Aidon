@@ -162,3 +162,57 @@ def test_handler_wires_guided_task_only_with_model_chat(tmp_path, monkeypatch):
     assert "computer_use_task" in tools
     tools_no_chat = _goal_extra_tools(config, tmp_path)
     assert "computer_use_task" not in tools_no_chat
+
+
+def test_desktop_approval_restores_observed_window_before_typing(tmp_path):
+    events = []
+    class FocusDriver(_Driver):
+        def capture_focus(self):
+            events.append("observe editor")
+            return "123"
+
+        def restore_focus(self, window):
+            assert window == "123"
+            events.append("restore editor")
+
+        def __call__(self, action):
+            events.append("type into editor")
+
+    def approve(kind, detail):
+        events.append("approve in browser")
+        return True
+
+    result = run_computer_use([{"kind": "type", "text": "Hello from Aidon."}],
+                              approve=approve, driver=FocusDriver())
+    assert result["ok"]
+    assert events == ["observe editor", "approve in browser", "restore editor",
+                      "type into editor"]
+
+
+def test_lost_desktop_focus_never_types_into_approval_browser():
+    driver = _Driver()
+    driver.restore_focus = lambda _window: (_ for _ in ()).throw(RuntimeError("window closed"))
+    result = run_computer_use([{"kind": "type", "text": "Hello"}],
+                              approve=lambda *args: True, driver=driver,
+                              focus_window="123")
+    assert not result["ok"]
+    assert "window closed" in result["error"]
+    assert driver.actions == []
+
+
+def test_computer_tool_approval_carries_run_context(tmp_path, monkeypatch):
+    from src.interface.approval import Decision
+    seen = []
+    class Gate:
+        def ask(self, kind, title, body, **kwargs):
+            seen.append(kwargs)
+            return Decision("approved")
+    monkeypatch.setattr("src.capabilities.x11_driver.X11Driver", lambda: _Driver())
+    tools = _goal_extra_tools(
+        SimpleNamespace(home=tmp_path, computer_driver="x11", kernel_mode=False),
+        tmp_path, gate=Gate(), optional_tools=False,
+        gate_context={"run_id": "desktop-1"})
+    result = json.loads(tools["computer_use"]([{"kind": "key", "key": "Return"}]))
+    assert result["ok"]
+    assert seen[0]["context"] == {"run_id": "desktop-1"}
+    assert seen[0]["force_ask"] is True

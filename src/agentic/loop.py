@@ -533,9 +533,9 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
         _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
         # Ask mode explicitly requests an interview. Advisory chat routing
         # must not swallow that choice (including a sticky /ask on WhatsApp).
-        if self.mode == "ask" and spec is None:
+        if getattr(self, "mode", None) == "ask" and spec is None:
             self.last_route = ("agentic", 1.0)
-            if callable(self.route_callback):
+            if callable(getattr(self, "route_callback", None)):
                 self.route_callback(self.last_route)
         _route = getattr(self, "last_route", None)
         if (not getattr(self, "resume_interview", False) and getattr(self, "use_semantic_router_skip", False) and _route

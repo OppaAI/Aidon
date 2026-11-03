@@ -1,14 +1,15 @@
 """Intent routing in every mode, and no live approval without live actions.
 
 A chat- or webchat-routed message gets a direct reply even when the
-chooser is on Ask: the intent skip runs before the mode interview.
-An agentic-routed message still interviews in Ask mode. And a run
+chooser is on Plan. Ask mode always interviews, even when the router
+classifies a dinner idea request as chat or webchat. And a run
 whose plan has no live actions never asks "Approve live execution?",
 a gate whose force_ask would otherwise repeat the mode-stop approval
 for an empty set (and bypass even an Auto-Approve grant).
 """
 
 import json
+import pytest
 from types import SimpleNamespace
 
 from src.interface.approval import ApprovalGate, Decision
@@ -34,14 +35,14 @@ class _Route:
         return (self.route, self.confidence)
 
 
-def test_ask_mode_chat_route_skips_interview(tmp_path):
+def test_plan_mode_chat_route_skips_interview(tmp_path):
     def _never_ask(question):
         raise AssertionError("interview must not run for a chat-routed greeting")
 
     runner = _runner(tmp_path, FakeClient("hey, doing well"),
                      semantic_router=_Route("chat"),
                      use_semantic_router_skip=True,
-                     mode="ask", question_ask=_never_ask,
+                     mode="plan", question_ask=_never_ask,
                      conversation_id="greeting")
     report = runner.run("Hey Aidon, how are you doing today?")
     assert report.status == "chat"
@@ -93,14 +94,14 @@ def test_plain_chat_route_includes_recalled_cross_chat_fact(tmp_path, monkeypatc
     assert "Do not reinterpret a word from the question" in sent
 
 
-def test_ask_mode_webchat_route_skips_interview(tmp_path):
+def test_plan_mode_webchat_route_skips_interview(tmp_path):
     def _never_ask(question):
         raise AssertionError("interview must not run for a webchat-routed question")
 
     runner = _runner(tmp_path, FakeClient("sunny and clear"),
                      semantic_router=_Route("webchat"),
                      use_semantic_router_skip=True,
-                     mode="ask", question_ask=_never_ask,
+                     mode="plan", question_ask=_never_ask,
                      researcher=lambda goal: "Vancouver weather: sunny",
                      conversation_id="weather")
     report = runner.run("What is the weather in Vancouver today?")
@@ -109,7 +110,8 @@ def test_ask_mode_webchat_route_skips_interview(tmp_path):
     assert not report.mode_stop
 
 
-def test_ask_mode_agentic_route_still_interviews(tmp_path):
+@pytest.mark.parametrize("route", ["agentic", "chat", "webchat"])
+def test_ask_mode_always_interviews(tmp_path, route):
     class _InterviewClient(FakeClient):
         def __init__(self):
             self.calls = 0
@@ -127,11 +129,12 @@ def test_ask_mode_agentic_route_still_interviews(tmp_path):
                                         "budget_cents": 10000}})
 
     runner = _runner(tmp_path, _InterviewClient(),
-                     semantic_router=_Route("agentic", 1.0),
+                     semantic_router=_Route(route, 1.0),
                      use_semantic_router_skip=True,
                      mode="ask", question_ask=lambda q: "roast beef",
                      conversation_id="dinner")
-    report = runner.run("Plan a dinner")
+    report = runner.run("Give me ideas for Thanksgiving dinner with a $200 budget")
+    assert runner.last_route == ("agentic", 1.0)
     assert report.status == "stopped"
     assert report.mode_stop
     assert report.mode_stop["mode"] == "ask"
