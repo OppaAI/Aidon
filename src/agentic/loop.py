@@ -596,7 +596,8 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
                     self.client, self.home, memory=self.memory, gate=None,
                     conversation_id=self.conversation_id)
                 result = interviewer.start_from_message(
-                    goal, ask=self.question_ask, approve=None)
+                    goal, ask=self.question_ask, approve=None,
+                    use_memory=False)
             except Exception as exc:
                 return self._finalize(RunReport(
                     "failed", goal, Plan(steps=[], deliverables=[], criteria=[]),
