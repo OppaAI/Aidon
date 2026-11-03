@@ -227,17 +227,9 @@ def register_creation_tools(config, workdir, tools, approve, confined,
             return make_draft(config.home, to, subject, body)
 
         def email_send(draft=None, to="", subject="", body="", owner_email=""):
-            # The tool used to pass sender=None, so it could only
-            # keep the draft and always reported "no sender". With
-            # Gmail keys present it now sends for real. Safety is
-            # layered, not repeated: interactive runs already pass
-            # the loop's send-gate (a human card) before dispatch,
-            # so their approve callback stays permissive; scheduled
-            # runs pass the ScheduledGate (email tools only) and
-            # then this callback refuses every non-owner recipient
-            # — send_draft skips the callback entirely for owner
-            # sends, so owner mail is the only mail a scheduled
-            # run can ever deliver.
+            # Gmail is the only send transport. External recipients get
+            # one informed approval containing the actual draft; owner
+            # mail follows the standing owner-recipient exception.
             sender = None
             if (os.environ.get("GMAIL_CLIENT_ID", "")
                     and os.environ.get("GMAIL_CLIENT_SECRET", "")
@@ -298,9 +290,6 @@ def register_creation_tools(config, workdir, tools, approve, confined,
 
         tools["email_make_draft"] = email_make_draft
         tools["email_read"] = email_read
-        # Let the common dispatch approval layer honor the standing
-        # owner-recipient exception without opening the draft file.
-        email_send.owner_email = (getattr(config, "owner_email", "") or "").strip()
         tools["email_send"] = email_send
     except Exception:
         pass
