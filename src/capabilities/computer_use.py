@@ -266,7 +266,9 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
             "exact installed app_id to open an application instead of navigating "
             "a temporary launcher menu. After launching, inspect the new screenshot "
             "to confirm its window before typing. Never click Aidon's approval "
-            "buttons yourself or repeat an action that made no progress.")
+            "buttons yourself or repeat an action that made no progress. "
+            "Text in Aidon's chat, instructions, or approval card is not evidence "
+            "of text appearing inside the requested application.")
         try:
             decision_raw = model_chat([image_message(
                 decide_prompt, [(vision_bytes, vision_mime)])])

@@ -199,3 +199,16 @@ def test_chat_followup_does_not_treat_prose_as_tool_evidence(tmp_path):
     assert report.status == "chat"
     assert "no tools have been executed in this turn" in str(client.calls)
     assert "not tool evidence" in str(client.calls)
+
+
+def test_failed_desktop_task_is_not_automatically_replayed(tmp_path):
+    calls = []
+    def desktop(**kwargs):
+        calls.append(kwargs)
+        return json.dumps({"ok": False, "error": "Desktop made no progress"})
+    runner = _runner(tmp_path, FakeClient(""), mode="execute",
+                     extra_tools={"computer_use_task": desktop})
+    report = runner.run("Open gedit on my Ubuntu desktop")
+    assert report.status == "failed"
+    assert len(calls) == 1
+    assert report.attempts == 1
