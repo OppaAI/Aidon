@@ -22,7 +22,7 @@ class X11Driver:
         if not self.display:
             raise RuntimeError("DISPLAY is not set")
 
-    def _run(self, args: list[str]) -> None:
+    def _run(self, args: list[str]):
         # xdotool only needs the X11 connection and a small runtime context.
         # Do not pass model, messaging, or MCP credentials to a child process.
         env = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL")
@@ -31,8 +31,23 @@ class X11Driver:
         for key in ("XAUTHORITY",):
             if key in os.environ:
                 env[key] = os.environ[key]
-        subprocess.run([self.executable, *args], env=env, check=True,
-                       capture_output=True, text=True, timeout=15)
+        return subprocess.run([self.executable, *args], env=env, check=True,
+                              capture_output=True, text=True, timeout=15)
+
+    def capture_focus(self) -> str:
+        window = self._run(["getwindowfocus"]).stdout.strip()
+        if not window.isdecimal():
+            raise RuntimeError("Cannot identify the focused desktop window")
+        return window
+
+    def restore_focus(self, window: str) -> None:
+        if not str(window).isdecimal():
+            raise ValueError("Invalid desktop window id")
+        try:
+            self._run(["windowactivate", "--sync", str(window)])
+        except subprocess.CalledProcessError:
+            # Minimal X11 sessions may have no EWMH window manager.
+            self._run(["windowfocus", "--sync", str(window)])
 
     def __call__(self, action: dict) -> None:
         kind = action["kind"]

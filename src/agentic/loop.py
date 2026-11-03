@@ -531,12 +531,12 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
         # Computed early: the pre-interview intent skip below
         # needs it, and the write-intent guard below reuses it.
         _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
-        # Intent routing applies in every mode, before any
-        # mode interview: a chat-routed message gets a plain
-        # reply and a webchat-routed message a research-backed
-        # reply, with no interview and no spec. Research mode
-        # and force_web keep their existing paths below, so
-        # they are excluded here.
+        # Ask mode explicitly requests an interview. Advisory chat routing
+        # must not swallow that choice (including a sticky /ask on WhatsApp).
+        if self.mode == "ask" and spec is None:
+            self.last_route = ("agentic", 1.0)
+            if callable(self.route_callback):
+                self.route_callback(self.last_route)
         _route = getattr(self, "last_route", None)
         if (not getattr(self, "resume_interview", False) and getattr(self, "use_semantic_router_skip", False) and _route
                 and _route[0] == "chat" and spec is None and not _write_intent

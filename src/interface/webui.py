@@ -226,9 +226,10 @@ class WebUIGate:
             card = self.cards[card_id]
             verdict = card["verdict"] or "rejected"
             card["verdict"] = verdict
-            return Decision(verdict, edited_text=card.get("edited_text", ""))
+            return Decision(verdict, edited_text=card.get("edited_text", ""),
+                            reason="timeout" if not event.is_set() else "")
 
-    def pending_cards(self) -> list[dict]:
+    def pending_cards(self, run_id: str | None = None) -> list[dict]:
         """Cards still awaiting a verdict, in creation order.
 
         A card leaves this list as soon as it is approved or
@@ -239,7 +240,8 @@ class WebUIGate:
             return [{"id": card_id, "kind": card["kind"],
                      "title": card["title"], "body": card["body"]}
                     for card_id, card in self.cards.items()
-                    if card["verdict"] is None]
+                    if card["verdict"] is None and
+                    (run_id is None or card.get("context", {}).get("run_id") == run_id)]
 
     def cancel_run(self, run_id: str) -> None:
         self.cancel_all(run_id=run_id)

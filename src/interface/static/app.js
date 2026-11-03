@@ -1279,8 +1279,8 @@
   }
 
   function showApprovalCard(run, pending) {
-    if (cardShownFor === run.run_id + pending.title) return;
-    cardShownFor = run.run_id + pending.title;
+    const cardKey = run.run_id + pending.id;
+    if (cardShownFor === cardKey) return;
     const replay = Array.isArray(run.replay) ? run.replay : [];
     approvalSlot.innerHTML = ""; // only one active card per run — replace, don't stack
     const card = document.createElement("div");
@@ -1317,6 +1317,8 @@
           '<button class="reject" data-d="rejected">Reject</button>') +
       "</div>";
     approvalSlot.appendChild(card);
+    cardShownFor = cardKey;
+    card.dataset.cardId = pending.id;
     const speakBtn = playButton(pending.title + ". " + pending.body, null);
     card.querySelector(".row").appendChild(speakBtn);
     // A waiting decision is worth hearing about - always, not only
@@ -1632,11 +1634,13 @@
   };
 
   async function decide(runId, decision, editedText) {
+    const currentCard = approvalSlot.querySelector(".approval-card");
+    const cardId = currentCard ? currentCard.dataset.cardId : "";
     try {
       const r = await fetch("/api/runs/" + runId + "/approval", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision, edited_text: editedText || "" }),
+        body: JSON.stringify({ decision, edited_text: editedText || "", card_id: cardId }),
       });
       if (!r.ok) {
         const data = await r.json().catch(() => ({}));

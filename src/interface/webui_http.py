@@ -636,7 +636,10 @@ def make_handler(server):
                 self._send_json(200 if 'run_id' in result else 400, result)
             elif parsed.path.startswith('/api/runs/') and parsed.path.endswith('/approval'):
                 run_id = parsed.path[len('/api/runs/'):-len('/approval')].strip('/')
-                pending = server.webui_gate.pending_cards()
+                pending = server.webui_gate.pending_cards(run_id=run_id)
+                card_id = str(body.get('card_id', '') or '')
+                if card_id:
+                    pending = [card for card in pending if card['id'] == card_id]
                 if not pending:
                     self._send_json(409, {'error': 'no pending approval'})
                 else:

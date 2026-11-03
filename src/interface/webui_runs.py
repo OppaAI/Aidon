@@ -492,6 +492,6 @@ class WebUIRunMixin:
         with self._question_lock:
             waiter = self._question_waiters.get(run_id)
             out["waiting_lab"] = bool(waiter and waiter.get("lab"))
-        pending = self.webui_gate.pending_cards()
+        pending = self.webui_gate.pending_cards(run_id=run_id)
         out["pending"] = pending[0] if pending else None
         return out

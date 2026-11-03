@@ -183,8 +183,10 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                 kind, title, f"{lead}\n\n{body}",
                 action_class=action_class,
                 force_ask=force_ask,
+                **({"context": gate_context} if gate_context else {}),
             )
-            return decision.verdict in ("approved", "auto_approved"), decision.verdict
+            return (decision.verdict in ("approved", "auto_approved"),
+                    decision.reason or decision.verdict)
         except Exception as exc:
             return False, f"approval failed: {exc}"
 

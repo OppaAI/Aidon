@@ -112,7 +112,8 @@ def _redact(text: str, secrets: dict | None) -> str:
     return text
 
 
-def run_computer_use(actions: list, approve=None, driver=None, screenshot_dir=None, secrets=None) -> dict:
+def run_computer_use(actions: list, approve=None, driver=None, screenshot_dir=None, secrets=None,
+                     focus_window=None) -> dict:
     """Run validated computer-use actions in order, with approval for irreversible actions, return executed results or an error, never a fake click.
 
     secrets maps handle NAME -> value for {{secret.NAME}} in
@@ -129,8 +130,19 @@ def run_computer_use(actions: list, approve=None, driver=None, screenshot_dir=No
             return {"ok": False, "error": f"action {index} invalid: {'; '.join(failures)}", "executed": results}
         kind = action["kind"]
         if kind in IRREVERSIBLE:
-            if approve is None or not approve(kind, str(action)):
-                return {"ok": False, "error": f"action {index} not approved: {kind}", "executed": results}
+            try:
+                window = focus_window
+                if window is None and callable(getattr(driver, "capture_focus", None)):
+                    window = driver.capture_focus()
+                if approve is None or not approve(kind, str(action)):
+                    return {"ok": False, "error": f"action {index} not approved: {kind}", "executed": results}
+                # Approving in the WebUI focuses the browser. Restore the
+                # observed target before dispatching any keys or typed text.
+                if window is not None:
+                    driver.restore_focus(window)
+            except Exception as exc:
+                return {"ok": False, "error": _redact(
+                    f"action {index} approval/focus failed: {exc}", secrets), "executed": results}
         if kind == "screenshot":
             out = Path(screenshot_dir or ".") / f"screenshot_{index}.png"
             result = capture_screenshot(out, capture=action.get("capture"))
@@ -180,6 +192,13 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
         return {"ok": False, "error": "guided computer task needs a description",
                 "actions_taken": history}
     for round_no in range(min(30, max(0, int(max_actions)))):
+        focus_window = None
+        if callable(getattr(driver, "capture_focus", None)):
+            try:
+                focus_window = driver.capture_focus()
+            except Exception as exc:
+                return {"ok": False, "error": f"desktop focus unavailable: {exc}",
+                        "actions_taken": history}
         shot = run_computer_use(
             [{"kind": "screenshot",
               **({"capture": capture} if capture is not None else {})}],
@@ -250,7 +269,8 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
             return {"ok": False, "error": "model gave no action without confirming completion",
                     "actions_taken": history, "final_description": last_description}
         step = run_computer_use([action], approve=approve, driver=driver,
-                                screenshot_dir=str(target), secrets=secrets)
+                                screenshot_dir=str(target), secrets=secrets,
+                                focus_window=focus_window)
         history.append({"description": last_description, "action": action,
                         "reason": decision.get("reason", "")})
         if not step.get("ok"):
@@ -258,6 +278,9 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
                          step.get("error", "action failed"))
             return {"ok": False, "error": step.get("error", "action failed"),
                     "actions_taken": history, "final_description": last_description}
+        # Let the application process the input before checking its screen.
+        import time
+        time.sleep(0.25)
     _write_trace(target, description, history, last_description,
                  "max actions reached")
     return {"ok": False, "error": "max actions reached",

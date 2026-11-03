@@ -63,11 +63,13 @@ def register_computer_tools(config, tools, approve, confined, model_chat=None):
             desktop_driver = X11Driver()
 
             def _desktop_approve(kind, detail):
-                ok, _ = _approval(
+                ok, why = _approval(
                     "live_execute", "Approve desktop action",
                     f"Run X11 computer action {kind}: {detail}",
                     force_ask=True,
                 )
+                if not ok and why != "rejected":
+                    raise RuntimeError(f"Desktop action approval failed: {why}")
                 return ok
 
             def computer_use(actions, screenshot_dir="computer-screenshots"):
@@ -84,37 +86,3 @@ def register_computer_tools(config, tools, approve, confined, model_chat=None):
         except Exception:
             # A missing xdotool or DISPLAY must not make other tools vanish.
             pass
-
-    # Desktop control is opt-in and never a raw shell. Kernel mode keeps it
-    # unavailable; the demo must explicitly run with AIDON_KERNEL=0.
-    if getattr(config, "computer_driver", "") == "x11" and not getattr(config, "kernel_mode", False):
-        try:
-            from ..capabilities.computer_use import run_computer_use
-            from ..capabilities.x11_driver import X11Driver
-
-            _desktop_driver = X11Driver()
-
-            def _desktop_approve2(kind, detail):
-                ok, why = _approval(
-                    "live_execute", "Approve desktop action",
-                    f"Run X11 computer action {kind}: {detail}",
-                    force_ask=True,
-                )
-                return ok
-
-            def computer_use(actions, screenshot_dir="computer-screenshots"):
-                target = _confined(screenshot_dir)
-                result = run_computer_use(
-                    actions, approve=_desktop_approve2, driver=_desktop_driver,
-                    screenshot_dir=target, secrets=_computer_secrets(),
-                )
-                return json.dumps(result, ensure_ascii=False)
-
-            tools["computer_use"] = computer_use
-            if model_chat is not None:
-                tools["computer_use_task"] = _guided_computer_task(
-                    _desktop_driver, _desktop_approve2)
-        except Exception:
-            # A missing display or driver leaves the capability unavailable.
-            pass
-
