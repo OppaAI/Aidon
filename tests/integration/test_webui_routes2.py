@@ -224,6 +224,21 @@ def test_capabilities_keys_and_contents(tmp_path):
     assert payload["mcp_servers"] == []
 
 
+def test_capabilities_hides_git_helpers_from_showcase_inventory(tmp_path):
+    server = _server(tmp_path)
+    server.handle_tools = lambda: {
+        "goal_tools": ["shell", "git_clone", "github_search", "github_fetch"],
+        "plugin_tools": [],
+    }
+
+    payload = server.handle_capabilities()
+
+    names = [row["name"] for row in payload["tools"]]
+    assert "shell" in names
+    assert not any("git" in name.lower() for name in names)
+    assert payload["counts"]["tools"] == len(names)
+
+
 def test_capabilities_route_live(live_server):
     base, _, _ = live_server
     status, payload = _get(base, "/api/capabilities")

@@ -6,7 +6,7 @@ GOAL_TOOL_NAMES = (
     "ask_user", "declare_blocked", "schedule_job", "list_schedule",
     "cancel_schedule", "web_search", "fetch_url", "read_document",
     "search_document", "search_research_cache", "youtube_learn",
-    "github_search", "github_fetch", "make_bar_chart", "make_line_chart",
+    "make_bar_chart", "make_line_chart",
     "make_chart", "generate_document", "build_ebook", "make_spreadsheet",
     "make_docx", "make_slides", "make_latex", "record_system_audio",
     "capture_webcam_photo", "record_webcam",

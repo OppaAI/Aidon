@@ -8,6 +8,7 @@ aidon-data/
 .eggs/
 build/
 dist/
+aidon-clean-data/
 aidon-clean-data/.toolbox.lock
 aidon-clean-data/autonomy_metrics.json
 aidon-clean-data/conversations.db
@@ -173,3 +174,5 @@ aidon-clean-data/workspace/2026-11-03_07-54-23_027582/computer-screenshots/task_
 aidon-clean-data/runs/c4c5a2a2.json
 aidon-clean-data/runs/c4c5a2a2.json.lock
 aidon-clean-data/trace/c4c5a2a2.jsonl
+aidon-clean-data/workspace/2026-11-03_07-54-23_027582/repo
+aidon-clean-data/workspace/2026-11-03_07-54-23_027582/repo

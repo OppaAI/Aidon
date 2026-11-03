@@ -1,6 +1,7 @@
 """Reporting, missions, capability inventory, and memory endpoints."""
 
 import json
+import re
 from pathlib import Path
 
 
@@ -63,6 +64,11 @@ _TOOL_DESCRIPTIONS = {
 }
 
 
+def _is_git_capability(name: str) -> bool:
+    """Hide Git/GitHub helpers from the showcase inventory only."""
+    return bool(re.search(r"(?:^|[_-])git(?:$|[_-])|github", str(name), re.I))
+
+
 class WebUICapabilityMixin:
     def handle_reports_list(self) -> dict:
         directory = self._json_dir("reports")
@@ -120,7 +126,8 @@ class WebUICapabilityMixin:
         """
         try:
             tools = self.handle_tools()
-            tool_names = list(tools.get("goal_tools", []))
+            tool_names = [name for name in tools.get("goal_tools", [])
+                          if not _is_git_capability(name)]
             plugin_names = set(tools.get("plugin_tools", []))
         except Exception:
             tool_names = []
