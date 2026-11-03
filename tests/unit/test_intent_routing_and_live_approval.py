@@ -160,3 +160,14 @@ def test_live_approval_skipped_when_no_live_actions(tmp_path):
     report = runner.run("Write out")
     assert report.status == "done"
     assert ("live", "Approve live execution?") not in asked
+
+
+def test_desktop_control_cannot_be_swallowed_by_chat_route(tmp_path):
+    runner = _runner(tmp_path, FakeClient("I cannot open apps"),
+                     semantic_router=_Route("chat"),
+                     use_semantic_router_skip=True, mode="plan",
+                     extra_tools={"computer_use_task": lambda **kwargs: "unused"})
+    report = runner.run("Open gedit on my Ubuntu desktop")
+    assert report.status == "stopped"
+    assert runner.last_route == ("agentic", 1.0)
+    assert report.plan.normalized_steps()[0].tool == "computer_use_task"

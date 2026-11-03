@@ -533,7 +533,12 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
         _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
         # Ask mode explicitly requests an interview. Advisory chat routing
         # must not swallow that choice (including a sticky /ask on WhatsApp).
-        if getattr(self, "mode", None) == "ask" and spec is None:
+        # Registered desktop control also requires execution, even when the
+        # router mistakes "open gedit" for a conversational question.
+        from .capability_triage import builtin_computer_use_covers
+        desktop_goal = (not self.kernel_mode and
+                        builtin_computer_use_covers(goal, self.extra_tools))
+        if (getattr(self, "mode", None) == "ask" or desktop_goal) and spec is None:
             self.last_route = ("agentic", 1.0)
             if callable(getattr(self, "route_callback", None)):
                 self.route_callback(self.last_route)
