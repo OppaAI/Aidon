@@ -18,6 +18,13 @@ def register_computer_tools(config, tools, approve, confined, model_chat=None, o
         values = dict(args)
         values.setdefault("screenshot_dir", "computer-screenshots")
         if tool == "computer_use_task":
+            # Older plans and some model-generated plans call this argument
+            # `task`; normalize it to the current public name so an approved
+            # plan's one-task grant still matches when the step executes.
+            if "task" in values and "description" not in values:
+                values["description"] = values.pop("task")
+            else:
+                values.pop("task", None)
             values["max_actions"] = min(30, max(0, int(values.get("max_actions", 10))))
         return {"tool": tool, "args": values}
 
@@ -64,9 +71,18 @@ def register_computer_tools(config, tools, approve, confined, model_chat=None, o
         blind. Scheduled runs never pass model_chat, so they
         never get this tool.
         """
-        def computer_use_task(description, max_actions=10,
-                              screenshot_dir="computer-screenshots"):
+        def computer_use_task(description=None, max_actions=10,
+                              screenshot_dir="computer-screenshots", task=None):
             from ..capabilities.computer_use import run_guided_task
+            if description is None:
+                description = task
+            elif task is not None and str(task) != str(description):
+                return json.dumps({"ok": False,
+                                   "error": "Provide either description or task, not conflicting values"})
+            description = str(description or "").strip()
+            if not description:
+                return json.dumps({"ok": False,
+                                   "error": "A desktop task description is required"})
             target = _confined(screenshot_dir)
             max_actions = min(30, max(0, int(max_actions)))
             refusal = _authorize(driver, "computer_use_task", {

@@ -72,3 +72,20 @@ def test_guided_grant_cannot_authorize_different_task_or_larger_limit(tmp_path, 
     assert json.loads(task("Open gedit"))["ok"]
     assert len(calls) == 3  # grant already consumed
     assert len(observed) == 4
+
+
+def test_guided_task_accepts_legacy_task_argument_and_matches_plan_grant(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "src.capabilities.computer_use.run_guided_task",
+        lambda description, *_args, **_kwargs: calls.append(description) or {"ok": True},
+    )
+    tools, approvals, _ = build(tmp_path, monkeypatch, grants=[
+        {"tool": "computer_use_task", "args": {"task": "Open gedit"}},
+    ])
+
+    result = json.loads(tools["computer_use_task"](task="Open gedit"))
+
+    assert result["ok"]
+    assert calls == ["Open gedit"]
+    assert approvals == []
