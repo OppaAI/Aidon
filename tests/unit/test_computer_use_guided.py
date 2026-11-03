@@ -216,3 +216,19 @@ def test_computer_tool_approval_carries_run_context(tmp_path, monkeypatch):
     assert result["ok"]
     assert seen[0]["context"] == {"run_id": "desktop-1"}
     assert seen[0]["force_ask"] is True
+
+
+@pytest.mark.parametrize("kernel,display,xdotool,expected", [
+    (True, ":0", True, "Disabled (kernel mode)"),
+    (False, "", True, "Unavailable (no DISPLAY)"),
+    (False, ":0", False, "Unavailable (xdotool missing)"),
+    (False, ":0", True, "X11 configured"),
+])
+def test_status_explains_desktop_availability(tmp_path, monkeypatch,
+                                             kernel, display, xdotool, expected):
+    from src.interface.webui import WebUIServer
+    monkeypatch.setenv("DISPLAY", display)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/xdotool" if xdotool else None)
+    server = WebUIServer(tmp_path, config=SimpleNamespace(
+        computer_driver="x11", kernel_mode=kernel))
+    assert server.handle_status()["computer"] == expected
