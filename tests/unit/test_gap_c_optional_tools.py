@@ -26,6 +26,10 @@ def test_on_shows_full_set(tmp_path):
     # Skill adoption is a post-success Skill Lab capability, never a
     # generally available tool in ordinary work or optional-tools mode.
     assert "adopt_skill" not in tools
+    # GitHub search/fetch are intentionally withdrawn from the built-in
+    # catalog for the tool-building showcase; Aidon must acquire equivalents.
+    assert "github_search" not in tools
+    assert "github_fetch" not in tools
     for name in OPTIONAL:
         assert name in tools, name
     for name in CORE - CONDITIONAL:
