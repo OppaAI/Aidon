@@ -584,7 +584,7 @@ from src.agentic.patterns import (
     looks_like_question, match_pattern, score_pattern,
 )
 from src.agentic.prompts import (
-    build_digest_prompt, build_minimal_prompt, build_system_prompt,
+    build_digest_prompt, build_identity_prompt, build_minimal_prompt, build_system_prompt,
     capability_block, context_block, guidance_block, render_prompt,
     workspace_block,
 )
@@ -805,10 +805,14 @@ def test_prompts_builders_and_blocks():
     system = build_system_prompt(persona="Be kind.", manual="## Capability ladder\nladder\n## Hard rules\nrules\n", user_text="User is Oppa.")
     assert system.startswith("You are Aidon")
     assert "Be kind." in system and "ladder" in system and "Oppa" in system
+    assert "person you are assisting" in system and "You are Aidon" in system
     digest = build_digest_prompt(manual="## Capability ladder\nladder\n## Hard rules\nrules\n", user_text="")
     assert "Capability ladder" in digest and "Hard rules" in digest
     minimal = build_minimal_prompt("research", user_text="")
     assert "research phase" in minimal and "Current local time:" in minimal
+    identity = build_identity_prompt("respond", user_text="Name: OppaAI")
+    assert "You are Aidon" in identity and "human user (not the agent)" in identity
+    assert "do not introduce yourself as" in identity and "OppaAI" in identity
     assert guidance_block("") == ""
     assert "binding" in guidance_block("stay under budget")
     assert context_block("dinner for two").startswith("Context:")
