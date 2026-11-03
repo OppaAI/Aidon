@@ -24,8 +24,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-ACTIONS = ("screenshot", "click", "type", "scroll", "key")
-IRREVERSIBLE = ("click", "type", "key")
+ACTIONS = ("screenshot", "click", "type", "scroll", "key", "launch_app")
+IRREVERSIBLE = ("click", "type", "key", "launch_app")
 
 
 def validate_action(action: dict) -> list[str]:
@@ -48,6 +48,12 @@ def validate_action(action: dict) -> list[str]:
         return [] if isinstance(action.get("delta"), int) and not isinstance(action.get("delta"), bool) else ["scroll needs an integer delta"]
     if kind == "key":
         return [] if isinstance(action.get("key"), str) and action["key"] else ["key needs a non-empty key name"]
+    if kind == "launch_app":
+        import re
+        value = action.get("app_id", "")
+        return [] if isinstance(value, str) and re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}\.desktop", value) else [
+                "launch_app needs an installed .desktop application ID"]
     return []
 
 
@@ -113,7 +119,7 @@ def _redact(text: str, secrets: dict | None) -> str:
 
 
 def run_computer_use(actions: list, approve=None, driver=None, screenshot_dir=None, secrets=None,
-                     focus_window=None) -> dict:
+                     focus_window=None, on_action=None) -> dict:
     """Run validated computer-use actions in order, with approval for irreversible actions, return executed results or an error, never a fake click.
 
     secrets maps handle NAME -> value for {{secret.NAME}} in
@@ -160,12 +166,17 @@ def run_computer_use(actions: list, approve=None, driver=None, screenshot_dir=No
         except Exception as exc:
             return {"ok": False, "error": _redact(f"driver failed on action {index} {kind}: {type(exc).__name__}: {exc}", secrets), "executed": results}
         results.append({"kind": kind, "action": action})
+        if callable(on_action):
+            try:
+                on_action({"tool": "computer_use", "args": dict(action), "result": "Executed"})
+            except Exception:
+                pass
     return {"ok": True, "executed": results}
 
 
 def run_guided_task(description: str, model_chat, approve=None, driver=None,
                     screenshot_dir=None, max_actions: int = 10,
-                    capture=None, secrets=None) -> dict:
+                    capture=None, secrets=None, on_action=None) -> dict:
     """Observe-act computer task: screenshot, describe, decide, act.
 
     The pre-written action list is blind — the model writes every
@@ -185,6 +196,9 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
     target.mkdir(parents=True, exist_ok=True)
     history: list[dict] = []
     last_description = ""
+    previous_screen = None
+    stagnant = 0
+    apps = driver.applications() if callable(getattr(driver, "applications", None)) else []
     if model_chat is None:
         return {"ok": False, "error": "guided computer task needs a model chat for vision",
                 "actions_taken": history}
@@ -238,15 +252,21 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
             pass
         decide_prompt = (
             f"Goal: {description}\nActions so far: {history}\n"
+            f"Installed desktop applications: {apps}\n"
             + screen_size +
             "Inspect the attached current screen and choose the next action. "
             "Reply JSON only: {\"screen\": str, \"action\": null | "
-            "{\"kind\": \"click\" | \"type\" | \"scroll\" | \"key\", "
+            "{\"kind\": \"launch_app\" | \"click\" | \"type\" | \"scroll\" | \"key\", "
+            "\"app_id\": str, "
             "\"x\": int 0-10000, \"y\": int 0-10000, \"text\": str, "
             "\"delta\": int, \"key\": str}, \"done\": bool, "
             "\"reason\": str}. Describe the visible app and controls briefly "
             "in screen. Set done true only when the goal is achieved; "
-            "otherwise return exactly one next action.")
+            "otherwise return exactly one next action. Prefer launch_app with an "
+            "exact installed app_id to open an application instead of navigating "
+            "a temporary launcher menu. After launching, inspect the new screenshot "
+            "to confirm its window before typing. Never click Aidon's approval "
+            "buttons yourself or repeat an action that made no progress.")
         try:
             decision_raw = model_chat([image_message(
                 decide_prompt, [(vision_bytes, vision_mime)])])
@@ -268,23 +288,49 @@ def run_guided_task(description: str, model_chat, approve=None, driver=None,
                          "model gave no action without confirming completion")
             return {"ok": False, "error": "model gave no action without confirming completion",
                     "actions_taken": history, "final_description": last_description}
+        if history and action == history[-1]["action"] and _same_screen(png, previous_screen):
+            stagnant += 1
+        else:
+            stagnant = 0
+        if stagnant >= 2:
+            error = "Desktop made no progress after two identical actions; stopped repeating approvals."
+            _write_trace(target, description, history, last_description, error)
+            return {"ok": False, "error": error, "actions_taken": history,
+                    "final_description": last_description}
+        previous_screen = png
         step = run_computer_use([action], approve=approve, driver=driver,
                                 screenshot_dir=str(target), secrets=secrets,
-                                focus_window=focus_window)
-        history.append({"description": last_description, "action": action,
-                        "reason": decision.get("reason", "")})
+                                focus_window=focus_window, on_action=on_action)
         if not step.get("ok"):
             _write_trace(target, description, history, last_description,
                          step.get("error", "action failed"))
             return {"ok": False, "error": step.get("error", "action failed"),
                     "actions_taken": history, "final_description": last_description}
+        history.append({"description": last_description, "action": action,
+                        "reason": decision.get("reason", "")})
         # Let the application process the input before checking its screen.
         import time
-        time.sleep(0.25)
+        time.sleep(1.0 if action.get("kind") == "launch_app" else 0.25)
     _write_trace(target, description, history, last_description,
                  "max actions reached")
     return {"ok": False, "error": "max actions reached",
             "actions_taken": history, "final_description": last_description}
+
+
+def _same_screen(current: bytes, previous: bytes | None) -> bool:
+    if previous is None:
+        return False
+    if current == previous:
+        return True
+    try:
+        import io
+        from PIL import Image, ImageChops, ImageStat
+        def reduced(data):
+            with Image.open(io.BytesIO(data)) as frame:
+                return frame.convert("L").resize((160, 100))
+        return ImageStat.Stat(ImageChops.difference(reduced(current), reduced(previous))).mean[0] < 1.0
+    except Exception:
+        return False
 
 
 def _compact_vision_image(data: bytes, max_side: int = 1280) -> tuple[bytes, str]:

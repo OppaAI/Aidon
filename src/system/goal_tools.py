@@ -38,7 +38,8 @@ CAPABILITY_TOOLS_WHEN_OPTIONAL_DISABLED = frozenset({
 def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answer=None, phrase=None, scheduled=False, model_chat=None, governor=None, optional_tools=None,
                       plugin_registry=None, gate_context=None, test_backend_factory=None,
                       allow_skill_adoption=False,
-                      approved_image_edits=None, speak_callback=None) -> dict:
+                      approved_image_edits=None, speak_callback=None,
+                      desktop_action_callback=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     If ``plugin_registry`` is given (a ``PluginRegistry`` instance that is
@@ -209,7 +210,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     if "instagram_publish" in tools:
         tools["instagram_post"] = tools["instagram_publish"]
 
-    register_computer_tools(config, tools, _approval, _confined, model_chat)
+    register_computer_tools(config, tools, _approval, _confined, model_chat,
+                            on_action=desktop_action_callback)
 
     # Recording host audio is a sensitive side effect. Keep the old
     # mandatory approval boundary even though the recorder itself lives in

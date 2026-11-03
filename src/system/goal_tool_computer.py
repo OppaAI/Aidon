@@ -6,7 +6,7 @@ import json
 import os
 
 
-def register_computer_tools(config, tools, approve, confined, model_chat=None):
+def register_computer_tools(config, tools, approve, confined, model_chat=None, on_action=None):
     """Register X11 actions and the optional vision-guided computer task."""
     _approval = approve
     _confined = confined
@@ -41,7 +41,7 @@ def register_computer_tools(config, tools, approve, confined, model_chat=None):
             result = run_guided_task(
                 description, model_chat, approve=approve_fn,
                 driver=driver, screenshot_dir=target,
-                max_actions=max_actions, secrets=_computer_secrets())
+                max_actions=max_actions, secrets=_computer_secrets(), on_action=on_action)
             return json.dumps(result, ensure_ascii=False)
         return computer_use_task
 
@@ -76,7 +76,7 @@ def register_computer_tools(config, tools, approve, confined, model_chat=None):
                 target = _confined(screenshot_dir)
                 result = run_computer_use(
                     actions, approve=_desktop_approve, driver=desktop_driver,
-                    screenshot_dir=target, secrets=_computer_secrets())
+                    screenshot_dir=target, secrets=_computer_secrets(), on_action=on_action)
                 return json.dumps(result, ensure_ascii=False)
 
             tools["computer_use"] = computer_use

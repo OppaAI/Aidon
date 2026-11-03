@@ -148,9 +148,9 @@ class PlanningMixin:
                     and builtin_computer_use_covers(goal, self.extra_tools)):
                 task = str(goal).strip()
                 task += ("\nUse visible desktop controls: open applications through the "
-                         "Ubuntu application launcher, move the pointer and click their "
-                         "controls. Do not use a terminal, shell command, background "
-                         "process or API to substitute for visible interaction. "
+                         "installed desktop application IDs when available, move the pointer and click their "
+                         "controls. Do not use a terminal, shell command, generated "
+                         "script or mockup to substitute for visible interaction. "
                          "For OBS, bring its window to the foreground and click the "
                          "requested Start Recording or Stop Recording button. "
                          "For gedit, launch the editor visibly, focus the text area, "

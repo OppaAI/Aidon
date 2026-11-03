@@ -408,6 +408,7 @@ class WebUIRunMixin:
                        {"kind": "speech-request", "text": str(text)}),
                    "_route_callback": route_update,
                    "_trace_callback": trace_update,
+                   "_desktop_action_callback": lambda item: record["replay"].append(dict(item)),
                    "_question_callback": question_callback,
                    "resume_interview": resume_interview,
                    "skill_source_run_id": skill_source_run_id,

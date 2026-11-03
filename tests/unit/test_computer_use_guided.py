@@ -150,6 +150,32 @@ def test_guided_task_refuses_without_model_chat(tmp_path):
     assert driver.actions == []
 
 
+def test_guided_task_stops_unchanged_repeated_actions_before_third_approval(tmp_path):
+    action = {"kind": "click", "x": 540, "y": 665}
+    chat = _ScriptChat([json.dumps({"action": action, "done": False})] * 3)
+    approvals, replay = [], []
+    result = run_guided_task(
+        "Open gedit", chat, driver=_Driver(), capture=_fake_png,
+        screenshot_dir=tmp_path, max_actions=10, on_action=replay.append,
+        approve=lambda *args: approvals.append(args) or True)
+    assert not result["ok"]
+    assert "no progress" in result["error"]
+    assert len(approvals) == len(replay) == len(result["actions_taken"]) == 2
+
+
+def test_launch_app_is_approved_and_failed_calls_do_not_count_as_executed():
+    action = {"kind": "launch_app", "app_id": "org.gnome.gedit.desktop"}
+    driver = _Driver()
+    replay = []
+    result = run_computer_use([action], approve=lambda *args: False,
+                              driver=driver, on_action=replay.append)
+    assert not result["ok"] and not driver.actions and not replay
+    result = run_computer_use([action], approve=lambda *args: True,
+                              driver=driver, on_action=replay.append)
+    assert result["ok"] and driver.actions == [action]
+    assert replay[0]["args"] == action
+
+
 def test_handler_wires_guided_task_only_with_model_chat(tmp_path, monkeypatch):
     import src.capabilities.x11_driver as _x11
     monkeypatch.setattr(_x11, "X11Driver", lambda: _Driver())

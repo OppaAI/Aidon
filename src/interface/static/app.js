@@ -87,6 +87,8 @@
   let lastRoute = null;
   let runTraceHistory = [];
   let cardShownFor = null;
+  let decidingCardId = null;
+  const decidedCardIds = new Set();
   let proceedShownFor = null;
   const streamMessages = {};
 
@@ -1279,6 +1281,7 @@
   }
 
   function showApprovalCard(run, pending) {
+    if (pending.id === decidingCardId || decidedCardIds.has(pending.id)) return;
     const cardKey = run.run_id + pending.id;
     if (cardShownFor === cardKey) return;
     const replay = Array.isArray(run.replay) ? run.replay : [];
@@ -1636,6 +1639,20 @@
   async function decide(runId, decision, editedText) {
     const currentCard = approvalSlot.querySelector(".approval-card");
     const cardId = currentCard ? currentCard.dataset.cardId : "";
+    if (decidingCardId !== null) return;
+    decidingCardId = cardId;
+    // The server releases the desktop action as soon as it accepts this
+    // request. Remove AND paint away the modal before sending, so the
+    // approved click cannot land on this overlay or screenshot it again.
+    cardShownFor = null;
+    approvalSlot.innerHTML = "";
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    function restoreCard() {
+      if (currentCard && !approvalSlot.querySelector(".approval-card")) {
+        approvalSlot.appendChild(currentCard);
+        cardShownFor = runId + cardId;
+      }
+    }
     try {
       const r = await fetch("/api/runs/" + runId + "/approval", {
         method: "POST",
@@ -1646,22 +1663,28 @@
         const data = await r.json().catch(() => ({}));
         showMiddleStatus("Approval failed: " + (data.detail || data.error || r.status), "error");
         if (r.status === 409) {
+          decidedCardIds.add(cardId);
           // Server has no pending approval: this card is dead (the gate
           // failed closed on timeout, or it was already decided). Remove
           // it instead of leaving tappable buttons that all fail again.
           cardShownFor = null;
           approvalSlot.innerHTML = "";
-        }
+        } else restoreCard();
+        decidingCardId = null;
         return;
       }
     } catch (e) {
+      restoreCard();
+      decidingCardId = null;
       showMiddleStatus("Approval failed: " + e.message, "error");
       return;
     }
+    decidedCardIds.add(cardId);
+    decidingCardId = null;
     // Decision accepted — drop the card and reset the shown-card tracking so
     // a repeated gate of the same kind renders fresh instead of hanging.
-    cardShownFor = null;
-    approvalSlot.innerHTML = "";
+    // A following action may already have created a different card while
+    // this response was in flight. Never clear that new decision.
   }
 
   async function poll() {
