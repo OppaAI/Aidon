@@ -84,8 +84,9 @@ flowchart LR
 
 After a successful run, Aidon can save its proven steps as a reusable DAG.
 Later, it searches for workflows with a similar goal and can adapt a saved DAG
-to the new request. The adapted workflow is validated before it is used, so a
-failed or unsuitable match falls back to a fresh plan.
+to the new request. The adapted workflow is validated before it is used. A
+validation failure rolls back to the saved DAG; if no DAG adaptation is
+available, Aidon tries sequential experience adaptation before fresh planning.
 
 ```mermaid
 flowchart LR
@@ -95,9 +96,13 @@ flowchart LR
     C --> E[Receive a similar goal later]
     E --> F[Recall matching workflows]
     F --> G{Suitable match?}
-    G -->|No| H[Build a fresh plan]
+    G -->|No| L[Try sequential experience adaptation]
     G -->|Yes| I[Adapt and validate DAG]
-    I --> J[Review and run adapted plan]
+    I -->|Valid| J[Review and run adapted plan]
+    I -->|Validation fails| K[Restore saved DAG, then review and run]
+    I -->|No DAG adaptation| L[Try sequential experience adaptation]
+    L -->|Adapted| J
+    L -->|No usable adaptation| H[Build a fresh plan]
 ```
 
 **Implemented in:** `src/agentic/run_finalization.py`,

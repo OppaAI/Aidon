@@ -62,8 +62,10 @@ semantic collection when a run or chat exchange completes.
 Successful workflows are also stored as Experiences and
 reusable DAGs. Promotion copies the point and marks the
 episodic point as promoted; it does not delete the episodic
-original, and it copies the payload, so a library link
-survives promotion.
+original. New or superseding semantic points copy the
+episodic payload, including library links. If an exact
+duplicate already exists, promotion keeps that existing
+point and does not merge the episodic payload into it.
 
 Chats, without a second store:
 Conversation ids are payload fields on working

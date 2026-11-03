@@ -104,7 +104,8 @@ flowchart TB
   hybrid dense plus sparse recall, forgetting curve,
   grace, and explicit prune. Library files live in
   the Aidon home. SQLite is the durable memory fallback
-  when Qdrant is unavailable and also stores conversations
+  when the Qdrant client package is not installed (it does
+  not detect an unreachable Qdrant server) and also stores conversations
   and application records. No memory service is hosted by Aidon.
 - Tools: sandbox tools are arena plumbing, write,
   read, list, shell, and calculate, all confined to

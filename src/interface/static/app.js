@@ -90,6 +90,8 @@
   let lastEventCount = 0;
   let lastTraceCount = 0;
   let finalReplySeenFor = null;
+  let terminalReplyWaitFor = null;
+  let terminalReplyWaitPolls = 0;
   let lastTracePhase = null;
   let routeShownFor = null;
   let lastRoute = null;
@@ -1889,6 +1891,15 @@
         // appended its final chat event. If an exception or transport race
         // loses that event, don't leave the owner with only a status light.
         // Stopped runs are different: their Proceed card is the response.
+        // Cancellation can mark the run terminal just before the worker
+        // appends its final chat event. Give that event a few polls to land.
+        if (run.status === "cancelled" && finalReplySeenFor !== polledRun) {
+          if (terminalReplyWaitFor !== polledRun) {
+            terminalReplyWaitFor = polledRun;
+            terminalReplyWaitPolls = 0;
+          }
+          if (terminalReplyWaitPolls++ < 15) return;
+        }
         if (run.status !== "stopped" && finalReplySeenFor !== polledRun) {
           const failure = [...runTraceHistory].reverse().find((item) =>
             String(item.status || "").toLowerCase() === "failed" &&
@@ -1910,7 +1921,9 @@
             fallback = "The run finished, but Aidon did not send a final response.";
           }
           finalReplySeenFor = polledRun;
-          addMsgTyped("aidon", fallback, null, true, lastRoute);
+          const fallbackMessage = addMsgTyped("aidon", fallback, null, true, lastRoute);
+          appendMessagePlayButton(fallbackMessage, fallback);
+          appendMessageCopyButton(fallbackMessage, fallback);
         }
         const composerWasDisabled = input.disabled;
         waitingForLab = false;
