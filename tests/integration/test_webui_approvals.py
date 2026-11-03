@@ -41,6 +41,13 @@ def test_pending_cards_lists_open_card():
         thread.join(timeout=5)
 
 
+def test_approval_card_renderer_handles_runs_without_replay():
+    app = (Path(__file__).resolve().parents[2] /
+           "src/interface/static/app.js").read_text(encoding="utf-8")
+    assert "const replay = Array.isArray(run.replay) ? run.replay : [];" in app
+    assert "replay.length +" in app
+
+
 def test_approved_card_leaves_pending_list():
     gate = WebUIGate(timeout_seconds=60)
     thread = threading.Thread(target=gate._decide, args=("live", "T", "B"))

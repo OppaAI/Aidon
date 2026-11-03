@@ -328,7 +328,7 @@ class WebUIRunMixin:
         if self.run_control is not None:
             self.run_control.register(run_id, goal, conversation_id)
         record = {"run_id": run_id, "goal": goal, "conversation_id": conversation_id,
-                  "status": "running", "events": [], "trace": []}
+                  "status": "running", "events": [], "trace": [], "replay": []}
         self._web_runs[run_id] = record
         stream_state = {"text": "", "active": False}
 
@@ -464,6 +464,7 @@ class WebUIRunMixin:
                                    control.get("stage", out.get("stage", "interpret")))})
         out.setdefault("events", [])
         out.setdefault("trace", [])
+        out.setdefault("replay", [])
         if record is None and control is not None:
             from .interview_store import InterviewStore
             saved_turns = InterviewStore(self.home).transcript(run_id)

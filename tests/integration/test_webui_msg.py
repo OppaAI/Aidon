@@ -99,6 +99,7 @@ def test_run_snapshot_returns_only_unseen_events(tmp_path):
         "trace": [{"phase": "interpret"}, {"phase": "respond"}],
     }
     snapshot = server.run_snapshot("run-1", since=1, trace_since=1)
+    assert snapshot["replay"] == []
     assert snapshot["event_total"] == 2
     assert [event["text"] for event in snapshot["events"]] == ["two"]
     assert snapshot["trace_total"] == 2

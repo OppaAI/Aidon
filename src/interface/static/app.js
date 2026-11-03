@@ -1281,6 +1281,7 @@
   function showApprovalCard(run, pending) {
     if (cardShownFor === run.run_id + pending.title) return;
     cardShownFor = run.run_id + pending.title;
+    const replay = Array.isArray(run.replay) ? run.replay : [];
     approvalSlot.innerHTML = ""; // only one active card per run — replace, don't stack
     const card = document.createElement("div");
     card.className = "card approval-card";
@@ -1304,8 +1305,8 @@
         '<textarea id="edit-text" placeholder="Edited text — press Submit to send…"></textarea>' +
         '<div id="edit-submit-row" class="row" style="display:none; justify-content:flex-end">' +
         '<button data-d="submit-edited" style="flex:none; padding:9px 18px">Submit</button></div>') +
-      '<details><summary>Run replay — what Aidon did (' + run.replay.length +
-      ' tool calls)</summary>' + renderReplay(run.replay) + "</details>" +
+      '<details><summary>Run replay — what Aidon did (' + replay.length +
+      ' tool calls)</summary>' + renderReplay(replay) + "</details>" +
       '<div class="row">' +
       (isDomain
         ? '<button class="approve" data-d="approved">Approve Temporary</button>' +
