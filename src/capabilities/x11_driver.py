@@ -91,7 +91,8 @@ class X11Driver:
                 if key in os.environ:
                     env[key] = os.environ[key]
             subprocess.run([launcher, app_id], env=env, check=True,
-                           capture_output=True, text=True, timeout=15)
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=15)
         elif kind == "click":
             self._run(["mousemove", "--sync", str(action["x"]), str(action["y"])])
             self._run(["click", "1"])

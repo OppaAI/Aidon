@@ -138,13 +138,13 @@ def run_computer_use(actions: list, approve=None, driver=None, screenshot_dir=No
         if kind in IRREVERSIBLE:
             try:
                 window = focus_window
-                if window is None and callable(getattr(driver, "capture_focus", None)):
+                if kind != "launch_app" and window is None and callable(getattr(driver, "capture_focus", None)):
                     window = driver.capture_focus()
                 if approve is None or not approve(kind, str(action)):
                     return {"ok": False, "error": f"action {index} not approved: {kind}", "executed": results}
                 # Approving in the WebUI focuses the browser. Restore the
                 # observed target before dispatching any keys or typed text.
-                if window is not None:
+                if kind != "launch_app" and window is not None:
                     driver.restore_focus(window)
             except Exception as exc:
                 return {"ok": False, "error": _redact(
