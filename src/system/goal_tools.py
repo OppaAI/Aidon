@@ -186,7 +186,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                 **({"context": gate_context} if gate_context else {}),
             )
             return (decision.verdict in ("approved", "auto_approved"),
-                    decision.reason or decision.verdict)
+                    getattr(decision, "reason", "") or decision.verdict)
         except Exception as exc:
             return False, f"approval failed: {exc}"
 
