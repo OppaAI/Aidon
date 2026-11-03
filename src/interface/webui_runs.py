@@ -231,6 +231,15 @@ class WebUIRunMixin:
         if answered_run is not None:
             return {"run_id": answered_run, "conversation_id": conversation_id,
                     "goal": goal, "lab_answer": answering_lab}
+        # A bare approval/rejection is a control command, not a new chat
+        # goal. If no live question waiter consumed it above, resolve it
+        # against the approval gate (which gives a deterministic
+        # "nothing pending" reply instead of letting the model answer from
+        # unrelated recalled history).
+        decision_reply = self._resolve_decision(goal)
+        if decision_reply is not None:
+            return self._simple_command_response(
+                conversation_id, raw_goal, decision_reply)
         resume_interview = goal.strip().lower() == "/resume-interview"
         if resume_interview:
             from .interview_store import InterviewStore

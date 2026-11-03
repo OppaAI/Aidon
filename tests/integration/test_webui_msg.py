@@ -262,6 +262,19 @@ def test_bare_approve_resolves_the_only_pending_card(tmp_path):
     assert server.webui_gate.cards[card_id]["verdict"] == "approved"
 
 
+def test_webui_bare_approve_without_pending_card_is_not_sent_to_chat(tmp_path):
+    server = WebUIServer(tmp_path)
+    dispatched = []
+    server.dispatcher.register("webui", lambda event: dispatched.append(event.goal))
+
+    result = server.start_goal({"goal": "approve"})
+
+    assert result["run_id"]
+    assert dispatched == []
+    run = server._web_runs[result["run_id"]]
+    assert run["events"][-1]["text"] == "No approval is currently pending."
+
+
 def test_bare_approve_does_not_guess_when_multiple_cards_are_pending(tmp_path):
     import threading
 
