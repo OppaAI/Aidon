@@ -69,6 +69,15 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _cleanup_download(path: Path) -> None:
+    """Remove only the file and private directory created for a URL read."""
+    try:
+        path.unlink(missing_ok=True)
+        path.parent.rmdir()
+    except OSError:
+        pass
+
+
 def _resolve_url(path_or_url: str, allowlist=None, grants=None,
                  allow_local: bool = False) -> tuple[Path | None, str]:
     """Download a URL to a temp file, stdlib only, 50MB cap, 5 hops.
@@ -92,6 +101,7 @@ def _resolve_url(path_or_url: str, allowlist=None, grants=None,
             return None, f"READ_BLOCKED: {reason}"
         req = urllib.request.Request(
             current, headers={"User-Agent": "Aidon/1.0 document-reader"})
+        tmp = None
         try:
             with opener.open(req, timeout=30) as resp:
                 suffix = Path(urllib.parse.urlparse(current).path).suffix or ".bin"
@@ -104,12 +114,12 @@ def _resolve_url(path_or_url: str, allowlist=None, grants=None,
                             break
                         size += len(chunk)
                         if size > MAX_DOWNLOAD_BYTES:
-                            tmp.unlink(missing_ok=True)
-                            tmp.parent.rmdir(missing_ok=True)
-                            return None, "READ_FAILED: download over 50MB cap"
+                            raise ValueError("download over 50MB cap")
                         f.write(chunk)
                 return tmp, ""
         except urllib.error.HTTPError as exc:
+            if tmp is not None:
+                _cleanup_download(tmp)
             if exc.code in (301, 302, 303, 307, 308):
                 loc = exc.headers.get("location") if exc.headers else None
                 if not loc:
@@ -119,6 +129,8 @@ def _resolve_url(path_or_url: str, allowlist=None, grants=None,
                 continue
             return None, f"READ_FAILED: HTTP {exc.code}"
         except (urllib.error.URLError, OSError, ValueError) as exc:
+            if tmp is not None:
+                _cleanup_download(tmp)
             return None, f"READ_FAILED: {type(exc).__name__}: {exc}"
     return None, "READ_FAILED: too many redirects"
 
@@ -162,20 +174,16 @@ def read_document(path_or_url: str, sandbox=None,
             if local is None:
                 return "READ_BLOCKED: path outside sandbox or not found"
             p = local
-        needed = parser_needed_for(p)
-        if needed is not None:
-            return f"READ_FAILED: {p.name} needs parser {needed} to read (install pypdf, python-docx, or beautifulsoup4)"
         try:
+            needed = parser_needed_for(p)
+            if needed is not None:
+                return f"READ_FAILED: {p.name} needs parser {needed} to read (install pypdf, python-docx, or beautifulsoup4)"
             text = extract_text(p)
         except Exception as e:
             return f"READ_FAILED: {type(e).__name__}: {e}"
         finally:
             if _is_url(path_or_url):
-                try:
-                    p.unlink(missing_ok=True)
-                    p.parent.rmdir(missing_ok=True)
-                except Exception:
-                    pass
+                _cleanup_download(p)
         if not text.strip():
             return f"READ_FAILED: no text content extracted from {path_or_url}"
         if len(text) > max_chars:
@@ -227,8 +235,4 @@ def read_document(path_or_url: str, sandbox=None,
     finally:
         # clean up URL downloads; never delete user files
         if _is_url(path_or_url) and local is not None:
-            try:
-                local.unlink(missing_ok=True)
-                local.parent.rmdir(missing_ok=True)
-            except Exception:
-                pass
+            _cleanup_download(local)

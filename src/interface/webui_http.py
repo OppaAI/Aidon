@@ -329,7 +329,10 @@ def make_handler(server):
                 jobs = []
                 for job in Scheduler(server.home).jobs:
                     try:
-                        next_run = job.next_due(now)
+                        # A naive timestamp is interpreted as wall time in
+                        # the job's zone. Supply an instant for zoned jobs so
+                        # servers in UTC do not shift Vancouver schedules.
+                        next_run = job.next_due(now.astimezone() if job.tz else now)
                     except Exception:
                         next_run = None
                     jobs.append({

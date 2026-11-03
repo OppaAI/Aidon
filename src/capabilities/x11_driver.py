@@ -41,7 +41,7 @@ class X11Driver:
             self._run(["click", "1"])
         elif kind == "type":
             self._run(["type", "--clearmodifiers", "--delay", "10",
-                       str(action["text"])])
+                       "--", str(action["text"])])
         elif kind == "key":
             self._run(["key", "--clearmodifiers", str(action["key"])])
         elif kind == "scroll":

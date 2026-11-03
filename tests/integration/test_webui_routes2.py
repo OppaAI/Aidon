@@ -317,3 +317,35 @@ def test_memory_routes_live(live_server):
     assert status == 200 and payload == {"ok": True}
     status, payload = _get(base, "/api/memory/knowledge")
     assert payload["points"] == [] and payload["items"] == []
+
+
+def test_scheduler_page_uses_current_instant_for_vancouver_job(live_server, monkeypatch):
+    import datetime as datetime_module
+    from src.interface.triggers import Scheduler, SchedulerJob
+
+    base, _, home = live_server
+    scheduler = Scheduler(home)
+    scheduler.add_job(SchedulerJob(
+        name="dinner", schedule="daily 11:00", goal="Prepare dinner",
+        tz="America/Vancouver"))
+    real_datetime = datetime_module.datetime
+    instant = real_datetime(2026, 7, 3, 17, tzinfo=datetime_module.timezone.utc)
+
+    class FrozenDatetime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fromtimestamp(instant.timestamp(), tz=tz)
+
+    monkeypatch.setattr(datetime_module, "datetime", FrozenDatetime)
+    seen = []
+    original = SchedulerJob.next_due
+
+    def next_due(job, after):
+        seen.append(after)
+        return original(job, after)
+
+    monkeypatch.setattr(SchedulerJob, "next_due", next_due)
+    status, payload = _get(base, "/api/scheduled-tasks")
+    assert status == 200
+    assert seen and seen[-1].tzinfo is not None
+    assert payload["jobs"][0]["next_run"] == "2026-07-03T11:00-07:00"

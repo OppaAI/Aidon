@@ -19,7 +19,7 @@ def test_x11_driver_uses_fixed_xdotool_commands(monkeypatch):
     assert [call[0] for call in calls] == [
         ["xdotool", "mousemove", "--sync", "10", "20"],
         ["xdotool", "click", "1"],
-        ["xdotool", "type", "--clearmodifiers", "--delay", "10", "hello; rm -rf /"],
+        ["xdotool", "type", "--clearmodifiers", "--delay", "10", "--", "hello; rm -rf /"],
         ["xdotool", "key", "--clearmodifiers", "Return"],
         ["xdotool", "click", "--repeat", "3", "--delay", "10", "5"],
     ]
@@ -37,3 +37,12 @@ def test_x11_driver_requires_display(monkeypatch):
         assert "DISPLAY" in str(exc)
     else:
         raise AssertionError("driver must refuse without a display")
+
+
+def test_x11_type_treats_option_like_text_as_literal(monkeypatch):
+    calls = []
+    monkeypatch.setattr("src.capabilities.x11_driver.subprocess.run",
+                        lambda argv, **kwargs: calls.append(argv))
+    driver = X11Driver(executable="xdotool", display=":0")
+    driver({"kind": "type", "text": "--file /tmp/example"})
+    assert calls[0][-2:] == ["--", "--file /tmp/example"]

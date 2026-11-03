@@ -279,3 +279,19 @@ def test_preflight_card_lists_capabilities(tmp_path):
     assert "Capabilities:" in preflight.body
     assert "fs (plugin data dir)" in preflight.body
     assert "secret:TOKEN" in preflight.body
+
+
+@pytest.mark.parametrize("method", ["http_get", "http_post"])
+def test_ctx_http_bounds_remote_response(tmp_path, monkeypatch, method):
+    import io
+    from src.capabilities import plugin_runtime
+
+    ctx = PluginContext("gadget", tmp_path,
+                        CapabilityPolicy.from_capabilities(["http:example.com"]))
+    monkeypatch.setattr(plugin_runtime, "_MAX_HTTP_RESPONSE_BYTES", 16)
+    monkeypatch.setattr(ctx, "_checked_url", lambda url: url)
+    monkeypatch.setattr(ctx, "_open", lambda *args: io.BytesIO(b"x" * 17))
+    with pytest.raises(ValueError, match="response exceeds"):
+        getattr(ctx, method)("https://example.com")
+    monkeypatch.setattr(ctx, "_open", lambda *args: io.BytesIO(b"x" * 16))
+    assert getattr(ctx, method)("https://example.com") == "x" * 16

@@ -41,6 +41,7 @@ CAPABILITY_FS = "fs"
 CAPABILITY_RUN = "run"
 CAPABILITY_SECRET = "secret"
 CAPABILITY_NETWORK = "network"
+_MAX_HTTP_RESPONSE_BYTES = 8 * 1024 * 1024
 
 KNOWN_CAPABILITIES = (CAPABILITY_HTTP, CAPABILITY_FS, CAPABILITY_RUN,
                       CAPABILITY_SECRET, CAPABILITY_NETWORK)
@@ -176,7 +177,7 @@ class PluginContext:
         request = urllib.request.Request(
             target, headers=dict(headers or {}), method="GET")
         with self._open(request, timeout) as resp:
-            return resp.read().decode("utf-8", errors="replace")
+            return self._read_http_response(resp)
 
     def http_post(self, url, data=None, headers=None, timeout=30) -> str:
         target = self._checked_url(url)
@@ -190,7 +191,16 @@ class PluginContext:
         request = urllib.request.Request(
             target, data=body, headers=merged_headers, method="POST")
         with self._open(request, timeout) as resp:
-            return resp.read().decode("utf-8", errors="replace")
+            return self._read_http_response(resp)
+
+    @staticmethod
+    def _read_http_response(resp) -> str:
+        # Remote content is untrusted. Bound allocation before decoding rather
+        # than relying on plugins to truncate a response already held in RAM.
+        body = resp.read(_MAX_HTTP_RESPONSE_BYTES + 1)
+        if len(body) > _MAX_HTTP_RESPONSE_BYTES:
+            raise ValueError("plugin HTTP response exceeds 8 MiB limit")
+        return body.decode("utf-8", errors="replace")
 
     def _open(self, request, timeout):
         opener = urllib.request.build_opener(
