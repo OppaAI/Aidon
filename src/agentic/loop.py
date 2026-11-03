@@ -410,7 +410,14 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
 
     def _chat_goal_with_memory(self, goal: str) -> str:
         """Add binding guidance and relevant memory to plain chat."""
-        parts = [goal]
+        parts = [goal,
+                 "Execution status for this reply: conversation only; no tools "
+                 "have been executed in this turn. Do not claim you opened an app, "
+                 "typed text, clicked, recorded, verified a screen, or validated a "
+                 "skill. Earlier assistant prose and a user's 'yes' are not tool "
+                 "evidence or an approval-card decision. If an earlier reply "
+                 "claimed execution without recorded tool results, correct it "
+                 "instead of repeating or role-playing that claim."]
         if str(getattr(self, "guidance", "") or "").strip():
             try:
                 from .prompts import guidance_block
@@ -533,15 +540,25 @@ class GoalRunner(RunSupportMixin, ToolDispatchMixin, PlanExecutionMixin, PlanRun
         _write_intent = any(word in goal.lower() for word in ("write", "save", "create a file", "export", ".md", ".py", ".txt", ".csv"))
         # Ask mode explicitly requests an interview. Advisory chat routing
         # must not swallow that choice (including a sticky /ask on WhatsApp).
-        # Registered desktop control also requires execution, even when the
-        # router mistakes "open gedit" for a conversational question.
-        from .capability_triage import builtin_computer_use_covers
-        desktop_goal = (not self.kernel_mode and
-                        builtin_computer_use_covers(goal, self.extra_tools))
+        # Desktop intent must not depend on whether registration succeeded.
+        # Otherwise a missing driver sends an action request into plain chat,
+        # where the model can narrate imaginary tool execution.
+        from .capability_triage import is_desktop_action_request
+        desktop_goal = is_desktop_action_request(goal)
         if (getattr(self, "mode", None) == "ask" or desktop_goal) and spec is None:
             self.last_route = ("agentic", 1.0)
             if callable(getattr(self, "route_callback", None)):
                 self.route_callback(self.last_route)
+        if desktop_goal and (self.kernel_mode or "computer_use_task" not in self.extra_tools):
+            reason = ("Desktop control is disabled by kernel mode. Set AIDON_KERNEL=0."
+                      if self.kernel_mode else
+                      "The guided desktop tool is unavailable in this running process. "
+                      "Check DISPLAY, xdotool, and AIDON_COMPUTER_DRIVER=x11, then "
+                      "launch Aidon from your Ubuntu desktop session.")
+            return self._finalize(RunReport(
+                "failed", goal, Plan(), False, False,
+                error=reason + " No desktop action was performed.",
+                backend=self._backend_name()))
         _route = getattr(self, "last_route", None)
         if (not getattr(self, "resume_interview", False) and getattr(self, "use_semantic_router_skip", False) and _route
                 and _route[0] == "chat" and spec is None and not _write_intent

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from src.agentic.capability_triage import (
     build_inventory, builtin_computer_use_covers, builtin_image_edit_covers,
-    inventory_text, triage)
+    inventory_text, is_desktop_action_request, triage)
 
 
 def test_attached_image_edit_is_covered_by_registered_builtin():
@@ -31,6 +31,13 @@ def test_desktop_goal_is_covered_when_computer_use_is_registered():
     assert not builtin_computer_use_covers(
         "Write a note about desktop computers",
         ["computer_use_task"])
+
+
+def test_desktop_action_detection_does_not_depend_on_tools():
+    assert is_desktop_action_request("On the Ubuntu desktop, visibly open gedit and type hello")
+    assert is_desktop_action_request("Can you open notepad on my desktop?")
+    assert not is_desktop_action_request("What is gedit?")
+    assert not is_desktop_action_request("How to open gedit on Ubuntu?")
 
 
 def test_desktop_plan_cannot_turn_into_file_deliverables():

@@ -1015,6 +1015,16 @@ class WebUIServer(WebUIRunMixin, WebUILabMixin, WebUIMessagingMixin, WebUISettin
         msg = self.messaging_config
         sandbox = str(getattr(config, "execution_backend", "bubblewrap"))
         computer = str(getattr(config, "computer_driver", "") or "off")
+        if getattr(config, "kernel_mode", False):
+            computer = "Disabled (kernel mode)"
+        elif computer == "x11" or os.environ.get("DISPLAY"):
+            import shutil
+            if not os.environ.get("DISPLAY"):
+                computer = "Unavailable (no DISPLAY)"
+            elif not shutil.which("xdotool"):
+                computer = "Unavailable (xdotool missing)"
+            else:
+                computer = "X11 configured"
         return {
             "model": model,
             "backend": backend,

@@ -171,3 +171,31 @@ def test_desktop_control_cannot_be_swallowed_by_chat_route(tmp_path):
     assert report.status == "stopped"
     assert runner.last_route == ("agentic", 1.0)
     assert report.plan.normalized_steps()[0].tool == "computer_use_task"
+
+
+@pytest.mark.parametrize("kernel_mode,tools", [(False, {}), (True, {"computer_use_task": object()})])
+def test_unavailable_desktop_never_fabricates_execution_in_chat(tmp_path, kernel_mode, tools):
+    client = FakeClient('[Visible gedit window opens, shows the typed message]')
+    runner = _runner(tmp_path, client, semantic_router=_Route("chat"),
+                     use_semantic_router_skip=True, mode="plan",
+                     kernel_mode=kernel_mode, extra_tools=tools)
+    report = runner.run(
+        'On the Ubuntu desktop, visibly open gedit and type "Hello from Aidon." '
+        'Show me each desktop action and ask for approval before clicking or typing. '
+        'Afterward, check the screen and tell me whether the text appeared.')
+    assert report.status == "failed"
+    assert "No desktop action was performed" in report.error
+    assert not report.chat_reply
+    assert runner.last_route == ("agentic", 1.0)
+    assert client.calls == []
+
+
+def test_chat_followup_does_not_treat_prose_as_tool_evidence(tmp_path):
+    client = FakeClient("No desktop action was executed.")
+    runner = _runner(tmp_path, client, semantic_router=_Route("chat"),
+                     use_semantic_router_skip=True,
+                     conversation_context='Assistant: [Visible gedit window opens]')
+    report = runner.run("Yes")
+    assert report.status == "chat"
+    assert "no tools have been executed in this turn" in str(client.calls)
+    assert "not tool evidence" in str(client.calls)

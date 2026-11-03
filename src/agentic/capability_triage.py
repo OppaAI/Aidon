@@ -98,6 +98,17 @@ def builtin_computer_use_covers(goal: str, tool_names) -> bool:
     return (bool(names.intersection({"computer_use", "computer_use_task"}))
             and is_desktop_interaction_goal(goal))
 
+
+def is_desktop_action_request(goal: str) -> bool:
+    """Identify requested GUI actions independently of driver availability."""
+    text = str(goal or "").strip().lower()
+    if not is_desktop_interaction_goal(text):
+        return False
+    if re.match(r"^(?:how (?:do|does|can|to)|what (?:is|are)|explain|describe)\b", text):
+        return False
+    return bool(re.search(
+        r"\b(?:open|launch|type|click|press|scroll|control|move|start|stop)\b", text))
+
 STATUS_CRITERIA = {
     "covered": "Every capability the goal needs is in the inventory.",
     "need_skill": "A reusable procedure might improve this work, but no "
