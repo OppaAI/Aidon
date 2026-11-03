@@ -25,7 +25,8 @@
 
 > # What this project wants to showcase for the Meta Global AI Developer Hackathon
 >
-> Built for the Meta Global AI Developer Hackathon (October 26 – November 4, 2026), Aidon showcases four capabilities. Meta models power its main agentic reasoning and optional image and speech features, alongside the supporting models and services described below:
+> Built for the Meta Global AI Developer Hackathon (The entire codebase was made between October 26 – November 4, 2026).  
+This project showcases four capabilities. Meta models power its main agentic reasoning and optional image and speech to text features, alongside the supporting models and services described below:
 >
 >- **Human Natural Language and Interview as source input** —  Understands goals in plain natural language and interviews the user in conversation to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it. Ask mode is the default: the agent asks chat questions first and works to a verified, frozen spec before planning anything, and the same conversation works in chat, on WhatsApp or Slack, or on the command line.
 >- **Grows its own capabilities with tools/skills creation** — drafting, sandbox-testing, and adopting tools and skills that plug into its agentic workflows, including niche ones tailored to a user's own task. A tool plugin is a directory with a manifest and module files: it is tested in the sandbox first, scanned for unsafe patterns, and adopted only on human approval, after which its tools are usable immediately in the current run and every later goal. Skills follow a candidate → validated → trusted lifecycle, and only trusted skills enter plan prompts.
