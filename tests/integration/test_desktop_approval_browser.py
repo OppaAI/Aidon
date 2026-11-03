@@ -15,7 +15,7 @@ from src.interface.webui import WebUIServer
 from src.system.goal_tools import _goal_extra_tools
 
 
-def test_overlay_is_gone_before_action_and_repeated_cards_remain_usable(tmp_path, monkeypatch):
+def test_overlay_is_gone_before_task_and_one_approval_covers_all_actions(tmp_path, monkeypatch):
     executed = []
 
     class Driver:
@@ -67,17 +67,10 @@ def test_overlay_is_gone_before_action_and_repeated_cards_remain_usable(tmp_path
                 page.locator("#send").click()
                 card = page.locator(".approval-card")
                 card.wait_for(state="visible")
-                first = card.get_attribute("data-card-id")
                 assert executed == []
                 card.locator('[data-d="approved"]').click()
-                page.wait_for_function(
-                    "old => { const c = document.querySelector('.approval-card'); "
-                    "return c && c.dataset.cardId !== old; }", arg=first)
-                assert len(executed) == 1
-                assert "1 tool calls" in card.inner_text()
-                card.locator('[data-d="approved"]').click()
                 page.get_by_text("Desktop completed", exact=True).wait_for()
-                assert len(executed) == 2 and len(set(requests)) == 2
+                assert len(executed) == 2 and len(requests) == 1
                 assert not errors
             finally:
                 browser.close()

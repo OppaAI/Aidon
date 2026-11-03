@@ -39,7 +39,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                       plugin_registry=None, gate_context=None, test_backend_factory=None,
                       allow_skill_adoption=False,
                       approved_image_edits=None, speak_callback=None,
-                      desktop_action_callback=None) -> dict:
+                      desktop_action_callback=None, approved_desktop_tasks=None) -> dict:
     """Extra tools for goal runs, built from existing modules only.
 
     If ``plugin_registry`` is given (a ``PluginRegistry`` instance that is
@@ -211,7 +211,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         tools["instagram_post"] = tools["instagram_publish"]
 
     register_computer_tools(config, tools, _approval, _confined, model_chat,
-                            on_action=desktop_action_callback)
+                            on_action=desktop_action_callback, approved_tasks=approved_desktop_tasks)
 
     # Recording host audio is a sensitive side effect. Keep the old
     # mandatory approval boundary even though the recorder itself lives in

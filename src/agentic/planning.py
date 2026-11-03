@@ -169,7 +169,7 @@ class PlanningMixin:
                             "args": {"description": task, "max_actions": 20},
                             "description": "Use the visible desktop to complete the requested task"}],
                     deliverables=[], criteria=[],
-                    summary="Use the desktop to complete the requested task; no files were requested.")
+                    summary="Proceed authorizes this desktop task for up to 20 actions, without asking for each click or keystroke.")
         if self.kernel_mode:
             system = ("Propose a short plan as JSON with keys summary, "
                       "deliverable_descriptions, steps, deliverables, criteria. "
