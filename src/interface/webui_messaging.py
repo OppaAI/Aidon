@@ -281,16 +281,14 @@ class WebUIMessagingMixin:
                             # Meta's webhook response is not delivered to the
                             # sender as a chat message. Surface shared goal
                             # handler failures on the WhatsApp conversation.
-                            # Preserve the actionable exception cause, but do
-                            # not log locals, request bodies, or conversations.
+                            # Exception messages can contain user content or
+                            # private details; log only the type and locations.
                             frames = traceback.extract_tb(exc.__traceback__)
                             locations = " -> ".join(
                                 f"{frame.filename.rsplit('/', 1)[-1]}:"
                                 f"{frame.lineno}:{frame.name}"
                                 for frame in frames[-6:])
-                            from ..system.diagnostics import redact_text
-                            cause = redact_text(str(exc)).replace("\n", " ")[:500]
-                            detail = (f"{type(exc).__name__}: {cause or 'no exception message'}; "
+                            detail = (f"{type(exc).__name__}; "
                                       f"stack: {locations or 'unavailable'}")
                             print(f"WhatsApp goal handler failed: {detail}")
                             try:
