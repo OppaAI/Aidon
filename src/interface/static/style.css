@@ -457,6 +457,8 @@ html[data-theme="light"] #guidance-input::placeholder { color: var(--muted); }
 .dash-title > span:first-child { color: var(--accent); }
 .dash-chevron { margin-left: auto; color: var(--muted); font-size: 18px; }
 .dash-empty { color: var(--muted); font-size: 13px; margin-top: 9px; }
+.dash-goal { color: var(--text); font-size: 13px; margin-top: 9px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dash-status { display: flex; justify-content: space-between; color: var(--muted); font-size: 13px;
   margin-top: 8px; }
 .dash-status b { font-weight: 500; }

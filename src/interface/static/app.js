@@ -2894,6 +2894,31 @@
 
   let currentConversationId = new URLSearchParams(location.search).get("conversation_id")
     || localStorage.getItem("aidon-conversation") || "";
+  function renderCurrentChatGoal(goal) {
+    const node = document.getElementById("current-chat-goal");
+    if (!node) return;
+    const text = String(goal || "").replace(/\s+/g, " ").trim();
+    node.textContent = text || "Start a goal to start a chat";
+    node.title = text;
+    node.classList.toggle("dash-empty", !text);
+    node.classList.toggle("dash-goal", !!text);
+  }
+  async function refreshCurrentChatGoal() {
+    const conversationId = currentConversationId;
+    if (!conversationId) {
+      renderCurrentChatGoal("");
+      return;
+    }
+    try {
+      const response = await fetch("/api/conversations/" +
+        encodeURIComponent(conversationId));
+      if (!response.ok || conversationId !== currentConversationId) return;
+      const conversation = await response.json();
+      const firstUserTurn = (conversation.turns || []).find((turn) =>
+        turn && turn.role === "user" && turn.text);
+      renderCurrentChatGoal(firstUserTurn ? firstUserTurn.text : "");
+    } catch (e) {}
+  }
   window.aidonConversation = () => ({
     conversation_id: currentConversationId,
   });
@@ -2902,7 +2927,9 @@
     if (currentConversationId) localStorage.setItem("aidon-conversation", currentConversationId);
     else localStorage.removeItem("aidon-conversation");
     markActiveConversation();
+    refreshCurrentChatGoal();
   };
+  refreshCurrentChatGoal();
 
   function fmtDate(iso) {
     if (!iso) return "";
@@ -3138,6 +3165,7 @@
     } catch (e) { return; }
     currentConversationId = conv.id;
     localStorage.setItem("aidon-conversation", currentConversationId);
+    refreshCurrentChatGoal();
     if (window.aidonStopPolling) window.aidonStopPolling();
     markActiveConversation();
     document.getElementById("dag-activity").textContent = "Waiting for a goal";
