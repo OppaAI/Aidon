@@ -201,7 +201,11 @@ def report_text(status: str, files: list[str], error: str,
     elif status == "cancelled":
         head = phrase or report_cancelled(run_id)
     else:
-        head = f"{phrase or report_failed_opener(run_id)} {error}"
+        failure = " ".join(str(error or "The cause is recorded in Aidon logs.").split())
+        if len(failure) > 200:
+            failure = failure[:197].rsplit(" ", 1)[0] + "…"
+            failure += " Open Thinking for details."
+        head = f"{phrase or report_failed_opener(run_id)} {failure}"
     if blocked:
         lines = "\n".join(f"- {item}" for item in blocked)
         head = f"{head}\nBlocked actions (need a human):\n{lines}"

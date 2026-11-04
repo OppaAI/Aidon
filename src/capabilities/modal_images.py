@@ -112,8 +112,14 @@ class CapabilityImageBuilder:
     @staticmethod
     def _exec(sb, cmd, timeout: int):
         proc = sb.exec(*cmd, timeout=timeout)
-        out = proc.stdout.read()
-        err = proc.stderr.read()
+        # Keep both Modal streams flowing. A command that fills stderr while
+        # stdout.read() waits for EOF can exceed Modal's buffered stream limit.
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            stdout_future = pool.submit(proc.stdout.read)
+            stderr_future = pool.submit(proc.stderr.read)
+            out = stdout_future.result()
+            err = stderr_future.result()
         proc.wait()
         return proc.returncode, out, err
 
