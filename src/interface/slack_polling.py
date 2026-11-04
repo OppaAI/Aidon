@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import traceback
 
 
 def configured_slack_channels(value: str) -> tuple[str, ...]:
@@ -22,7 +23,7 @@ def process_polled_messages(messages, handle, checkpoint) -> None:
 
 
 def dispatch_slack_message(dispatcher, event, *, channel: str, thread_ts: str,
-                           sender, ack_after: float = 15) -> None:
+                           sender, ack_after: float = 15, home=None) -> None:
     """Dispatch a polled message and return its result to the same thread.
 
     Exceptions raised in the worker thread used to disappear from the poll
@@ -36,7 +37,22 @@ def dispatch_slack_message(dispatcher, event, *, channel: str, thread_ts: str,
         try:
             dispatcher.dispatch(event)
         except Exception as exc:  # surfaced to the Slack user below
-            print(f"Slack goal handler failed: {type(exc).__name__}")
+            frames = traceback.extract_tb(exc.__traceback__)
+            locations = " -> ".join(
+                f"{frame.filename.rsplit('/', 1)[-1]}:"
+                f"{frame.lineno}:{frame.name}"
+                for frame in frames[-6:])
+            detail = (f"{type(exc).__name__}; "
+                      f"stack: {locations or 'unavailable'}")
+            print(f"Slack goal handler failed: {detail}")
+            if home is not None:
+                try:
+                    from ..system.diagnostics import log_run_error
+                    log_run_error(
+                        home, str(event.payload.get("run_id", "") or ""),
+                        "slack_dispatch", detail)
+                except Exception:
+                    pass
             failures.append(exc)
 
     event.reply = replies.append

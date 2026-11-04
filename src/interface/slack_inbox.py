@@ -21,6 +21,7 @@ from .triggers import TriggerEvent
 
 class SlackInbox:
     def __init__(self, home, dispatcher, sender, ack_after: float = 15, recorder=None):
+        self.home = Path(home)
         self.path = Path(home) / "messaging" / "slack" / "inbox.db"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.dispatcher = dispatcher
@@ -93,7 +94,7 @@ class SlackInbox:
             dispatch_slack_message(
                 self.dispatcher, event, channel=row["channel"],
                 thread_ts=event.payload.get("thread_ts") or row["ts"],
-                sender=reply, ack_after=self.ack_after)
+                sender=reply, ack_after=self.ack_after, home=self.home)
         except Exception as exc:
             # Do not re-execute a completed goal merely because reporting
             # failed; retain the failed record for owner diagnosis.
