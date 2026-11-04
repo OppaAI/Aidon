@@ -968,12 +968,8 @@ class WebUIServer(WebUIRunMixin, WebUILabMixin, WebUIMessagingMixin, WebUISettin
         return {"keys": keys}
 
     def handle_voice(self) -> dict:
-        """Voice capability info: whether spoken replies are
-        announced, and whether a TTS key is configured. No secret
-        is ever returned, only booleans.
-        """
-        return {"announce": bool(getattr(self, "voice_announce", False)),
-                "tts_available": bool(getattr(self, "tts_key", None))}
+        """Voice output is disabled; input transcription remains available."""
+        return {"announce": False, "tts_available": False}
 
     def handle_status(self) -> dict:
         """Return safe, human-readable capability status for the dashboard."""

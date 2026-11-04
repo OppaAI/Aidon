@@ -673,8 +673,8 @@
     requestAnimationFrame(mouthLoop);
   }
   fetch("/api/voice").then((r) => r.json()).then((v) => {
-    voiceAnnounce = !!v.announce;
-    ttsAvailable = !!v.tts_available;
+    voiceAnnounce = false;
+    ttsAvailable = false;
   }).catch(() => {});
 
   let stopKaraokeActive = null;  // cancels the rAF loop of the current voice
@@ -947,109 +947,14 @@
     }
   }
 
-  async function speak(el, text, btn) {
-    const gen = ++speakGen;
-    stopStreamSpeech();
-    if (currentBtn === btn && currentAudio) {  // toggle: stop
-      currentAudio.pause();
-      resetSpeakBtn();
-      return;
-    }
-    if (currentAudio) {  // only one voice at a time
-      currentAudio.pause();
-      resetSpeakBtn();
-    }
-    btn.textContent = "…";
-    try {
-      // Start the network request immediately. Waiting for the typewriter
-      // first made TTS feel several seconds late on long answers.
-      // Typed messages keep a dedicated body node. Streamed messages replace
-      // their markup at completion, and restored messages never had that
-      // wrapper, so fall back to the message itself when the cached node is
-      // absent or has been detached. karaokeWords skips timestamp and stats
-      // descendants in that case.
-      const body = el
-        ? (el._body && el._body.isConnected ? el._body : el)
-        : null;
-      const spoken = spokenText(text || (body ? body.textContent : ""));
-      const request = {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: spoken }),
-      };
-      const streamRequest = fetch("/api/tts/stream", request);
-      const streamResponse = await streamRequest;
-      if (!streamResponse.ok) throw new Error("tts " + streamResponse.status);
-      // Start consuming Fish while the message is still typewriting. The
-      // old order waited for the complete visual animation before reading
-      // the first audio chunk, which made long answers feel silent.
-      const progressivePromise = progressiveAudio(streamResponse);
-      if (el && el._typing) { try { await el._typing; } catch (e) {} }
-      if (gen !== speakGen) return;
-      const progressive = await progressivePromise;
-      let audio;
-      let url;
-      if (progressive) {
-        audio = progressive.audio;
-        url = progressive.url;
-        currentAudioCancel = progressive.cancel;
-      } else {
-        // Safari, older browsers, and unusual MP3 implementations use the
-        // complete-response path without changing user behavior.
-        const r = await fetch("/api/tts", request);
-        if (!r.ok) throw new Error("tts " + r.status);
-        url = URL.createObjectURL(await r.blob());
-        audio = new Audio(url);
-        currentAudioCancel = null;
-      }
-      // A newer playback started while this one was downloading: drop
-      // it, or the two voices talk over each other.
-      if (gen !== speakGen) {
-        if (currentAudioCancel) {
-          try { currentAudioCancel(); } catch (e) { /* noop */ }
-          currentAudioCancel = null;
-        }
-        URL.revokeObjectURL(url);
-        return;
-      }
-      // Route through the analyser for lip sync + waveform (no-op if
-      // Web Audio is unavailable — falls back to plain playback).
-      audio.playbackRate = TTS_PLAYBACK_RATE;
-      audio.preservesPitch = true;
-      try {
-        const analyser = getTtsAnalyser();
-        const src = ttsCtx.createMediaElementSource(audio);
-        src.connect(analyser);
-      } catch (e) { /* plain playback */ }
-      currentAudio = audio;
-      currentAudioUrl = url;
-      currentBtn = btn;
-      btn.textContent = "⏹";
-      btn.classList.add("playing");
-      btn.title = "Stop";
-      ttsPlaying = true;
-      stopMouthSync = syncMouthToText(spoken, audio);
-      startMouthLoop();
-      // Karaoke: the words light up as the voice reaches them.
-      // resetSpeakBtn() owns cancellation and the blob URL, so a
-      // stopped/replaced playback cannot leave either behind.
-      if (body) {
-        const words = karaokeWords(body);
-        stopKaraokeActive = karaokeSync(words, audio);
-      }
-      audio.onended = () => resetSpeakBtn();
-      audio.onerror = () => resetSpeakBtn();
-      await audio.play();  // may reject before first user gesture; fine
-    } catch (e) {
-      resetSpeakBtn();
-    }
-  }
+  async function speak() { return; }
 
   function playButton(text, el) {
     const b = document.createElement("button");
     b.className = "tts-play";
     b.textContent = "▶";
     b.title = "Play aloud";
+    b.hidden = true;
     b.addEventListener("click", () => speak(el, text, b));
     return b;
   }
@@ -1152,11 +1057,7 @@
   // Speak the two moments that MATTER: a decision is waiting for you,
   // and the run is over. Everything in between stays silent unless
   // AIDON_VOICE_ANNOUNCE=1 asks for the running commentary.
-  function announceImportant(el, text, btn) {
-    if (!ttsAvailable) return;
-    const say = spokenText(text);
-    if (say) speak(el, say, btn).catch(() => {});
-  }
+  function announceImportant() { return; }
 
   function renderStages(stage) {
     stagesEl.innerHTML = "";
@@ -1812,23 +1713,10 @@
             const button = playButton(e.text, message);
             message.appendChild(button);
             speak(message, e.text, button).catch(() => {});
-          } else if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
-            const play = () => {
-              window.speechSynthesis.cancel();
-              window.speechSynthesis.speak(new SpeechSynthesisUtterance(e.text));
-            };
-            const button = document.createElement("button");
-            button.className = "tts-play";
-            button.textContent = "▶";
-            button.title = "Read aloud";
-            button.addEventListener("click", play);
-            message.appendChild(button);
-            play();
-          } else showMiddleStatus("Speech is unavailable; the requested text is shown.", "warning");
+          }
         }
         else if (e.kind === "approval-request") {
           const m = addMsg("stage-line", "approval requested: " + e.text);
-          m.appendChild(playButton("Approval requested. " + e.text));
         }
         else if (e.kind === "approval-decision") {
           sawDecision = true;
@@ -1908,13 +1796,9 @@
             (item.detail || item.title || item.error));
           let fallback;
           if (run.status === "failed") {
-            fallback = "This run failed before Aidon could send its final response.";
-            if (failure) {
-              const detail = String(failure.detail || failure.title || failure.error);
-              fallback += " " + detail;
-            } else {
-              fallback += " Check the Thinking panel for the failure details.";
-            }
+            fallback = failure
+              ? "Run failed. Open Thinking for the cause and next step."
+              : "Run failed before a final response. Open Thinking for details.";
           } else if (run.status === "cancelled") {
             fallback = "This run was cancelled before Aidon sent a final response.";
           } else if (run.status === "rejected") {
@@ -2017,7 +1901,7 @@
       wrap.className = "img-thumb-wrap";
       const label = document.createElement("span");
       label.className = "img-thumb";
-      label.textContent = "📎 " + f.name;
+      label.textContent = f.name;
       label.title = f.name;
       const x = document.createElement("button");
       x.className = "img-thumb-x";
@@ -3192,7 +3076,7 @@
         img.alt = a.name;
         d.appendChild(img);
       } else {
-        d.innerHTML = '📎 <a href="' + url +
+        d.innerHTML = '<a href="' + url +
           '" target="_blank" rel="noopener">' + esc(a.name) + "</a>" +
           (a.memory_id ? ' <span class="hist-meta">· linked to memory</span>' : "");
       }
@@ -3403,10 +3287,10 @@
         a.conversation_title || "",
         a.memory_linked ? "🔗 memory" : "",
         fmtDate(a.created_at)].filter(Boolean).join(" · ");
+      const extension = String(a.name || "").split(".").pop().slice(0, 5).toUpperCase();
       const visual = a.kind === "image"
         ? '<img class="lib-thumb" src="' + a.url + '" alt="">'
-        : '<span class="lib-ico">' +
-          (a.kind === "output" ? "📄" : "📎") + "</span>";
+        : '<span class="lib-ext">' + esc(extension || "FILE") + "</span>";
       d.innerHTML = visual + "<div><div class=\"lib-name\">" +
         esc(a.name) + '</div><div class="lib-meta">' + esc(meta) +
         "</div></div>" +
@@ -3445,7 +3329,7 @@
       d.className = "lib-item";
       const visual = a.kind === "image"
         ? '<img class="lib-thumb" src="' + esc(a.url) + '" alt="">'
-        : '<span class="lib-ico">📎</span>';
+        : '<span class="lib-ext">' + esc(String(a.name || "").split(".").pop().slice(0, 5).toUpperCase() || "FILE") + '</span>';
       const date = a.created_at
         ? fmtDate(new Date(a.created_at * 1000).toISOString()) : "";
       const meta = [a.kind === "image" ? "Imported image" : "Imported file",

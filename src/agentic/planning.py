@@ -203,13 +203,15 @@ class PlanningMixin:
                       "Tools: write, read, "
                       "list, shell, calculate. Keep every file inside "
                       "the workdir.")
-        system += (" Every item in deliverables MUST be produced by exactly "
+        system += (" Use only tool names listed in this prompt, exactly as written; "
+                   "never invent a tool name or prefix one with the project name. "
+                   "Match every tool argument to its listed signature. "
+                   "Every item in deliverables MUST be produced by exactly "
                    "one step; never return deliverables with an empty or "
                    "missing steps array. For GUI requests, use the "
                    "computer_use_task for visual desktop tasks when it is available, "
                    "so each action is chosen using the current screen. "
-                   "When asked to read text aloud after a desktop action, add "
-                   "a dependent tts_speak step containing the exact requested text.")
+                   "Voice output is disabled; do not plan spoken replies or audio playback.")
         system += (" Deliverables are files, not tool calls. If the user asks "
                    "for an answer or action result and no file, use an "
                    "output-only step: omit its deliverable (or use an empty "
@@ -405,8 +407,16 @@ class PlanningMixin:
         if self.extra_tools and not self.kernel_mode:
             # Kernel mode restricts _call_tool to seed tools, so
             # extra tools are advertised only outside kernel mode.
-            system += (" Extra tools available to plan steps: "
-                       + ", ".join(sorted(self.extra_tools)) + ".")
+            import inspect
+            signatures = []
+            for tool_name, tool_fn in sorted(self.extra_tools.items()):
+                try:
+                    signature = str(inspect.signature(tool_fn))
+                except (TypeError, ValueError):
+                    signature = "(arguments unavailable)"
+                signatures.append(f"{tool_name}{signature}")
+            system += (" Extra tools available to plan steps, with exact arguments: "
+                       + "; ".join(signatures) + ".")
             if "email_send" in self.extra_tools:
                 system += (
                     " EMAIL WORKFLOW: For a user request to send or reply to "

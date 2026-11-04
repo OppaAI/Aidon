@@ -25,7 +25,7 @@ _SELF_MODIFY_LOCK = threading.Lock()
 CAPABILITY_TOOLS_WHEN_OPTIONAL_DISABLED = frozenset({
     "edit_image", "sam_segment", "generate_document",
     "build_ebook", "make_docx", "make_latex", "make_slides",
-    "make_spreadsheet", "transcribe_audio", "tts_speak",
+    "make_spreadsheet", "transcribe_audio",
     "email_make_draft", "email_send", "slack_send", "slack_send_file",
     "email_read",
     "whatsapp_send", "whatsapp_send_media", "threads_publish",
@@ -172,15 +172,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         if gate is None:
             return False, "no approval gate configured"
         try:
-            from ..interface.phrasing import approval_lead_in
-            lead = None
-            if phrase is not None:
-                try:
-                    lead = phrase("approval")
-                except Exception:
-                    lead = None
-            if not lead:
-                lead = approval_lead_in()
+            lead = "Approval required before this action."
             decision = gate.ask(
                 kind, title, f"{lead}\n\n{body}",
                 action_class=action_class,
@@ -433,8 +425,12 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
     # drafts. This is deliberately unavailable to unattended runs and does
     # not execute or adopt model-generated source.
     if not scheduled:
-        def draft_tool_plugin(spec, output_dir=""):
+        def draft_tool_plugin(spec=None, output_dir="", request=None):
             try:
+                if spec is None:
+                    spec = request
+                if spec is None:
+                    return "plugin generation failed: provide spec (or request)"
                 if not callable(model_chat):
                     return "plugin generation unavailable: no model client is configured for this run"
                 from ..capabilities.plugin_generation import (
@@ -465,7 +461,7 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             PluginRegistry, _existing_approved_plugin, adoption_gate, ask_plugin_approval,
             commit_plugin, preflight_plugin)
 
-        def adopt_tool_plugin(path):
+        def adopt_tool_plugin(path="", plugin_dir=None):
             # Order matters: preflight and approval cost nothing.
             # The governor counts only the commit, after the
             # owner has said yes — a rejection, whether by the
@@ -475,6 +471,9 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
             if posture == "locked" or getattr(config, "kernel_mode", False):
                 return ("adoption refused: tool posture is locked; "
                         "plugin adoption is disabled")
+            path = path or plugin_dir or ""
+            if not path:
+                return "adoption refused: provide path (or plugin_dir)"
             source = _confined(path)
             if not source.is_dir():
                 return f"adoption refused: plugin directory not found: {path}"
