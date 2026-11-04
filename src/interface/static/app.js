@@ -1705,6 +1705,35 @@
     // this response was in flight. Never clear that new decision.
   }
 
+  async function recoverFinalReply(run, runId) {
+    const conversationId = String(run.conversation_id || "");
+    if (!conversationId) return false;
+    try {
+      const response = await fetch("/api/conversations/" +
+        encodeURIComponent(conversationId));
+      if (!response.ok) return false;
+      const conversation = await response.json();
+      const turns = Array.isArray(conversation.turns) ? conversation.turns : [];
+      let lastUser = -1;
+      turns.forEach((turn, index) => {
+        if (turn && turn.role === "user") lastUser = index;
+      });
+      if (lastUser < 0) return false;
+      const replies = turns.slice(lastUser + 1).filter((turn) =>
+        turn && turn.role === "assistant" && String(turn.text || "").trim());
+      const reply = replies[replies.length - 1];
+      if (!reply) return false;
+      finalReplySeenFor = runId;
+      const message = addMsgTyped("aidon", reply.text, reply.created_at,
+        true, lastRoute);
+      appendMessagePlayButton(message, reply.text);
+      appendMessageCopyButton(message, reply.text);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
   async function poll() {
     if (!currentRun || pollInFlight) return;
     const polledRun = currentRun;
@@ -1899,6 +1928,9 @@
             terminalReplyWaitPolls = 0;
           }
           if (terminalReplyWaitPolls++ < 15) return;
+        }
+        if (run.status !== "stopped" && finalReplySeenFor !== polledRun) {
+          await recoverFinalReply(run, polledRun);
         }
         if (run.status !== "stopped" && finalReplySeenFor !== polledRun) {
           const failure = [...runTraceHistory].reverse().find((item) =>
