@@ -185,10 +185,16 @@ class PlanningMixin:
                       "and how it is used. Each step is an object with tool, "
                       "args, optional deliverable, and a short human-facing description "
                       "of its purpose (never private chain-of-thought). "
-                      "Tools: write, read, "
-                      "list, shell only, kernel mode, no calculate, "
-                      "no plugin tools. Keep every file inside "
-                      "the workdir.")
+                      "Tools: write, read, list, shell, read_document(path_or_url) "
+                      "only, kernel mode, no calculate, "
+                      "no plugin tools. Keep deliverables inside the workdir.")
+            system += (
+                " For a local file the user names, use read_document with its "
+                "exact path, never shell/cat/ls. Shell runs in an isolated "
+                "environment where ~/Downloads may be /root/Downloads. "
+                "read_document only permits the Aidon workspace and the service "
+                "user's ~/Downloads; if unavailable, ask the user to attach it."
+            )
         else:
             system = ("Propose a short plan as JSON with keys summary, "
                       "deliverable_descriptions, steps, deliverables, "

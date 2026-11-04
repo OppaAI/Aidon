@@ -1,7 +1,7 @@
 """Kernel mode, Aidon, seed-only toolset, no harm, opt-in.
 
 AIDON_KERNEL=1 means only the minimal seed toolset is
-exposed: write, read, list, shell, plus research fetch,
+exposed: write, read, list, shell, read_document, plus research fetch,
 the human approval channel, gated installs, MCP connect,
 and plugin adoption, which live outside the loop tool
 registry. Every other capability must be earned via
@@ -15,7 +15,7 @@ skills, or memory, and turning it off restores the full
 toolset, with no state to migrate.
 In the new loop, the registry tools are write, read,
 list, shell, calculate. Kernel mode allows write, read,
-list, shell only, and blocks calculate and all adopted
+list, shell, read_document, and blocks calculate and all adopted
 plugin tools, because those are earned capabilities,
 not seed tools. A blocked tool call is an error, never
 a silent skip, so a plan that needs a blocked tool
@@ -24,7 +24,7 @@ fails visibly and can be repaired with seed tools.
 
 from __future__ import annotations
 
-SEED_TOOLS = {"write", "read", "list", "shell"}
+SEED_TOOLS = {"write", "read", "list", "shell", "read_document"}
 
 # Built-ins kept available when optional tools are off. These include
 # explicitly approval-gated host capture tools; the flip controls
@@ -63,6 +63,6 @@ def kernel_system_note(kernel_mode: bool) -> str:
     if not kernel_mode:
         return ""
     return ("Kernel mode on: only seed tools are available: "
-            "write, read, list, shell. No calculate, no plugin "
+            "write, read, list, shell, read_document. No calculate, no plugin "
             "tools, no other capabilities, until they are earned "
             "via the plugin ladder with owner approval.")
