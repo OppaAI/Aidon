@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from urllib.parse import urlparse
 
 
 def _env_int(name, default):
@@ -69,7 +71,23 @@ def register_research_tools(config, workdir, researcher, confined):
     def read_document(path_or_url):
         try:
             from ..capabilities.documents import read_document as _read_doc
-            return _read_doc(str(path_or_url))
+            source = str(path_or_url)
+            if urlparse(source).scheme in ("http", "https"):
+                return _read_doc(source)
+            path = Path(source).expanduser()
+            if not path.is_absolute():
+                path = Path(workdir) / path
+            path = path.resolve()
+            allowed_roots = (
+                Path(workdir).resolve(),
+                Path(config.workdir).resolve(),
+                (Path.home() / "Downloads").resolve(),
+            )
+            if not any(path == root or root in path.parents
+                       for root in allowed_roots):
+                return ("READ_BLOCKED: local reads are limited to the Aidon "
+                        "workspace and ~/Downloads")
+            return _read_doc(str(path))
         except Exception as exc:
             return f"read failed: {type(exc).__name__}: {exc}"
 

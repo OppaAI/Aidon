@@ -15,6 +15,9 @@
   `python -m src.system.main --cli`) opens a lightweight chat
   interface with the same model configuration. It is not a full-screen
   terminal UI; use `/help`, `/clear`, `/history`, and `/quit` there.
+- `read_document` is available even when `AIDON_OPTIONAL_TOOLS=0`.
+  It reads web documents through the URL safety checks and local files
+  only from the current Aidon workspace or `~/Downloads`.
 - WhatsApp and Slack, both two-way, no Telegram,
   with the Aidon key names:
   `AIDON_WHATSAPP_TOKEN`, `AIDON_WHATSAPP_PHONE_ID`,
