@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Point 4 - Learns and reuses workflows</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Inter,system-ui,Arial,sans-serif;background:#0f172a;color:#f8fafc;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:48px}
+.badge{display:inline-block;background:#1e293b;border:1px solid #334155;color:#fbbf24;padding:6px 12px;border-radius:999px;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:18px}
+h1{font-size:42px;margin-bottom:12px;letter-spacing:-0.02em}
+h2{font-size:22px;color:#fbbf24;margin-bottom:20px;font-weight:500}
+p{font-size:18px;line-height:1.6;max-width:760px;color:#cbd5e1}
+.flow{display:flex;gap:12px;align-items:center;justify-content:center;margin-top:28px;flex-wrap:wrap}
+.box{background:#1e293b;border:1px solid #334155;padding:14px 18px;border-radius:12px;font-size:15px;min-width:140px}
+.arrow{font-size:20px;color:#fbbf24}
+.card{background:#1e293b;border:1px solid #334155;border-radius:16px;padding:20px 24px;max-width:700px;margin-top:24px;text-align:left}
+.card h3{font-size:16px;color:#f1f5f9;margin-bottom:8px}
+.card ul{margin-left:18px;color:#cbd5e1;line-height:1.7}
+.small{font-size:13px;color:#94a3b8;margin-top:16px}
+</style>
+</head>
+<body>
+<div class='badge'>Point 4 &mdash; Learn & Reuse</div>
+<h1>Aidon learns and reuses workflows</h1>
+<h2>Do it once, reuse forever</h2>
+<p>After a goal is completed, Aidon can save its workflow as a <strong>DAG</strong>, then recall and adapt it for a similar goal next time.</p>
+<div class='flow'>
+<div class='box'>1. Complete goal</div><div class='arrow'>&rarr;</div>
+<div class='box'>2. Save as DAG</div><div class='arrow'>&rarr;</div>
+<div class='box'>3. Recall for similar goal</div><div class='arrow'>&rarr;</div>
+<div class='box' style='border-color:#fbbf24;background:#78350f;color:#fef3c7;font-weight:600'>4. Adapt & replay</div>
+</div>
+<div class='card'>
+<h3>Why DAGs matter:</h3>
+<ul>
+<li>Workflow = directed acyclic graph of steps with dependencies</li>
+<li>Saved workflows are versioned, searchable, and reusable</li>
+<li>Next time: recall &rarr; tweak parameters &rarr; faster execution</li>
+<li>Continuous learning without re-inventing the plan</li>
+</ul>
+</div>
+<p class='small'>Every success becomes a template for the next goal.</p>
+</body>
+</html>
