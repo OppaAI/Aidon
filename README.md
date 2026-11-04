@@ -28,6 +28,10 @@
 
 ---
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/OppaAI/Aidon)
+
+---
+
 > # What this project wants to showcase for the Meta Global AI Developer Hackathon
 >
 > Built for the Meta Global AI Developer Hackathon (The entire codebase was made between October 26 – November 4, 2026).  
