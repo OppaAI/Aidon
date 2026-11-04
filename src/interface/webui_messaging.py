@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
+import traceback
 
 from .messaging import normalize_number, verify_whatsapp_signature
 from .triggers import TriggerEvent
@@ -280,8 +281,24 @@ class WebUIMessagingMixin:
                             # Meta's webhook response is not delivered to the
                             # sender as a chat message. Surface shared goal
                             # handler failures on the WhatsApp conversation.
-                            print(f"WhatsApp goal handler failed: "
-                                  f"{type(exc).__name__}")
+                            # Log only exception type and stack locations: no
+                            # exception text, locals, or message content.
+                            frames = traceback.extract_tb(exc.__traceback__)
+                            locations = " -> ".join(
+                                f"{frame.filename.rsplit('/', 1)[-1]}:"
+                                f"{frame.lineno}:{frame.name}"
+                                for frame in frames[-6:])
+                            detail = (f"{type(exc).__name__}; "
+                                      f"stack: {locations or 'unavailable'}")
+                            print(f"WhatsApp goal handler failed: {detail}")
+                            try:
+                                from ..system.diagnostics import log_run_error
+                                log_run_error(
+                                    self.home,
+                                    str(event.payload.get("run_id", "") or ""),
+                                    "whatsapp_dispatch", detail)
+                            except Exception:
+                                pass
                             error_reply = (
                                 "Aidon couldn't process that message because its "
                                 "run encountered an internal error. Check the "

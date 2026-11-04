@@ -120,6 +120,7 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         from ..capabilities.plugins import PluginRegistry
         from ..interface.scheduler_loop import NudgeTracker
         run_id = str(event.payload.get("run_id", "")) or new_run_id()
+        event.payload["run_id"] = run_id
         run_control.register(run_id, event.goal, event.conversation_id)
         # Each goal gets its own timestamped workspace directory. This
         # prevents unrelated runs from colliding on filenames and keeps
