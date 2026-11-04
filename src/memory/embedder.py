@@ -235,7 +235,10 @@ class SpladeEmbedder:
 
     def embed_sparse(self, text: str) -> tuple[list[int], list[float]]:
         raw = next(iter(self._sparse.embed([text])))
-        return (list(raw.indices), list(raw.values))
+        # FastEmbed returns NumPy scalars. Convert at the boundary so
+        # sparse vectors can be persisted by SQLite's JSON writer.
+        return ([int(index) for index in raw.indices],
+                [float(value) for value in raw.values])
 
 
 class HybridEmbedder(Embedder):

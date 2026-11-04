@@ -4,6 +4,31 @@ from src.memory.embedder import HashEmbedder
 from src.memory.memory import Memory, SQLiteStore
 
 
+def test_splade_vectors_persist_in_sqlite(tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    import pytest
+
+    np = pytest.importorskip("numpy")
+    from src.memory.embedder import SpladeEmbedder
+
+    sparse = SpladeEmbedder.__new__(SpladeEmbedder)
+    sparse._sparse = SimpleNamespace(embed=lambda texts: iter([
+        SimpleNamespace(indices=np.array([2, 9], dtype=np.int64),
+                        values=np.array([0.5, 1.25], dtype=np.float32))]))
+    vector = sparse.embed_sparse("hello")
+    assert json.loads(json.dumps(vector)) == [[2, 9], [0.5, 1.25]]
+    store = SQLiteStore(tmp_path)
+    memory = Memory(tmp_path, embedder=HashEmbedder(), store=store)
+    point = memory._record_with_vector(
+        "working", "hello", np.array([0.5], dtype=np.float32),
+        (np.array([2, 9]), np.array([0.5, 1.25], dtype=np.float32)), {})
+    restored = SQLiteStore(tmp_path).get("working", point.id)
+    assert restored.vector == [0.5]
+    assert restored.sparse == ([2, 9], [0.5, 1.25])
+
+
 def test_sqlite_memory_persists_points(tmp_path):
     home = tmp_path / "aidon"
     first = Memory(home, embedder=HashEmbedder(), store=SQLiteStore(home))

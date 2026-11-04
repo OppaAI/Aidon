@@ -6,6 +6,52 @@ import threading
 import traceback
 
 
+def discover_slack_threads(config, channel, cursors, since, fetch=None):
+    """Find updated threads among the channel's 100 most recent roots.
+
+    History excludes replies and an old root can receive a new reply.
+    Use each thread's checkpoint, falling back to the channel checkpoint,
+    so discovery never replays conversations from before polling began.
+    """
+    import json
+    import urllib.request
+    from decimal import Decimal
+    from urllib.parse import urlencode
+    from .messaging import SlackRateLimited, SLACK_API_BASE, _slack_api_error
+
+    if fetch is None:
+        def fetch(url, token, params):
+            request = urllib.request.Request(
+                url + "?" + urlencode(params),
+                headers={"Authorization": f"Bearer {token}"})
+            try:
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    return json.load(response)
+            except urllib.error.HTTPError as exc:
+                if exc.code == 429:
+                    raise SlackRateLimited(exc.headers.get("Retry-After", "60")) from None
+                raise RuntimeError(f"Slack thread discovery failed: HTTP {exc.code}") from None
+
+    result = fetch(f"{SLACK_API_BASE}/conversations.history",
+                   config.slack_bot_token, {"channel": channel, "limit": 100})
+    if not isinstance(result, dict):
+        raise RuntimeError("Slack thread discovery returned an invalid response")
+    if not result.get("ok"):
+        if result.get("error") in ("ratelimited", "rate_limited"):
+            raise SlackRateLimited()
+        raise RuntimeError("Slack thread discovery failed: " + _slack_api_error(result))
+    threads = []
+    for message in result.get("messages", []):
+        root = str(message.get("ts", ""))
+        latest = str(message.get("latest_reply", "") or "")
+        if not root or not latest:
+            continue
+        checkpoint = cursors.get(f"thread:{channel}:{root}", since)
+        if Decimal(latest) > Decimal(checkpoint or "0"):
+            threads.append({"thread_ts": root, "checkpoint": checkpoint})
+    return threads
+
+
 def configured_slack_channels(value: str) -> tuple[str, ...]:
     """Parse the comma-separated channel setting, preserving order."""
     return tuple(dict.fromkeys(

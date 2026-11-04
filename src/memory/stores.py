@@ -189,8 +189,10 @@ class SQLiteStore(InMemoryStore):
                 "VALUES(?,?,?,?,?,?) ON CONFLICT(collection,id) DO UPDATE SET "
                 "text=excluded.text, vector=excluded.vector, sparse=excluded.sparse, "
                 "payload=excluded.payload",
-                (collection, point.id, point.text, json.dumps(point.vector),
-                 json.dumps([list(point.sparse[0]), list(point.sparse[1])]),
+                (collection, point.id, point.text,
+                 json.dumps([float(value) for value in point.vector]),
+                 json.dumps([[int(index) for index in point.sparse[0]],
+                             [float(value) for value in point.sparse[1]]]),
                  json.dumps(point.payload)),
             )
             self._db.commit()

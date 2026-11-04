@@ -822,10 +822,21 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                         if _slack_time.monotonic() < _retry_after.get(_channel, 0):
                             continue
                         try:
+                            _history_since = str(_cursors.get(_channel, ""))
                             _messages, _last = _poll_slack_once(
                                 msg, _channel,
                                 last_ts=str(_cursors.get(_channel, "")))
-                            from ..interface.slack_polling import process_polled_messages
+                            from ..interface.slack_polling import (
+                                discover_slack_threads, process_polled_messages)
+                            _discovered_threads = discover_slack_threads(
+                                msg, _channel, _cursors, _history_since)
+                            for _thread in _discovered_threads:
+                                _cursors.setdefault(
+                                    f"thread:{_channel}:{_thread['thread_ts']}",
+                                    str(_thread["checkpoint"] or _thread["thread_ts"]))
+                            # Save reply checkpoints before advancing channel
+                            # history, including when a later thread fetch fails.
+                            save_poll_cursors(_cursor_path, _cursors)
 
                             def _handle_polled_message(_message):
                                 server.handle_slack_message(
@@ -846,24 +857,28 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                             if _last and _last > str(_cursors.get(_channel, "")):
                                 _cursors[_channel] = _last
                                 save_poll_cursors(_cursor_path, _cursors)
-                            # conversations.history does not include thread
-                            # replies. While a stopped plan exists, poll only
-                            # its originating thread so "proceed" can resume
-                            # from a Slack reply instead of requiring a new
-                            # top-level message.
+                            # History excludes replies. Watch updated recent
+                            # threads as well as older threads with active stops.
                             from ..interface.mode_stops import (
                                 mode_stops_for_conversation)
                             from ..interface.messaging import (
                                 poll_slack_thread_once)
                             from decimal import Decimal as _Decimal
                             from datetime import datetime as _datetime
-                            for _stop in mode_stops_for_conversation(
-                                    config.home, "slack:" + _channel):
+                            _thread_stops = list(mode_stops_for_conversation(
+                                config.home, "slack:" + _channel))
+                            _known_threads = {str(s.get("thread_ts", "")) for s in _thread_stops}
+                            for _thread in _discovered_threads:
+                                if _thread["thread_ts"] not in _known_threads:
+                                    _thread_stops.append(_thread)
+                            for _stop in _thread_stops:
                                 _thread_ts = str(_stop.get("thread_ts", "") or "")
                                 if not _thread_ts:
                                     continue
                                 _thread_key = f"thread:{_channel}:{_thread_ts}"
                                 _thread_cursor = _cursors.get(_thread_key)
+                                if not _thread_cursor and "checkpoint" in _stop:
+                                    _thread_cursor = _stop["checkpoint"] or _thread_ts
                                 if not _thread_cursor:
                                     try:
                                         _created = _datetime.fromisoformat(
