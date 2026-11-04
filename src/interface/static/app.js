@@ -313,7 +313,7 @@
     let html = md(parts.body);
     let routeChip = "";
     if (route && route.group) {
-      const icons = { chat: "💬", webchat: "🌐", agentic: "⚙️", artifact: "📄" };
+      const icons = { chat: "💬", webchat: "🌐", agentic: "⚙️", artifact: "◇" };
       const labels = { chat: "Local chat", webchat: "Web chat",
                        agentic: "Agentic", artifact: "Artifact" };
       const confidence = Math.round(
@@ -1134,6 +1134,9 @@
       const meta = (e.seconds || 0) + "s" + (hasTokenUsage
         ? " · " + tokensIn + "→" + tokensOut + " tok" + thinkSuffix : "");
       let detail = e.detail || e.title || e.error || "";
+      if (failed && detail.length > 220) {
+        detail = detail.slice(0, 217) + "… (open Aidon logs for full details)";
+      }
       if (phase === "plan" && detail === "plan proposed") {
         detail = "Aidon drafted the plan shown in the plan card. This model reports reasoning-token usage, but does not provide a user-facing reasoning transcript.";
       }
