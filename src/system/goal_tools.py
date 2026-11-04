@@ -181,7 +181,8 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
                     # decision itself from being presented.
                     lead = ""
             if not lead:
-                lead = "Approval required before this action."
+                from ..interface.phrasing import approval_lead_in
+                lead = approval_lead_in()
             decision = gate.ask(
                 kind, title, f"{lead}\n\n{body}",
                 action_class=action_class,
