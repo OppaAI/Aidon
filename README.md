@@ -51,7 +51,7 @@ This project showcases four capabilities. Meta models power its main agentic rea
 >
 > 🎞️ [Open the standalone Aidon intro deck](demo/index.html)
 > 
->▶️ [Watch the 3-minute demo on YouTube — coming soon](https://www.youtube.com/watch?v=YOUR_VIDEO_ID)
+>▶️ [Watch the 3-minute demo on YouTube — coming soon](https://www.youtube.com/watch?v=AsgdLZCFJig)
 >
 ><!-- TODO: replace YOUR_VIDEO_ID with the real YouTube video ID after uploading -->
 
