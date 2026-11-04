@@ -49,7 +49,7 @@ This project showcases four capabilities. Meta models power its main agentic rea
 
 > ## Demo video
 >
-> 🎞️ [Open the standalone Aidon intro deck](demo/assests/index.html)
+> 🎞️ [Open the standalone Aidon intro deck](demo/assets/index.html)
 > 
 >▶️ [Watch the 3-minute demo on YouTube — coming soon](https://www.youtube.com/watch?v=AsgdLZCFJig)
 >
