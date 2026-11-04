@@ -28,7 +28,7 @@
 
 ---
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/OppaAI/Aidon)
+Read Aidon documents at DeepWiki: [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/OppaAI/Aidon)
 
 ---
 
