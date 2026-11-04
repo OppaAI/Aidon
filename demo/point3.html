@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Point 3 - Aidon separate in control</title>
+<title>Point 3 - You stay in control</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Inter,system-ui,Arial,sans-serif;background:#0f172a;color:#f8fafc;height:100vh;overflow:hidden}
@@ -34,16 +34,16 @@ p{font-size:18px;line-height:1.6;max-width:760px;color:#cbd5e1}
 <div class="slides">
   <section class="slide active" id="s1">
     <div class="badge">Point 3 — Control</div>
-    <h1>Aidon separate in control</h1>
+    <h1>You stay in control</h1>
     <h2>Human in the loop, always</h2>
-    <p>Aidon presents the plan and every consequential action for your review — then acts <strong>only after you approve</strong>.</p>
+    <p>Aidon presents the plan and consequential live actions for your review, then waits for your approval before acting.</p>
     <div class="flow">
       <div class="box">1. Aidon drafts plan</div><div class="arrow">→</div>
       <div class="box">2. Presents for review</div><div class="arrow">→</div>
       <div class="box approval">3. Waits for approval</div><div class="arrow">→</div>
       <div class="box">4. Acts live</div>
     </div>
-    <p class="small">No sending, publishing, buying, installing, or deleting without explicit approval.</p>
+    <p class="small">Sending, publishing, buying, installing, and deleting require explicit approval.</p>
   </section>
   <section class="slide" id="s2">
     <div class="badge">How it works</div>
@@ -60,9 +60,9 @@ p{font-size:18px;line-height:1.6;max-width:760px;color:#cbd5e1}
     <div class="card">
       <h3>Approval gate</h3>
       <ul>
-        <li>One approval gate before anything live (two with --supervised)</li>
+        <li>Approval requirements depend on the action; privileged operations have their own approval steps</li>
         <li>Approval is explicit — silence is not consent</li>
-        <li>Every consequential action needs fresh approval</li>
+        <li>A rejected or timed-out approval stops the action</li>
       </ul>
     </div>
   </section>
@@ -76,10 +76,10 @@ p{font-size:18px;line-height:1.6;max-width:760px;color:#cbd5e1}
         <li>Aidon: "Plan ready — 4 steps, 1 email to send. Approve?"</li>
         <li>You: Review, edit, or deny</li>
         <li>Aidon: Executes only after your approval</li>
-        <li>All actions logged and reversible where possible</li>
+        <li>Aidon verifies and records the outcome</li>
       </ul>
     </div>
-    <p class="small">Aidon separate in control means you stay in control — approval required.</p>
+    <p class="small">You stay in control: review the action and approve it before it goes live.</p>
   </section>
 </div>
 <div class="nav">
