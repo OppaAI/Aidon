@@ -920,15 +920,35 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         _startup_style("warn", "Slack webhook requests are rejected: AIDON_SLACK_SIGNING_SECRET is not set (fail-closed).")
     try:
         import importlib.util
+        faiss_available = importlib.util.find_spec("faiss") is not None
         qdrant_available = importlib.util.find_spec("qdrant_client") is not None
     except Exception:
-        qdrant_available = False
-    if not qdrant_available:
-        _startup_style("warn", "Qdrant client is not installed; using persistent SQLite memory fallback.")
-    elif os.environ.get("AIDON_QDRANT_URL", "").strip():
-        _startup_style("info", "Qdrant remote store configured; connection checked when memory is first used.")
+        faiss_available = qdrant_available = False
+    memory_backend = os.environ.get("AIDON_MEMORY_BACKEND", "auto").strip().lower()
+    qdrant_url_configured = bool(os.environ.get("AIDON_QDRANT_URL", "").strip())
+    if memory_backend == "sqlite-faiss":
+        if faiss_available:
+            _startup_style("info", "Memory backend selected: SQLite + FAISS.")
+        else:
+            _startup_style("warn", "SQLite + FAISS was requested, but FAISS is not installed; memory will fall back to SQLite.")
+    elif memory_backend == "sqlite":
+        _startup_style("info", "Memory backend selected: SQLite.")
+    elif memory_backend == "qdrant":
+        if qdrant_available:
+            target = "remote Qdrant" if qdrant_url_configured else "local Qdrant"
+            _startup_style("info", f"Memory backend selected: {target}.")
+        else:
+            _startup_style("warn", "Qdrant was requested, but qdrant-client is not installed; memory will fall back to SQLite.")
+    elif faiss_available:
+        message = "Memory backend selected: SQLite + FAISS (automatic preference)."
+        if qdrant_url_configured:
+            message += " A Qdrant URL is configured but is not selected."
+        _startup_style("info", message)
+    elif qdrant_available:
+        target = "remote Qdrant" if qdrant_url_configured else "local Qdrant"
+        _startup_style("info", f"Memory backend selected: {target} (FAISS unavailable).")
     else:
-        _startup_style("info", "Qdrant local store available under the Aidon home.")
+        _startup_style("warn", "FAISS and Qdrant are unavailable; memory will use persistent SQLite.")
     _startup_style("section", "WebUI")
     if args.webhook_only:
         _startup_style("ok", f"Webhook listener: http://{args.host}:{args.port}/ (WhatsApp and Slack only)")
