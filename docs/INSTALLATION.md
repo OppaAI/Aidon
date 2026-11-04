@@ -141,8 +141,9 @@ The base install does not pull heavyweight ML packages. Use `uv sync --extra mem
 `--extra memory-faiss`, `--extra embed`, `--extra sparse`, `--extra vision`, `--extra kb`, or `--extra docs`
 for the corresponding capabilities. `./setup.sh --with-optional` installs all optional groups.
 
-Vector memory automatically prefers SQLite + FAISS when FAISS is installed,
-then tries Qdrant, then plain SQLite. Install FAISS with
+Vector memory preserves an existing local Qdrant store or uses Qdrant when a
+server URL is configured. Otherwise, it prefers SQLite + FAISS when FAISS is
+installed, then tries Qdrant, then plain SQLite. Install FAISS with
 `uv sync --extra memory-faiss` or accept it during `./setup.sh`.
 No `.env` change is needed for automatic selection. To force a backend, set
 `AIDON_MEMORY_BACKEND` to `sqlite-faiss`, `qdrant`, or `sqlite`.

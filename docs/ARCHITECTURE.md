@@ -100,8 +100,9 @@ flowchart TB
   while the final response footer reports elapsed time and token usage.
   These are presentation features, not a separate execution backend.
 - Memory: SQLite-backed collections with FAISS dense indexes
-  by default when installed; Qdrant is the automatic backend
-  fallback. Plain SQLite remains the dependency-light fallback.
+  by default when installed; an existing local Qdrant store or
+  configured Qdrant URL remains selected. Qdrant is the automatic
+  fallback before plain SQLite.
   Working,
   episodic, semantic, experience, and knowledge, with
   hybrid dense plus sparse recall, forgetting curve,
@@ -109,7 +110,7 @@ flowchart TB
   the Aidon home. SQLite also stores conversations and
   application records. Set `AIDON_MEMORY_BACKEND` to force
   `sqlite-faiss`, `qdrant`, or `sqlite`; automatic selection
-  occurs at startup and does not dual-write stores. If FAISS
+  occurs on first use and does not dual-write stores. If FAISS
   fails during a run, SQLite exact search remains available. No memory
   service is hosted by Aidon.
 - Tools: sandbox tools are arena plumbing, write,

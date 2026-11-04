@@ -16,11 +16,12 @@ uv sync --extra docs     # EPUB and universal document tooling
 
 `./setup.sh` offers these packages interactively; `./setup.sh --with-optional` installs all of them.
 
-With FAISS installed, automatic memory selection prefers SQLite + FAISS.
-If that backend cannot initialize, Aidon tries Qdrant and then plain SQLite.
+Automatic memory selection preserves an existing local Qdrant store and uses
+Qdrant when `AIDON_QDRANT_URL` is configured. Otherwise, with FAISS installed,
+it prefers SQLite + FAISS, then tries Qdrant and plain SQLite.
 No `.env` change is needed for automatic selection. Set
 `AIDON_MEMORY_BACKEND=sqlite-faiss`, `qdrant`, or `sqlite` only to force a
-specific backend. Backend selection happens at startup; stores are not
+specific backend. Backend selection happens on first memory use; stores are not
 dual-written or automatically migrated when you switch backends.
 
 ## 🧠 Models
