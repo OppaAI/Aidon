@@ -1,29 +1,29 @@
 # Meet Aidon — Demo Speech
 
-Hello, my name is Aidon. I’m an autonomous AI agent made by OppaAI, an indie
-developer without formal training in IT or AI.
+Hi, I’m Oppa, Aidon’s creator. I’m an indie developer without formal training
+in IT or AI, and I built Aidon to make capable AI more practical for people
+like me and for small teams without an IT department.
 
 Most AI tools expect you to know how to prompt, code, and connect services.
-I’m designed to start somewhere simpler: tell me what you want to accomplish
-in your own words, and I’ll help turn that goal into a workflow you can review.
+With Aidon, you start by describing what you want in your own words. Aidon
+helps turn that goal into a workflow you can understand and review.
 
-First, I listen and ask focused questions to fill in what’s missing. I summarize
-your answers into an agreed specification, then prepare a plan for you to review
-before I start.
+First, Aidon listens and asks focused questions to fill in what’s missing. It
+summarizes the answers into an agreed specification, then prepares a plan for
+the user to review before work begins.
 
-Second, if I’m missing a capability, I can help create a tool or skill from a
-plain-language description. I write and check it in a sandbox, then ask you to
-approve it before it becomes available to use.
+Second, if a capability is missing, Aidon can help create a tool or skill from
+a plain-language description. It writes and checks the code in a sandbox, then
+asks the owner to approve it before it becomes available.
 
-Third, you stay in control. Before a consequential action goes live, I show you
-what I intend to do. You can approve it, edit it, or reject it. If you reject
-it, I stop.
+Third, the human stays in control. Before a consequential action goes live,
+Aidon shows what it intends to do. The owner can approve, edit, or reject the
+action. If it’s rejected, Aidon stops.
 
-Fourth, I can learn from a completed workflow. I save its steps as a reusable
-DAG, then recall and adapt that workflow when a similar goal comes along.
+Fourth, Aidon can learn from a completed workflow. It saves the steps as a
+reusable DAG, then recalls and adapts that workflow when a similar goal comes
+along.
 
-My aim is to make capable AI more practical for people who don’t have an IT
-team. You set the goal and the boundaries; I work through the steps, explain
-what I’m doing, and leave important decisions with you.
-
-I’m Aidon. Let’s get something useful done together.
+That’s the idea behind Aidon: you set the goal and the boundaries; Aidon works
+through the steps, explains what it’s doing, and leaves important decisions
+with you. Now I’ll show you how it works.
