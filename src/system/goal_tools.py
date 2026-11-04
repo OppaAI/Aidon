@@ -25,7 +25,7 @@ _SELF_MODIFY_LOCK = threading.Lock()
 CAPABILITY_TOOLS_WHEN_OPTIONAL_DISABLED = frozenset({
     "edit_image", "sam_segment", "generate_document",
     "build_ebook", "make_docx", "make_latex", "make_slides",
-    "make_spreadsheet", "transcribe_audio",
+    "make_spreadsheet", "tts_speak", "transcribe_audio",
     "email_make_draft", "email_send", "slack_send", "slack_send_file",
     "email_read",
     "whatsapp_send", "whatsapp_send_media", "threads_publish",

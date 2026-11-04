@@ -88,7 +88,7 @@ CHAT_HTML = """<!doctype html>
 </svg>
 <p id="avatar-status">Idle</p>
 <div id="wave-bars"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-<p><button id="mic" type="button">Mic</button></p>
+<p><button id="mic" type="button">Mic</button> <label><input id="announce" type="checkbox"> Voice announce</label></p>
 <p id="mic-status"></p>
 </div>
 <div id="sidebar">
@@ -210,7 +210,17 @@ async function typewriterKaraoke(element, text) {
   setAvatarStatus('Idle');
 }
 function speak(text, onWord) {
-  return;
+  if (document.getElementById('announce').checked && 'speechSynthesis' in window) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.85;
+    utterance.onstart = () => { setSpeaking(true); setAvatarStatus('Speaking'); };
+    utterance.onend = () => { setMouthPose('closed'); setSpeaking(false); setAvatarStatus('Idle'); };
+    utterance.onboundary = (event) => {
+      if (event.charIndex !== undefined) setMouthPose(mouthForChar(text[event.charIndex]));
+    };
+    if (onWord) { utterance.onboundary = (event) => { if (event.charIndex !== undefined) { onWord(event.charIndex); } }; }
+    window.speechSynthesis.speak(utterance);
+  }
 }
 async function sendMessage(message) {
   setAvatarStatus('Working');

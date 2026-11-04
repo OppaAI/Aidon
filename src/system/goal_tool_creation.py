@@ -192,8 +192,7 @@ def register_creation_tools(config, workdir, tools, approve, confined,
             result = transcribe(bytes(audio), key or getattr(config, "transcribe_api_key", ""))
             return result.get("text", "")
 
-        # Spoken output is disabled by owner preference. Retain the local
-        # implementation for compatibility, but do not expose it to plans.
+        tools["tts_speak"] = tts_speak
         tools["transcribe_audio"] = transcribe_audio
     except Exception:
         pass

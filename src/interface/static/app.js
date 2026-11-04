@@ -673,8 +673,8 @@
     requestAnimationFrame(mouthLoop);
   }
   fetch("/api/voice").then((r) => r.json()).then((v) => {
-    voiceAnnounce = false;
-    ttsAvailable = false;
+    voiceAnnounce = !!v.announce;
+    ttsAvailable = !!v.tts_available;
   }).catch(() => {});
 
   let stopKaraokeActive = null;  // cancels the rAF loop of the current voice
@@ -947,15 +947,109 @@
     }
   }
 
-  async function speak() { return; }
+  async function speak(el, text, btn) {
+    const gen = ++speakGen;
+    stopStreamSpeech();
+    if (currentBtn === btn && currentAudio) {  // toggle: stop
+      currentAudio.pause();
+      resetSpeakBtn();
+      return;
+    }
+    if (currentAudio) {  // only one voice at a time
+      currentAudio.pause();
+      resetSpeakBtn();
+    }
+    btn.textContent = "…";
+    try {
+      // Start the network request immediately. Waiting for the typewriter
+      // first made TTS feel several seconds late on long answers.
+      // Typed messages keep a dedicated body node. Streamed messages replace
+      // their markup at completion, and restored messages never had that
+      // wrapper, so fall back to the message itself when the cached node is
+      // absent or has been detached. karaokeWords skips timestamp and stats
+      // descendants in that case.
+      const body = el
+        ? (el._body && el._body.isConnected ? el._body : el)
+        : null;
+      const spoken = spokenText(text || (body ? body.textContent : ""));
+      const request = {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: spoken }),
+      };
+      const streamRequest = fetch("/api/tts/stream", request);
+      const streamResponse = await streamRequest;
+      if (!streamResponse.ok) throw new Error("tts " + streamResponse.status);
+      // Start consuming Fish while the message is still typewriting. The
+      // old order waited for the complete visual animation before reading
+      // the first audio chunk, which made long answers feel silent.
+      const progressivePromise = progressiveAudio(streamResponse);
+      if (el && el._typing) { try { await el._typing; } catch (e) {} }
+      if (gen !== speakGen) return;
+      const progressive = await progressivePromise;
+      let audio;
+      let url;
+      if (progressive) {
+        audio = progressive.audio;
+        url = progressive.url;
+        currentAudioCancel = progressive.cancel;
+      } else {
+        // Safari, older browsers, and unusual MP3 implementations use the
+        // complete-response path without changing user behavior.
+        const r = await fetch("/api/tts", request);
+        if (!r.ok) throw new Error("tts " + r.status);
+        url = URL.createObjectURL(await r.blob());
+        audio = new Audio(url);
+        currentAudioCancel = null;
+      }
+      // A newer playback started while this one was downloading: drop
+      // it, or the two voices talk over each other.
+      if (gen !== speakGen) {
+        if (currentAudioCancel) {
+          try { currentAudioCancel(); } catch (e) { /* noop */ }
+          currentAudioCancel = null;
+        }
+        URL.revokeObjectURL(url);
+        return;
+      }
+      // Route through the analyser for lip sync + waveform (no-op if
+      // Web Audio is unavailable — falls back to plain playback).
+      audio.playbackRate = TTS_PLAYBACK_RATE;
+      audio.preservesPitch = true;
+      try {
+        const analyser = getTtsAnalyser();
+        const src = ttsCtx.createMediaElementSource(audio);
+        src.connect(analyser);
+      } catch (e) { /* plain playback */ }
+      currentAudio = audio;
+      currentAudioUrl = url;
+      currentBtn = btn;
+      btn.textContent = "⏹";
+      btn.classList.add("playing");
+      btn.title = "Stop";
+      ttsPlaying = true;
+      stopMouthSync = syncMouthToText(spoken, audio);
+      startMouthLoop();
+      // Karaoke: the words light up as the voice reaches them.
+      // resetSpeakBtn() owns cancellation and the blob URL, so a
+      // stopped/replaced playback cannot leave either behind.
+      if (body) {
+        const words = karaokeWords(body);
+        stopKaraokeActive = karaokeSync(words, audio);
+      }
+      audio.onended = () => resetSpeakBtn();
+      audio.onerror = () => resetSpeakBtn();
+      await audio.play();  // may reject before first user gesture; fine
+    } catch (e) {
+      resetSpeakBtn();
+    }
+  }
 
   function playButton(text, el) {
     const b = document.createElement("button");
     b.className = "tts-play";
     b.textContent = "▶";
     b.title = "Play aloud";
-    b.hidden = true;
-    b.hidden = true;
     b.addEventListener("click", () => speak(el, text, b));
     return b;
   }
@@ -1712,7 +1806,24 @@
         // status line, not a bubble per phase)
         else if (e.kind === "speech-request") {
           explicitSpeechRuns.add(polledRun);
-          addMsg("aidon", e.text, e.t);
+          const message = addMsg("aidon", e.text, e.t);
+          if (ttsAvailable) {
+            const button = playButton(e.text, message);
+            message.appendChild(button);
+            speak(message, e.text, button).catch(() => {});
+          } else if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
+            const play = () => {
+              window.speechSynthesis.cancel();
+              window.speechSynthesis.speak(new SpeechSynthesisUtterance(e.text));
+            };
+            const button = document.createElement("button");
+            button.className = "tts-play";
+            button.textContent = "▶";
+            button.title = "Read aloud";
+            button.addEventListener("click", play);
+            message.appendChild(button);
+            play();
+          } else showMiddleStatus("Speech is unavailable; the requested text is shown.", "warning");
         }
         else if (e.kind === "approval-request") {
           const m = addMsg("stage-line", "approval requested: " + e.text);

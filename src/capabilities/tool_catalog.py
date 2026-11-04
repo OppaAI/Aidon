@@ -10,7 +10,7 @@ GOAL_TOOL_NAMES = (
     "make_chart", "generate_document", "build_ebook", "make_spreadsheet",
     "make_docx", "make_slides", "make_latex", "record_system_audio",
     "capture_webcam_photo", "record_webcam",
-    "transcribe_audio", "email_read", "email_make_draft",
+    "tts_speak", "transcribe_audio", "email_read", "email_make_draft",
     "email_send",
     "slack_send", "whatsapp_send", "threads_publish", "threads_post",
     "instagram_publish", "instagram_post", "write_versioned", "read_file",
