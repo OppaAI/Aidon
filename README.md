@@ -11,7 +11,7 @@
 [![NVIDIA](https://img.shields.io/badge/NVIDIA-accelerated-76B900?logo=nvidia&logoColor=white)](https://www.nvidia.com/)<br>
 [![Sandbox](https://img.shields.io/badge/Sandbox-Modal%20%7C%20Docker-2496ED?logo=docker&logoColor=white)](https://modal.com/products/sandboxes)
 [![Docker](https://img.shields.io/badge/Docker-supported-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![Memory](https://img.shields.io/badge/Memory-SQLite%20%2B%20FAISS%20%7C%20Qdrant-8E75B2)](https://qdrant.tech/)
+[![Memory](https://img.shields.io/badge/Memory-SQLite%20%2B%20FAISS%20%E2%86%92%20Qdrant-8E75B2)](https://github.com/facebookresearch/faiss)
 
 [![Baseten](https://img.shields.io/badge/Inference-Baseten-6366F1)](https://www.baseten.co/)
 [![Modal](https://img.shields.io/badge/Cloud%20Compute-Modal-16A34A)](https://modal.com/)
