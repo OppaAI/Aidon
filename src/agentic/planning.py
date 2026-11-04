@@ -417,6 +417,18 @@ class PlanningMixin:
                 signatures.append(f"{tool_name}{signature}")
             system += (" Extra tools available to plan steps, with exact arguments: "
                        + "; ".join(signatures) + ".")
+            if "read_document" in self.extra_tools:
+                system += (
+                    " LOCAL FILE READING: When the user names a local file, "
+                    "read it with read_document using the exact supplied path. "
+                    "Do not use shell, cat, ls, or guessed alternate paths for "
+                    "host files. Shell runs in the isolated execution environment "
+                    "(often with HOME=/root), so ~/Downloads there is not the "
+                    "user's Downloads folder and host paths are not mounted. "
+                    "If read_document reports the file is unavailable, ask the "
+                    "user to attach it or run Aidon where that file is accessible; "
+                    "do not keep probing paths."
+                )
             if "email_send" in self.extra_tools:
                 system += (
                     " EMAIL WORKFLOW: For a user request to send or reply to "

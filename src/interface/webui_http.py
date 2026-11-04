@@ -749,7 +749,9 @@ def make_handler(server):
                 try:
                     response = server.open_tts_stream(body)
                 except Exception as exc:
-                    self._send_json(500, {'error': type(exc).__name__})
+                    status = 410 if str(exc) == "Voice output is disabled" else 500
+                    self._send_json(status, {'error': str(exc) if status == 410
+                                             else type(exc).__name__})
                 else:
                     self.send_response(200)
                     self.send_header('Content-Type', 'audio/mpeg')

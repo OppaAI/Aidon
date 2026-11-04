@@ -814,39 +814,10 @@ class WebUIServer(WebUIRunMixin, WebUILabMixin, WebUIMessagingMixin, WebUISettin
         return {"ok": True, "day": day, "path": str(path)}
 
     def handle_tts(self, body: dict) -> tuple[int, dict]:
-        tts_key = getattr(self, "tts_key", None)
-        if not tts_key:
-            return 501, {"error": "TTS key not configured"}
-        from ..capabilities.voice import tts as _tts
-        import re
-        text = str(body.get("text", "")).strip()
-        if not text:
-            return 400, {"error": "empty text"}
-        text = text[:2000]
-        text = re.sub(r"[#>*`_\[\]()|]", " ", text)
-        text = re.sub(r"\s+", " ", text).strip()
-        voice_id = str(body.get("voice_id", "") or self.tts_voice_id)
-        result = _tts(text, tts_key, voice_id)
-        if not result.get("ok"):
-            return 500, {"error": result.get("error", "TTS failed")}
-        return 200, {"ok": True,
-                     "audio_bytes": len(result.get("audio", b"")),
-                     "_audio": result.get("audio", b"")}
+        return 410, {"error": "Voice output is disabled"}
 
     def open_tts_stream(self, body: dict):
-        """Open a progressive Fish response for the WebUI audio player."""
-        import re
-        text = str(body.get("text", "")).strip()
-        if not getattr(self, "tts_key", None):
-            raise ValueError("TTS key not configured")
-        if not text:
-            raise ValueError("empty text")
-        text = text[:2000]
-        text = re.sub(r"[#>*`_\[\]()|]", " ", text)
-        text = re.sub(r"\s+", " ", text).strip()
-        from ..capabilities.voice import open_tts_stream as _open_tts_stream
-        return _open_tts_stream(text, self.tts_key,
-                                str(body.get("voice_id", "") or self.tts_voice_id))
+        raise RuntimeError("Voice output is disabled")
 
     @staticmethod
     def parse_goal_multipart(raw: bytes, content_type: str) -> tuple[dict, list[dict]]:
