@@ -525,6 +525,7 @@ section "Optional capabilities"
 info "Each package enables one feature. Skip anything you do not need today."
 for spec in \
   "qdrant-client:qdrant_client:Qdrant vector memory:memory" \
+  "faiss-cpu:faiss:FAISS CPU dense memory index:memory-faiss" \
   "sentence-transformers:sentence_transformers:real semantic embeddings:embed" \
   "fastembed:fastembed:learned SPLADE sparse recall:sparse" \
   "Pillow:PIL:image handling and video annotation:vision" \

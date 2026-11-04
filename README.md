@@ -11,7 +11,7 @@
 [![NVIDIA](https://img.shields.io/badge/NVIDIA-accelerated-76B900?logo=nvidia&logoColor=white)](https://www.nvidia.com/)<br>
 [![Sandbox](https://img.shields.io/badge/Sandbox-Modal%20%7C%20Docker-2496ED?logo=docker&logoColor=white)](https://modal.com/products/sandboxes)
 [![Docker](https://img.shields.io/badge/Docker-supported-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![Memory](https://img.shields.io/badge/Memory-Qdrant%20%7C%20SQLite-8E75B2)](https://qdrant.tech/)
+[![Memory](https://img.shields.io/badge/Memory-SQLite%20%2B%20FAISS%20%7C%20Qdrant-8E75B2)](https://qdrant.tech/)
 
 [![Baseten](https://img.shields.io/badge/Inference-Baseten-6366F1)](https://www.baseten.co/)
 [![Modal](https://img.shields.io/badge/Cloud%20Compute-Modal-16A34A)](https://modal.com/)
@@ -69,7 +69,7 @@ This project showcases four capabilities. Meta models power its main agentic rea
 Give Aidon a goal in plain language, in chat, on WhatsApp or Slack, or on the command line. Aidon will:
 
 1. **Choose a mode** — Plan mode is the default. Choose Ask mode for a guided interview that turns chat answers into a verified spec; an attached spec sheet can also provide the requirements, or run straight through in Execute mode.
-2. **Research and recall** — web search and YouTube, plus hybrid Qdrant recall over past episodes and knowledge, facts only if a source excerpt contains them
+2. **Research and recall** — web search and YouTube, plus hybrid recall over past episodes and knowledge, facts only if a source excerpt contains them
 3. **Plan** — steps, deliverables, and criteria, as a DAG, not a loose list
 4. **Sandbox** — execute in Modal Sandbox, Docker, subprocess, or on a VM over SSH, verify by code (with an optional model second opinion, off by default), repair only failed steps, at most 3 attempts
 5. **Approve (you)** — one decision card before any live action, fail-closed on timeout
@@ -122,7 +122,7 @@ Meta is one part of Aidon's model and infrastructure stack. The other components
 
 - **Front-end chat:** (I love the legacy Llama3 so much) So decided to use local Ollama to serve Llama 3.2 handles lightweight conversational turns locally in the configured setup. This keeps the more expensive Muse Spark calls focused on agentic planning and tool work, as well as to show model from earlier generation is still capable. Aidon supports Ollama's native chat API; this model choice is configuration, not a fixed default.
 - **Decision model:** Clef 9B in the deployed setup handles compact routing and ranking decisions, including intent routing and workflow selection. The model ID is configurable. Modal serves the Clef inference endpoint.
-- **Embedding model and vector store (RAG):** Google EmbeddingGemma 2 (`google/embeddinggemma-2`), loaded locally through Sentence Transformers and PyTorch, turns text and images into dense embedding vectors. Qdrant is the vector store that indexes and retrieves those vectors. SQLite provides durable fallback memory and stores conversations, interviews, and run/skill records. Optional FastEmbed/SPLADE adds learned sparse retrieval; keyword vectors are used when it is not enabled.
+- **Embedding model and vector store (RAG):** Google EmbeddingGemma 2 (`google/embeddinggemma-2`), loaded locally through Sentence Transformers and PyTorch, turns text and images into dense embedding vectors. SQLite stores memory points and metadata; optional FAISS CPU indexes dense vectors. Automatic selection tries Qdrant if SQLite+FAISS cannot initialize, then plain SQLite. Set `AIDON_MEMORY_BACKEND` to force a backend. Optional FastEmbed/SPLADE adds learned sparse retrieval; keyword vectors are used when it is not enabled.
 - **Speech output:** Fish Audio provides text-to-speech. Muse Voice Transcribe, listed above, handles speech-to-text.
 - **Sandbox and inference hosting:** Modal runs the configured remote sandbox and Clef inference service. For local execution, Aidon also supports Bubblewrap and Docker; an SSH connection can target a VM the owner already operates.
 - **Other optional integrations and libraries:** Tavily or SearXNG for web search; YouTube Data API, Gmail API, and Slack API for their respective features; Playwright MCP for browser automation; Three.js and three-vrm for the optional 3D avatar viewer. FFmpeg and Pillow support video and image processing. These integrations require their own local configuration or credentials when used.
@@ -134,7 +134,7 @@ Aidon has no central Aidon-hosted service: run the app and WebUI on your own com
 Code lives in `src/`, grouped, not flat:
 
 - `src/system/` — config, model client, and `main.py`, the entry point
-- `src/memory/` — Qdrant vector memory, EmbeddingGemma embeddings, SQLite fallback and application records, entity graph, KB, experience, redaction
+- `src/memory/` — SQLite + FAISS and Qdrant memory stores, EmbeddingGemma embeddings, application records, entity graph, KB, experience, redaction
 - `src/agentic/` — goal loop, DAG, adapt, swarm, interview, validation, budgets, trace, research
 - `src/interface/` — WebUI, messaging, v1 API, MCP, triggers, scheduler, approval, run control
 - `src/capabilities/` — sandbox and execution, tools and plugins, search, voice, GitHub, email, image, charts, Unity, Playwright MCP, SAM, video

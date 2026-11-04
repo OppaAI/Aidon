@@ -199,7 +199,7 @@ def _make_memory(config: Config):
     """Memory with the real embedder if available, else Hash, with warning."""
     from ..memory.embedder import HashEmbedder, make_embedder_cached
     from ..memory.entity_graph import EntityGraph
-    from ..memory.memory import Memory, SQLiteStore
+    from ..memory.memory import Memory, SQLiteFaissStore, SQLiteStore
 
     try:
         embedder = make_embedder_cached()
@@ -213,14 +213,16 @@ def _make_memory(config: Config):
     try:
         mem = Memory(config.home, embedder=embedder,
                      entity_graph=entity_graph)
-        if type(mem.store).__name__ == "SQLiteStore":
-            print("warning: Qdrant client not installed, using persistent "
-                  "SQLite memory fallback (run ./setup.sh --with-qdrant "
-                  "for a Qdrant server)", file=sys.stderr)
+        if isinstance(mem.store, SQLiteFaissStore):
+            print("info: using SQLite with FAISS dense vector search",
+                  file=sys.stderr)
+        elif type(mem.store).__name__ == "SQLiteStore":
+            print("warning: using persistent SQLite memory with exact-search fallback",
+                  file=sys.stderr)
         return mem
     except Exception as exc:
-        # A broken/unreachable Qdrant must not discard an already loaded
-        # semantic embedder. SQLite keeps memory durable until Qdrant returns.
+        # A broken vector backend must not discard an already loaded
+        # semantic embedder. SQLite keeps memory durable as the final fallback.
         print(f"warning: vector store initialization failed "
               f"({type(exc).__name__}: {exc}); using persistent SQLite "
               "memory fallback", file=sys.stderr)

@@ -26,6 +26,9 @@ vision = [
 memory = [
     "qdrant-client>=1.10",
 ]
+memory-faiss = [
+    "faiss-cpu>=1.8",
+]
 sparse = [
     "fastembed>=0.3",
 ]

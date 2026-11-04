@@ -989,8 +989,8 @@ class WebUIServer(WebUIRunMixin, WebUILabMixin, WebUIMessagingMixin, WebUISettin
             memory_name = f"{type(memory._memory.embedder).__name__} · {store_name}"
             warnings = []
             if store_name == "SQLiteStore":
-                warnings.append("Memory is on the SQLite fallback, not Qdrant — "
-                                "run ./setup.sh --with-qdrant for shared vector memory.")
+                warnings.append("Memory is using SQLite exact-search fallback; "
+                                "install faiss-cpu for indexed dense search.")
             if type(memory._memory.embedder).__name__ == "HashEmbedder":
                 warnings.append("Memory uses hash embeddings, not semantic embeddings — "
                                 "install the embedding packages with ./setup.sh for real recall.")
@@ -1002,16 +1002,28 @@ class WebUIServer(WebUIRunMixin, WebUILabMixin, WebUIMessagingMixin, WebUISettin
         else:
             try:
                 import importlib.util
-                if importlib.util.find_spec("qdrant_client") is None:
-                    memory_name = "SQLite memory (persistent fallback)"
-                    memory_warning = ("Memory is on the SQLite fallback, not Qdrant — "
-                                      "run ./setup.sh --with-qdrant for shared vector memory.")
+                requested_memory = os.environ.get(
+                    "AIDON_MEMORY_BACKEND", "auto").strip().lower()
+                if requested_memory == "qdrant":
+                    memory_name = "Qdrant memory (on demand)"
+                elif requested_memory == "sqlite":
+                    memory_name = "SQLite memory (on demand)"
+                    memory_warning = ("Memory is using SQLite exact search; "
+                                      "install faiss-cpu for indexed dense search.")
+                elif requested_memory == "sqlite-faiss":
+                    memory_name = "SQLite + FAISS memory (on demand)"
+                elif importlib.util.find_spec("faiss") is not None:
+                    memory_name = "SQLite + FAISS memory (on demand)"
+                elif importlib.util.find_spec("qdrant_client") is not None:
+                    memory_name = "Qdrant memory (on demand)"
                 else:
-                    memory_name = "Semantic memory (on demand)"
+                    memory_name = "SQLite memory (persistent fallback)"
+                    memory_warning = ("Memory is using SQLite exact search; "
+                                      "install faiss-cpu for indexed dense search.")
             except Exception:
                 memory_name = "SQLite memory (persistent fallback)"
-                memory_warning = ("Memory is on the SQLite fallback, not Qdrant — "
-                                  "run ./setup.sh --with-qdrant for shared vector memory.")
+                memory_warning = ("Memory is using SQLite exact search; "
+                                  "install faiss-cpu for indexed dense search.")
         msg = self.messaging_config
         sandbox = str(getattr(config, "execution_backend", "bubblewrap"))
         computer = str(getattr(config, "computer_driver", "") or "off")

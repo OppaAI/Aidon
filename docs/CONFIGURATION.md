@@ -5,7 +5,8 @@ Aidon reads runtime settings from a local `.env` file. Keep secrets local and ne
 Base installation is intentionally lightweight. Heavy ML and optional capabilities are installed only after setup asks for confirmation, or explicitly with `--with-optional`. They can also be installed with extras:
 
 ```sh
-uv sync --extra memory   # Qdrant vector storage
+uv sync --extra memory       # Qdrant vector storage
+uv sync --extra memory-faiss # FAISS CPU index for SQLite memory
 uv sync --extra embed    # SentenceTransformers/Torchvision embeddings
 uv sync --extra sparse   # FastEmbed/SPLADE sparse recall
 uv sync --extra vision   # Pillow image and video handling
@@ -14,6 +15,13 @@ uv sync --extra docs     # EPUB and universal document tooling
 ```
 
 `./setup.sh` offers these packages interactively; `./setup.sh --with-optional` installs all of them.
+
+With FAISS installed, automatic memory selection prefers SQLite + FAISS.
+If that backend cannot initialize, Aidon tries Qdrant and then plain SQLite.
+No `.env` change is needed for automatic selection. Set
+`AIDON_MEMORY_BACKEND=sqlite-faiss`, `qdrant`, or `sqlite` only to force a
+specific backend. Backend selection happens at startup; stores are not
+dual-written or automatically migrated when you switch backends.
 
 ## 🧠 Models
 

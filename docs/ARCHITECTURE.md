@@ -81,7 +81,7 @@ flowchart TB
     LOOP[🔁 Goal runner]
     TOOLS[🧰 Tools and plugins]
     SANDBOX[🔒 Bubblewrap, Docker, VM, or Modal]
-    MEMORY[(🧠 Qdrant / memory)]
+    MEMORY[(🧠 SQLite + FAISS / Qdrant memory)]
     APPROVAL[👤 Approval gate]
     REPORT[📊 Trace, reports, metrics]
     UI --> T --> LOOP
@@ -99,14 +99,19 @@ flowchart TB
   model/configuration path. WebUI TTS can stream Fish Audio chunks,
   while the final response footer reports elapsed time and token usage.
   These are presentation features, not a separate execution backend.
-- Memory: Qdrant vector collections for working,
+- Memory: SQLite-backed collections with FAISS dense indexes
+  by default when installed; Qdrant is the automatic backend
+  fallback. Plain SQLite remains the dependency-light fallback.
+  Working,
   episodic, semantic, experience, and knowledge, with
   hybrid dense plus sparse recall, forgetting curve,
   grace, and explicit prune. Library files live in
-  the Aidon home. SQLite is the durable memory fallback
-  when the Qdrant client package is not installed (it does
-  not detect an unreachable Qdrant server) and also stores conversations
-  and application records. No memory service is hosted by Aidon.
+  the Aidon home. SQLite also stores conversations and
+  application records. Set `AIDON_MEMORY_BACKEND` to force
+  `sqlite-faiss`, `qdrant`, or `sqlite`; automatic selection
+  occurs at startup and does not dual-write stores. If FAISS
+  fails during a run, SQLite exact search remains available. No memory
+  service is hosted by Aidon.
 - Tools: sandbox tools are arena plumbing, write,
   read, list, shell, and calculate, all confined to
   the workdir. Capability tools are plugins, adopted
@@ -158,7 +163,8 @@ flowchart TB
 - skills: standalone Markdown skills, per name.
 - library: library files, per item id.
 - knowledge: knowledge files and manifest.
-- qdrant: Qdrant collections, local mode or server.
+- memory.sqlite3: SQLite memory points and FAISS ID mappings.
+- qdrant: optional Qdrant collections, local mode or server.
 - learned: last run record, with research and live.
 - trace: trace files, per run id.
 - v1: key hashes and goal records, keys in 0600 file.
@@ -185,7 +191,7 @@ flowchart TB
 Code lives in `src/`, grouped by what it does, so a reader can find a system without reading 70 files in one directory. `src/system/main.py` is the entry point, it imports from the groups, it does not contain the systems itself. `src/` itself contains only `__init__.py` and the group directories, no modules at the top level.
 
 - `src/system/` — config, model client, and `main.py`, the entry point. The model client is endpoint, key, and model name only, OpenAI-compatible, stdlib, FakeClient for tests.
-- `src/memory/` — Qdrant memory, embedder, entity graph, KB parsing, Experience, redaction, rolling summary, library links.
+- `src/memory/` — SQLite + FAISS and Qdrant memory stores, embedder, entity graph, KB parsing, Experience, redaction, rolling summary, library links.
 - `src/agentic/` — goal loop, DAG and DAG store, adapt, swarm, interview and spec, validation, model verifier, budgets, trace, counting, metrics, benchmark, kernel, routers, research.
 - `src/interface/` — WebUI and robot avatar, messaging, v1 API, MCP server and client, triggers, scheduler loop, run control, approval and pre-approval gates.
 - `src/capabilities/` — sandbox and execution backends, tools and plugins, skill lifecycle, live actions, search, voice, GitHub, email and Gmail, image generation and editing, charts, Unity assets, Playwright MCP, SAM segmentation, video pipeline.
