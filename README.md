@@ -17,9 +17,7 @@
 [![Baseten](https://img.shields.io/badge/Inference-Baseten-6366F1)](https://www.baseten.co/)
 [![Modal](https://img.shields.io/badge/Cloud%20Compute-Modal-16A34A)](https://modal.com/)
 
----
-
-[![Chat Model](https://img.shields.io/badge/Chat%20Model-Llama%203.1-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
+[![Chat Model](https://img.shields.io/badge/Chat%20Model-Llama%203.2-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
 [![Agentic Model](https://img.shields.io/badge/Agentic%20Model-Muse%20Spark%20Open-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
 [![Image Model](https://img.shields.io/badge/Image%20Model-Muse%20Image%201.0-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
 [![ASR Model](https://img.shields.io/badge/ASR%20Model-Muse%20Voice%20Transcribe-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
@@ -45,7 +43,7 @@ This project showcases four capabilities. Meta models power its main agentic rea
 >- Muse Spark Open (from Baseten API) — the reasoning engine: goal understanding, interviewing, plan and DAG construction, recalling and adapting past workflows, repairing failed steps, and verifying results. Lightweight phases can use a fast model tier to keep costs down.
 >- Muse Image 1.0 — generates and edits images and diagrams for workflows that need them, through the same API key and endpoint as the chat model, with generation approval-gated and credit-aware.
 >- Muse Voice Transcribe — speech-to-text that lets users speak to the agent in natural language instead of typing, via a transcribe tool backed by Meta's transcription API.
->- The legendary Llama 3.1 (served in local Ollama) - used as the front-end chat model interacting with users. (You probably can't tell the front-end is from older generation model).
+>- Llama 3.2, served through local Ollama, handles the front-end chat experience.
 >
 >*Note: Aidon is still under active development — it was built during this 10-day hackathon, and not all planned agentic capabilities are implemented yet.*
 
@@ -115,7 +113,7 @@ The demo uses Meta's Model API at runtime for Muse Spark reasoning and optional 
 
 Meta is one part of Aidon's model and infrastructure stack. The other components handle local conversation, decision routing, memory, voice output, and execution:
 
-- **Front-end chat:** Local Ollama serving Llama 3.1 (Gotta love this legend) handles lightweight conversational turns locally in the configured setup. This keeps the more expensive Muse Spark calls focused on agentic planning and tool work, as well as to show model from earlier generation is still capable. Aidon supports Ollama's native chat API; this model choice is configuration, not a fixed default.
+- **Front-end chat:** Local Ollama serving Llama 3.2 handles lightweight conversational turns in the configured setup. This keeps the more expensive Muse Spark calls focused on agentic planning and tool work. Aidon supports Ollama's native chat API; the model choice is configurable.
 - **Decision model:** Clef 9B in the deployed setup handles compact routing and ranking decisions, including intent routing and workflow selection. The model ID is configurable. Modal serves the Clef inference endpoint.
 - **Embedding model and vector store (RAG):** Google EmbeddingGemma 2 (`google/embeddinggemma-2`), loaded locally through Sentence Transformers and PyTorch, turns text and images into dense embedding vectors. SQLite stores memory points and metadata; optional FAISS CPU indexes dense vectors. Automatic selection tries Qdrant if SQLite+FAISS cannot initialize, then plain SQLite. Set `AIDON_MEMORY_BACKEND` to force a backend. Optional FastEmbed/SPLADE adds learned sparse retrieval; keyword vectors are used when it is not enabled.
 - **Speech output:** Fish Audio provides text-to-speech. Muse Voice Transcribe, listed above, handles speech-to-text.
