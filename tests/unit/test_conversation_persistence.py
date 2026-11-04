@@ -1,9 +1,11 @@
 """WebUI conversation rows and their transcript must survive refreshes."""
 
 from src.interface.triggers import TriggerDispatcher
+from src.interface.run_control import RunControl
 from src.interface.webui import WebUIServer
 from src.memory.conversations_db import ConversationStoreDB
 import threading
+import time
 
 
 def test_start_goal_registers_a_browser_supplied_conversation_id(tmp_path):
@@ -48,6 +50,35 @@ def test_saved_chat_brief_and_run_guidance_reach_dispatcher(tmp_path):
     guidance = events[0].payload["guidance"]
     assert "Use concise answers and metric units." in guidance
     assert "Give the estimate first." in guidance
+
+
+def test_completed_run_without_handler_reply_gets_persisted_fallback(tmp_path):
+    run_control = RunControl(tmp_path)
+    dispatcher = TriggerDispatcher()
+    dispatcher.register(
+        "webui",
+        lambda event: run_control.set_status(
+            event.payload["run_id"], "done"),
+    )
+    server = WebUIServer(tmp_path, dispatcher=dispatcher,
+                         run_control=run_control)
+
+    result = server.start_goal({"goal": "make a short slide"})
+    deadline = time.monotonic() + 2
+    snapshot = None
+    while time.monotonic() < deadline:
+        snapshot = server.run_snapshot(result["run_id"])
+        if snapshot and any(e.get("kind") == "aidon-final"
+                            for e in snapshot["events"]):
+            break
+        time.sleep(0.01)
+
+    assert snapshot is not None
+    assert any(e.get("kind") == "aidon-final"
+               and "run completed" in e.get("text", "")
+               for e in snapshot["events"])
+    turns = server.handle_conversation_get(result["conversation_id"])["turns"]
+    assert turns[-1]["role"] == "assistant"
 
 
 def test_store_recovers_orphaned_webui_exchange_rows(tmp_path):
