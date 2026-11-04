@@ -37,7 +37,7 @@ SEED_TOOLS = {"write", "read", "list", "shell"}
 # flipping one setting on. Adopted plugins and trusted
 # skills are earned tools, never gated by this flip.
 CORE_LADDER_TOOLS = frozenset({
-    "fetch_url", "web_search",
+    "fetch_url", "web_search", "read_document",
     "ask_user", "declare_blocked", "notify",
     "uv_venv", "install_python_package", "apt_install",
     "mcp_connect", "mcp_disconnect", "draft_tool_plugin",

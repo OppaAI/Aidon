@@ -1,10 +1,9 @@
-"""Memory and knowledge framework, Qdrant preferred with SQLite fallback.
+"""Memory and knowledge framework, SQLite+FAISS preferred with Qdrant fallback.
 
-One Qdrant instance is used in normal installations, local mode under
-the Aidon home by default or a server URL if AIDON_QDRANT_URL is set.
-If qdrant-client is not installed, the same collections use the
-dependency-free SQLiteStore so memory remains durable instead of being
-silently discarded at process exit.
+Automatic selection uses SQLite as the durable source of truth and FAISS
+for dense vector search when ``faiss-cpu`` is installed. If FAISS cannot be
+initialized, Aidon tries Qdrant (local under the Aidon home by default, or
+at ``AIDON_QDRANT_URL``); plain SQLite is the final dependency-light option.
 
 Taxonomy, as defined for Aidon:
 - Working memory (STM): chat history. Recent exchanges, kept
@@ -57,22 +56,20 @@ removed, it never runs on its own, and it never deletes
 promoted LTM or library files, only memory points.
 
 Promotion, episodic -> LTM:
-At the end of a completed run, Aidon may ask the user whether
-to put that run's episodic memories into LTM. If the
-environment flag AIDON_AUTO_PROMOTE_TO_LTM is "1", promotion
-happens automatically, without asking. Otherwise the default
-is to ask, via a caller-supplied ask callback, and a "no"
-leaves episodic memories chat-scoped only. Promotion
-copies a point to the semantic collection (for a fact) or
-to the experience collection (for a workflow), and marks
-the episodic point as promoted, it does not delete the
-episodic original, and it copies the payload, so a library
-link survives promotion.
+The goal runner promotes eligible episodic records to the
+semantic collection when a run or chat exchange completes.
+Successful workflows are also stored as Experiences and
+reusable DAGs. Promotion copies the point and marks the
+episodic point as promoted; it does not delete the episodic
+original. New or superseding semantic points copy the
+episodic payload, including library links. If an exact
+duplicate already exists, promotion keeps that existing
+point and does not merge the episodic payload into it.
 
 Chats, without a second store:
 Conversation ids are payload fields on working
 and episodic points. ``conversation_history``
-reads them back from Qdrant by filtered
+reads them back from the active memory store by filtered
 scroll, in created order, so a conversation survives a
 restart without SQLite. ``conversation_context`` returns
 the last exchanges for a conversation, plus a stored
@@ -84,11 +81,14 @@ Images: see library.py. A memory point never holds image
 bytes; it holds the image vector and the library link, so
 recall returns the file reference alongside the text.
 
-If qdrant_client is not installed, the store falls back to
-an in-memory store with the same collection / point / search
-shape, so tests run offline. When qdrant_client is installed,
-the real Qdrant store is used, local mode by default, with
-one shared client per path or URL per process.
+SQLite+FAISS is the default when FAISS is installed. Automatic
+selection tries Qdrant next and plain SQLite last. Select a backend
+with ``AIDON_MEMORY_BACKEND`` (``auto``, ``sqlite-faiss``,
+``qdrant``, or ``sqlite``). If FAISS fails during a run, SQLite
+exact search remains available. Switching to Qdrant is a startup-time
+choice, not live failover; stores are not dual-written. Separate
+conversation and application records are also persisted in
+SQLite under the Aidon home.
 """
 
 from __future__ import annotations
@@ -101,7 +101,7 @@ from pathlib import Path
 from .embedder import Embedder, HashEmbedder, tokens
 
 from .stores import (COLLECTIONS, Hit, InMemoryStore, Point, QdrantStore,
-                    SQLiteStore, make_store, retention_rank)
+                    SQLiteFaissStore, SQLiteStore, make_store, retention_rank)
 from .retention import (decay_score, is_grace_protected, should_prune,
                         _now_iso, _today_iso)
 
@@ -128,7 +128,7 @@ def _shape_overlap(a: set[str], b: set[str]) -> float:
 
 
 class Memory:
-    """STM + episodic + semantic + experience + knowledge, Qdrant for all."""
+    """STM + episodic + semantic + experience + knowledge memory."""
 
     def __init__(self, home: Path, embedder: Embedder | None = None,
                  store=None, entity_graph=None):

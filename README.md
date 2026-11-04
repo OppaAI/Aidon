@@ -5,13 +5,25 @@
 [![Repo](https://img.shields.io/badge/Repo-OppaAI%2FAidon-D9578C)](https://github.com/OppaAI/Aidon)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/Status-experimental-orange.svg)
+
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu&logoColor=white)](https://ubuntu.com/)
 [![NVIDIA](https://img.shields.io/badge/NVIDIA-accelerated-76B900?logo=nvidia&logoColor=white)](https://www.nvidia.com/)<br>
-[![Sandbox](https://img.shields.io/badge/Sandbox-bubblewrap%20%7C%20Docker-2496ED?logo=docker&logoColor=white)](https://github.com/containers/bubblewrap)
+[![Sandbox](https://img.shields.io/badge/Sandbox-Modal%20%7C%20Docker-2496ED?logo=docker&logoColor=white)](https://modal.com/products/sandboxes)
 [![Docker](https://img.shields.io/badge/Docker-supported-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![Meta Models](https://img.shields.io/badge/Meta%20Models-Muse%20Spark%201.3-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
-[![Memory](https://img.shields.io/badge/Memory-Qdrant-8E75B2)](https://qdrant.tech/)
+[![Memory](https://img.shields.io/badge/Memory-SQLite%20%2B%20FAISS%20%E2%86%92%20Qdrant-8E75B2)](https://github.com/facebookresearch/faiss)
+
+[![Baseten](https://img.shields.io/badge/Inference-Baseten-6366F1)](https://www.baseten.co/)
+[![Modal](https://img.shields.io/badge/Cloud%20Compute-Modal-16A34A)](https://modal.com/)
+
+[![Chat Model](https://img.shields.io/badge/Chat%20Model-Llama%203.2-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
+[![Agentic Model](https://img.shields.io/badge/Agentic%20Model-Muse%20Spark%20Open-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
+[![Image Model](https://img.shields.io/badge/Image%20Model-Muse%20Image%201.0-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
+[![ASR Model](https://img.shields.io/badge/ASR%20Model-Muse%20Voice%20Transcribe-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
+[![Segmentation Model](https://img.shields.io/badge/Segmentation%20Model-SAM-0467DF?logo=meta&logoColor=white)](https://ai.meta.com/)
+[![TTS Provider](https://img.shields.io/badge/TTS%20Provider-Fish%20Audio-00A6A6)](https://fish.audio/)
+[![Decision Model](https://img.shields.io/badge/Decision%20Model-Clef%209B-7C3AED)](https://modal.com/)
+[![Embedding Model](https://img.shields.io/badge/Embedding%20Model-EmbeddingGemma%202-4285F4?logo=google&logoColor=white)](https://huggingface.co/google/embeddinggemma-2)
 
 ---
 
@@ -28,16 +40,17 @@
 > Built for the Meta Global AI Developer Hackathon (The entire codebase was made between October 26 – November 4, 2026).  
 This project showcases four capabilities. Meta models power its main agentic reasoning and optional image and speech to text features, alongside the supporting models and services described below:
 >
->- **Human Natural Language and Interview as source input** —  Understands goals in plain natural language and interviews the user in conversation to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it. Ask mode is the default: the agent asks chat questions first and works to a verified, frozen spec before planning anything, and the same conversation works in chat, on WhatsApp or Slack, or on the command line.
+>- **Human Natural Language and Interview as source input** — Understands goals in plain natural language and can interview the user to fill in missing details, so people without programming or AI experience can drive an autonomous agent simply by talking to it. Plan mode is the default; users can choose Ask mode for a guided interview that produces a verified spec before planning. The same conversation works in chat, on WhatsApp or Slack, or on the command line.
 >- **Grows its own capabilities with tools/skills creation** — drafting, sandbox-testing, and adopting tools and skills that plug into its agentic workflows, including niche ones tailored to a user's own task. A tool plugin is a directory with a manifest and module files: it is tested in the sandbox first, scanned for unsafe patterns, and adopted only on human approval, after which its tools are usable immediately in the current run and every later goal. Skills follow a candidate → validated → trusted lifecycle, and only trusted skills enter plan prompts.
 >- **Keeps a human in the loop for decision** — every consequential action passes through human review and approval before it goes live, with verification and rollback on failure, so the agent's autonomy never outruns its owner's consent. Nothing unproven goes live: work runs in a sandbox first, is verified by code, and only failed steps are repaired (at most 3 attempts); the approval card itself fails closed on timeout, and approvals can also be given by replying approve or reject on WhatsApp or Slack.
->- **DAG graph generation of workflows after successful runs** — every goal becomes a directed acyclic graph of steps with dependencies, deliverables, and acceptance criteria, so the agent knows what depends on what and what "done" means for each step. Completed DAGs are saved and adapted to new goals instead of planned from scratch, which is how Aidon reuses past work and saves time and tokens and LLM calls over time.
+>- **DAG graph generation of workflows after successful runs** — plans are represented as directed acyclic graphs of steps with dependencies, deliverables, and acceptance criteria, so the agent knows what depends on what and what "done" means for each step. Eligible successful workflows are saved and can be recalled and adapted to similar goals, reducing repeated planning work over time.
 
 > **Meta models used:**
->
->- Muse Spark 1.3 — the reasoning engine: goal understanding, interviewing, plan and DAG construction, recalling and adapting past workflows, repairing failed steps, and verifying results. Lightweight phases can use a fast model tier to keep costs down.
+> 
+>- Muse Spark Open (from Baseten API) — the reasoning engine: goal understanding, interviewing, plan and DAG construction, recalling and adapting past workflows, repairing failed steps, and verifying results. Lightweight phases can use a fast model tier to keep costs down.
 >- Muse Image 1.0 — generates and edits images and diagrams for workflows that need them, through the same API key and endpoint as the chat model, with generation approval-gated and credit-aware.
 >- Muse Voice Transcribe — speech-to-text that lets users speak to the agent in natural language instead of typing, via a transcribe tool backed by Meta's transcription API.
+>- The legend Llama 3.2 (served in local Ollama) - used as the front-end chat model interacting with users. (You probably can't tell the front-end is from older generation model).
 >
 >*Note: Aidon is still under active development — it was built during this 10-day hackathon, and not all planned agentic capabilities are implemented yet.*
 
@@ -55,10 +68,10 @@ This project showcases four capabilities. Meta models power its main agentic rea
 
 Give Aidon a goal in plain language, in chat, on WhatsApp or Slack, or on the command line. Aidon will:
 
-1. **Interview** — Ask mode is the default: chat questions first, to a verified spec; skip with an attached spec sheet, or run straight through in Execute mode
-2. **Research and recall** — web search and YouTube, plus hybrid Qdrant recall over past episodes and knowledge, facts only if a source excerpt contains them
+1. **Choose a mode** — Plan mode is the default. Choose Ask mode for a guided interview that turns chat answers into a verified spec; an attached spec sheet can also provide the requirements, or run straight through in Execute mode.
+2. **Research and recall** — web search and YouTube, plus hybrid recall over past episodes and knowledge, facts only if a source excerpt contains them
 3. **Plan** — steps, deliverables, and criteria, as a DAG, not a loose list
-4. **Sandbox** — execute in bubblewrap, Docker, subprocess, or on a VM over SSH, verify by code (with an optional model second opinion, off by default), repair only failed steps, at most 3 attempts
+4. **Sandbox** — execute in Modal Sandbox, Docker, subprocess, or on a VM over SSH, verify by code (with an optional model second opinion, off by default), repair only failed steps, at most 3 attempts
 5. **Approve (you)** — one decision card before any live action, fail-closed on timeout
 6. **Live** — execute only what was approved, verify, rollback on failure
 7. **Learn** — persist the DAG and new skills, so the next similar goal reuses and adapts, saving tokens and calls
@@ -88,6 +101,7 @@ The demo uses Meta's Model API at runtime for Muse Spark reasoning and optional 
 
 ## 📚 Guides
 
+- [Features](docs/FEATURES.md) — the four hackathon capabilities and Mermaid workflow diagrams.
 - [Installation](docs/INSTALLATION.md) — prerequisites, setup, and launch.
 - [Configuration](docs/CONFIGURATION.md) — models, `.env`, and the Aidon home.
 - [Usage](docs/USAGE.md) — WebUI and messaging, core loop, spec sheet, tools and plugins, triggers, research and live execution, budgets, trace, v1 API, and MCP.
@@ -97,8 +111,7 @@ The demo uses Meta's Model API at runtime for Muse Spark reasoning and optional 
 
 ## 🧠 Models
 
-- **Main agentic model, submission and demo:** Muse Spark 1.3, standard.
-- **Agent, tests only:** Muse Spark 1.3 Contributor, same capabilities, much cheaper. Switch by changing `AIDON_MODEL` only. Contributor inputs and outputs are used to train models, so tests must use non-sensitive test data only.
+- **Main agentic model:** Muse Spark Open, from Baseten API.
 - **Speech, when voice is on:** Muse Voice Transcribe, speech-to-text only.
 - **Images, optional, only if a workflow requires one:** Muse Image 1.0, as a tool, not as the agent.
 - **Segmentation, for video editing:** SAM, via the Meta Model API Responses API.
@@ -107,9 +120,9 @@ The demo uses Meta's Model API at runtime for Muse Spark reasoning and optional 
 
 Meta is one part of Aidon's model and infrastructure stack. The other components handle local conversation, decision routing, memory, voice output, and execution:
 
-- **Front-end chat:** Ollama with Llama 3.2 handles lightweight conversational turns locally in the configured setup. This keeps the more expensive Muse Spark calls focused on agentic planning and tool work. Aidon supports Ollama's native chat API; this model choice is configuration, not a fixed default.
+- **Front-end chat:** (I love the legacy Llama3 so much) So decided to use local Ollama to serve Llama 3.2 handles lightweight conversational turns locally in the configured setup. This keeps the more expensive Muse Spark calls focused on agentic planning and tool work, as well as to show model from earlier generation is still capable. Aidon supports Ollama's native chat API; this model choice is configuration, not a fixed default.
 - **Decision model:** Clef 9B in the deployed setup handles compact routing and ranking decisions, including intent routing and workflow selection. The model ID is configurable. Modal serves the Clef inference endpoint.
-- **Embedding model and vector store (RAG):** Google EmbeddingGemma 2 (`google/embeddinggemma-2`), loaded locally through Sentence Transformers and PyTorch, turns text and images into dense embedding vectors. Qdrant is the vector store that indexes and retrieves those vectors. SQLite provides durable fallback memory and stores conversations, interviews, and run/skill records. Optional FastEmbed/SPLADE adds learned sparse retrieval; keyword vectors are used when it is not enabled.
+- **Embedding model and vector store (RAG):** Google EmbeddingGemma 2 (`google/embeddinggemma-2`), loaded locally through Sentence Transformers and PyTorch, turns text and images into dense embedding vectors. SQLite stores memory points and metadata; optional FAISS CPU indexes dense vectors. Automatic selection tries Qdrant if SQLite+FAISS cannot initialize, then plain SQLite. Set `AIDON_MEMORY_BACKEND` to force a backend. Optional FastEmbed/SPLADE adds learned sparse retrieval; keyword vectors are used when it is not enabled.
 - **Speech output:** Fish Audio provides text-to-speech. Muse Voice Transcribe, listed above, handles speech-to-text.
 - **Sandbox and inference hosting:** Modal runs the configured remote sandbox and Clef inference service. For local execution, Aidon also supports Bubblewrap and Docker; an SSH connection can target a VM the owner already operates.
 - **Other optional integrations and libraries:** Tavily or SearXNG for web search; YouTube Data API, Gmail API, and Slack API for their respective features; Playwright MCP for browser automation; Three.js and three-vrm for the optional 3D avatar viewer. FFmpeg and Pillow support video and image processing. These integrations require their own local configuration or credentials when used.
@@ -121,11 +134,13 @@ Aidon has no central Aidon-hosted service: run the app and WebUI on your own com
 Code lives in `src/`, grouped, not flat:
 
 - `src/system/` — config, model client, and `main.py`, the entry point
-- `src/memory/` — Qdrant vector memory, EmbeddingGemma embeddings, SQLite fallback and application records, entity graph, KB, experience, redaction
+- `src/memory/` — SQLite + FAISS and Qdrant memory stores, EmbeddingGemma embeddings, application records, entity graph, KB, experience, redaction
 - `src/agentic/` — goal loop, DAG, adapt, swarm, interview, validation, budgets, trace, research
 - `src/interface/` — WebUI, messaging, v1 API, MCP, triggers, scheduler, approval, run control
 - `src/capabilities/` — sandbox and execution, tools and plugins, search, voice, GitHub, email, image, charts, Unity, Playwright MCP, SAM, video
 - `src/social/` — one-way social publishing, Threads and Instagram, plus YouTube search, metadata, and transcripts
+- `docker/` — Dockerfile, build ignore rules, and the opt-in desktop demo launcher
+- `compose.yaml` — the single Docker Compose file, with standard, development, desktop, and clean-home profiles
 
 Run it with `python -m src.system.main goal "..."`, or `./launch.sh goal "..."`. `src/` itself has no modules at the top level, only `__init__.py` and the groups.
 
@@ -141,7 +156,7 @@ not in this repository; small parts of the first two exist (see below).
    (YouTube, webcam); a dedicated live toolset as a subsystem,
    distinct from sandbox tools, does not yet.
 3. **Stronger sandbox backend (spike).** A Tier-2 backend behind
-   the isolation seam, with bubblewrap staying default until the
+   the isolation seam, with Modal staying default until the
    probes say otherwise.
 4. **Deterministic plan validation.** A canonical plan format
    plus a cross-file validator, so plan, ledger, and

@@ -2,10 +2,10 @@ name: Dependency audit
 
 on:
   pull_request:
-    paths: [pyproject.toml, uv.lock, Dockerfile, .github/workflows/dependencies.yml]
+    paths: [pyproject.toml, uv.lock, docker/Dockerfile, .github/workflows/dependencies.yml]
   push:
     branches: [dev]
-    paths: [pyproject.toml, uv.lock, Dockerfile, .github/workflows/dependencies.yml]
+    paths: [pyproject.toml, uv.lock, docker/Dockerfile, .github/workflows/dependencies.yml]
   schedule:
     - cron: "0 12 * * 1"
   workflow_dispatch:

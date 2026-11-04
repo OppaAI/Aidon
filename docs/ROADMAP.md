@@ -9,7 +9,8 @@ post-hackathon, NOT built, NOT demoed, at the end.
 
 - Skeleton: config, generic model client, approval gate,
   sandbox, goal loop, CLI.
-- Memory: Qdrant for all, hybrid recall, forgetting
+- Memory: SQLite-backed points with optional FAISS dense indexes,
+  Qdrant startup fallback and plain SQLite fallback, hybrid recall, forgetting
   curve, promotion, library, EmbeddingGemma 2, KB
   parsing, parser needed recording for CAD, LaTeX, and
   other formats not yet readable.
@@ -67,18 +68,6 @@ post-hackathon, NOT built, NOT demoed, at the end.
   policy. Not built here: Gmail MCP transport
   (dropped by decision), see below.
 
-## 🧪 Not built yet, in the repo, for the hackathon
-
-- Demo capability tools end to end: dinner menu PDF
-  plus grocery app, store run, and job search plus
-  publish, through plugins Aidon climbs to.
-- Live verification on a real model and a real
-  Qdrant and EmbeddingGemma 2 run: all runs so far
-  in the new repo are FakeClient tests, plus a local
-  HTTP research test. A real Muse Spark run and a
-  real Qdrant run are still owed.
-- Demo video, 3 minutes, required for submission.
-
 ## 🆕 Built after implementation period, now in the repo
 
 - Conversational `--cli` mode, dark/light WebUI theme refresh, robot
@@ -88,7 +77,7 @@ post-hackathon, NOT built, NOT demoed, at the end.
 
 - Adaptive DAG, steer and cancel across WebUI,
   WhatsApp, Slack, CLI, v1, and MCP, with RunControl.
-- Built in v0.5.0: Ask → Plan → Execute run-mode chain with spec
+- Current release v0.6.0 includes the Ask → Plan → Execute run-mode chain with spec
   cards; Clef intent router, DAG matching, validate gate, and
   recovery router; Modal execution backend, capability image
   builder, and worker pool; capability registry, failure-lessons
@@ -200,8 +189,8 @@ post-hackathon, NOT built, NOT demoed, at the end.
   pattern as the ffmpeg skip, instead of failing on a
   missing optional package.
 
-- Run modes Ask, Plan, and Execute, with Ask the
-  default on every interactive surface, a Run Mode
+- Run modes Ask, Plan, and Execute, with Plan the
+  default on interactive surfaces, a Run Mode
   chooser in the WebUI, and Proceed resuming the
   frozen plan or spec without re-planning; daemon
   and scheduled runs execute directly.

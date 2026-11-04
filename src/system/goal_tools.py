@@ -23,7 +23,7 @@ _SELF_MODIFY_LOCK = threading.Lock()
 # services that core read/write/shell tools cannot provide alone. Their
 # individual approval, credential, and publication boundaries still apply.
 CAPABILITY_TOOLS_WHEN_OPTIONAL_DISABLED = frozenset({
-    "edit_image", "sam_segment", "read_document", "generate_document",
+    "edit_image", "sam_segment", "generate_document",
     "build_ebook", "make_docx", "make_latex", "make_slides",
     "make_spreadsheet", "transcribe_audio", "tts_speak",
     "email_make_draft", "email_send", "slack_send", "slack_send_file",

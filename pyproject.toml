@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aidon"
-version = "0.5.0"
+version = "0.6.0"
 description = "An autonomous agent that works from a plain-language goal."
 requires-python = ">=3.11"
 dependencies = [
@@ -25,6 +25,9 @@ vision = [
 ]
 memory = [
     "qdrant-client>=1.10",
+]
+memory-faiss = [
+    "faiss-cpu>=1.8",
 ]
 sparse = [
     "fastembed>=0.3",

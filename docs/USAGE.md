@@ -15,6 +15,9 @@
   `python -m src.system.main --cli`) opens a lightweight chat
   interface with the same model configuration. It is not a full-screen
   terminal UI; use `/help`, `/clear`, `/history`, and `/quit` there.
+- `read_document` is available even when `AIDON_OPTIONAL_TOOLS=0`.
+  It reads web documents through the URL safety checks and local files
+  only from the current Aidon workspace or `~/Downloads`.
 - WhatsApp and Slack, both two-way, no Telegram,
   with the Aidon key names:
   `AIDON_WHATSAPP_TOKEN`, `AIDON_WHATSAPP_PHONE_ID`,
@@ -160,17 +163,16 @@ shows, and a CLI run or a scheduled job honours it too.
 
 ## 🔁 Core, in order
 
-1. **Interpret** — the goal, in chat. Interview questions are
-   chat turns, not cards, and they have no clock. The
-   interview triggers from the chat message itself, and
-   ends in a frozen spec: goal, deliverables, constraints,
-   budget, deadline, recipients, files, notifications,
-   assumptions, with no open questions. The spec is built
-   from the questions, from memory, and from previous runs,
-   then confirmed with a spec sheet card for user approval
-   before any planning proceeds. The spec is verified by
-   code and approved as a decision card, then it binds the
-   planner. Run it with
+1. **Interpret** — Plan mode is the default on interactive
+   surfaces. It reads the goal, recalls relevant context,
+   researches when needed, then prepares a plan for review
+   before steps run. Choose Ask mode when you want a guided
+   interview first: questions are ordinary chat turns with no
+   approval clock, and the answers become a frozen spec. Aidon
+   validates the spec and shows it for approval; after you
+   proceed, Plan mode prepares the plan for its own review.
+   An attached spec sheet is another way to supply requirements.
+   Run the interview from the CLI with
    `python -m src.system.main interview "Plan a dinner"`, with
    `--run` to run the goal after the spec is approved.
 
@@ -180,13 +182,13 @@ You do not have to do the interview. Write your own spec
 sheet, attach it in the chat box, and Aidon skips the
 interview.
 
-- Template: [examples/SPEC-SHEET-TEMPLATE.md](examples/SPEC-SHEET-TEMPLATE.md)
+- Template: [examples/SPEC-SHEET-TEMPLATE.md](../examples/SPEC-SHEET-TEMPLATE.md)
   in this repo, and `specs/template.md` in your Aidon home
   (`~/.aidon/specs/template.md` by default). Copy it, fill
   it in, save it, and attach it. The template contains no
   amounts, values, or example constraints, only one or a
   few sentences per section telling you what to write.
-- Example: [examples/SPEC-SHEET-EXAMPLE.md](examples/SPEC-SHEET-EXAMPLE.md),
+- Example: [examples/SPEC-SHEET-EXAMPLE.md](../examples/SPEC-SHEET-EXAMPLE.md),
   a filled spec sheet for generating October 2026 monthly
   statements from invoice accounts, with customer totals,
   a pay by date, and email to customers. The example is
@@ -221,23 +223,25 @@ interview.
 ## 🎛️ Run modes: Ask, Plan, Execute
 
 Aidon runs in one of three modes, picked in the WebUI
-Run Mode chooser, or with /ask, /plan, /execute on
-WebUI, WhatsApp, Slack, and the CLI.
+Run Mode chooser, or with `/ask`, `/plan`, `/execute`
+on WebUI, WhatsApp, Slack, and the CLI.
 
-- Ask is the default on every interactive surface.
-  A goal in Ask mode starts with chat questions and
-  stops at a frozen spec; nothing is planned or run
-  until you approve the spec and proceed.
+- Plan is the default on interactive surfaces. It prepares
+  a plan for review before any step runs.
+- Ask is an optional guided interview. It stops at a frozen
+  spec for review; after you approve and proceed, Aidon moves
+  to Plan mode, where the plan has a separate review gate.
 - Plan mode stops after the plan, for review, before
   any step runs.
 - Execute mode runs straight through, as before.
-- Proceed resumes the frozen plan or spec exactly,
-  without re-planning and without a new interview.
+- Proceed resumes the approved spec or plan without starting
+  a new interview; after Ask, it continues into Plan mode.
 - Daemon runs, scheduled jobs, and practice runs
   execute directly; they never stall on an interview.
 
-Skip the interview any time by attaching a spec
-sheet, or by choosing Execute mode.
+Choose Plan or Execute mode to skip the guided interview.
+An attached spec sheet can provide requirements without
+interview questions.
 
 ## 🧰 Tool, skill, and plugin system
 
@@ -403,10 +407,13 @@ verification arena they will run in.
 
 ## Desktop demo and recording
 
-On an X11 Linux desktop, run `./scripts/start-desktop-demo.sh` from a terminal
-in the graphical session. It builds and starts the Aidon container with access
-to that desktop; the usual `docker compose up -d aidon` starts it without the
-desktop overlay. The script needs `xauth`, a valid `DISPLAY`, and the session's
+On an X11 Linux desktop, stop the currently running profile with
+`docker compose down`, then run `./docker/start-desktop-demo.sh` from a terminal
+in the graphical session. It builds and starts the desktop-profile UI plus the
+webhook listener; ordinary `docker compose up -d` starts the UI without desktop
+access. Run `docker compose --profile desktop down` to stop the desktop-profile
+containers before starting the standard UI. The script needs `xauth`, a valid
+`DISPLAY`, and the session's
 X11 authorization file. Desktop access gives the container access to the X11
 session, so use it only when you intend Aidon to control that desktop. Wayland
 desktop control is not supported by this driver.
@@ -520,14 +527,20 @@ draft, sandbox-test, and adopt with owner approval, like
 any capability tool. Parsers for CAD, LaTeX, and other
 formats are not preinstalled.
 
-## 🧠 Memory and KB, Qdrant for all
+## 🧠 Memory and KB
 
-One database, Qdrant, no second database. One instance, local
-mode under the Aidon home by default, or a server URL if
-`AIDON_QDRANT_URL` is set, with separate collections.
-Memory starts blank: no import from previous chats,
-collections start empty, the first runs build memory from
-scratch.
+Memory uses SQLite as its durable point store and FAISS for dense
+vector search when `faiss-cpu` is installed. Automatic selection
+tries Qdrant if SQLite+FAISS cannot initialize, then falls back to
+plain SQLite. Set `AIDON_QDRANT_URL` to use a Qdrant server. Choose
+`AIDON_MEMORY_BACKEND=sqlite-faiss`, `qdrant`, or `sqlite` to force
+a backend; leave it unset for automatic selection. The SQLite+FAISS
+backend rebuilds its dense index from SQLite at startup and uses
+SQLite exact search if FAISS fails while running. Backend switching
+does not migrate or dual-write existing data. A separate SQLite
+database persists conversations and application records.
+Memory starts blank: no import from previous chats; the first
+runs build it from scratch.
 
 - **Working memory (STM):** chat history, last 20 exchanges,
   `working` collection. Never promoted on its own.
@@ -542,7 +555,7 @@ scratch.
   collection.
 
 **Promotion, episodic to LTM:** at the end of a completed run,
-and for a chat exchange, that episodic record is copied to
+and for a chat exchange, the episodic record is copied to
 LTM automatically — no approval. An identical text already
 in LTM is a duplicate and is not recorded twice; a record
 sharing at least half its shape tokens supersedes the old
@@ -558,8 +571,8 @@ collection created at 128-dim cannot hold 768-dim vectors, so
 changing embedders means a fresh home or a recreated
 collection, never a silent resize.
 **Recall, hybrid:** dense plus sparse, fused with RRF,
-over-fetching 2x, in Qdrant with named vectors `dense` and
-`sparse`, and the same RRF shape in the in-memory fallback.
+over-fetching 2x. FAISS supplies dense candidates for the SQLite
+backend; Qdrant uses named vectors `dense` and `sparse`.
 Sparse is SPLADE when `AIDON_SPARSE_MODEL` is set and the
 optional `sparse` extra is installed; otherwise it falls back
 to keyword sparse weights with no extra download. `recall_both` embeds once
@@ -570,7 +583,7 @@ half-life, 35-day grace, 0.02 prune threshold, finds
 cleanup candidates. Prune is explicit only, never automatic.
 **Chats:** conversation ids
 are payload fields on working and episodic points, read back
-from Qdrant by filtered scroll, oldest first, so a
+from the active store by filtered scroll, oldest first, so a
 conversation survives a restart without a second database.
 **KB parsing:** text and markdown as UTF-8, HTML stripped,
 docx via python-docx, PDF via pypdf, with a UTF-8 fallback

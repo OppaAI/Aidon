@@ -53,33 +53,6 @@ jobs:
       - name: Validate WebUI JavaScript
         run: find src/interface/static -name '*.js' -print0 | xargs -0 -r -n1 node --check
 
-      - name: Prepare release notes from changelog
-        env:
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_TEMP: ${{ runner.temp }}
-        run: |
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-
-          version = os.environ["REF_NAME"][1:]
-          text = Path("CHANGELOG.md").read_text(encoding="utf-8")
-          heading = f"## [{version}]"
-          lines = text.splitlines()
-          try:
-              start = next(i for i, line in enumerate(lines)
-                           if line.startswith(heading))
-          except StopIteration:
-              raise SystemExit(f"CHANGELOG.md has no {heading} section")
-          end = next((i for i in range(start + 1, len(lines))
-                      if lines[i].startswith("## ")), len(lines))
-          notes = "\n".join(lines[start + 1:end]).strip()
-          if not notes:
-              raise SystemExit(f"CHANGELOG.md section {heading} is empty")
-          path = Path(os.environ["RUNNER_TEMP"]) / "release-notes.md"
-          path.write_text(notes + "\n", encoding="utf-8")
-          PY
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -101,6 +74,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: docker/Dockerfile
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
@@ -112,4 +86,4 @@ jobs:
         run: |
           gh release create "$REF_NAME" \
             --title "$REF_NAME" \
-            --notes-file "$RUNNER_TEMP/release-notes.md"
+            --generate-notes

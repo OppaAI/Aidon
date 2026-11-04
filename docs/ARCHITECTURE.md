@@ -10,27 +10,34 @@ goal starts from what actually worked.
 
 ```mermaid
 flowchart LR
-    A[🎯 Goal] --> B[🧭 Interpret]
-    B --> C[💬 Interview / Spec]
-    C --> D[🧠 Recall]
-    D --> E[🔎 Research]
-    E --> F[📋 Plan DAG]
-    F --> G[🧪 Sandbox]
-    G --> H[✅ Verify]
-    H -->|failed| I[🔧 Repair]
-    I --> G
-    H --> J{👤 Approval}
-    J -->|rejected / timeout| K[🛑 Stop]
-    J -->|approved| L[🚀 Live]
-    L --> M[📚 Learn]
+    A[🎯 Goal] --> B{Run mode}
+    B -->|Ask| C[💬 Interview and freeze spec]
+    C --> D{Spec approval}
+    D -->|reject| X[🛑 Stop]
+    D -->|approve and proceed| E[🧠 Recall and research]
+    B -->|Plan default / Execute| E
+    E --> F[📋 Build and validate plan DAG]
+    F --> G{Run mode}
+    G -->|Plan: stop for review| Y[⏸️ Wait for proceed]
+    Y --> H[🧪 Sandbox]
+    G -->|Execute: continue| H
+    H --> I[✅ Verify]
+    I -->|failed| J[🔧 Repair failed steps]
+    J --> H
+    I --> K{Live action approval}
+    K -->|rejected / timeout| X
+    K -->|approved| L[🚀 Live action]
+    L --> M[📚 Learn and save successful workflow]
 ```
 
 1. Interpret: a chat message, an attached spec sheet,
-   a trigger event, or a v1 or MCP goal submission.
-2. Interview: chat questions, no clock, no cards, to a
-   frozen spec, or a user-written spec sheet attached
-   in chat, which skips the interview. Spec approval
-   is a decision card, with a spec sheet as its body.
+   a trigger event, or a v1 or MCP goal submission. Plan
+   mode is the interactive default; Ask and Execute are
+   explicit alternatives.
+2. Ask mode only: chat questions, without an approval
+   clock, produce a frozen spec. The user can approve the
+   spec on a decision card; proceeding then enters Plan
+   mode. An attached spec sheet can supply requirements.
 3. Recall: previous Experiences, episodic memory, and
    research sources for a similar goal, before planning
    fresh.
@@ -51,8 +58,10 @@ flowchart LR
    only after code passes, and never overrides code.
 8. Repair: only failed steps are repaired, passed
    files are untouched, at most 3 attempts in total.
-9. Approval: a decision card, fail-closed on timeout,
-   before any live action.
+9. Review and approval: Plan mode stops for plan review;
+   Ask mode has a separate spec confirmation. A decision
+   card also gates consequential live actions and fails
+   closed on timeout.
 10. Live: only a closed list of live actions, copy a
     verified file to a spec-named output with a
     snapshot backup, and record a notification.
@@ -72,7 +81,7 @@ flowchart TB
     LOOP[🔁 Goal runner]
     TOOLS[🧰 Tools and plugins]
     SANDBOX[🔒 Bubblewrap, Docker, VM, or Modal]
-    MEMORY[(🧠 Qdrant / memory)]
+    MEMORY[(🧠 SQLite + FAISS / Qdrant memory)]
     APPROVAL[👤 Approval gate]
     REPORT[📊 Trace, reports, metrics]
     UI --> T --> LOOP
@@ -90,12 +99,19 @@ flowchart TB
   model/configuration path. WebUI TTS can stream Fish Audio chunks,
   while the final response footer reports elapsed time and token usage.
   These are presentation features, not a separate execution backend.
-- Memory: Qdrant for all collections, working,
+- Memory: SQLite-backed collections with FAISS dense indexes
+  by default when installed; Qdrant is the automatic backend
+  fallback. Plain SQLite remains the dependency-light fallback.
+  Working,
   episodic, semantic, experience, and knowledge, with
   hybrid dense plus sparse recall, forgetting curve,
   grace, and explicit prune. Library files live in
-  the Aidon home, never in the repo, never in a
-  central service.
+  the Aidon home. SQLite also stores conversations and
+  application records. Set `AIDON_MEMORY_BACKEND` to force
+  `sqlite-faiss`, `qdrant`, or `sqlite`; automatic selection
+  occurs at startup and does not dual-write stores. If FAISS
+  fails during a run, SQLite exact search remains available. No memory
+  service is hosted by Aidon.
 - Tools: sandbox tools are arena plumbing, write,
   read, list, shell, and calculate, all confined to
   the workdir. Capability tools are plugins, adopted
@@ -147,7 +163,8 @@ flowchart TB
 - skills: standalone Markdown skills, per name.
 - library: library files, per item id.
 - knowledge: knowledge files and manifest.
-- qdrant: Qdrant collections, local mode or server.
+- memory.sqlite3: SQLite memory points and FAISS ID mappings.
+- qdrant: optional Qdrant collections, local mode or server.
 - learned: last run record, with research and live.
 - trace: trace files, per run id.
 - v1: key hashes and goal records, keys in 0600 file.
@@ -174,7 +191,7 @@ flowchart TB
 Code lives in `src/`, grouped by what it does, so a reader can find a system without reading 70 files in one directory. `src/system/main.py` is the entry point, it imports from the groups, it does not contain the systems itself. `src/` itself contains only `__init__.py` and the group directories, no modules at the top level.
 
 - `src/system/` — config, model client, and `main.py`, the entry point. The model client is endpoint, key, and model name only, OpenAI-compatible, stdlib, FakeClient for tests.
-- `src/memory/` — Qdrant memory, embedder, entity graph, KB parsing, Experience, redaction, rolling summary, library links.
+- `src/memory/` — SQLite + FAISS and Qdrant memory stores, embedder, entity graph, KB parsing, Experience, redaction, rolling summary, library links.
 - `src/agentic/` — goal loop, DAG and DAG store, adapt, swarm, interview and spec, validation, model verifier, budgets, trace, counting, metrics, benchmark, kernel, routers, research.
 - `src/interface/` — WebUI and robot avatar, messaging, v1 API, MCP server and client, triggers, scheduler loop, run control, approval and pre-approval gates.
 - `src/capabilities/` — sandbox and execution backends, tools and plugins, skill lifecycle, live actions, search, voice, GitHub, email and Gmail, image generation and editing, charts, Unity assets, Playwright MCP, SAM segmentation, video pipeline.
