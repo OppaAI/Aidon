@@ -6,9 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.interface.approval import ApprovalGate, Decision
-from src.memory.embedder import HashEmbedder
 from src.agentic.loop import GoalRunner
-from src.memory.memory import Memory
 from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
 from src.agentic.semantic_router import SemanticRouter
