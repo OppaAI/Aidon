@@ -2352,6 +2352,8 @@
     });
     if (data.conversation_id && window.aidonSetConversation)
       window.aidonSetConversation(data.conversation_id);
+    if (data.conversation_id && window.aidonLoadHistory)
+      window.aidonLoadHistory();
     refreshThinkBtn();
     if (previousRun && data.run_id === previousRun) {
       // Answer to a waiting question, not a new run: the server
@@ -2591,11 +2593,13 @@
     });
   });
 
-  document.getElementById("new-chat").addEventListener("click", () => {
+  const newChatBtn = document.getElementById("new-chat");
+  newChatBtn.addEventListener("click", async () => {
     // never orphan a poll interval or strand the composer mid-run
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     currentRun = null;
-    // a new chat starts a fresh persistent conversation on first send
+    // Clear the current thread immediately, then create the persistent
+    // conversation so it is selectable in history before the first message.
     if (window.aidonSetConversation) window.aidonSetConversation("");
     renderStages("interpret");
     setStatus("idle", "ready");
@@ -2614,6 +2618,26 @@
     guidanceInput.disabled = false;
     steerRow.hidden = true;
     input.focus();
+    newChatBtn.disabled = true;
+    try {
+      const response = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const conversation = await response.json();
+      if (!conversation.id) throw new Error("Missing conversation id");
+      if (window.aidonSetConversation)
+        window.aidonSetConversation(conversation.id);
+      if (window.aidonLoadHistory) await window.aidonLoadHistory();
+    } catch (error) {
+      setStatus("error", "chat creation failed");
+      addMsg("assistant", "Could not create a new chat. Check the Aidon connection and try again.");
+    } finally {
+      newChatBtn.disabled = false;
+      input.focus();
+    }
   });
 
   renderStages("interpret");
@@ -3147,7 +3171,7 @@
     convs.forEach((c) => list.appendChild(conversationItem(c)));
   }
   // poll() in the chat IIFE calls this when a run completes.
-  window.aidonLoadHistory = () => { loadHistory(); };
+  window.aidonLoadHistory = () => loadHistory();
 
   async function openConversation(id) {
     let conv;
