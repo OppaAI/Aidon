@@ -104,6 +104,23 @@ def test_read_document_maps_host_downloads_to_read_only_mount(tmp_path, monkeypa
     assert "speech text from the mounted Downloads folder" in result
 
 
+def test_read_document_maps_tilde_downloads_before_expanduser(tmp_path, monkeypatch):
+    mounted_downloads = tmp_path / "container" / "Downloads"
+    mounted_downloads.mkdir(parents=True)
+    (mounted_downloads / "SPEECH.md").write_text(
+        "speech text from tilde path", encoding="utf-8")
+    monkeypatch.setenv("AIDON_HOST_DOWNLOADS_MOUNT", str(mounted_downloads))
+    tools = _tools(tmp_path)
+    result = tools["read_document"]("~/Downloads/SPEECH.md")
+    assert "speech text from tilde path" in result
+
+
+def test_fetch_url_cannot_bypass_local_read_guard(tmp_path):
+    tools = _tools(tmp_path)
+    result = tools["fetch_url"]("/etc/passwd")
+    assert "READ_BLOCKED" in result
+
+
 def test_search_document_empty_home_returns_string(tmp_path):
     tools = _tools(tmp_path)
     result = tools["search_document"]("something never ingested")

@@ -217,8 +217,10 @@ class PlanningMixin:
                    "missing steps array. For GUI requests, use the "
                    "computer_use_task for visual desktop tasks when it is available, "
                    "so each action is chosen using the current screen. "
-                   "If the user explicitly asks for spoken output, use tts_speak "
-                   "with the requested text. Approval prompts must remain silent.")
+                   "Approval prompts must remain silent.")
+        if not self.kernel_mode:
+            system += (" If the user explicitly asks for spoken output, use tts_speak "
+                       "with the requested text.")
         system += (" Deliverables are files, not tool calls. If the user asks "
                    "for an answer or action result and no file, use an "
                    "output-only step: omit its deliverable (or use an empty "

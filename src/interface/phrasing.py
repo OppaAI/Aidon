@@ -182,7 +182,7 @@ def phrase_with_model(kind: str, say, timeout_s: float = 10.0) -> str | None:
 def report_text(status: str, files: list[str], error: str,
                 run_id: str, stats_line: str, phrase: str | None = None,
                 blocked: list[str] | None = None,
-                result_text: str = "") -> str:
+                result_text: str = "", surface: str = "webui") -> str:
     """Full completion message for a run, in natural language.
 
     The stats line (elapsed, tokens) is kept verbatim as the trailing
@@ -201,10 +201,11 @@ def report_text(status: str, files: list[str], error: str,
     elif status == "cancelled":
         head = phrase or report_cancelled(run_id)
     else:
-        failure = " ".join(str(error or "The cause is recorded in Aidon logs.").split())
+        failure = " ".join(str(error or "").split()) or "The cause is recorded in Aidon logs."
         if len(failure) > 200:
             failure = failure[:197].rsplit(" ", 1)[0] + "…"
-            failure += " Open Thinking for details."
+            if surface == "webui":
+                failure += " Open Thinking for details."
         head = f"{phrase or report_failed_opener(run_id)} {failure}"
     if blocked:
         lines = "\n".join(f"- {item}" for item in blocked)

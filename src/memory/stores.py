@@ -89,7 +89,10 @@ def _hybrid_search(points, vector, query_text, limit, sparse=None):
         return sum(min(query_sparse.get(i, 0.0), weight)
                    for i, weight in point_sparse.items())
 
-    dense = heapq.nlargest(over, points, key=lambda point: _cosine(vector, point.vector))
+    same_dim = [point for point in points
+                if len(point.vector) == len(vector)]
+    dense = heapq.nlargest(
+        over, same_dim, key=lambda point: _cosine(vector, point.vector))
     keyword = heapq.nlargest(over, points, key=sparse_score)
     return _rrf(dense, keyword, limit)
 
@@ -285,6 +288,10 @@ class SQLiteFaissStore(SQLiteStore):
         self._db.commit()
         for collection in COLLECTIONS:
             self._rebuild_index(collection)
+        initial_version = self._db.execute(
+            "PRAGMA data_version").fetchone()[0]
+        self._data_versions = {collection: initial_version
+                               for collection in COLLECTIONS}
 
     def _faiss_id(self, collection: str, point_id: str) -> int:
         row = self._db.execute(
@@ -380,11 +387,19 @@ class SQLiteFaissStore(SQLiteStore):
                sparse: tuple[list[int], list[float]] | None = None) -> list[Hit]:
         if limit <= 0:
             return []
-        if collection in self._faiss_broken:
-            return _hybrid_search(self._rows(collection), vector, query_text,
-                                  limit, sparse)
         try:
             with self._lock:
+                data_version = self._db.execute(
+                    "PRAGMA data_version").fetchone()[0]
+                if data_version != self._data_versions.get(collection):
+                    # Another SQLite connection (for example an ingest
+                    # worker) committed since this FAISS index was built.
+                    self._faiss_broken.discard(collection)
+                    self._rebuild_index(collection)
+                    self._data_versions[collection] = data_version
+                if collection in self._faiss_broken:
+                    return _hybrid_search(self._rows(collection), vector,
+                                          query_text, limit, sparse)
                 points = self._rows(collection)
                 if not points:
                     return []
@@ -658,7 +673,7 @@ class QdrantStore:
 
 
 def make_store(home: Path, dim: int = 768):
-    """Select SQLite+FAISS first, Qdrant second, and plain SQLite last.
+    """Select existing/configured Qdrant before new local stores.
 
     ``AIDON_MEMORY_BACKEND`` may force ``auto``, ``sqlite-faiss``,
     ``qdrant``, or ``sqlite``. Automatic fallback occurs during startup;
@@ -676,6 +691,13 @@ def make_store(home: Path, dim: int = 768):
         return SQLiteFaissStore(home, dim=dim)
     url = os.environ.get("AIDON_QDRANT_URL", "").strip()
     if selected == "qdrant":
+        return QdrantStore(home, url=url, dim=dim)
+
+    # Keep previously persisted Qdrant points visible when switching code
+    # versions or when the owner has configured a remote Qdrant endpoint.
+    qdrant_home = Path(home) / "qdrant"
+    has_local_qdrant = qdrant_home.exists() and any(qdrant_home.iterdir())
+    if url or has_local_qdrant:
         return QdrantStore(home, url=url, dim=dim)
 
     try:

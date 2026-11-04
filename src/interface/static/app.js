@@ -1231,10 +1231,9 @@
         ? (" (" + e.thinking_tokens + " think)") : "";
       const meta = (e.seconds || 0) + "s" + (hasTokenUsage
         ? " · " + tokensIn + "→" + tokensOut + " tok" + thinkSuffix : "");
-      let detail = e.detail || e.title || e.error || "";
-      if (failed && detail.length > 220) {
-        detail = detail.slice(0, 217) + "… (open Aidon logs for full details)";
-      }
+      const clipFailed = (text) => (failed && text.length > 220)
+        ? text.slice(0, 217) + "… (open Aidon logs for full details)" : text;
+      let detail = clipFailed(e.detail || e.title || e.error || "");
       if (phase === "plan" && detail === "plan proposed") {
         detail = "Aidon drafted the plan shown in the plan card. This model reports reasoning-token usage, but does not provide a user-facing reasoning transcript.";
       }
@@ -1256,7 +1255,7 @@
           (hasThinkingTokens ? ' thinking tokens"' : ' details"') : '') + '>' +
         (expandable ? '<button class="think-toggle" title="expand">›</button>' :
           '<span class="think-toggle" style="visibility:hidden">›</span>') +
-        '<div class="think-title">' + esc(e.title || e.detail || e.status || phase) + "</div>" +
+        '<div class="think-title">' + esc(clipFailed(e.title || e.detail || e.status || phase)) + "</div>" +
         '<div class="think-meta">' + esc(meta) + "</div></div>" +
         detailMarkup;
       if (expandable) item.querySelector(".think-head-row").addEventListener("click", () => {
@@ -1723,6 +1722,7 @@
         turn && turn.role === "assistant" && String(turn.text || "").trim());
       const reply = replies[replies.length - 1];
       if (!reply) return false;
+      if (currentRun !== runId) return false;
       finalReplySeenFor = runId;
       const message = addMsgTyped("aidon", reply.text, reply.created_at,
         true, lastRoute);
@@ -1931,6 +1931,7 @@
         }
         if (run.status !== "stopped" && finalReplySeenFor !== polledRun) {
           await recoverFinalReply(run, polledRun);
+          if (currentRun !== polledRun) return;
         }
         if (run.status !== "stopped" && finalReplySeenFor !== polledRun) {
           const failure = [...runTraceHistory].reverse().find((item) =>
@@ -2660,7 +2661,10 @@
       if (!response.ok) throw new Error("HTTP " + response.status);
       const conversation = await response.json();
       if (!conversation.id) throw new Error("Missing conversation id");
-      if (window.aidonSetConversation)
+      const selected = window.aidonConversation
+        ? window.aidonConversation().conversation_id
+        : "";
+      if (!selected && window.aidonSetConversation)
         window.aidonSetConversation(conversation.id);
       if (window.aidonLoadHistory) await window.aidonLoadHistory();
     } catch (error) {
@@ -2962,12 +2966,20 @@
     try {
       const response = await fetch("/api/conversations/" +
         encodeURIComponent(conversationId));
-      if (!response.ok || conversationId !== currentConversationId) return;
+      if (conversationId !== currentConversationId) return;
+      if (!response.ok) {
+        renderCurrentChatGoal("Goal unavailable");
+        return;
+      }
       const conversation = await response.json();
+      if (conversationId !== currentConversationId) return;
       const firstUserTurn = (conversation.turns || []).find((turn) =>
-        turn && turn.role === "user" && turn.text);
+        turn && turn.role === "user" && String(turn.text || "").trim());
       renderCurrentChatGoal(firstUserTurn ? firstUserTurn.text : "");
-    } catch (e) {}
+    } catch (e) {
+      if (conversationId === currentConversationId)
+        renderCurrentChatGoal("Goal unavailable");
+    }
   }
   window.aidonConversation = () => ({
     conversation_id: currentConversationId,
@@ -3453,7 +3465,9 @@
         a.conversation_title || "",
         a.memory_linked ? "🔗 memory" : "",
         fmtDate(a.created_at)].filter(Boolean).join(" · ");
-      const extension = String(a.name || "").split(".").pop().slice(0, 5).toUpperCase();
+      const name = String(a.name || "");
+      const dot = name.lastIndexOf(".");
+      const extension = dot > 0 ? name.slice(dot + 1, dot + 6).toUpperCase() : "";
       const visual = a.kind === "image"
         ? '<img class="lib-thumb" src="' + a.url + '" alt="">'
         : '<span class="lib-ext">' + esc(extension || "FILE") + "</span>";
@@ -3493,9 +3507,12 @@
     items.forEach((a) => {
       const d = document.createElement("div");
       d.className = "lib-item";
+      const name = String(a.name || "");
+      const dot = name.lastIndexOf(".");
+      const extension = dot > 0 ? name.slice(dot + 1, dot + 6).toUpperCase() : "";
       const visual = a.kind === "image"
         ? '<img class="lib-thumb" src="' + esc(a.url) + '" alt="">'
-        : '<span class="lib-ext">' + esc(String(a.name || "").split(".").pop().slice(0, 5).toUpperCase() || "FILE") + '</span>';
+        : '<span class="lib-ext">' + esc(extension || "FILE") + '</span>';
       const date = a.created_at
         ? fmtDate(new Date(a.created_at * 1000).toISOString()) : "";
       const meta = [a.kind === "image" ? "Imported image" : "Imported file",

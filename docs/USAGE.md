@@ -535,10 +535,13 @@ formats are not preinstalled.
 
 ## 🧠 Memory and KB
 
-Memory uses SQLite as its durable point store and FAISS for dense
-vector search when `faiss-cpu` is installed. Automatic selection
-tries Qdrant if SQLite+FAISS cannot initialize, then falls back to
-plain SQLite. Set `AIDON_QDRANT_URL` to use a Qdrant server. Choose
+Memory stores points in SQLite with the `sqlite-faiss` or `sqlite`
+backend, and in Qdrant with the `qdrant` backend. FAISS provides dense
+vector search when `faiss-cpu` is installed. Automatic selection keeps
+an existing local Qdrant store or uses a configured Qdrant URL; otherwise
+it prefers SQLite+FAISS, then Qdrant, then plain SQLite. Without
+`AIDON_QDRANT_URL`, Qdrant data lives under `<AIDON_HOME>/qdrant`.
+Set `AIDON_QDRANT_URL` to use a Qdrant server. Choose
 `AIDON_MEMORY_BACKEND=sqlite-faiss`, `qdrant`, or `sqlite` to force
 a backend; leave it unset for automatic selection. The SQLite+FAISS
 backend rebuilds its dense index from SQLite at startup and uses

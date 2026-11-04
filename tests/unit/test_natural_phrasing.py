@@ -56,6 +56,28 @@ def test_report_text_variants():
     assert files_sentence(["a.pdf", "b.pdf"]) == "a.pdf and b.pdf are ready."
 
 
+def test_report_failure_handles_blank_and_surface_specific_details():
+    blank = report_text("failed", [], "   \n ", "r", "")
+    assert "The cause is recorded in Aidon logs." in blank
+    long_error = "specific failure " * 30
+    web = report_text("failed", [], long_error, "r", "", surface="webui")
+    mobile = report_text("failed", [], long_error, "r", "", surface="whatsapp")
+    assert "Open Thinking for details." in web
+    assert "Open Thinking for details." not in mobile
+
+
+def test_whatsapp_location_context_requires_confirmation():
+    from src.interface.whatsapp import whatsapp_location_context
+
+    context = whatsapp_location_context({
+        "latitude": 49.2, "longitude": -123.1,
+        "name": "Cafe", "address": "Main Street",
+    })
+    assert "location pin" in context
+    assert "not as my current location" in context
+    assert "ask me to confirm" in context
+
+
 def test_report_text_includes_result_without_file_deliverable():
     text = report_text("done", [], "", "run-output", "stats",
                        result_text="/workspace/run-123")

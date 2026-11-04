@@ -1008,26 +1008,18 @@ class WebUIServer(WebUIRunMixin, WebUILabMixin, WebUIMessagingMixin, WebUISettin
                     memory_name = "Qdrant memory"
                 elif requested_memory == "sqlite":
                     memory_name = "SQLite memory"
-                    memory_warning = ("Memory is using SQLite exact search; "
-                                      "install faiss-cpu for indexed dense search.")
+                    memory_warning = ("Memory is pinned to SQLite exact search. "
+                                      "Set AIDON_MEMORY_BACKEND=auto, then install faiss-cpu for indexed dense search.")
                 elif requested_memory == "sqlite-faiss":
                     if importlib.util.find_spec("faiss") is not None:
                         memory_name = "SQLite + FAISS memory"
                     else:
                         memory_name = "SQLite + FAISS unavailable"
                         memory_warning = "Install faiss-cpu to use SQLite + FAISS memory."
-                elif importlib.util.find_spec("faiss") is not None:
-                    memory_name = "SQLite + FAISS memory"
-                elif importlib.util.find_spec("qdrant_client") is not None:
-                    memory_name = "Qdrant memory"
                 else:
-                    memory_name = "SQLite memory (persistent fallback)"
-                    memory_warning = ("Memory is using SQLite exact search; "
-                                      "install faiss-cpu for indexed dense search.")
+                    memory_name = "Memory backend not initialized"
             except Exception:
-                memory_name = "SQLite memory (persistent fallback)"
-                memory_warning = ("Memory is using SQLite exact search; "
-                                  "install faiss-cpu for indexed dense search.")
+                memory_name = "Memory backend not initialized"
         msg = self.messaging_config
         sandbox = str(getattr(config, "execution_backend", "bubblewrap"))
         computer = str(getattr(config, "computer_driver", "") or "off")

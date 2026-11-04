@@ -46,11 +46,12 @@ def whatsapp_location_context(location: dict) -> str:
                                    location.get("address")) if x)
     suffix = f" Place label: {label}." if label else ""
     return (
-        "I shared my current location in WhatsApp: latitude "
+        "I shared this location pin in WhatsApp: latitude "
         f"{location['latitude']:.6f}, longitude "
-        f"{location['longitude']:.6f}.{suffix} Use it as my starting point "
-        "for my nearby-place request. If I have not said what I am looking "
-        "for, ask me."
+        f"{location['longitude']:.6f}.{suffix} Treat it as a place I shared, "
+        "not as my current location. Before searching for nearby places, "
+        "ask me to confirm this is where I am or where I want to search from. "
+        "If I have not said what I am looking for, ask me."
     )
 
 

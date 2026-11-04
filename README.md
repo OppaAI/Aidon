@@ -115,7 +115,7 @@ Meta is one part of Aidon's model and infrastructure stack. The other components
 
 - **Front-end chat:** Local Ollama serving Llama 3.2 handles lightweight conversational turns in the configured setup. This keeps the more expensive Muse Spark calls focused on agentic planning and tool work. Aidon supports Ollama's native chat API; the model choice is configurable.
 - **Decision model:** Clef 9B in the deployed setup handles compact routing and ranking decisions, including intent routing and workflow selection. The model ID is configurable. Modal serves the Clef inference endpoint.
-- **Embedding model and vector store (RAG):** Google EmbeddingGemma 2 (`google/embeddinggemma-2`), loaded locally through Sentence Transformers and PyTorch, turns text and images into dense embedding vectors. SQLite stores memory points and metadata; optional FAISS CPU indexes dense vectors. Automatic selection tries Qdrant if SQLite+FAISS cannot initialize, then plain SQLite. Set `AIDON_MEMORY_BACKEND` to force a backend. Optional FastEmbed/SPLADE adds learned sparse retrieval; keyword vectors are used when it is not enabled.
+- **Embedding model and vector store (RAG):** Google EmbeddingGemma 2 (`google/embeddinggemma-2`), loaded locally through Sentence Transformers and PyTorch, turns text and images into dense embedding vectors. With `sqlite-faiss` or `sqlite`, SQLite stores memory points and metadata; optional FAISS CPU indexes dense vectors. With `qdrant`, Qdrant stores points under the Aidon home or at the configured server. Automatic selection preserves an existing/configured Qdrant store, otherwise prefers SQLite+FAISS and falls back to Qdrant, then plain SQLite. Set `AIDON_MEMORY_BACKEND` to force a backend. Optional FastEmbed/SPLADE adds learned sparse retrieval; keyword vectors are used when it is not enabled.
 - **Speech output:** Fish Audio provides text-to-speech. Muse Voice Transcribe, listed above, handles speech-to-text.
 - **Sandbox and inference hosting:** Modal runs the configured remote sandbox and Clef inference service. For local execution, Aidon also supports Bubblewrap and Docker; an SSH connection can target a VM the owner already operates.
 - **Other optional integrations and libraries:** Tavily or SearXNG for web search; YouTube Data API, Gmail API, and Slack API for their respective features; Playwright MCP for browser automation; Three.js and three-vrm for the optional 3D avatar viewer. FFmpeg and Pillow support video and image processing. These integrations require their own local configuration or credentials when used.
@@ -149,7 +149,7 @@ not in this repository; small parts of the first two exist (see below).
    (YouTube, webcam); a dedicated live toolset as a subsystem,
    distinct from sandbox tools, does not yet.
 3. **Stronger sandbox backend (spike).** A Tier-2 backend behind
-   the isolation seam, with Modal staying default until the
+   the isolation seam, with bubblewrap staying default until the
    probes say otherwise.
 4. **Deterministic plan validation.** A canonical plan format
    plus a cross-file validator, so plan, ledger, and
