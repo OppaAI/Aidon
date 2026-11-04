@@ -191,7 +191,7 @@ def test_slack_poll_advances_cursor_only_after_handling_each_message():
     assert cursor["C1"] == "3"
 
 
-def test_slack_dispatch_replies_when_handler_raises():
+def test_slack_dispatch_replies_when_handler_raises(tmp_path, capsys):
     dispatcher = TriggerDispatcher()
 
     def fail(_event):
@@ -203,12 +203,17 @@ def test_slack_dispatch_replies_when_handler_raises():
     dispatch_slack_message(
         dispatcher, event, channel="C1", thread_ts="123.4",
         sender=lambda channel, text, thread_ts=None:
-            sent.append((channel, text, thread_ts)), ack_after=1)
+            sent.append((channel, text, thread_ts)), ack_after=1, home=tmp_path)
     assert len(sent) == 1
     assert sent[0][0] == "C1"
     assert sent[0][2] == "123.4"
     assert "internal error" in sent[0][1]
     assert "private detail" not in sent[0][1]
+    assert "Slack goal handler failed: RuntimeError" in capsys.readouterr().out
+    errors = (tmp_path / "logs" / "errors.jsonl").read_text()
+    assert '"stage": "slack_dispatch"' in errors
+    assert "slack_polling.py" in errors
+    assert "private detail" not in errors
 
 
 def test_factory_stages_from_trace(tmp_path):

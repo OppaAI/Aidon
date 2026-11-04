@@ -80,12 +80,45 @@ def test_fetch_url_invalid_input_returns_string_without_raising(tmp_path):
 
 
 def test_read_document_local_temp_file(tmp_path):
-    doc = tmp_path / "note.txt"
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    doc = workdir / "note.txt"
     doc.write_text("the quick brown fox jumps over the lazy dog", encoding="utf-8")
     tools = _tools(tmp_path)
     result = tools["read_document"](str(doc))
     assert isinstance(result, str)
     assert "quick brown fox" in result
+
+
+def test_read_document_maps_host_downloads_to_read_only_mount(tmp_path, monkeypatch):
+    host_downloads = tmp_path / "host" / "Downloads"
+    mounted_downloads = tmp_path / "container" / "Downloads"
+    mounted_downloads.mkdir(parents=True)
+    (mounted_downloads / "SPEECH.md").write_text(
+        "speech text from the mounted Downloads folder", encoding="utf-8")
+    monkeypatch.setenv("AIDON_HOST_DOWNLOADS_SOURCE", str(host_downloads))
+    monkeypatch.setenv("AIDON_HOST_DOWNLOADS_MOUNT", str(mounted_downloads))
+
+    tools = _tools(tmp_path)
+    result = tools["read_document"](str(host_downloads / "SPEECH.md"))
+    assert "speech text from the mounted Downloads folder" in result
+
+
+def test_read_document_maps_tilde_downloads_before_expanduser(tmp_path, monkeypatch):
+    mounted_downloads = tmp_path / "container" / "Downloads"
+    mounted_downloads.mkdir(parents=True)
+    (mounted_downloads / "SPEECH.md").write_text(
+        "speech text from tilde path", encoding="utf-8")
+    monkeypatch.setenv("AIDON_HOST_DOWNLOADS_MOUNT", str(mounted_downloads))
+    tools = _tools(tmp_path)
+    result = tools["read_document"]("~/Downloads/SPEECH.md")
+    assert "speech text from tilde path" in result
+
+
+def test_fetch_url_cannot_bypass_local_read_guard(tmp_path):
+    tools = _tools(tmp_path)
+    result = tools["fetch_url"]("/etc/passwd")
+    assert "READ_BLOCKED" in result
 
 
 def test_search_document_empty_home_returns_string(tmp_path):

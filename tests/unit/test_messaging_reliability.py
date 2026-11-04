@@ -15,6 +15,32 @@ from src.interface.triggers import TriggerDispatcher, TriggerEvent
 from src.interface.webui import WebUIServer
 
 
+def test_slack_discovers_new_replies_on_old_roots_without_a_stopped_plan():
+    from src.interface.slack_polling import discover_slack_threads
+
+    def fetch(url, token, params):
+        assert "oldest" not in params
+        return {"ok": True, "messages": [
+            {"ts": "1.0", "latest_reply": "120.0"},
+            {"ts": "2.0", "latest_reply": "90.0"},
+            {"ts": "3.0", "latest_reply": "110.0"},
+            {"ts": "4.0"},
+        ]}
+
+    cursors = {"C1": "100.0", "thread:C1:3.0": "110.0"}
+    assert discover_slack_threads(MessagingConfig(), "C1", cursors,
+                                  "100.0", fetch=fetch) == [
+        {"thread_ts": "1.0", "checkpoint": "100.0"}]
+
+
+def test_slack_thread_discovery_surfaces_api_failure():
+    from src.interface.slack_polling import discover_slack_threads
+
+    with pytest.raises(RuntimeError, match="missing_scope"):
+        discover_slack_threads(MessagingConfig(), "C1", {}, "100.0",
+                               fetch=lambda *args: {"ok": False, "error": "missing_scope"})
+
+
 def test_failed_reply_survives_restart_and_retry_does_not_rerun_goal(tmp_path):
     attempts = []
 

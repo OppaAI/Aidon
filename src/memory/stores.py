@@ -89,7 +89,10 @@ def _hybrid_search(points, vector, query_text, limit, sparse=None):
         return sum(min(query_sparse.get(i, 0.0), weight)
                    for i, weight in point_sparse.items())
 
-    dense = heapq.nlargest(over, points, key=lambda point: _cosine(vector, point.vector))
+    same_dim = [point for point in points
+                if len(point.vector) == len(vector)]
+    dense = heapq.nlargest(
+        over, same_dim, key=lambda point: _cosine(vector, point.vector))
     keyword = heapq.nlargest(over, points, key=sparse_score)
     return _rrf(dense, keyword, limit)
 
@@ -189,8 +192,10 @@ class SQLiteStore(InMemoryStore):
                 "VALUES(?,?,?,?,?,?) ON CONFLICT(collection,id) DO UPDATE SET "
                 "text=excluded.text, vector=excluded.vector, sparse=excluded.sparse, "
                 "payload=excluded.payload",
-                (collection, point.id, point.text, json.dumps(point.vector),
-                 json.dumps([list(point.sparse[0]), list(point.sparse[1])]),
+                (collection, point.id, point.text,
+                 json.dumps([float(value) for value in point.vector]),
+                 json.dumps([[int(index) for index in point.sparse[0]],
+                             [float(value) for value in point.sparse[1]]]),
                  json.dumps(point.payload)),
             )
             self._db.commit()
@@ -254,6 +259,175 @@ class SQLiteStore(InMemoryStore):
                limit: int = 5,
                sparse: tuple[list[int], list[float]] | None = None) -> list[Hit]:
         return _hybrid_search(self._rows(collection), vector, query_text, limit, sparse)
+
+
+class SQLiteFaissStore(SQLiteStore):
+    """SQLite source of truth with rebuildable FAISS dense indexes.
+
+    SQLite persists points and sparse vectors. FAISS indexes are rebuilt
+    from SQLite on startup, so a missing or damaged index never loses data.
+    Sparse ranking remains SQLite-backed and is fused with FAISS dense
+    candidates using the same RRF ranking as the other stores.
+    """
+
+    def __init__(self, home: Path, dim: int = 768):
+        super().__init__(home)
+        import faiss
+        import numpy as np
+
+        self._faiss = faiss
+        self._np = np
+        self._default_dim = int(dim)
+        self._indexes = {}
+        self._index_dims = {}
+        self._faiss_broken: set[str] = set()
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS faiss_point_ids ("
+            "collection TEXT NOT NULL, id TEXT NOT NULL, faiss_id INTEGER NOT NULL, "
+            "PRIMARY KEY(collection, id), UNIQUE(collection, faiss_id))")
+        self._db.commit()
+        for collection in COLLECTIONS:
+            self._rebuild_index(collection)
+        initial_version = self._db.execute(
+            "PRAGMA data_version").fetchone()[0]
+        self._data_versions = {collection: initial_version
+                               for collection in COLLECTIONS}
+
+    def _faiss_id(self, collection: str, point_id: str) -> int:
+        row = self._db.execute(
+            "SELECT faiss_id FROM faiss_point_ids WHERE collection=? AND id=?",
+            (collection, str(point_id))).fetchone()
+        if row is not None:
+            return int(row[0])
+        next_id = self._db.execute(
+            "SELECT COALESCE(MAX(faiss_id), 0) + 1 FROM faiss_point_ids "
+            "WHERE collection=?", (collection,)).fetchone()[0]
+        self._db.execute(
+            "INSERT INTO faiss_point_ids(collection,id,faiss_id) VALUES(?,?,?)",
+            (collection, str(point_id), int(next_id)))
+        self._db.commit()
+        return int(next_id)
+
+    def _make_index(self, collection: str, dim: int):
+        self._indexes[collection] = self._faiss.IndexIDMap2(
+            self._faiss.IndexFlatIP(dim))
+        self._index_dims[collection] = dim
+
+    def _normalized(self, vector):
+        array = self._np.asarray(vector, dtype=self._np.float32).reshape(1, -1)
+        self._faiss.normalize_L2(array)
+        return array
+
+    def _rebuild_index(self, collection: str) -> None:
+        points = self._rows(collection)
+        dim = len(points[0].vector) if points else self._default_dim
+        self._make_index(collection, dim)
+        try:
+            for point in points:
+                if len(point.vector) != dim:
+                    raise ValueError(
+                        f"mixed vector dimensions in {collection}: "
+                        f"expected {dim}, got {len(point.vector)}")
+                self._indexes[collection].add_with_ids(
+                    self._normalized(point.vector),
+                    self._np.asarray([self._faiss_id(collection, point.id)],
+                                     dtype=self._np.int64))
+        except Exception:
+            self._faiss_broken.add(collection)
+
+    def upsert(self, collection: str, point: Point) -> None:
+        with self._lock:
+            super().upsert(collection, point)
+            if collection in self._faiss_broken:
+                return
+            try:
+                dim = self._index_dims.get(collection, self._default_dim)
+                index = self._indexes[collection]
+                if index.ntotal == 0 and len(point.vector) != dim:
+                    dim = len(point.vector)
+                    self._make_index(collection, dim)
+                    index = self._indexes[collection]
+                if len(point.vector) != dim:
+                    raise ValueError(
+                        f"vector dimension changed in {collection}: "
+                        f"expected {dim}, got {len(point.vector)}")
+                faiss_id = self._faiss_id(collection, point.id)
+                index.remove_ids(self._np.asarray([faiss_id], dtype=self._np.int64))
+                index.add_with_ids(self._normalized(point.vector),
+                                   self._np.asarray([faiss_id], dtype=self._np.int64))
+            except Exception:
+                # SQLite already committed the point. Search can still use its
+                # exact dense+sparse fallback without risking data loss.
+                self._faiss_broken.add(collection)
+
+    def delete(self, collection: str, point_id: str) -> bool:
+        with self._lock:
+            removed = super().delete(collection, point_id)
+            if not removed:
+                return False
+            if collection in self._faiss_broken:
+                return True
+            try:
+                row = self._db.execute(
+                    "SELECT faiss_id FROM faiss_point_ids WHERE collection=? AND id=?",
+                    (collection, str(point_id))).fetchone()
+                if row is not None:
+                    self._indexes[collection].remove_ids(
+                        self._np.asarray([int(row[0])], dtype=self._np.int64))
+                    self._db.execute(
+                        "DELETE FROM faiss_point_ids WHERE collection=? AND id=?",
+                        (collection, str(point_id)))
+                    self._db.commit()
+            except Exception:
+                self._faiss_broken.add(collection)
+            return True
+
+    def search(self, collection: str, vector: list[float], query_text: str,
+               limit: int = 5,
+               sparse: tuple[list[int], list[float]] | None = None) -> list[Hit]:
+        if limit <= 0:
+            return []
+        try:
+            with self._lock:
+                data_version = self._db.execute(
+                    "PRAGMA data_version").fetchone()[0]
+                if data_version != self._data_versions.get(collection):
+                    # Another SQLite connection (for example an ingest
+                    # worker) committed since this FAISS index was built.
+                    self._faiss_broken.discard(collection)
+                    self._rebuild_index(collection)
+                    self._data_versions[collection] = data_version
+                if collection in self._faiss_broken:
+                    return _hybrid_search(self._rows(collection), vector,
+                                          query_text, limit, sparse)
+                points = self._rows(collection)
+                if not points:
+                    return []
+                index = self._indexes[collection]
+                if len(vector) != self._index_dims[collection]:
+                    raise ValueError("query vector dimension does not match FAISS index")
+                over = max(limit * 2, 4)
+                _scores, ids = index.search(self._normalized(vector), over)
+                by_faiss_id = {self._faiss_id(collection, p.id): p for p in points}
+            dense = [by_faiss_id[int(fid)] for fid in ids[0]
+                     if int(fid) in by_faiss_id]
+            query_sparse = dict(zip(sparse[0], sparse[1])) if sparse else {}
+            if not query_sparse:
+                query_sparse = dict(zip(*_sparse_from_text(query_text)))
+
+            def sparse_score(point):
+                point_sparse = (dict(zip(point.sparse[0], point.sparse[1]))
+                                if point.sparse and point.sparse[0]
+                                else dict(zip(*_sparse_from_text(point.text))))
+                return sum(min(query_sparse.get(i, 0.0), weight)
+                           for i, weight in point_sparse.items())
+
+            keyword = heapq.nlargest(over, points, key=sparse_score)
+            return _rrf(dense, keyword, limit)
+        except Exception:
+            self._faiss_broken.add(collection)
+            return _hybrid_search(self._rows(collection), vector, query_text,
+                                  limit, sparse)
 
 
 def _sparse_from_text(text: str):
@@ -499,12 +673,45 @@ class QdrantStore:
 
 
 def make_store(home: Path, dim: int = 768):
-    """Real Qdrant if installed, otherwise a durable SQLite fallback."""
-    try:
-        import qdrant_client  # noqa: F401
-    except ImportError:
+    """Select existing/configured Qdrant before new local stores.
+
+    ``AIDON_MEMORY_BACKEND`` may force ``auto``, ``sqlite-faiss``,
+    ``qdrant``, or ``sqlite``. Automatic fallback occurs during startup;
+    the stores are not dual-written, so this is not transparent failover
+    after a running backend fails.
+    """
+    import warnings
+
+    selected = os.environ.get("AIDON_MEMORY_BACKEND", "auto").strip().lower()
+    if selected not in {"auto", "sqlite-faiss", "qdrant", "sqlite"}:
+        raise ValueError("AIDON_MEMORY_BACKEND must be auto, sqlite-faiss, qdrant, or sqlite")
+    if selected == "sqlite":
         return SQLiteStore(home)
+    if selected == "sqlite-faiss":
+        return SQLiteFaissStore(home, dim=dim)
     url = os.environ.get("AIDON_QDRANT_URL", "").strip()
-    return QdrantStore(home, url=url, dim=dim)
+    if selected == "qdrant":
+        return QdrantStore(home, url=url, dim=dim)
+
+    # Keep previously persisted Qdrant points visible when switching code
+    # versions or when the owner has configured a remote Qdrant endpoint.
+    qdrant_home = Path(home) / "qdrant"
+    has_local_qdrant = qdrant_home.exists() and any(qdrant_home.iterdir())
+    if url or has_local_qdrant:
+        return QdrantStore(home, url=url, dim=dim)
+
+    try:
+        return SQLiteFaissStore(home, dim=dim)
+    except Exception as exc:
+        warnings.warn(
+            f"SQLite+FAISS memory unavailable ({type(exc).__name__}: {exc}); "
+            "trying Qdrant", RuntimeWarning)
+    try:
+        return QdrantStore(home, url=url, dim=dim)
+    except Exception as exc:
+        warnings.warn(
+            f"Qdrant memory unavailable ({type(exc).__name__}: {exc}); "
+            "using persistent SQLite", RuntimeWarning)
+        return SQLiteStore(home)
 
 

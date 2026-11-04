@@ -21,9 +21,12 @@ services:
     <<: *service-base
     environment:
       AIDON_HOME: /data
+      AIDON_HOST_DOWNLOADS_SOURCE: "${HOME:?HOME must be set}/Downloads"
+      AIDON_HOST_DOWNLOADS_MOUNT: /host-downloads
     command: ["webui", "serve", "--port", "${AIDON_WEBUI_PORT:-8765}"]
     volumes:
       - ./aidon-data:/data
+      - "${HOME:?HOME must be set}/Downloads:/host-downloads:ro"
     # Listener liveness only; model and sandbox readiness need separate probes.
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', ${AIDON_WEBUI_PORT:-8765}), timeout=3).close()"]
@@ -37,9 +40,12 @@ services:
     <<: *service-base
     environment:
       AIDON_HOME: /data
+      AIDON_HOST_DOWNLOADS_SOURCE: "${HOME:?HOME must be set}/Downloads"
+      AIDON_HOST_DOWNLOADS_MOUNT: /host-downloads
     command: ["webui", "serve", "--webhook-only", "--port", "8766"]
     volumes:
       - ./aidon-data:/data
+      - "${HOME:?HOME must be set}/Downloads:/host-downloads:ro"
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8766), timeout=3).close()"]
       interval: 30s
@@ -53,9 +59,12 @@ services:
     profiles: [clean]
     environment:
       AIDON_HOME: /data
+      AIDON_HOST_DOWNLOADS_SOURCE: "${HOME:?HOME must be set}/Downloads"
+      AIDON_HOST_DOWNLOADS_MOUNT: /host-downloads
     command: ["webui", "serve", "--port", "${AIDON_WEBUI_PORT:-8765}"]
     volumes:
       - ./aidon-clean-data:/data
+      - "${HOME:?HOME must be set}/Downloads:/host-downloads:ro"
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', ${AIDON_WEBUI_PORT:-8765}), timeout=3).close()"]
       interval: 30s
@@ -68,9 +77,12 @@ services:
     profiles: [clean]
     environment:
       AIDON_HOME: /data
+      AIDON_HOST_DOWNLOADS_SOURCE: "${HOME:?HOME must be set}/Downloads"
+      AIDON_HOST_DOWNLOADS_MOUNT: /host-downloads
     command: ["webui", "serve", "--webhook-only", "--port", "8766"]
     volumes:
       - ./aidon-clean-data:/data
+      - "${HOME:?HOME must be set}/Downloads:/host-downloads:ro"
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8766), timeout=3).close()"]
       interval: 30s
@@ -85,9 +97,12 @@ services:
     environment:
       AIDON_HOME: /data
       PYTHONPATH: /opt/aidon
+      AIDON_HOST_DOWNLOADS_SOURCE: "${HOME:?HOME must be set}/Downloads"
+      AIDON_HOST_DOWNLOADS_MOUNT: /host-downloads
     command: ["webui", "serve", "--port", "${AIDON_WEBUI_PORT:-8765}"]
     volumes:
       - ./aidon-data:/data
+      - "${HOME:?HOME must be set}/Downloads:/host-downloads:ro"
       - ./src:/opt/aidon/src:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', ${AIDON_WEBUI_PORT:-8765}), timeout=3).close()"]
@@ -102,9 +117,12 @@ services:
     environment:
       AIDON_HOME: /data
       PYTHONPATH: /opt/aidon
+      AIDON_HOST_DOWNLOADS_SOURCE: "${HOME:?HOME must be set}/Downloads"
+      AIDON_HOST_DOWNLOADS_MOUNT: /host-downloads
     command: ["webui", "serve", "--webhook-only", "--port", "8766"]
     volumes:
       - ./aidon-data:/data
+      - "${HOME:?HOME must be set}/Downloads:/host-downloads:ro"
       - ./src:/opt/aidon/src:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8766), timeout=3).close()"]
@@ -123,9 +141,12 @@ services:
       XAUTHORITY: /run/aidon-xauthority
       AIDON_COMPUTER_DRIVER: x11
       AIDON_KERNEL: "0"
+      AIDON_HOST_DOWNLOADS_SOURCE: "${HOME:?HOME must be set}/Downloads"
+      AIDON_HOST_DOWNLOADS_MOUNT: /host-downloads
     command: ["webui", "serve", "--port", "${AIDON_WEBUI_PORT:-8765}"]
     volumes:
       - ./aidon-data:/data
+      - "${HOME:?HOME must be set}/Downloads:/host-downloads:ro"
       - /tmp/.X11-unix:/tmp/.X11-unix:ro
       - "${AIDON_DESKTOP_XAUTHORITY:-/dev/null}:/run/aidon-xauthority:ro"
     healthcheck:

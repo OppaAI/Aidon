@@ -15,6 +15,9 @@
   `python -m src.system.main --cli`) opens a lightweight chat
   interface with the same model configuration. It is not a full-screen
   terminal UI; use `/help`, `/clear`, `/history`, and `/quit` there.
+- `read_document` is available even when `AIDON_OPTIONAL_TOOLS=0`.
+  It reads web documents through the URL safety checks and local files
+  only from the current Aidon workspace or `~/Downloads`.
 - WhatsApp and Slack, both two-way, no Telegram,
   with the Aidon key names:
   `AIDON_WHATSAPP_TOKEN`, `AIDON_WHATSAPP_PHONE_ID`,
@@ -42,6 +45,12 @@
   or Slack, and the full WebUI must not be tunneled
   unauthenticated, use a webhook-only listener in
   front, as Aidon did.
+- WhatsApp location: use the chat's attachment menu and choose
+  **Location → Send current location**. Aidon accepts pins from the
+  configured owner number and passes their coordinates, plus any place
+  label, into the conversation. This does not add a Maps API: nearby-place
+  results depend on configured web search and may not include exact route
+  distances or live hours.
 - Completed WebUI runs include same-origin links to files
   in the run workspace. When Slack is configured, files are
   uploaded to the conversation's linked Slack channel, or to
@@ -526,10 +535,18 @@ formats are not preinstalled.
 
 ## 🧠 Memory and KB
 
-Qdrant stores the vector memory collections, using local mode
-under the Aidon home by default or a server URL when
-`AIDON_QDRANT_URL` is set. If the Qdrant client is unavailable,
-the memory store falls back to SQLite. A separate SQLite
+Memory stores points in SQLite with the `sqlite-faiss` or `sqlite`
+backend, and in Qdrant with the `qdrant` backend. FAISS provides dense
+vector search when `faiss-cpu` is installed. Automatic selection keeps
+an existing local Qdrant store or uses a configured Qdrant URL; otherwise
+it prefers SQLite+FAISS, then Qdrant, then plain SQLite. Without
+`AIDON_QDRANT_URL`, Qdrant data lives under `<AIDON_HOME>/qdrant`.
+Set `AIDON_QDRANT_URL` to use a Qdrant server. Choose
+`AIDON_MEMORY_BACKEND=sqlite-faiss`, `qdrant`, or `sqlite` to force
+a backend; leave it unset for automatic selection. The SQLite+FAISS
+backend rebuilds its dense index from SQLite at startup and uses
+SQLite exact search if FAISS fails while running. Backend switching
+does not migrate or dual-write existing data. A separate SQLite
 database persists conversations and application records.
 Memory starts blank: no import from previous chats; the first
 runs build it from scratch.
@@ -563,8 +580,8 @@ collection created at 128-dim cannot hold 768-dim vectors, so
 changing embedders means a fresh home or a recreated
 collection, never a silent resize.
 **Recall, hybrid:** dense plus sparse, fused with RRF,
-over-fetching 2x, in Qdrant with named vectors `dense` and
-`sparse`, and the same RRF shape in the in-memory fallback.
+over-fetching 2x. FAISS supplies dense candidates for the SQLite
+backend; Qdrant uses named vectors `dense` and `sparse`.
 Sparse is SPLADE when `AIDON_SPARSE_MODEL` is set and the
 optional `sparse` extra is installed; otherwise it falls back
 to keyword sparse weights with no extra download. `recall_both` embeds once
@@ -575,7 +592,7 @@ half-life, 35-day grace, 0.02 prune threshold, finds
 cleanup candidates. Prune is explicit only, never automatic.
 **Chats:** conversation ids
 are payload fields on working and episodic points, read back
-from Qdrant by filtered scroll, oldest first, so a
+from the active store by filtered scroll, oldest first, so a
 conversation survives a restart without a second database.
 **KB parsing:** text and markdown as UTF-8, HTML stripped,
 docx via python-docx, PDF via pypdf, with a UTF-8 fallback

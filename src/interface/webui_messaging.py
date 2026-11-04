@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
+import traceback
 
 from .messaging import normalize_number, verify_whatsapp_signature
 from .triggers import TriggerEvent
@@ -40,6 +41,14 @@ class WebUIMessagingMixin:
                 for change in entry.get("changes", []):
                     for message in change.get("value", {}).get("messages", []):
                         text = message.get("text", {}).get("body", "")
+                        is_location = message.get("type") == "location"
+                        location = None
+                        if is_location:
+                            from .whatsapp import (parse_whatsapp_location,
+                                                   whatsapp_location_context)
+                            location = parse_whatsapp_location(message)
+                            if location is not None:
+                                text = whatsapp_location_context(location)
                         if not text and message.get("type") == "image":
                             caption = message.get("image", {}).get("caption", "")
                             media_id = message.get("image", {}).get("id", "")
@@ -95,6 +104,13 @@ class WebUIMessagingMixin:
                             print("WhatsApp inbound ignored: sender failed owner check")
                             continue
                         print("WhatsApp inbound owner message accepted")
+                        if is_location and location is None:
+                            error_reply = ("I couldn't read that location pin. "
+                                           "Please share it again or send an address.")
+                            replies.append(error_reply)
+                            if self.whatsapp_sender is not None:
+                                self.whatsapp_sender(sender, error_reply)
+                            continue
                         # Mode commands are controls, never answers to a
                         # waiting interview. Parse them before answer_question.
                         from .surfaces import parse_mode_command, set_mode
@@ -265,8 +281,24 @@ class WebUIMessagingMixin:
                             # Meta's webhook response is not delivered to the
                             # sender as a chat message. Surface shared goal
                             # handler failures on the WhatsApp conversation.
-                            print(f"WhatsApp goal handler failed: "
-                                  f"{type(exc).__name__}")
+                            # Exception messages can contain user content or
+                            # private details; log only the type and locations.
+                            frames = traceback.extract_tb(exc.__traceback__)
+                            locations = " -> ".join(
+                                f"{frame.filename.rsplit('/', 1)[-1]}:"
+                                f"{frame.lineno}:{frame.name}"
+                                for frame in frames[-6:])
+                            detail = (f"{type(exc).__name__}; "
+                                      f"stack: {locations or 'unavailable'}")
+                            print(f"WhatsApp goal handler failed: {detail}")
+                            try:
+                                from ..system.diagnostics import log_run_error
+                                log_run_error(
+                                    self.home,
+                                    str(event.payload.get("run_id", "") or ""),
+                                    "whatsapp_dispatch", detail)
+                            except Exception:
+                                pass
                             error_reply = (
                                 "Aidon couldn't process that message because its "
                                 "run encountered an internal error. Check the "

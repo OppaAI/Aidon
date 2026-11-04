@@ -9,8 +9,8 @@ post-hackathon, NOT built, NOT demoed, at the end.
 
 - Skeleton: config, generic model client, approval gate,
   sandbox, goal loop, CLI.
-- Memory: Qdrant vector collections with SQLite fallback,
-  hybrid recall, forgetting
+- Memory: SQLite-backed points with optional FAISS dense indexes,
+  Qdrant startup fallback and plain SQLite fallback, hybrid recall, forgetting
   curve, promotion, library, EmbeddingGemma 2, KB
   parsing, parser needed recording for CAD, LaTeX, and
   other formats not yet readable.

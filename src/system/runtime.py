@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 from datetime import datetime
@@ -199,7 +200,7 @@ def _make_memory(config: Config):
     """Memory with the real embedder if available, else Hash, with warning."""
     from ..memory.embedder import HashEmbedder, make_embedder_cached
     from ..memory.entity_graph import EntityGraph
-    from ..memory.memory import Memory, SQLiteStore
+    from ..memory.memory import Memory, SQLiteFaissStore, SQLiteStore, QdrantStore
 
     try:
         embedder = make_embedder_cached()
@@ -213,14 +214,29 @@ def _make_memory(config: Config):
     try:
         mem = Memory(config.home, embedder=embedder,
                      entity_graph=entity_graph)
-        if type(mem.store).__name__ == "SQLiteStore":
-            print("warning: Qdrant client not installed, using persistent "
-                  "SQLite memory fallback (run ./setup.sh --with-qdrant "
-                  "for a Qdrant server)", file=sys.stderr)
+        if isinstance(mem.store, SQLiteFaissStore):
+            print("info: using SQLite with FAISS dense vector search",
+                  file=sys.stderr)
+        elif isinstance(mem.store, QdrantStore):
+            target = ("remote Qdrant" if os.environ.get(
+                "AIDON_QDRANT_URL", "").strip() else "local Qdrant")
+            print(f"info: using {target} memory store", file=sys.stderr)
+        elif type(mem.store).__name__ == "SQLiteStore":
+            print("warning: using persistent SQLite memory with exact-search fallback",
+                  file=sys.stderr)
         return mem
     except Exception as exc:
-        # A broken/unreachable Qdrant must not discard an already loaded
-        # semantic embedder. SQLite keeps memory durable until Qdrant returns.
+        selected = (os.environ.get("AIDON_MEMORY_BACKEND", "auto").strip().lower()
+                    or "auto")
+        qdrant_home = config.home / "qdrant"
+        has_existing_qdrant = (qdrant_home.exists()
+                               and any(qdrant_home.iterdir()))
+        if (selected != "auto"
+                or os.environ.get("AIDON_QDRANT_URL", "").strip()
+                or has_existing_qdrant):
+            raise
+        # A broken vector backend must not discard an already loaded
+        # semantic embedder. SQLite keeps memory durable as the final fallback.
         print(f"warning: vector store initialization failed "
               f"({type(exc).__name__}: {exc}); using persistent SQLite "
               "memory fallback", file=sys.stderr)

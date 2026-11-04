@@ -120,6 +120,7 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         from ..capabilities.plugins import PluginRegistry
         from ..interface.scheduler_loop import NudgeTracker
         run_id = str(event.payload.get("run_id", "")) or new_run_id()
+        event.payload["run_id"] = run_id
         run_control.register(run_id, event.goal, event.conversation_id)
         # Each goal gets its own timestamped workspace directory. This
         # prevents unrelated runs from colliding on filenames and keeps
@@ -681,7 +682,8 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                 report.status, report.files, report.error, run_id,
                 "", phrase=_phrase,
                 blocked=report.blocked,
-                result_text=report.result_text)
+                result_text=report.result_text,
+                surface=event.source)
             if (event.source == "webui" and report.status == "done"
                     and event.payload.get("skill_source_run_id")):
                 from urllib.parse import quote as _quote_skill
@@ -821,10 +823,31 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                         if _slack_time.monotonic() < _retry_after.get(_channel, 0):
                             continue
                         try:
+                            _history_since = str(_cursors.get(_channel, ""))
                             _messages, _last = _poll_slack_once(
                                 msg, _channel,
                                 last_ts=str(_cursors.get(_channel, "")))
-                            from ..interface.slack_polling import process_polled_messages
+                            from ..interface.slack_polling import (
+                                discover_slack_threads, process_polled_messages)
+                            _discovered_threads = discover_slack_threads(
+                                msg, _channel, _cursors, _history_since)
+                            from ..interface.mode_stops import (
+                                mode_stops_for_conversation)
+                            _thread_stops = list(mode_stops_for_conversation(
+                                config.home, "slack:" + _channel))
+                            _active_stop_threads = {
+                                str(s.get("thread_ts", ""))
+                                for s in _thread_stops
+                                if s.get("thread_ts")}
+                            for _thread in _discovered_threads:
+                                if str(_thread["thread_ts"]) in _active_stop_threads:
+                                    continue
+                                _cursors.setdefault(
+                                    f"thread:{_channel}:{_thread['thread_ts']}",
+                                    str(_thread["checkpoint"] or _thread["thread_ts"]))
+                            # Save reply checkpoints before advancing channel
+                            # history, including when a later thread fetch fails.
+                            save_poll_cursors(_cursor_path, _cursors)
 
                             def _handle_polled_message(_message):
                                 server.handle_slack_message(
@@ -845,24 +868,24 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                             if _last and _last > str(_cursors.get(_channel, "")):
                                 _cursors[_channel] = _last
                                 save_poll_cursors(_cursor_path, _cursors)
-                            # conversations.history does not include thread
-                            # replies. While a stopped plan exists, poll only
-                            # its originating thread so "proceed" can resume
-                            # from a Slack reply instead of requiring a new
-                            # top-level message.
-                            from ..interface.mode_stops import (
-                                mode_stops_for_conversation)
+                            # History excludes replies. Watch updated recent
+                            # threads as well as older threads with active stops.
                             from ..interface.messaging import (
                                 poll_slack_thread_once)
                             from decimal import Decimal as _Decimal
                             from datetime import datetime as _datetime
-                            for _stop in mode_stops_for_conversation(
-                                    config.home, "slack:" + _channel):
+                            _known_threads = {str(s.get("thread_ts", "")) for s in _thread_stops}
+                            for _thread in _discovered_threads:
+                                if _thread["thread_ts"] not in _known_threads:
+                                    _thread_stops.append(_thread)
+                            for _stop in _thread_stops:
                                 _thread_ts = str(_stop.get("thread_ts", "") or "")
                                 if not _thread_ts:
                                     continue
                                 _thread_key = f"thread:{_channel}:{_thread_ts}"
                                 _thread_cursor = _cursors.get(_thread_key)
+                                if not _thread_cursor and "checkpoint" in _stop:
+                                    _thread_cursor = _stop["checkpoint"] or _thread_ts
                                 if not _thread_cursor:
                                     try:
                                         _created = _datetime.fromisoformat(
@@ -875,27 +898,34 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
                                         _thread_cursor = _thread_ts
                                     _cursors[_thread_key] = _thread_cursor
                                     save_poll_cursors(_cursor_path, _cursors)
-                                _thread_messages, _thread_last = poll_slack_thread_once(
-                                    msg, _channel, _thread_ts,
-                                    last_ts=str(_thread_cursor))
+                                try:
+                                    _thread_messages, _thread_last = poll_slack_thread_once(
+                                        msg, _channel, _thread_ts,
+                                        last_ts=str(_thread_cursor))
 
-                                def _handle_thread_reply(_message):
-                                    server.handle_slack_message(
-                                        {"event": {**_message, "type": "message",
-                                                    "channel": _channel}},
-                                        dispatch=_slack_inbox.enqueue)
+                                    def _handle_thread_reply(_message):
+                                        server.handle_slack_message(
+                                            {"event": {**_message, "type": "message",
+                                                        "channel": _channel}},
+                                            dispatch=_slack_inbox.enqueue)
 
-                                def _save_thread_cursor(_timestamp):
-                                    _cursors[_thread_key] = _timestamp
-                                    save_poll_cursors(_cursor_path, _cursors)
+                                    def _save_thread_cursor(_timestamp):
+                                        _cursors[_thread_key] = _timestamp
+                                        save_poll_cursors(_cursor_path, _cursors)
 
-                                process_polled_messages(
-                                    _thread_messages, _handle_thread_reply,
-                                    _save_thread_cursor)
-                                if (_thread_last and _Decimal(_thread_last)
-                                        > _Decimal(str(_cursors.get(_thread_key, "0")))):
-                                    _cursors[_thread_key] = _thread_last
-                                    save_poll_cursors(_cursor_path, _cursors)
+                                    process_polled_messages(
+                                        _thread_messages, _handle_thread_reply,
+                                        _save_thread_cursor)
+                                    if (_thread_last and _Decimal(_thread_last)
+                                            > _Decimal(str(_cursors.get(_thread_key, "0")))):
+                                        _cursors[_thread_key] = _thread_last
+                                        save_poll_cursors(_cursor_path, _cursors)
+                                except Exception as _thread_exc:
+                                    from ..interface.messaging import SlackRateLimited
+                                    if isinstance(_thread_exc, SlackRateLimited):
+                                        raise
+                                    print(f"Slack thread poll error for {_channel}/{_thread_ts}: "
+                                          f"{type(_thread_exc).__name__}: {_thread_exc}")
                         except Exception as _exc:
                             print(f"Slack poll error for {_channel}: {_exc}")
                             _retry_after[_channel] = _slack_time.monotonic() + getattr(
@@ -918,17 +948,7 @@ def run_webui(args, config, memory, client, model_router=None) -> int:
         _startup_style("warn", "Slack sending is not configured: SLACK_BOT_TOKEN is not set.")
     if not msg.slack_signing_secret:
         _startup_style("warn", "Slack webhook requests are rejected: AIDON_SLACK_SIGNING_SECRET is not set (fail-closed).")
-    try:
-        import importlib.util
-        qdrant_available = importlib.util.find_spec("qdrant_client") is not None
-    except Exception:
-        qdrant_available = False
-    if not qdrant_available:
-        _startup_style("warn", "Qdrant client is not installed; using persistent SQLite memory fallback.")
-    elif os.environ.get("AIDON_QDRANT_URL", "").strip():
-        _startup_style("info", "Qdrant remote store configured; connection checked when memory is first used.")
-    else:
-        _startup_style("info", "Qdrant local store available under the Aidon home.")
+    _startup_style("info", "Memory backend initializes on first use; status will report the constructed store.")
     _startup_style("section", "WebUI")
     if args.webhook_only:
         _startup_style("ok", f"Webhook listener: http://{args.host}:{args.port}/ (WhatsApp and Slack only)")

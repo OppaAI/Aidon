@@ -158,6 +158,7 @@ function render_markdown(text) {
   // whose second line is a separator row of | - : and spaces
   // become a real <table>; other lines get inline rendering.
   // Non-table lines are joined with <br> so line breaks survive.
+  text = String(text || '').replace(/[📎📄]/g, '');
   const lines = text.split('\\n');
   let html = '';
   let i = 0;

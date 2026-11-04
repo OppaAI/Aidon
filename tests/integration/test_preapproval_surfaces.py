@@ -263,7 +263,7 @@ def test_whatsapp_bad_signature_is_logged_without_request_content(tmp_path, caps
     assert "private" not in output
 
 
-def test_whatsapp_goal_handler_failure_is_replied_to_owner(tmp_path):
+def test_whatsapp_goal_handler_failure_is_replied_to_owner(tmp_path, capsys):
     dispatcher = TriggerDispatcher()
 
     def fail(_event):
@@ -286,6 +286,13 @@ def test_whatsapp_goal_handler_failure_is_replied_to_owner(tmp_path):
     assert "internal error" in replies[0][1]
     assert "private detail" not in replies[0][1]
     assert result["replies"] == [replies[0][1]]
+    output = capsys.readouterr().out
+    assert "WhatsApp goal handler failed: RuntimeError" in output
+    assert "private detail" not in output
+    errors = (tmp_path / "logs" / "errors.jsonl").read_text()
+    assert '"stage": "whatsapp_dispatch"' in errors
+    assert "webui_messaging.py" in errors
+    assert "private detail" not in errors
 
 
 def test_slack_command_grants_and_confirms(tmp_path, monkeypatch):

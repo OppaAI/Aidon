@@ -449,15 +449,23 @@ class ModalBackend(ExecutionBackend):
         return self._sb
 
     def _exec(self, sb, cmd, timeout_seconds, stdin_bytes=None):
-        """One exec, mirroring the owner's harness: stdin bytes
-        first when given, then stdout/stderr, then wait."""
+        """Run one command and drain both output streams concurrently.
+
+        Modal buffers each stream while the client is not consuming it.
+        Reading stdout to EOF before touching stderr can therefore overflow
+        stderr's buffer for chatty commands (for example repository scans).
+        """
         proc = sb.exec(*cmd, timeout=timeout_seconds)
         if stdin_bytes is not None:
             proc.stdin.write(stdin_bytes)
             proc.stdin.write_eof()
             proc.stdin.drain()
-        out = proc.stdout.read()
-        err = proc.stderr.read()
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            stdout_future = pool.submit(proc.stdout.read)
+            stderr_future = pool.submit(proc.stderr.read)
+            out = stdout_future.result()
+            err = stderr_future.result()
         proc.wait()
         return proc.returncode, out, err
 

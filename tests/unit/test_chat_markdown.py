@@ -56,8 +56,9 @@ def test_chat_code_and_tables_stay_separate():
 
 def test_new_chat_resets_stage_bar_and_status():
     source = (Path(__file__).parents[2] / "src/interface/static/app.js").read_text()
-    start = source.index('document.getElementById("new-chat").addEventListener')
+    start = source.index('const newChatBtn = document.getElementById("new-chat");')
     end = source.index('\n  renderStages("interpret");', start)
     handler = source[start:end]
+    assert 'newChatBtn.addEventListener("click"' in handler
     assert 'renderStages("interpret")' in handler
     assert 'setStatus("idle", "ready")' in handler

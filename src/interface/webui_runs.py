@@ -449,10 +449,30 @@ class WebUIRunMixin:
             try:
                 self.dispatcher.dispatch(event)
             except Exception as exc:
-                record["events"].append({"kind": "aidon-final",
-                                         "text": f"Error: {exc}"})
+                reply(f"Error: {exc}")
                 if self.run_control is not None:
                     self.run_control.set_status(run_id, "failed")
+            # A handler should always call the event reply callback, but a
+            # successful terminal status without a final message otherwise
+            # leaves the browser with only a generic fallback. Make that
+            # contract explicit at the dispatcher boundary and persist the
+            # recovery reply through the same callback as normal responses.
+            control = (self.run_control.get(run_id)
+                       if self.run_control is not None else None)
+            status = str((control or {}).get(
+                "status", record.get("status", "running")))
+            final_sent = any(item.get("kind") == "aidon-final"
+                             for item in record.get("events", []))
+            if status in {"done", "failed", "rejected", "cancelled", "stopped"} and not final_sent:
+                fallback = {
+                    "done": ("The run completed, but its final summary was missing. "
+                             "Check Thinking for details and the workspace for files."),
+                    "failed": "The run failed before its final response. Check Thinking for details.",
+                    "rejected": "The run was rejected before its final response.",
+                    "cancelled": "The run was cancelled before its final response.",
+                    "stopped": "The plan is ready. Use Proceed to continue or Reject to stop.",
+                }[status]
+                reply(fallback)
 
         threading.Thread(target=dispatch, daemon=True,
                          name=f"aidon-run-{run_id}").start()

@@ -185,10 +185,16 @@ class PlanningMixin:
                       "and how it is used. Each step is an object with tool, "
                       "args, optional deliverable, and a short human-facing description "
                       "of its purpose (never private chain-of-thought). "
-                      "Tools: write, read, "
-                      "list, shell only, kernel mode, no calculate, "
-                      "no plugin tools. Keep every file inside "
-                      "the workdir.")
+                      "Tools: write, read, list, shell, read_document(path_or_url) "
+                      "only, kernel mode, no calculate, "
+                      "no plugin tools. Keep deliverables inside the workdir.")
+            system += (
+                " For a local file the user names, use read_document with its "
+                "exact path, never shell/cat/ls. Shell runs in an isolated "
+                "environment where ~/Downloads may be /root/Downloads. "
+                "read_document only permits the Aidon workspace and the service "
+                "user's ~/Downloads; if unavailable, ask the user to attach it."
+            )
         else:
             system = ("Propose a short plan as JSON with keys summary, "
                       "deliverable_descriptions, steps, deliverables, "
@@ -203,13 +209,18 @@ class PlanningMixin:
                       "Tools: write, read, "
                       "list, shell, calculate. Keep every file inside "
                       "the workdir.")
-        system += (" Every item in deliverables MUST be produced by exactly "
+        system += (" Use only tool names listed in this prompt, exactly as written; "
+                   "never invent a tool name or prefix one with the project name. "
+                   "Match every tool argument to its listed signature. "
+                   "Every item in deliverables MUST be produced by exactly "
                    "one step; never return deliverables with an empty or "
                    "missing steps array. For GUI requests, use the "
                    "computer_use_task for visual desktop tasks when it is available, "
                    "so each action is chosen using the current screen. "
-                   "When asked to read text aloud after a desktop action, add "
-                   "a dependent tts_speak step containing the exact requested text.")
+                   "Approval prompts must remain silent.")
+        if not self.kernel_mode:
+            system += (" If the user explicitly asks for spoken output, use tts_speak "
+                       "with the requested text.")
         system += (" Deliverables are files, not tool calls. If the user asks "
                    "for an answer or action result and no file, use an "
                    "output-only step: omit its deliverable (or use an empty "
@@ -405,8 +416,28 @@ class PlanningMixin:
         if self.extra_tools and not self.kernel_mode:
             # Kernel mode restricts _call_tool to seed tools, so
             # extra tools are advertised only outside kernel mode.
-            system += (" Extra tools available to plan steps: "
-                       + ", ".join(sorted(self.extra_tools)) + ".")
+            import inspect
+            signatures = []
+            for tool_name, tool_fn in sorted(self.extra_tools.items()):
+                try:
+                    signature = str(inspect.signature(tool_fn))
+                except (TypeError, ValueError):
+                    signature = "(arguments unavailable)"
+                signatures.append(f"{tool_name}{signature}")
+            system += (" Extra tools available to plan steps, with exact arguments: "
+                       + "; ".join(signatures) + ".")
+            if "read_document" in self.extra_tools:
+                system += (
+                    " LOCAL FILE READING: When the user names a local file, "
+                    "read it with read_document using the exact supplied path. "
+                    "Do not use shell, cat, ls, or guessed alternate paths for "
+                    "host files. Shell runs in the isolated execution environment "
+                    "(often with HOME=/root), so ~/Downloads there is not the "
+                    "user's Downloads folder and host paths are not mounted. "
+                    "If read_document reports the file is unavailable, ask the "
+                    "user to attach it or run Aidon where that file is accessible; "
+                    "do not keep probing paths."
+                )
             if "email_send" in self.extra_tools:
                 system += (
                     " EMAIL WORKFLOW: For a user request to send or reply to "

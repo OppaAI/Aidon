@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Point 3 - You stay in control</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Inter,system-ui,Arial,sans-serif;background:#0f172a;color:#f8fafc;height:100vh;overflow:hidden}
+.slides{height:100vh;width:100vw;position:relative}
+.slide{display:none;height:100vh;width:100vw;padding:48px;flex-direction:column;justify-content:center;align-items:center;text-align:center}
+.slide.active{display:flex}
+h1{font-size:42px;margin-bottom:16px;letter-spacing:-0.02em}
+h2{font-size:28px;color:#38bdf8;margin-bottom:20px}
+p{font-size:18px;line-height:1.6;max-width:760px;color:#cbd5e1}
+.badge{display:inline-block;background:#1e293b;border:1px solid #334155;color:#38bdf8;padding:6px 12px;border-radius:999px;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:18px}
+.card{background:#1e293b;border:1px solid #334155;border-radius:16px;padding:24px 28px;max-width:760px;margin-top:24px;text-align:left}
+.card h3{font-size:16px;color:#f1f5f9;margin-bottom:8px}
+.card ul{margin-left:18px;color:#cbd5e1;line-height:1.7}
+.flow{display:flex;gap:12px;align-items:center;justify-content:center;margin-top:28px;flex-wrap:wrap}
+.box{background:#1e293b;border:1px solid #334155;padding:14px 18px;border-radius:12px;font-size:15px;min-width:160px}
+.arrow{font-size:20px;color:#38bdf8}
+.approval{border-color:#22c55e;background:#14532d;color:#dcfce7;font-weight:600}
+.nav{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:12px;align-items:center;background:#1e293b;border:1px solid #334155;padding:8px 14px;border-radius:999px}
+.nav button{background:#38bdf8;color:#0f172a;border:none;padding:8px 14px;border-radius:999px;cursor:pointer;font-weight:600}
+.nav button:disabled{opacity:0.4;cursor:not-allowed}
+.dots{display:flex;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;background:#334155}
+.dot.active{background:#38bdf8}
+.small{font-size:13px;color:#94a3b8;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="slides">
+  <section class="slide active" id="s1">
+    <div class="badge">Point 3 — Control</div>
+    <h1>You stay in control</h1>
+    <h2>Human in the loop, always</h2>
+    <p>Aidon presents the plan and consequential live actions for your review, then waits for your approval before acting.</p>
+    <div class="flow">
+      <div class="box">1. Aidon drafts plan</div><div class="arrow">→</div>
+      <div class="box">2. Presents for review</div><div class="arrow">→</div>
+      <div class="box approval">3. Waits for approval</div><div class="arrow">→</div>
+      <div class="box">4. Acts live</div>
+    </div>
+    <p class="small">Sending, publishing, buying, installing, and deleting require explicit approval.</p>
+  </section>
+  <section class="slide" id="s2">
+    <div class="badge">How it works</div>
+    <h1>Present → Review → Approval → Act</h1>
+    <div class="card">
+      <h3>What Aidon shows you before acting:</h3>
+      <ul>
+        <li>DAG of steps with dependencies and acceptance criteria</li>
+        <li>Sandbox test results for risky parts</li>
+        <li>Consequential actions flagged for approval</li>
+        <li>Required credentials and external effects</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Approval gate</h3>
+      <ul>
+        <li>Approval requirements depend on the action; privileged operations have their own approval steps</li>
+        <li>Approval is explicit — silence is not consent</li>
+        <li>A rejected or timed-out approval stops the action</li>
+      </ul>
+    </div>
+  </section>
+  <section class="slide" id="s3">
+    <div class="badge">Why it matters</div>
+    <h1>Research is cheap, actions are not</h1>
+    <p>Aidon does the heavy lifting in the sandbox, but you stay in control of the real world.</p>
+    <div class="card">
+      <h3>Approval in practice</h3>
+      <ul>
+        <li>Aidon: "Plan ready — 4 steps, 1 email to send. Approve?"</li>
+        <li>You: Review, edit, or deny</li>
+        <li>Aidon: Executes only after your approval</li>
+        <li>Aidon verifies and records the outcome</li>
+      </ul>
+    </div>
+    <p class="small">You stay in control: review the action and approve it before it goes live.</p>
+  </section>
+</div>
+<div class="nav">
+  <button id="prev" onclick="go(-1)">Prev</button>
+  <div class="dots"><span class="dot active"></span><span class="dot"></span><span class="dot"></span></div>
+  <button id="next" onclick="go(1)">Next</button>
+</div>
+<script>
+let i=0;const slides=[...document.querySelectorAll('.slide')];const dots=[...document.querySelectorAll('.dot')];
+function show(n){slides.forEach(s=>s.classList.remove('active'));dots.forEach(d=>d.classList.remove('active'));slides[n].classList.add('active');dots[n].classList.add('active');document.getElementById('prev').disabled=n===0;document.getElementById('next').disabled=n===slides.length-1}
+function go(d){i=Math.max(0,Math.min(slides.length-1,i+d));show(i)}
+document.addEventListener('keydown',e=>{if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1)})
+</script>
+</body>
+</html>

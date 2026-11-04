@@ -138,16 +138,23 @@ At minimum, configure an endpoint, key, and model. Heavy ML packages and optiona
 - `AIDON_HOME` — where Aidon keeps its state (default `~/.aidon`)
 
 The base install does not pull heavyweight ML packages. Use `uv sync --extra memory`,
-`--extra embed`, `--extra sparse`, `--extra vision`, `--extra kb`, or `--extra docs`
+`--extra memory-faiss`, `--extra embed`, `--extra sparse`, `--extra vision`, `--extra kb`, or `--extra docs`
 for the corresponding capabilities. `./setup.sh --with-optional` installs all optional groups.
 
-Vector memory: embedded local mode works for one process. For shared memory
-across the WebUI, tick loop, and listeners, setup offers a Qdrant server
-in Docker: answer yes at the prompt, or run `./setup.sh --with-qdrant`.
+Vector memory preserves an existing local Qdrant store or uses Qdrant when a
+server URL is configured. Otherwise, it prefers SQLite + FAISS when FAISS is
+installed, then tries Qdrant, then plain SQLite. Install FAISS with
+`uv sync --extra memory-faiss` or accept it during `./setup.sh`.
+No `.env` change is needed for automatic selection. To force a backend, set
+`AIDON_MEMORY_BACKEND` to `sqlite-faiss`, `qdrant`, or `sqlite`.
+
+To use a shared Qdrant server instead, setup offers to run one in Docker:
+answer yes at the prompt, or run `./setup.sh --with-qdrant`.
 It starts the `aidon-qdrant` container (pinned image, data in
 `~/.aidon/qdrant-server`), health-checks port 6333, and sets
 `AIDON_QDRANT_URL=http://127.0.0.1:6333` in `.env`. Without a server,
-the dashboard shows a memory-fallback warning instead of failing silently.
+Qdrant local mode permits only one Aidon process at a time. Backend selection
+is at startup; switching backends does not migrate or copy existing memory.
 A previous binary + systemd install is retired automatically: its service
 is stopped and disabled before the container starts.
 

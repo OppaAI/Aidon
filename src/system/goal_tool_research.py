@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import os
+import shutil
+import stat
+import tempfile
+from pathlib import Path
+from urllib.parse import urlparse
 
 
 def _env_int(name, default):
@@ -61,15 +66,70 @@ def register_research_tools(config, workdir, researcher, confined):
 
     def fetch_url(url):
         try:
-            from ..capabilities.documents import read_document as _read_doc
-            return _read_doc(str(url))
+            return read_document(url)
         except Exception as exc:
             return f"fetch failed: {type(exc).__name__}: {exc}"
 
     def read_document(path_or_url):
         try:
             from ..capabilities.documents import read_document as _read_doc
-            return _read_doc(str(path_or_url))
+            source = str(path_or_url)
+            if urlparse(source).scheme in ("http", "https"):
+                return _read_doc(source)
+            downloads_mount_raw = os.environ.get("AIDON_HOST_DOWNLOADS_MOUNT")
+            if downloads_mount_raw and (source == "~/Downloads"
+                    or source.startswith("~/Downloads/")):
+                source = downloads_mount_raw + source[len("~/Downloads"):]
+            path = Path(source).expanduser()
+            if not path.is_absolute():
+                path = Path(workdir) / path
+            path = path.resolve()
+            # Docker's service user has a different HOME from the host. The
+            # compose services may expose the host Downloads directory at a
+            # read-only mount and provide both path roots here, allowing a
+            # WhatsApp/WebUI request to name its normal host path safely.
+            downloads_source = Path(os.environ.get(
+                "AIDON_HOST_DOWNLOADS_SOURCE",
+                str(Path.home() / "Downloads"),
+            )).expanduser().resolve()
+            downloads_mount = Path(os.environ.get(
+                "AIDON_HOST_DOWNLOADS_MOUNT",
+                str(downloads_source),
+            )).expanduser().resolve()
+            if path == downloads_source or downloads_source in path.parents:
+                relative = path.relative_to(downloads_source)
+                path = (downloads_mount / relative).resolve()
+            allowed_roots = (
+                Path(workdir).resolve(),
+                downloads_mount,
+            )
+            if not any(path == root or root in path.parents
+                       for root in allowed_roots):
+                return ("READ_BLOCKED: local reads are limited to the Aidon "
+                        "workspace and ~/Downloads")
+            # Open once, then validate the opened object rather than trusting
+            # the path checked above. This closes symlink-swap races between
+            # validation and the document parser opening the path again.
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(path, flags)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    return "read failed: local document is not a regular file"
+                opened_path = Path(os.path.realpath(f"/proc/self/fd/{fd}"))
+                if not any(opened_path == root or root in opened_path.parents
+                           for root in allowed_roots):
+                    return ("READ_BLOCKED: opened file is outside the Aidon "
+                            "workspace and ~/Downloads")
+                with tempfile.TemporaryDirectory(prefix="aidon-read-") as temp_dir:
+                    safe_copy = Path(temp_dir) / ("document" + path.suffix)
+                    with os.fdopen(fd, "rb") as source_file:
+                        fd = -1
+                        with safe_copy.open("wb") as target_file:
+                            shutil.copyfileobj(source_file, target_file)
+                    return _read_doc(str(safe_copy))
+            finally:
+                if fd >= 0:
+                    os.close(fd)
         except Exception as exc:
             return f"read failed: {type(exc).__name__}: {exc}"
 

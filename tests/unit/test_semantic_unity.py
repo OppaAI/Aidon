@@ -6,9 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.interface.approval import ApprovalGate, Decision
-from src.memory.embedder import HashEmbedder
 from src.agentic.loop import GoalRunner
-from src.memory.memory import Memory
 from src.system.model_client import FakeClient
 from src.capabilities.sandbox import Sandbox
 from src.agentic.semantic_router import SemanticRouter
@@ -19,7 +17,6 @@ def test_semantic_router_classifies_and_loop_guard():
     # With a fake embedder that returns the example vectors, classification works.
     # Here, with HashEmbedder, the guard is what matters: a write goal must
     # not be skipped as chat, even if the router said chat.
-    memory = Memory(Path("/tmp") / "mem-test", embedder=HashEmbedder())
     # Direct loop test: use_semantic_router_skip with a router that says chat,
     # but a write goal must still go through the pipeline, not chat.
     class ChatRouter:
