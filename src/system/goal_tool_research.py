@@ -80,7 +80,6 @@ def register_research_tools(config, workdir, researcher, confined):
             path = path.resolve()
             allowed_roots = (
                 Path(workdir).resolve(),
-                Path(config.workdir).resolve(),
                 (Path.home() / "Downloads").resolve(),
             )
             if not any(path == root or root in path.parents

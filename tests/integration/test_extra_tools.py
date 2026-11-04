@@ -80,7 +80,9 @@ def test_fetch_url_invalid_input_returns_string_without_raising(tmp_path):
 
 
 def test_read_document_local_temp_file(tmp_path):
-    doc = tmp_path / "note.txt"
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    doc = workdir / "note.txt"
     doc.write_text("the quick brown fox jumps over the lazy dog", encoding="utf-8")
     tools = _tools(tmp_path)
     result = tools["read_document"](str(doc))
