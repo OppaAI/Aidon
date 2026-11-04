@@ -1152,7 +1152,11 @@
   // Speak the two moments that MATTER: a decision is waiting for you,
   // and the run is over. Everything in between stays silent unless
   // AIDON_VOICE_ANNOUNCE=1 asks for the running commentary.
-  function announceImportant() { return; }
+  function announceImportant(el, text, btn) {
+    if (!ttsAvailable) return;
+    const say = spokenText(text);
+    if (say) speak(el, say, btn).catch(() => {});
+  }
 
   function renderStages(stage) {
     stagesEl.innerHTML = "";
@@ -1333,11 +1337,7 @@
     approvalSlot.appendChild(card);
     cardShownFor = cardKey;
     card.dataset.cardId = pending.id;
-    const speakBtn = playButton(pending.title + ". " + pending.body, null);
-    card.querySelector(".row").appendChild(speakBtn);
-    // A waiting decision is worth hearing about - always, not only
-    // when the running commentary is switched on.
-    announceImportant(null, pending.title + ". " + pending.body, speakBtn);
+    // Mandatory approval prompts remain silent; the owner can read the card.
     const ta = card.querySelector("#edit-text");
     const submitRow = card.querySelector("#edit-submit-row");
     const editBtn = card.querySelector('[data-d="edited"]');
