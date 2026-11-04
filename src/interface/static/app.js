@@ -955,6 +955,7 @@
     b.textContent = "▶";
     b.title = "Play aloud";
     b.hidden = true;
+    b.hidden = true;
     b.addEventListener("click", () => speak(el, text, b));
     return b;
   }
@@ -1708,12 +1709,7 @@
         // status line, not a bubble per phase)
         else if (e.kind === "speech-request") {
           explicitSpeechRuns.add(polledRun);
-          const message = addMsg("aidon", e.text, e.t);
-          if (ttsAvailable) {
-            const button = playButton(e.text, message);
-            message.appendChild(button);
-            speak(message, e.text, button).catch(() => {});
-          }
+          addMsg("aidon", e.text, e.t);
         }
         else if (e.kind === "approval-request") {
           const m = addMsg("stage-line", "approval requested: " + e.text);
