@@ -90,6 +90,20 @@ def test_read_document_local_temp_file(tmp_path):
     assert "quick brown fox" in result
 
 
+def test_read_document_maps_host_downloads_to_read_only_mount(tmp_path, monkeypatch):
+    host_downloads = tmp_path / "host" / "Downloads"
+    mounted_downloads = tmp_path / "container" / "Downloads"
+    mounted_downloads.mkdir(parents=True)
+    (mounted_downloads / "SPEECH.md").write_text(
+        "speech text from the mounted Downloads folder", encoding="utf-8")
+    monkeypatch.setenv("AIDON_HOST_DOWNLOADS_SOURCE", str(host_downloads))
+    monkeypatch.setenv("AIDON_HOST_DOWNLOADS_MOUNT", str(mounted_downloads))
+
+    tools = _tools(tmp_path)
+    result = tools["read_document"](str(host_downloads / "SPEECH.md"))
+    assert "speech text from the mounted Downloads folder" in result
+
+
 def test_search_document_empty_home_returns_string(tmp_path):
     tools = _tools(tmp_path)
     result = tools["search_document"]("something never ingested")

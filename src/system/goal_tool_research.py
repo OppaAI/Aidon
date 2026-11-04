@@ -78,9 +78,24 @@ def register_research_tools(config, workdir, researcher, confined):
             if not path.is_absolute():
                 path = Path(workdir) / path
             path = path.resolve()
+            # Docker's service user has a different HOME from the host. The
+            # compose services may expose the host Downloads directory at a
+            # read-only mount and provide both path roots here, allowing a
+            # WhatsApp/WebUI request to name its normal host path safely.
+            downloads_source = Path(os.environ.get(
+                "AIDON_HOST_DOWNLOADS_SOURCE",
+                str(Path.home() / "Downloads"),
+            )).expanduser().resolve()
+            downloads_mount = Path(os.environ.get(
+                "AIDON_HOST_DOWNLOADS_MOUNT",
+                str(downloads_source),
+            )).expanduser().resolve()
+            if path == downloads_source or downloads_source in path.parents:
+                relative = path.relative_to(downloads_source)
+                path = (downloads_mount / relative).resolve()
             allowed_roots = (
                 Path(workdir).resolve(),
-                (Path.home() / "Downloads").resolve(),
+                downloads_mount,
             )
             if not any(path == root or root in path.parents
                        for root in allowed_roots):
