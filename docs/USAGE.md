@@ -45,6 +45,12 @@
   or Slack, and the full WebUI must not be tunneled
   unauthenticated, use a webhook-only listener in
   front, as Aidon did.
+- WhatsApp location: use the chat's attachment menu and choose
+  **Location → Send current location**. Aidon accepts pins from the
+  configured owner number and passes their coordinates, plus any place
+  label, into the conversation. This does not add a Maps API: nearby-place
+  results depend on configured web search and may not include exact route
+  distances or live hours.
 - Completed WebUI runs include same-origin links to files
   in the run workspace. When Slack is configured, files are
   uploaded to the conversation's linked Slack channel, or to

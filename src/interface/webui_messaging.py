@@ -40,6 +40,14 @@ class WebUIMessagingMixin:
                 for change in entry.get("changes", []):
                     for message in change.get("value", {}).get("messages", []):
                         text = message.get("text", {}).get("body", "")
+                        is_location = message.get("type") == "location"
+                        location = None
+                        if is_location:
+                            from .whatsapp import (parse_whatsapp_location,
+                                                   whatsapp_location_context)
+                            location = parse_whatsapp_location(message)
+                            if location is not None:
+                                text = whatsapp_location_context(location)
                         if not text and message.get("type") == "image":
                             caption = message.get("image", {}).get("caption", "")
                             media_id = message.get("image", {}).get("id", "")
@@ -95,6 +103,13 @@ class WebUIMessagingMixin:
                             print("WhatsApp inbound ignored: sender failed owner check")
                             continue
                         print("WhatsApp inbound owner message accepted")
+                        if is_location and location is None:
+                            error_reply = ("I couldn't read that location pin. "
+                                           "Please share it again or send an address.")
+                            replies.append(error_reply)
+                            if self.whatsapp_sender is not None:
+                                self.whatsapp_sender(sender, error_reply)
+                            continue
                         # Mode commands are controls, never answers to a
                         # waiting interview. Parse them before answer_question.
                         from .surfaces import parse_mode_command, set_mode
