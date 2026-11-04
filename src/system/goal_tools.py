@@ -172,7 +172,16 @@ def _goal_extra_tools(config, workdir, gate=None, researcher=None, question_answ
         if gate is None:
             return False, "no approval gate configured"
         try:
-            lead = "Approval required before this action."
+            lead = ""
+            if phrase is not None:
+                try:
+                    lead = str(phrase("approval") or "").strip()
+                except Exception:
+                    # A wording helper must never prevent the approval
+                    # decision itself from being presented.
+                    lead = ""
+            if not lead:
+                lead = "Approval required before this action."
             decision = gate.ask(
                 kind, title, f"{lead}\n\n{body}",
                 action_class=action_class,
