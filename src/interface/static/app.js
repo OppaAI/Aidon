@@ -72,8 +72,10 @@
         node.title = memoryWarning;
         node.classList.toggle("status-warning", !!memoryWarning);
         node.classList.toggle("status-ready", !memoryWarning && [
-          "Online", "Ready", "bubblewrap", "docker",
-          "Semantic memory (on demand)", "EmbeddingGemma2Embedder",
+          "Online", "Ready", "bubblewrap", "docker", "modal",
+          "tavily", "Tavily", "X11 configured",
+          "SQLite + FAISS memory", "EmbeddingGemma2Embedder · SQLiteFaissStore",
+          "EmbeddingGemma2Embedder",
           "HybridEmbedder · QdrantStore",
           "EmbeddingGemma2Embedder · QdrantStore",
         ].includes(value));

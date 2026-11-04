@@ -1005,17 +1005,21 @@ class WebUIServer(WebUIRunMixin, WebUILabMixin, WebUIMessagingMixin, WebUISettin
                 requested_memory = os.environ.get(
                     "AIDON_MEMORY_BACKEND", "auto").strip().lower()
                 if requested_memory == "qdrant":
-                    memory_name = "Qdrant memory (on demand)"
+                    memory_name = "Qdrant memory"
                 elif requested_memory == "sqlite":
-                    memory_name = "SQLite memory (on demand)"
+                    memory_name = "SQLite memory"
                     memory_warning = ("Memory is using SQLite exact search; "
                                       "install faiss-cpu for indexed dense search.")
                 elif requested_memory == "sqlite-faiss":
-                    memory_name = "SQLite + FAISS memory (on demand)"
+                    if importlib.util.find_spec("faiss") is not None:
+                        memory_name = "SQLite + FAISS memory"
+                    else:
+                        memory_name = "SQLite + FAISS unavailable"
+                        memory_warning = "Install faiss-cpu to use SQLite + FAISS memory."
                 elif importlib.util.find_spec("faiss") is not None:
-                    memory_name = "SQLite + FAISS memory (on demand)"
+                    memory_name = "SQLite + FAISS memory"
                 elif importlib.util.find_spec("qdrant_client") is not None:
-                    memory_name = "Qdrant memory (on demand)"
+                    memory_name = "Qdrant memory"
                 else:
                     memory_name = "SQLite memory (persistent fallback)"
                     memory_warning = ("Memory is using SQLite exact search; "
